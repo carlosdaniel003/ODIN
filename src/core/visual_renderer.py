@@ -243,6 +243,33 @@ def criar_imagem_roi_debug(imagem_original, resultado_led: AlvoLed):
     return roi_debug
 
 
+def criar_imagem_roi_debug_sem_alvo(imagem_original):
+    imagem_debug = imagem_original.copy()
+
+    cv2.putText(
+        imagem_debug,
+        "ROI ainda nao selecionado",
+        (30, 50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (56, 189, 248),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        imagem_debug,
+        "Clique em Selecionar LEDs e marque um LED para ampliar o ROI",
+        (30, 86),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (203, 213, 225),
+        1,
+        cv2.LINE_AA,
+    )
+
+    return imagem_debug
+
+
 def criar_imagem_roi_debug_ampliado(imagem_original, alvo: AlvoLed = None, fator_escala: int = 5):
     roi_debug = criar_imagem_roi_debug(imagem_original, alvo)
 
@@ -278,7 +305,7 @@ def criar_pacote_renderizacoes_visuais(imagem_original, alvo: AlvosLed = None) -
     if ultimo_alvo is not None:
         renderizacoes["roi_debug"] = criar_imagem_roi_debug_ampliado(imagem_original, ultimo_alvo)
     else:
-        renderizacoes["roi_debug"] = None
+        renderizacoes["roi_debug"] = criar_imagem_roi_debug_sem_alvo(imagem_original)
 
     if alvos and all(isinstance(item, LedAnalysisResult) for item in alvos):
         renderizacoes["overlay"] = criar_imagem_resultados_visuais(imagem_original, alvos)

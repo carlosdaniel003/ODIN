@@ -27,6 +27,8 @@ def __init__(self, root: tk.Tk, callbacks: dict, raio_atual_px: int) -> None:
         self.resolucao_atual = "--"
         self._ultimo_resultado_historico = None
         self._redimensionamento_pendente = None
+        self.selecao_led_ativa = False
+        self.botao_selecionar_leds = None
 
         self.root.title("LumusPCI - Estação de Inspeção Visual de LED")
         self.root.geometry("1600x900")

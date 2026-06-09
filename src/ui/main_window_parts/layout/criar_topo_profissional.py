@@ -66,10 +66,11 @@ def criar_topo_profissional(self) -> None:
             cor_texto="#BAE6FD",
         ).pack(side=tk.LEFT, padx=4)
 
-        self.criar_botao_topo(
+        self.botao_selecionar_leds = self.criar_botao_topo(
             texto="Selecionar LEDs",
             comando=self.callbacks["iniciar_selecao_led"],
-        ).pack(side=tk.LEFT, padx=4)
+        )
+        self.botao_selecionar_leds.pack(side=tk.LEFT, padx=4)
 
         self.criar_botao_topo(
             texto="Analisar",

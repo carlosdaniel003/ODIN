@@ -52,6 +52,7 @@ class LumusPCIApp:
             callbacks=self.criar_callbacks(),
             raio_atual_px=self.raio_atual_px,
         )
+        self.view.atualizar_estado_selecao_led(False)
         self.atualizar_painel_inicial()
 
     def criar_callbacks(self) -> dict:
@@ -244,6 +245,7 @@ class LumusPCIApp:
         self.leds_selecionados = []
         self.resultados_led_atual = []
         self.modo_atual = "ocioso"
+        self.view.atualizar_estado_selecao_led(False)
 
         self.view.preparar_imagem_para_exibicao(self.imagem_original)
         self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
@@ -257,13 +259,23 @@ class LumusPCIApp:
             messagebox.showwarning("Atenção", "Carregue a imagem da PCI antes de selecionar LEDs.")
             return
 
+        if self.modo_atual == "selecionar_leds_analise":
+            self.modo_atual = "ocioso"
+            self.view.atualizar_estado_selecao_led(False)
+            self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
+            self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+            self.view.atualizar_status("modo seleção desativado.")
+            self.atualizar_painel_inicial()
+            return
+
         self.modo_atual = "selecionar_leds_analise"
         self.resultados_led_atual = []
+        self.view.atualizar_estado_selecao_led(True)
         self.view.preparar_imagem_para_exibicao(self.imagem_original)
         self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
         self.atualizar_renderizacoes_visuais(self.leds_selecionados)
         self.view.atualizar_faixa_resultado()
-        self.view.atualizar_status("modo seleção: clique em um ou mais LEDs. Depois clique em Analisar.")
+        self.view.atualizar_status("modo seleção ativo: clique em um ou mais LEDs. Depois clique em Analisar.")
         self.atualizar_painel_inicial()
 
     def evento_clique_esquerdo(self, evento) -> None:
@@ -371,6 +383,8 @@ class LumusPCIApp:
             resultados_led.append(resultado_led)
 
         self.resultados_led_atual = resultados_led
+        self.modo_atual = "ocioso"
+        self.view.atualizar_estado_selecao_led(False)
         output_paths = self.result_repository.salvar_resultado_analise_multiplos(
             imagem_original=self.imagem_original,
             resultados_led=resultados_led,
@@ -425,6 +439,7 @@ class LumusPCIApp:
 
     def limpar_tela(self) -> None:
         self.modo_atual = "ocioso"
+        self.view.atualizar_estado_selecao_led(False)
         self.leds_selecionados = []
         self.resultados_led_atual = []
 

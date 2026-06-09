@@ -27,7 +27,6 @@ def desenhar_canvas(self, led_selecionado, resultado_led_atual) -> None:
                 fill=self.COR_TEXTO_2,
                 font=("Segoe UI", 18, "bold"),
             )
-            self.desenhar_placeholders_laterais()
             return
 
         self.canvas.create_image(
@@ -42,11 +41,8 @@ def desenhar_canvas(self, led_selecionado, resultado_led_atual) -> None:
             self.atualizar_painel_resultado_multiplos(resultados_led)
             for resultado in resultados_led:
                 self.adicionar_resultado_historico(resultado)
-            self.desenhar_placeholders_laterais(resultados_led[-1])
         elif leds_selecionados:
             self.desenhar_leds_selecionados(leds_selecionados)
             self.atualizar_resumo_selecoes(leds_selecionados)
-            self.desenhar_placeholders_laterais()
         else:
             self.atualizar_resumo_sem_analise()
-            self.desenhar_placeholders_laterais()

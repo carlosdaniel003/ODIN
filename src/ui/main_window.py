@@ -14,6 +14,7 @@ from src.ui.main_window_parts.widgets.criar_titulo_card import criar_titulo_card
 from src.ui.main_window_parts.widgets.criar_kpi import criar_kpi
 from src.ui.main_window_parts.widgets.configurar_estilo_tabela import configurar_estilo_tabela
 from src.ui.main_window_parts.updates.atualizar_status import atualizar_status
+from src.ui.main_window_parts.updates.atualizar_estado_selecao_led import atualizar_estado_selecao_led
 from src.ui.main_window_parts.updates.escrever_resultados import escrever_resultados
 from src.ui.main_window_parts.updates.atualizar_faixa_resultado import atualizar_faixa_resultado
 from src.ui.main_window_parts.image.obter_tamanho_canvas_principal import obter_tamanho_canvas_principal
@@ -93,6 +94,7 @@ class LumusPCIView:
     criar_kpi = criar_kpi
     configurar_estilo_tabela = configurar_estilo_tabela
     atualizar_status = atualizar_status
+    atualizar_estado_selecao_led = atualizar_estado_selecao_led
     escrever_resultados = escrever_resultados
     atualizar_faixa_resultado = atualizar_faixa_resultado
     obter_tamanho_canvas_principal = obter_tamanho_canvas_principal
