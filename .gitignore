@@ -1,0 +1,31 @@
+# Python
+__pycache__
+.py[cod]
+.pyo
+.pyd
+.Python
+.venv
+venv
+env
+
+# VS Code
+.vscode
+
+# Sistema  temporários
+.DS_Store
+Thumbs.db
+
+# Resultados gerados pelo sistema
+dataresultados
+datacapturas
+
+# Cache e arquivos temporários
+.log
+.tmp
+.bak
+
+# Dados locais de configuração
+dataconfiglumus_pci_config.json
+
+# Amostrasimagens locais de LED
+dataconfigroi_samples

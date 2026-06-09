@@ -1,0 +1,18 @@
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+
+DATA_DIR = BASE_DIR / "data"
+CONFIG_DIR = DATA_DIR / "config"
+RESULTS_DIR = DATA_DIR / "resultados"
+CAPTURES_DIR = DATA_DIR / "capturas"
+
+CONFIG_FILE = CONFIG_DIR / "lumus_pci_config.json"
+
+DEFAULT_THRESHOLD_V = 160
+DEFAULT_MIN_PERCENT_ON = 0.12
+DEFAULT_RADIUS_PX = 15
+DEFAULT_SAVE_ANALYSIS_RESULTS = False
+
+MAX_DISPLAY_WIDTH = 1100
+MAX_DISPLAY_HEIGHT = 650
