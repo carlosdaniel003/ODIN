@@ -18,12 +18,12 @@ def criar_topo_profissional(self) -> None:
         self.frame_marca.pack_propagate(False)
 
         self.label_icone = tk.Label(
-            self.frame_marca,
-            text="▌",
-            font=("Segoe UI", 38, "bold"),
-            fg=self.COR_VERDE_CLARO,
-            bg=self.COR_TOPO,
-        )
+        self.frame_marca,
+        text="▌",
+        font=("Segoe UI", 38, "bold"),
+        fg=self.COR_VERDE_CLARO,
+        bg=self.COR_TOPO,
+)
         self.label_icone.pack(side=tk.LEFT, padx=(0, 10))
 
         self.frame_titulo = tk.Frame(self.frame_marca, bg=self.COR_TOPO)
@@ -84,7 +84,7 @@ def criar_topo_profissional(self) -> None:
             comando=self.callbacks["limpar_tela"],
         ).pack(side=tk.LEFT, padx=4)
 
-        self.frame_topo_direita = tk.Frame(self.frame_topo, bg=self.COR_TOPO, width=170)
+        self.frame_topo_direita = tk.Frame(self.frame_topo, bg=self.COR_TOPO, width=260)
         self.frame_topo_direita.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 10))
         self.frame_topo_direita.pack_propagate(False)
 
@@ -101,4 +101,21 @@ def criar_topo_profissional(self) -> None:
             bd=0,
             cursor="hand2",
         )
-        self.botao_configuracoes.pack(side=tk.RIGHT, padx=10, pady=18)
+        self.botao_configuracoes.pack(side=tk.RIGHT, padx=(8, 0), pady=18)
+
+        self.botao_toggle_relogio = tk.Button(
+            self.frame_topo_direita,
+            text="Hora ON",
+            command=self.alternar_visibilidade_relogio,
+            width=9,
+            height=2,
+            bg="#0F3D24",
+            fg="#BBF7D0",
+            activebackground="#14532D",
+            activeforeground=self.COR_TEXTO,
+            relief=tk.FLAT,
+            bd=0,
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2",
+        )
+        self.botao_toggle_relogio.pack(side=tk.RIGHT, padx=(0, 8), pady=22)

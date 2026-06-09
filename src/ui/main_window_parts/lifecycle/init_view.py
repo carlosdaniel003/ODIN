@@ -23,6 +23,10 @@ def __init__(self, root: tk.Tk, callbacks: dict, raio_atual_px: int) -> None:
     self.selecao_led_ativa = False
     self.botao_selecionar_leds = None
     self.tela_cheia_ativa = False
+    self.relogio_visivel = True
+    self.botao_toggle_relogio = None
+    self._atualizacao_relogio_pendente = None
+    self.logo_tk = None
 
     self.root.title("LumusPCI - Estação de Inspeção Visual de LED")
     self.root.geometry("1600x900")
@@ -32,5 +36,6 @@ def __init__(self, root: tk.Tk, callbacks: dict, raio_atual_px: int) -> None:
     self.configurar_atalhos_tela()
     self.configurar_estilo_tabela()
     self.criar_layout()
+    self.iniciar_relogio_sistema()
 
     self.root.after(120, self.maximizar_janela)

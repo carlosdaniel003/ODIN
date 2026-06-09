@@ -55,7 +55,11 @@ from src.ui.main_window_parts.updates.atualizar_resumo_sem_analise import atuali
 from src.ui.main_window_parts.history.adicionar_resultado_historico import adicionar_resultado_historico
 from src.ui.main_window_parts.history.obter_data_hora import obter_data_hora
 from src.ui.main_window_parts.lifecycle.init_view import __init__ as init_view
-
+from src.ui.main_window_parts.clock.iniciar_relogio_sistema import iniciar_relogio_sistema
+from src.ui.main_window_parts.clock.atualizar_relogio_sistema import atualizar_relogio_sistema
+from src.ui.main_window_parts.clock.atualizar_estado_relogio import atualizar_estado_relogio
+from src.ui.main_window_parts.clock.alternar_visibilidade_relogio import alternar_visibilidade_relogio
+from src.ui.main_window_parts.brand.carregar_logo_sistema import carregar_logo_sistema
 
 class LumusPCIView:
     """
@@ -140,3 +144,8 @@ class LumusPCIView:
     sair_tela_cheia = sair_tela_cheia
     configurar_atalhos_tela = configurar_atalhos_tela
     obter_geometria_monitor_atual = obter_geometria_monitor_atual
+    iniciar_relogio_sistema = iniciar_relogio_sistema
+    atualizar_relogio_sistema = atualizar_relogio_sistema
+    atualizar_estado_relogio = atualizar_estado_relogio
+    alternar_visibilidade_relogio = alternar_visibilidade_relogio
+    carregar_logo_sistema = carregar_logo_sistema
