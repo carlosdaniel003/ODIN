@@ -38,12 +38,14 @@ class LumusPCIApp:
         self.raio_atual_px = DEFAULT_RADIUS_PX
 
         self.leds_selecionados: list[LedSelection] = []
+        self.leds_fixos_configurados: list[LedSelection] = []
         self.resultados_led_atual = []
         self.configuracao_atual = {}
 
         self.config_repository = ConfigRepository()
         self.result_repository = ResultRepository()
         self.salvar_resultados_analise = self.config_repository.obter_salvar_resultados_analise()
+        self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
 
         self.criar_pastas()
         self.carregar_referencias_automaticamente_se_necessario()
@@ -63,6 +65,9 @@ class LumusPCIApp:
             "carregar_configuracao": self.carregar_configuracao,
             "carregar_imagem": self.carregar_imagem,
             "iniciar_selecao_led": self.iniciar_selecao_led,
+            "configurar_leds_fixos": self.configurar_leds_fixos,
+            "salvar_leds_fixos": self.salvar_leds_fixos,
+            "carregar_leds_fixos": self.carregar_leds_fixos,
             "analisar_led_selecionado": self.analisar_led_selecionado,
             "limpar_tela": self.limpar_tela,
             "diminuir_raio": self.diminuir_raio,
@@ -278,11 +283,103 @@ class LumusPCIApp:
         self.view.atualizar_status("modo seleção ativo: clique em um ou mais LEDs. Depois clique em Analisar.")
         self.atualizar_painel_inicial()
 
+    def configurar_leds_fixos(self) -> None:
+        if self.imagem_original is None:
+            messagebox.showwarning("Atenção", "Carregue a imagem da PCI antes de configurar LEDs fixos.")
+            return
+
+        self.modo_atual = "configurar_leds_fixos"
+        self.leds_selecionados = []
+        self.resultados_led_atual = []
+
+        self.view.atualizar_estado_selecao_led(True)
+        self.view.preparar_imagem_para_exibicao(self.imagem_original)
+        self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
+        self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+        self.view.atualizar_faixa_resultado()
+        self.view.atualizar_status("modo configuração de LEDs fixos: clique nos LEDs e depois salve nas configurações.")
+        self.atualizar_painel_inicial()
+
+    def salvar_leds_fixos(self) -> None:
+        if not self.leds_selecionados:
+            messagebox.showwarning("Atenção", "Nenhum LED foi selecionado para salvar como posição fixa.")
+            return
+
+        self.leds_fixos_configurados = [
+            LedSelection(
+                id=led_selecionado.id,
+                centro_x=led_selecionado.centro_x,
+                centro_y=led_selecionado.centro_y,
+                raio=led_selecionado.raio,
+            )
+            for led_selecionado in self.leds_selecionados
+        ]
+
+        self.configuracao_atual = self.config_repository.salvar_leds_fixos(self.leds_fixos_configurados)
+
+        self.modo_atual = "ocioso"
+        self.view.atualizar_estado_selecao_led(False)
+        self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
+        self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+        self.view.atualizar_status(f"{len(self.leds_fixos_configurados)} LEDs fixos salvos.")
+        self.atualizar_painel_inicial()
+
+        messagebox.showinfo("LumusPCI", f"{len(self.leds_fixos_configurados)} LEDs fixos salvos com sucesso.")
+
+    def carregar_leds_fixos(self) -> None:
+        if self.imagem_original is None:
+            messagebox.showwarning("Atenção", "Carregue a imagem da PCI antes de carregar LEDs fixos.")
+            return
+
+        self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
+
+        if not self.leds_fixos_configurados:
+            messagebox.showwarning("Atenção", "Nenhum LED fixo configurado foi encontrado.")
+            return
+
+        leds_fixos_validos = []
+
+        for led_fixo in self.leds_fixos_configurados:
+            if validar_centro_led(
+                led_fixo.centro_x,
+                led_fixo.centro_y,
+                led_fixo.raio,
+                self.largura_original,
+                self.altura_original,
+            ):
+                leds_fixos_validos.append(
+                    LedSelection(
+                        id=led_fixo.id,
+                        centro_x=led_fixo.centro_x,
+                        centro_y=led_fixo.centro_y,
+                        raio=led_fixo.raio,
+                    )
+                )
+
+        if not leds_fixos_validos:
+            messagebox.showwarning(
+                "Atenção",
+                "Os LEDs fixos salvos não são válidos para a imagem carregada.",
+            )
+            return
+
+        self.modo_atual = "ocioso"
+        self.leds_selecionados = leds_fixos_validos
+        self.resultados_led_atual = []
+
+        self.view.atualizar_estado_selecao_led(False)
+        self.view.preparar_imagem_para_exibicao(self.imagem_original)
+        self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
+        self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+        self.view.atualizar_faixa_resultado()
+        self.view.atualizar_status(f"{len(self.leds_selecionados)} LEDs fixos carregados. Clique em Analisar.")
+        self.atualizar_painel_inicial()
+
     def evento_clique_esquerdo(self, evento) -> None:
         if self.imagem_original is None:
             return
 
-        if self.modo_atual == "selecionar_leds_analise":
+        if self.modo_atual in ["selecionar_leds_analise", "configurar_leds_fixos"]:
             self.selecionar_led_para_analise(evento.x, evento.y)
 
     def selecionar_led_para_analise(self, canvas_x: int, canvas_y: int) -> None:
@@ -318,7 +415,12 @@ class LumusPCIApp:
         self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
         self.atualizar_renderizacoes_visuais(self.leds_selecionados)
         self.view.atualizar_faixa_resultado()
-        self.view.atualizar_status(f"{id_led} selecionado. Continue clicando ou clique em Analisar.")
+
+        if self.modo_atual == "configurar_leds_fixos":
+            self.view.atualizar_status(f"{id_led} fixo selecionado. Depois salve em Configurações > Salvar LEDs.")
+        else:
+            self.view.atualizar_status(f"{id_led} selecionado. Continue clicando ou clique em Analisar.")
+
         self.atualizar_painel_inicial()
 
     def referencias_disponiveis(self) -> bool:

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from config import CONFIG_FILE, DEFAULT_SAVE_ANALYSIS_RESULTS, DEFAULT_THRESHOLD_V
 from src.models.led_features import LedFeatures
+from src.models.led_selection import LedSelection
 from src.models.reference_sample import ReferenceSample
 
 
@@ -71,6 +72,7 @@ class ConfigRepository:
                 "save_analysis_results": DEFAULT_SAVE_ANALYSIS_RESULTS,
             },
         )
+        fixed_leds = configuracao_existente.get("fixed_leds", [])
 
         configuracao_final = {
             "project": "LumusPCI",
@@ -79,6 +81,7 @@ class ConfigRepository:
             "threshold_v": DEFAULT_THRESHOLD_V,
             "default_radius_px": raio_atual_px,
             "settings": settings,
+            "fixed_leds": fixed_leds,
             "reference_on": {
                 "image_path": caminho_referencia_acesa,
                 "features": features_referencia_acesa.to_dict(),
@@ -101,3 +104,45 @@ class ConfigRepository:
         referencia_acesa = ReferenceSample.from_dict(configuracao.get("reference_on", {}))
         referencia_apagada = ReferenceSample.from_dict(configuracao.get("reference_off", {}))
         return referencia_acesa, referencia_apagada, configuracao
+
+    def salvar_leds_fixos(self, leds_fixos: list[LedSelection]) -> dict:
+        configuracao = self.carregar_configuracao_existente_sem_alerta()
+
+        if not configuracao:
+            configuracao = {
+                "project": "LumusPCI",
+                "version": "0.7.0",
+                "inspection_method": "single_selected_led_reference_classifier_modular",
+                "threshold_v": DEFAULT_THRESHOLD_V,
+            }
+
+        settings = configuracao.get(
+            "settings",
+            {
+                "save_analysis_results": DEFAULT_SAVE_ANALYSIS_RESULTS,
+            },
+        )
+
+        configuracao["settings"] = settings
+        configuracao["fixed_leds"] = [led_fixo.to_dict() for led_fixo in leds_fixos]
+
+        self.config_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(self.config_file, "w", encoding="utf-8") as arquivo:
+            json.dump(configuracao, arquivo, indent=4, ensure_ascii=False)
+
+        return configuracao
+
+    def carregar_leds_fixos(self) -> list[LedSelection]:
+        configuracao = self.carregar_configuracao_existente_sem_alerta()
+        dados_leds_fixos = configuracao.get("fixed_leds", [])
+
+        leds_fixos = []
+
+        for dados_led_fixo in dados_leds_fixos:
+            led_fixo = LedSelection.from_dict(dados_led_fixo)
+
+            if led_fixo is not None:
+                leds_fixos.append(led_fixo)
+
+        return leds_fixos

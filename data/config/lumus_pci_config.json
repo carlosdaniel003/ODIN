@@ -65,5 +65,262 @@
             "inner_area_pixels": 253,
             "ring_area_pixels": 820
         }
-    }
+    },
+    "settings": {
+        "save_analysis_results": false
+    },
+    "fixed_leds": [
+        {
+            "id": "LED_001",
+            "centro_x": 164,
+            "centro_y": 368,
+            "raio": 15
+        },
+        {
+            "id": "LED_002",
+            "centro_x": 76,
+            "centro_y": 383,
+            "raio": 15
+        },
+        {
+            "id": "LED_003",
+            "centro_x": 41,
+            "centro_y": 462,
+            "raio": 15
+        },
+        {
+            "id": "LED_004",
+            "centro_x": 91,
+            "centro_y": 529,
+            "raio": 15
+        },
+        {
+            "id": "LED_005",
+            "centro_x": 184,
+            "centro_y": 516,
+            "raio": 15
+        },
+        {
+            "id": "LED_006",
+            "centro_x": 216,
+            "centro_y": 437,
+            "raio": 15
+        },
+        {
+            "id": "LED_007",
+            "centro_x": 357,
+            "centro_y": 363,
+            "raio": 15
+        },
+        {
+            "id": "LED_008",
+            "centro_x": 341,
+            "centro_y": 279,
+            "raio": 15
+        },
+        {
+            "id": "LED_009",
+            "centro_x": 363,
+            "centro_y": 195,
+            "raio": 15
+        },
+        {
+            "id": "LED_010",
+            "centro_x": 406,
+            "centro_y": 119,
+            "raio": 15
+        },
+        {
+            "id": "LED_011",
+            "centro_x": 478,
+            "centro_y": 65,
+            "raio": 15
+        },
+        {
+            "id": "LED_012",
+            "centro_x": 557,
+            "centro_y": 39,
+            "raio": 15
+        },
+        {
+            "id": "LED_013",
+            "centro_x": 644,
+            "centro_y": 42,
+            "raio": 15
+        },
+        {
+            "id": "LED_014",
+            "centro_x": 726,
+            "centro_y": 67,
+            "raio": 15
+        },
+        {
+            "id": "LED_015",
+            "centro_x": 792,
+            "centro_y": 124,
+            "raio": 15
+        },
+        {
+            "id": "LED_016",
+            "centro_x": 840,
+            "centro_y": 197,
+            "raio": 15
+        },
+        {
+            "id": "LED_017",
+            "centro_x": 857,
+            "centro_y": 281,
+            "raio": 15
+        },
+        {
+            "id": "LED_018",
+            "centro_x": 842,
+            "centro_y": 369,
+            "raio": 15
+        },
+        {
+            "id": "LED_019",
+            "centro_x": 801,
+            "centro_y": 445,
+            "raio": 15
+        },
+        {
+            "id": "LED_020",
+            "centro_x": 732,
+            "centro_y": 501,
+            "raio": 15
+        },
+        {
+            "id": "LED_021",
+            "centro_x": 646,
+            "centro_y": 531,
+            "raio": 15
+        },
+        {
+            "id": "LED_022",
+            "centro_x": 555,
+            "centro_y": 531,
+            "raio": 15
+        },
+        {
+            "id": "LED_023",
+            "centro_x": 467,
+            "centro_y": 501,
+            "raio": 15
+        },
+        {
+            "id": "LED_024",
+            "centro_x": 398,
+            "centro_y": 443,
+            "raio": 15
+        },
+        {
+            "id": "LED_025",
+            "centro_x": 490,
+            "centro_y": 277,
+            "raio": 15
+        },
+        {
+            "id": "LED_026",
+            "centro_x": 506,
+            "centro_y": 225,
+            "raio": 15
+        },
+        {
+            "id": "LED_027",
+            "centro_x": 547,
+            "centro_y": 188,
+            "raio": 15
+        },
+        {
+            "id": "LED_028",
+            "centro_x": 602,
+            "centro_y": 171,
+            "raio": 15
+        },
+        {
+            "id": "LED_029",
+            "centro_x": 656,
+            "centro_y": 188,
+            "raio": 15
+        },
+        {
+            "id": "LED_030",
+            "centro_x": 697,
+            "centro_y": 227,
+            "raio": 15
+        },
+        {
+            "id": "LED_031",
+            "centro_x": 711,
+            "centro_y": 285,
+            "raio": 15
+        },
+        {
+            "id": "LED_032",
+            "centro_x": 697,
+            "centro_y": 337,
+            "raio": 15
+        },
+        {
+            "id": "LED_033",
+            "centro_x": 657,
+            "centro_y": 376,
+            "raio": 15
+        },
+        {
+            "id": "LED_034",
+            "centro_x": 602,
+            "centro_y": 389,
+            "raio": 15
+        },
+        {
+            "id": "LED_035",
+            "centro_x": 544,
+            "centro_y": 372,
+            "raio": 15
+        },
+        {
+            "id": "LED_036",
+            "centro_x": 503,
+            "centro_y": 333,
+            "raio": 15
+        },
+        {
+            "id": "LED_037",
+            "centro_x": 974,
+            "centro_y": 436,
+            "raio": 15
+        },
+        {
+            "id": "LED_038",
+            "centro_x": 1023,
+            "centro_y": 372,
+            "raio": 15
+        },
+        {
+            "id": "LED_039",
+            "centro_x": 1108,
+            "centro_y": 387,
+            "raio": 15
+        },
+        {
+            "id": "LED_040",
+            "centro_x": 1136,
+            "centro_y": 464,
+            "raio": 15
+        },
+        {
+            "id": "LED_041",
+            "centro_x": 1088,
+            "centro_y": 529,
+            "raio": 15
+        },
+        {
+            "id": "LED_042",
+            "centro_x": 1006,
+            "centro_y": 514,
+            "raio": 15
+        }
+    ]
 }

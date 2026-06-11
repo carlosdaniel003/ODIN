@@ -8,9 +8,10 @@ import cv2
 from src.models.analysis_result import LedAnalysisResult
 from src.models.led_selection import LedSelection
 
+
 def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_salvar) -> None:
     largura_janela = 520
-    altura_janela = 430
+    altura_janela = 560
 
     janela = tk.Toplevel(self.root)
     janela.title("Configurações - LumusPCI")
@@ -102,6 +103,52 @@ def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_s
         frame_botoes_ref,
         "Carregar refs.",
         lambda: executar_e_fechar("carregar_configuracao"),
+    ).pack(side=tk.LEFT, padx=(0, 8))
+
+    frame_leds_fixos = tk.Frame(
+        frame,
+        bg=self.COR_CARD_2,
+        highlightthickness=1,
+        highlightbackground=self.COR_BORDA,
+    )
+    frame_leds_fixos.pack(fill=tk.X, pady=(0, 14))
+
+    tk.Label(
+        frame_leds_fixos,
+        text="LEDs fixos",
+        font=("Segoe UI", 11, "bold"),
+        fg=self.COR_TEXTO,
+        bg=self.COR_CARD_2,
+        anchor="w",
+    ).pack(fill=tk.X, padx=12, pady=(10, 4))
+
+    tk.Label(
+        frame_leds_fixos,
+        text=(
+            "Configure posições fixas de LEDs para análise repetitiva. "
+            "Clique em Configurar LEDs, marque os LEDs na imagem e depois volte aqui para salvar."
+        ),
+        font=("Segoe UI", 9),
+        fg=self.COR_TEXTO_2,
+        bg=self.COR_CARD_2,
+        wraplength=460,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(fill=tk.X, padx=12, pady=(0, 10))
+
+    frame_botoes_leds_fixos = tk.Frame(frame_leds_fixos, bg=self.COR_CARD_2)
+    frame_botoes_leds_fixos.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+    self.criar_botao_config(
+        frame_botoes_leds_fixos,
+        "Configurar LEDs",
+        lambda: executar_e_fechar("configurar_leds_fixos"),
+    ).pack(side=tk.LEFT, padx=(0, 8))
+
+    self.criar_botao_config(
+        frame_botoes_leds_fixos,
+        "Salvar LEDs",
+        lambda: executar_e_fechar("salvar_leds_fixos"),
     ).pack(side=tk.LEFT, padx=(0, 8))
 
     label_descricao = tk.Label(
