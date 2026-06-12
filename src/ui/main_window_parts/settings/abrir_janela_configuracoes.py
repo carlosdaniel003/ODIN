@@ -9,9 +9,14 @@ from src.models.analysis_result import LedAnalysisResult
 from src.models.led_selection import LedSelection
 
 
-def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_salvar) -> None:
+def abrir_janela_configuracoes(
+    self,
+    salvar_resultados_analise: bool,
+    callback_salvar,
+    raio_atual_px: int = 15,
+) -> None:
     largura_janela = 520
-    altura_janela = 560
+    altura_janela = 650
 
     janela = tk.Toplevel(self.root)
     janela.title("Configurações - LumusPCI")
@@ -54,7 +59,7 @@ def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_s
         highlightthickness=1,
         highlightbackground=self.COR_BORDA,
     )
-    frame_referencias.pack(fill=tk.X, pady=(0, 14))
+    frame_referencias.pack(fill=tk.X, pady=(0, 12))
 
     tk.Label(
         frame_referencias,
@@ -111,7 +116,7 @@ def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_s
         highlightthickness=1,
         highlightbackground=self.COR_BORDA,
     )
-    frame_leds_fixos.pack(fill=tk.X, pady=(0, 14))
+    frame_leds_fixos.pack(fill=tk.X, pady=(0, 12))
 
     tk.Label(
         frame_leds_fixos,
@@ -151,6 +156,77 @@ def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_s
         lambda: executar_e_fechar("salvar_leds_fixos"),
     ).pack(side=tk.LEFT, padx=(0, 8))
 
+    frame_raio = tk.Frame(
+        frame,
+        bg=self.COR_CARD_2,
+        highlightthickness=1,
+        highlightbackground=self.COR_BORDA,
+    )
+    frame_raio.pack(fill=tk.X, pady=(0, 12))
+
+    tk.Label(
+        frame_raio,
+        text="Raio de seleção dos LEDs",
+        font=("Segoe UI", 11, "bold"),
+        fg=self.COR_TEXTO,
+        bg=self.COR_CARD_2,
+        anchor="w",
+    ).pack(fill=tk.X, padx=12, pady=(10, 4))
+
+    tk.Label(
+        frame_raio,
+        text=(
+            "Define o tamanho do ROI circular usado ao selecionar LEDs. "
+            "O valor atual é limitado entre 3px e 15px."
+        ),
+        font=("Segoe UI", 9),
+        fg=self.COR_TEXTO_2,
+        bg=self.COR_CARD_2,
+        wraplength=460,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(fill=tk.X, padx=12, pady=(0, 8))
+
+    valor_raio_led = tk.IntVar(value=min(15, max(3, int(raio_atual_px))))
+
+    frame_controle_raio = tk.Frame(frame_raio, bg=self.COR_CARD_2)
+    frame_controle_raio.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+    label_raio_atual = tk.Label(
+        frame_controle_raio,
+        text="Raio:",
+        font=("Segoe UI", 10, "bold"),
+        fg=self.COR_TEXTO,
+        bg=self.COR_CARD_2,
+        anchor="w",
+    )
+    label_raio_atual.pack(side=tk.LEFT, padx=(0, 8))
+
+    spin_raio = tk.Spinbox(
+        frame_controle_raio,
+        from_=3,
+        to=15,
+        increment=1,
+        textvariable=valor_raio_led,
+        width=6,
+        font=("Segoe UI", 10, "bold"),
+        bg="#020617",
+        fg=self.COR_TEXTO,
+        buttonbackground=self.COR_CARD_2,
+        relief=tk.FLAT,
+        bd=2,
+        justify=tk.CENTER,
+    )
+    spin_raio.pack(side=tk.LEFT, padx=(0, 8))
+
+    tk.Label(
+        frame_controle_raio,
+        text="px",
+        font=("Segoe UI", 10, "bold"),
+        fg=self.COR_TEXTO_2,
+        bg=self.COR_CARD_2,
+    ).pack(side=tk.LEFT)
+
     label_descricao = tk.Label(
         frame,
         text=(
@@ -165,7 +241,7 @@ def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_s
         justify=tk.LEFT,
         anchor="w",
     )
-    label_descricao.pack(fill=tk.X, pady=(0, 14))
+    label_descricao.pack(fill=tk.X, pady=(0, 10))
 
     valor_salvar_resultados = tk.BooleanVar(value=salvar_resultados_analise)
 
@@ -181,13 +257,23 @@ def abrir_janela_configuracoes(self, salvar_resultados_analise: bool, callback_s
         selectcolor=self.COR_CARD_2,
         anchor="w",
     )
-    check_salvar_resultados.pack(fill=tk.X, pady=(0, 16))
+    check_salvar_resultados.pack(fill=tk.X, pady=(0, 12))
 
     frame_botoes = tk.Frame(frame, bg=self.COR_CARD)
     frame_botoes.pack(fill=tk.X, side=tk.BOTTOM, pady=(8, 0))
 
     def confirmar() -> None:
-        callback_salvar(bool(valor_salvar_resultados.get()))
+        try:
+            raio_configurado_px = int(valor_raio_led.get())
+        except Exception:
+            raio_configurado_px = 15
+
+        raio_configurado_px = min(15, max(3, raio_configurado_px))
+
+        callback_salvar(
+            bool(valor_salvar_resultados.get()),
+            raio_configurado_px,
+        )
         janela.destroy()
 
     botao_cancelar = tk.Button(

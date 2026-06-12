@@ -60,6 +60,9 @@ from src.ui.main_window_parts.clock.atualizar_relogio_sistema import atualizar_r
 from src.ui.main_window_parts.clock.atualizar_estado_relogio import atualizar_estado_relogio
 from src.ui.main_window_parts.clock.alternar_visibilidade_relogio import alternar_visibilidade_relogio
 from src.ui.main_window_parts.brand.carregar_logo_sistema import carregar_logo_sistema
+from src.ui.main_window_parts.magnifier.atualizar_lupa_canvas import atualizar_lupa_canvas
+from src.ui.main_window_parts.magnifier.desenhar_lupa_canvas import desenhar_lupa_canvas
+from src.ui.main_window_parts.magnifier.limpar_lupa_canvas import limpar_lupa_canvas
 
 class LumusPCIView:
     """
@@ -149,3 +152,6 @@ class LumusPCIView:
     atualizar_estado_relogio = atualizar_estado_relogio
     alternar_visibilidade_relogio = alternar_visibilidade_relogio
     carregar_logo_sistema = carregar_logo_sistema
+    atualizar_lupa_canvas = atualizar_lupa_canvas
+    desenhar_lupa_canvas = desenhar_lupa_canvas
+    limpar_lupa_canvas = limpar_lupa_canvas

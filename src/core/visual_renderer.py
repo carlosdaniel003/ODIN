@@ -48,8 +48,82 @@ def _obter_cor_bgr(alvo: AlvoLed):
 
     return (248, 189, 56)
 
+def _obter_numero_led(alvo: AlvoLed) -> str:
+    dados_alvo = _obter_dados_alvo(alvo)
+
+    if dados_alvo is None:
+        return ""
+
+    id_led = dados_alvo["id"]
+
+    if "_" in id_led:
+        return id_led.split("_")[-1]
+
+    return id_led
 
 def _desenhar_marcacao_led(imagem, alvo: AlvoLed, com_texto: bool = True):
+    dados_alvo = _obter_dados_alvo(alvo)
+
+    if dados_alvo is None:
+        return imagem
+
+    centro_x = dados_alvo["centro_x"]
+    centro_y = dados_alvo["centro_y"]
+    raio = dados_alvo["raio"]
+    valor_binario = dados_alvo["valor_binario"]
+    cor = _obter_cor_bgr(alvo)
+    numero_led = _obter_numero_led(alvo)
+
+    espessura = 2
+    raio_externo = raio
+
+    if valor_binario == 0:
+        espessura = 3
+        raio_externo = int(raio * 1.25)
+
+    cv2.circle(imagem, (centro_x, centro_y), raio_externo, cor, espessura)
+    cv2.drawMarker(
+        imagem,
+        (centro_x, centro_y),
+        cor,
+        markerType=cv2.MARKER_CROSS,
+        markerSize=max(8, int(raio * 0.9)),
+        thickness=1,
+    )
+
+    if com_texto and numero_led:
+        texto = numero_led
+
+        largura_texto, altura_texto = cv2.getTextSize(
+            texto,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.38,
+            1,
+        )[0]
+
+        x_texto = max(4, centro_x - int(largura_texto / 2))
+        y_texto = max(14, centro_y - raio_externo - 6)
+
+        cv2.rectangle(
+            imagem,
+            (x_texto - 3, y_texto - altura_texto - 3),
+            (x_texto + largura_texto + 3, y_texto + 3),
+            (3, 7, 18),
+            -1,
+        )
+
+        cv2.putText(
+            imagem,
+            texto,
+            (x_texto, y_texto),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.38,
+            cor,
+            1,
+            cv2.LINE_AA,
+        )
+
+    return imagem
     dados_alvo = _obter_dados_alvo(alvo)
 
     if dados_alvo is None:
@@ -100,6 +174,28 @@ def criar_imagem_resultado_visual(imagem_original, resultado_led: LedAnalysisRes
 
 
 def criar_imagem_resultados_visuais(imagem_original, resultados_led: list[LedAnalysisResult]):
+    imagem_resultado = imagem_original.copy()
+    overlay = imagem_resultado.copy()
+
+    for resultado_led in resultados_led:
+        centro_x = resultado_led.centro_x
+        centro_y = resultado_led.centro_y
+        raio = resultado_led.raio
+
+        if resultado_led.valor_binario == 1:
+            cor = (0, 180, 0)
+            alpha_local = 0.12
+        else:
+            cor = (0, 0, 255)
+            alpha_local = 0.35
+
+        camada_led = imagem_resultado.copy()
+        cv2.circle(camada_led, (centro_x, centro_y), int(raio * 1.15), cor, -1)
+        imagem_resultado = cv2.addWeighted(camada_led, alpha_local, imagem_resultado, 1 - alpha_local, 0)
+
+    _desenhar_marcacoes_leds(imagem_resultado, resultados_led, com_texto=False)
+
+    return imagem_resultado
     imagem_resultado = imagem_original.copy()
     overlay = imagem_resultado.copy()
 

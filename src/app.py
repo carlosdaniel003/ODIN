@@ -45,6 +45,7 @@ class LumusPCIApp:
         self.config_repository = ConfigRepository()
         self.result_repository = ResultRepository()
         self.salvar_resultados_analise = self.config_repository.obter_salvar_resultados_analise()
+        self.raio_atual_px = self.config_repository.obter_raio_padrao_led(RAIO_MAXIMO_LED_PX)
         self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
 
         self.criar_pastas()
@@ -92,17 +93,42 @@ class LumusPCIApp:
     def abrir_configuracoes(self) -> None:
         self.view.abrir_janela_configuracoes(
             salvar_resultados_analise=self.salvar_resultados_analise,
+            raio_atual_px=self.raio_atual_px,
             callback_salvar=self.salvar_configuracoes_sistema,
         )
 
-    def salvar_configuracoes_sistema(self, salvar_resultados_analise: bool) -> None:
+    def salvar_configuracoes_sistema(
+        self,
+        salvar_resultados_analise: bool,
+        raio_configurado_px: int | None = None,
+    ) -> None:
         self.salvar_resultados_analise = bool(salvar_resultados_analise)
+
+        if raio_configurado_px is not None:
+            self.raio_atual_px = min(
+                RAIO_MAXIMO_LED_PX,
+                max(3, int(raio_configurado_px)),
+            )
+            self.view.atualizar_label_raio(self.raio_atual_px)
+
+            if self.leds_selecionados:
+                for led_selecionado in self.leds_selecionados:
+                    led_selecionado.raio = self.raio_atual_px
+
+                if self.imagem_original is not None:
+                    self.view.preparar_imagem_para_exibicao(self.imagem_original)
+                    self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
+                    self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+
         self.configuracao_atual = self.config_repository.salvar_configuracoes_sistema(
             salvar_resultados_analise=self.salvar_resultados_analise,
+            raio_atual_px=self.raio_atual_px,
         )
 
         status = "ativado" if self.salvar_resultados_analise else "desativado"
-        self.view.atualizar_status(f"salvamento automático {status}.")
+        self.view.atualizar_status(
+            f"salvamento automático {status}. raio de seleção: {self.raio_atual_px}px."
+        )
         self.atualizar_painel_inicial()
 
     def atualizar_renderizacoes_visuais(self, alvo=None) -> None:

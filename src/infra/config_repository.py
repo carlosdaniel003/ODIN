@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from config import CONFIG_FILE, DEFAULT_SAVE_ANALYSIS_RESULTS, DEFAULT_THRESHOLD_V
+from config import CONFIG_FILE, DEFAULT_RADIUS_PX, DEFAULT_SAVE_ANALYSIS_RESULTS, DEFAULT_THRESHOLD_V
 from src.models.led_features import LedFeatures
 from src.models.led_selection import LedSelection
 from src.models.reference_sample import ReferenceSample
@@ -29,13 +29,25 @@ class ConfigRepository:
             "save_analysis_results": bool(
                 settings.get("save_analysis_results", DEFAULT_SAVE_ANALYSIS_RESULTS)
             ),
+            "default_radius_px": int(
+                configuracao.get("default_radius_px", DEFAULT_RADIUS_PX)
+            ),
         }
 
     def obter_salvar_resultados_analise(self) -> bool:
         settings = self.obter_configuracoes_sistema()
         return bool(settings["save_analysis_results"])
 
-    def salvar_configuracoes_sistema(self, salvar_resultados_analise: bool) -> dict:
+    def obter_raio_padrao_led(self, raio_maximo_px: int = 15) -> int:
+        settings = self.obter_configuracoes_sistema()
+        raio_configurado = int(settings.get("default_radius_px", DEFAULT_RADIUS_PX))
+        return min(raio_maximo_px, max(3, raio_configurado))
+
+    def salvar_configuracoes_sistema(
+        self,
+        salvar_resultados_analise: bool,
+        raio_atual_px: int | None = None,
+    ) -> dict:
         configuracao = self.carregar_configuracao_existente_sem_alerta()
 
         if not configuracao:
@@ -49,6 +61,9 @@ class ConfigRepository:
         settings = configuracao.get("settings", {})
         settings["save_analysis_results"] = bool(salvar_resultados_analise)
         configuracao["settings"] = settings
+
+        if raio_atual_px is not None:
+            configuracao["default_radius_px"] = int(raio_atual_px)
 
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
 

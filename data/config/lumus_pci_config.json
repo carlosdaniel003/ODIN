@@ -3,7 +3,7 @@
     "version": "0.4.0",
     "inspection_method": "single_selected_led_reference_classifier_v2",
     "threshold_v": 160,
-    "default_radius_px": 12,
+    "default_radius_px": 15,
     "reference_on": {
         "image_path": "C:/Users/cdaniel/Documents/Imagens para Análise/Led Aceso.JPG",
         "features": {
