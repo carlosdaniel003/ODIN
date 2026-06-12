@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from config import CONFIG_FILE, DEFAULT_RADIUS_PX, DEFAULT_SAVE_ANALYSIS_RESULTS, DEFAULT_THRESHOLD_V
+from config import CONFIG_FILE, DEFAULT_RADIUS_PX, DEFAULT_SAVE_ANALYSIS_RESULTS, DEFAULT_THRESHOLD_V, MAX_RADIUS_PX, MIN_RADIUS_PX
 from src.models.led_features import LedFeatures
 from src.models.led_selection import LedSelection
 from src.models.reference_sample import ReferenceSample
@@ -38,10 +38,10 @@ class ConfigRepository:
         settings = self.obter_configuracoes_sistema()
         return bool(settings["save_analysis_results"])
 
-    def obter_raio_padrao_led(self, raio_maximo_px: int = 15) -> int:
+    def obter_raio_padrao_led(self, raio_maximo_px: int = MAX_RADIUS_PX) -> int:
         settings = self.obter_configuracoes_sistema()
         raio_configurado = int(settings.get("default_radius_px", DEFAULT_RADIUS_PX))
-        return min(raio_maximo_px, max(3, raio_configurado))
+        return min(raio_maximo_px, max(MIN_RADIUS_PX, raio_configurado))
 
     def salvar_configuracoes_sistema(
         self,

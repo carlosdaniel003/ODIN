@@ -2,7 +2,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from config import CONFIG_DIR, CONFIG_FILE, DEFAULT_RADIUS_PX
+from config import CONFIG_DIR, CONFIG_FILE, DEFAULT_RADIUS_PX, MAX_RADIUS_PX, MIN_RADIUS_PX
 from src.core.classifier import ReferenceLedClassifier
 from src.core.debug_formatter import formatar_painel_inicial, formatar_resultado_textual_multiplos
 from src.core.feature_extractor import extrair_features_led, extrair_features_referencia_led, validar_centro_led
@@ -14,7 +14,7 @@ from src.models.led_selection import LedSelection
 from src.ui.main_window import LumusPCIView
 
 
-RAIO_MAXIMO_LED_PX = 15
+RAIO_MAXIMO_LED_PX = MAX_RADIUS_PX
 
 
 class LumusPCIApp:
@@ -107,7 +107,7 @@ class LumusPCIApp:
         if raio_configurado_px is not None:
             self.raio_atual_px = min(
                 RAIO_MAXIMO_LED_PX,
-                max(3, int(raio_configurado_px)),
+                max(MIN_RADIUS_PX, int(raio_configurado_px))
             )
             self.view.atualizar_label_raio(self.raio_atual_px)
 
@@ -233,7 +233,7 @@ class LumusPCIApp:
         self.caminho_referencia_apagada = referencia_apagada.image_path
         self.raio_atual_px = min(
             RAIO_MAXIMO_LED_PX,
-            max(3, int(configuracao.get("default_radius_px", self.raio_atual_px))),
+            max(MIN_RADIUS_PX, int(configuracao.get("default_radius_px", self.raio_atual_px)))
         )
         self.view.atualizar_label_raio(self.raio_atual_px)
 
@@ -550,7 +550,7 @@ class LumusPCIApp:
         self.atualizar_painel_inicial()
 
     def diminuir_raio(self) -> None:
-        self.raio_atual_px = max(3, self.raio_atual_px - 1)
+        self.raio_atual_px = max(MIN_RADIUS_PX, self.raio_atual_px - 1)
         self.view.atualizar_label_raio(self.raio_atual_px)
 
         if self.leds_selecionados:

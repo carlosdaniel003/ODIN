@@ -7,6 +7,7 @@ import cv2
 
 from src.models.analysis_result import LedAnalysisResult
 from src.models.led_selection import LedSelection
+from config import MAX_RADIUS_PX, MIN_RADIUS_PX
 
 
 def abrir_janela_configuracoes(
@@ -177,7 +178,7 @@ def abrir_janela_configuracoes(
         frame_raio,
         text=(
             "Define o tamanho do ROI circular usado ao selecionar LEDs. "
-            "O valor atual é limitado entre 3px e 15px."
+            f"O valor atual é limitado entre {MIN_RADIUS_PX}px e {MAX_RADIUS_PX}px."
         ),
         font=("Segoe UI", 9),
         fg=self.COR_TEXTO_2,
@@ -187,7 +188,9 @@ def abrir_janela_configuracoes(
         anchor="w",
     ).pack(fill=tk.X, padx=12, pady=(0, 8))
 
-    valor_raio_led = tk.IntVar(value=min(15, max(3, int(raio_atual_px))))
+    valor_raio_led = tk.IntVar(
+    value=min(MAX_RADIUS_PX, max(MIN_RADIUS_PX, int(raio_atual_px)))
+)
 
     frame_controle_raio = tk.Frame(frame_raio, bg=self.COR_CARD_2)
     frame_controle_raio.pack(fill=tk.X, padx=12, pady=(0, 12))
@@ -204,8 +207,8 @@ def abrir_janela_configuracoes(
 
     spin_raio = tk.Spinbox(
         frame_controle_raio,
-        from_=3,
-        to=15,
+        from_=MIN_RADIUS_PX,
+        to=MAX_RADIUS_PX,
         increment=1,
         textvariable=valor_raio_led,
         width=6,
@@ -266,9 +269,12 @@ def abrir_janela_configuracoes(
         try:
             raio_configurado_px = int(valor_raio_led.get())
         except Exception:
-            raio_configurado_px = 15
+            raio_configurado_px = MAX_RADIUS_PX
 
-        raio_configurado_px = min(15, max(3, raio_configurado_px))
+        raio_configurado_px = min(
+            MAX_RADIUS_PX,
+            max(MIN_RADIUS_PX, raio_configurado_px),
+        )
 
         callback_salvar(
             bool(valor_salvar_resultados.get()),
