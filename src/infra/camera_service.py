@@ -57,14 +57,14 @@ class CameraService:
         self.altura = int(altura)
         self.fps = int(fps)
         self.intervalo_reconexao_s = max(0.25, float(intervalo_reconexao_s))
-        self.frames_aquecimento = max(0, int(frames_aquecimento))
-        self.falhas_antes_reconexao = max(1, int(falhas_antes_reconexao))
+        self.frames_aquecimento = max(60, int(frames_aquecimento))
+        self.falhas_antes_reconexao = max(5, int(falhas_antes_reconexao))
         self.largura_minima = max(1, int(largura_minima))
         self.altura_minima = max(1, int(altura_minima))
         self.limite_preto_media = float(limite_preto_media)
         self.limite_preto_desvio = float(limite_preto_desvio)
-        self.frames_estabilidade = max(1, int(frames_estabilidade))
-        self.espera_apos_abrir_s = max(0.0, float(espera_apos_abrir_s))
+        self.frames_estabilidade = max(15, int(frames_estabilidade))
+        self.espera_apos_abrir_s = max(0.8, float(espera_apos_abrir_s))
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -486,6 +486,161 @@ class CameraService:
         return diferenca_media <= 1.2
 
     @staticmethod
+    def _reduzir_frame_cinza(
+        frame_cinza,
+        largura_maxima: int = 640,
+    ):
+        altura, largura = frame_cinza.shape[:2]
+
+        if largura <= largura_maxima:
+            return frame_cinza
+
+        largura_reduzida = int(largura_maxima)
+        altura_reduzida = max(
+            1,
+            int(altura * (largura_reduzida / largura)),
+        )
+        return cv2.resize(
+            frame_cinza,
+            (largura_reduzida, altura_reduzida),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    @staticmethod
+    def _contar_cortes_retilineos(
+        diferencas,
+        vertical: bool,
+    ) -> int:
+        if vertical:
+            tamanho_eixo = diferencas.shape[1]
+            perfil = diferencas.mean(axis=0)
+        else:
+            tamanho_eixo = diferencas.shape[0]
+            perfil = diferencas.mean(axis=1)
+
+        if tamanho_eixo < 40:
+            return 0
+
+        mediana = float(np.median(perfil)) + 1.0
+        percentil_95 = float(np.percentile(perfil, 95)) + 1.0
+        limite_perfil = max(22.0, mediana * 5.5, percentil_95 * 1.65)
+        limite_pixel = max(24.0, mediana * 4.0)
+
+        inicio = int(tamanho_eixo * 0.08)
+        fim = int(tamanho_eixo * 0.92)
+        candidatos = []
+
+        for indice in range(inicio, fim):
+            valor = float(perfil[indice])
+
+            if valor < limite_perfil:
+                continue
+
+            if vertical:
+                fracao_forte = float(
+                    np.mean(diferencas[:, indice] >= limite_pixel)
+                )
+            else:
+                fracao_forte = float(
+                    np.mean(diferencas[indice, :] >= limite_pixel)
+                )
+
+            if fracao_forte >= 0.36:
+                candidatos.append(indice)
+
+        if not candidatos:
+            return 0
+
+        grupos = 1
+        anterior = candidatos[0]
+
+        for indice in candidatos[1:]:
+            if indice - anterior > 5:
+                grupos += 1
+            anterior = indice
+
+        return grupos
+
+    @staticmethod
+    def _possui_corte_retilineo_suspeito(frame_cinza) -> bool:
+        cinza = CameraService._reduzir_frame_cinza(
+            frame_cinza,
+            largura_maxima=640,
+        ).astype(np.int16)
+
+        diferencas_x = np.abs(np.diff(cinza, axis=1))
+        diferencas_y = np.abs(np.diff(cinza, axis=0))
+
+        cortes_verticais = CameraService._contar_cortes_retilineos(
+            diferencas_x,
+            vertical=True,
+        )
+        cortes_horizontais = CameraService._contar_cortes_retilineos(
+            diferencas_y,
+            vertical=False,
+        )
+
+        return cortes_verticais >= 2 or cortes_horizontais >= 2
+
+    @staticmethod
+    def _possui_faixa_interna_suspeita(frame_cinza) -> bool:
+        cinza = CameraService._reduzir_frame_cinza(
+            frame_cinza,
+            largura_maxima=640,
+        ).astype(np.float32)
+
+        altura, largura = cinza.shape[:2]
+
+        if altura < 120 or largura < 160:
+            return False
+
+        # Frames parcialmente decodificados costumam apresentar blocos com
+        # textura/luminosidade muito diferente separados por linhas retas.
+        # A checagem abaixo compara faixas internas com suas vizinhas.
+        faixas_x = 12
+        largura_faixa = max(8, largura // faixas_x)
+        medias_x = []
+        desvios_x = []
+
+        for indice in range(faixas_x):
+            x1 = indice * largura_faixa
+            x2 = largura if indice == faixas_x - 1 else (indice + 1) * largura_faixa
+            trecho = cinza[:, x1:x2]
+            medias_x.append(float(trecho.mean()))
+            desvios_x.append(float(trecho.std()))
+
+        saltos_media_x = np.abs(np.diff(np.array(medias_x)))
+        saltos_desvio_x = np.abs(np.diff(np.array(desvios_x)))
+
+        if (
+            float(np.max(saltos_media_x)) >= 42.0
+            and float(np.percentile(saltos_media_x, 85)) >= 18.0
+            and float(np.max(saltos_desvio_x)) >= 18.0
+        ):
+            return True
+
+        faixas_y = 8
+        altura_faixa = max(8, altura // faixas_y)
+        medias_y = []
+        desvios_y = []
+
+        for indice in range(faixas_y):
+            y1 = indice * altura_faixa
+            y2 = altura if indice == faixas_y - 1 else (indice + 1) * altura_faixa
+            trecho = cinza[y1:y2, :]
+            medias_y.append(float(trecho.mean()))
+            desvios_y.append(float(trecho.std()))
+
+        saltos_media_y = np.abs(np.diff(np.array(medias_y)))
+        saltos_desvio_y = np.abs(np.diff(np.array(desvios_y)))
+
+        return (
+            float(np.max(saltos_media_y)) >= 42.0
+            and float(np.percentile(saltos_media_y, 85)) >= 18.0
+            and float(np.max(saltos_desvio_y)) >= 18.0
+        )
+
+    @staticmethod
     def _possui_emenda_suspeita(frame_cinza) -> bool:
         altura, largura = frame_cinza.shape[:2]
 
@@ -505,8 +660,8 @@ class CameraService:
         pontuacao_colunas = diferencas_x.mean(axis=0)
         mediana_x = float(np.median(pontuacao_colunas)) + 1.0
 
-        inicio_x = int(len(pontuacao_colunas) * 0.30)
-        fim_x = int(len(pontuacao_colunas) * 0.70)
+        inicio_x = int(len(pontuacao_colunas) * 0.20)
+        fim_x = int(len(pontuacao_colunas) * 0.80)
 
         if fim_x > inicio_x:
             trecho = pontuacao_colunas[inicio_x:fim_x]
@@ -514,12 +669,12 @@ class CameraService:
             indice = inicio_x + indice_local
             valor = float(pontuacao_colunas[indice])
             fracao_linhas_fortes = float(
-                np.mean(diferencas_x[:, indice] >= 38)
+                np.mean(diferencas_x[:, indice] >= 30)
             )
 
             if (
-                valor >= max(34.0, mediana_x * 6.0)
-                and fracao_linhas_fortes >= 0.62
+                valor >= max(28.0, mediana_x * 5.0)
+                and fracao_linhas_fortes >= 0.42
             ):
                 return True
 
@@ -527,8 +682,8 @@ class CameraService:
         pontuacao_linhas = diferencas_y.mean(axis=1)
         mediana_y = float(np.median(pontuacao_linhas)) + 1.0
 
-        inicio_y = int(len(pontuacao_linhas) * 0.30)
-        fim_y = int(len(pontuacao_linhas) * 0.70)
+        inicio_y = int(len(pontuacao_linhas) * 0.20)
+        fim_y = int(len(pontuacao_linhas) * 0.80)
 
         if fim_y > inicio_y:
             trecho = pontuacao_linhas[inicio_y:fim_y]
@@ -536,16 +691,43 @@ class CameraService:
             indice = inicio_y + indice_local
             valor = float(pontuacao_linhas[indice])
             fracao_colunas_fortes = float(
-                np.mean(diferencas_y[indice, :] >= 38)
+                np.mean(diferencas_y[indice, :] >= 30)
             )
 
             if (
-                valor >= max(34.0, mediana_y * 6.0)
-                and fracao_colunas_fortes >= 0.62
+                valor >= max(28.0, mediana_y * 5.0)
+                and fracao_colunas_fortes >= 0.42
             ):
                 return True
 
+        if CameraService._possui_corte_retilineo_suspeito(frame_cinza):
+            return True
+
+        if CameraService._possui_faixa_interna_suspeita(frame_cinza):
+            return True
+
         return False
+
+    @staticmethod
+    def _calcular_assinatura_estabilidade(frame_cinza):
+        assinatura = cv2.resize(
+            frame_cinza,
+            (96, 54),
+            interpolation=cv2.INTER_AREA,
+        )
+        assinatura = cv2.GaussianBlur(assinatura, (5, 5), 0)
+        return assinatura.astype(np.int16)
+
+    @staticmethod
+    def _diferenca_assinaturas(assinatura_atual, assinatura_anterior) -> float:
+        if assinatura_atual is None or assinatura_anterior is None:
+            return 0.0
+
+        return float(
+            np.mean(
+                np.abs(assinatura_atual - assinatura_anterior)
+            )
+        )
 
     def _frame_valido(
         self,
@@ -654,6 +836,7 @@ class CameraService:
             frames_validos_consecutivos = 0
             falhas_consecutivas = 0
             camera_estabilizada = False
+            assinatura_estabilidade_anterior = None
 
             while not self._stop_event.is_set():
                 configuracao_alterada = (
@@ -665,9 +848,10 @@ class CameraService:
                         self.ESTADO_ESTABILIZANDO,
                         "Aplicando configurações da câmera...",
                     )
-                    frames_descartar = max(frames_descartar, 5)
+                    frames_descartar = max(frames_descartar, 15)
                     frames_validos_consecutivos = 0
                     camera_estabilizada = False
+                    assinatura_estabilidade_anterior = None
 
                 sucesso, frame = capture.read()
 
@@ -683,6 +867,7 @@ class CameraService:
                 ):
                     falhas_consecutivas += 1
                     frames_validos_consecutivos = 0
+                    assinatura_estabilidade_anterior = None
 
                     if falhas_consecutivas >= self.falhas_antes_reconexao:
                         break
@@ -700,9 +885,32 @@ class CameraService:
                     frames_descartar -= 1
                     continue
 
-                frames_validos_consecutivos += 1
+                frame_cinza_estabilidade = cv2.cvtColor(
+                    frame,
+                    cv2.COLOR_BGR2GRAY,
+                )
+                assinatura_atual = self._calcular_assinatura_estabilidade(
+                    frame_cinza_estabilidade
+                )
 
                 if not camera_estabilizada:
+                    if assinatura_estabilidade_anterior is None:
+                        assinatura_estabilidade_anterior = assinatura_atual
+                        frames_validos_consecutivos = 1
+                        continue
+
+                    diferenca_estabilidade = self._diferenca_assinaturas(
+                        assinatura_atual,
+                        assinatura_estabilidade_anterior,
+                    )
+                    assinatura_estabilidade_anterior = assinatura_atual
+
+                    if diferenca_estabilidade > 18.0:
+                        frames_validos_consecutivos = 1
+                        continue
+
+                    frames_validos_consecutivos += 1
+
                     if frames_validos_consecutivos < self.frames_estabilidade:
                         continue
 
