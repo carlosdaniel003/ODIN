@@ -2,13 +2,20 @@ import tkinter as tk
 from tkinter import ttk
 
 from config import (
+    CAMERA_FORMATS,
+    CAMERA_FPS_PRESETS,
+    CAMERA_HEIGHT_MAX,
+    CAMERA_HEIGHT_MIN,
     CAMERA_IMAGE_CONTROL_MAX,
     CAMERA_IMAGE_CONTROL_MIN,
     CAMERA_PAN_MAX,
     CAMERA_PAN_MIN,
+    CAMERA_RESOLUTION_PRESETS,
     CAMERA_ROTATIONS,
     CAMERA_TILT_MAX,
     CAMERA_TILT_MIN,
+    CAMERA_WIDTH_MAX,
+    CAMERA_WIDTH_MIN,
     DEFAULT_CAMERA_SETTINGS,
     MAX_RADIUS_PX,
     MIN_RADIUS_PX,
@@ -24,8 +31,8 @@ def abrir_janela_configuracoes(
     camera_conectada: bool = False,
     status_controles_camera: dict | None = None,
 ) -> None:
-    largura_janela = 680
-    altura_janela = 780
+    largura_janela = 760
+    altura_janela = 820
 
     janela = tk.Toplevel(self.root)
     janela.title("Configurações - LumusPCI")
@@ -57,14 +64,70 @@ def abrir_janela_configuracoes(
     frame_raiz = tk.Frame(janela, bg=self.COR_CARD)
     frame_raiz.pack(fill=tk.BOTH, expand=True, padx=18, pady=16)
 
-    tk.Label(
+    # Cabeçalho visual ----------------------------------------------------
+    frame_cabecalho = tk.Frame(
         frame_raiz,
+        bg=self.COR_CARD_2,
+        highlightthickness=1,
+        highlightbackground=self.COR_BORDA,
+    )
+    frame_cabecalho.pack(fill=tk.X, pady=(0, 16))
+
+    tk.Frame(
+        frame_cabecalho,
+        bg="#22C55E",
+        width=5,
+    ).pack(side=tk.LEFT, fill=tk.Y)
+
+    frame_cabecalho_textos = tk.Frame(
+        frame_cabecalho,
+        bg=self.COR_CARD_2,
+    )
+    frame_cabecalho_textos.pack(
+        side=tk.LEFT,
+        fill=tk.BOTH,
+        expand=True,
+        padx=16,
+        pady=14,
+    )
+
+    frame_cabecalho_linha = tk.Frame(
+        frame_cabecalho_textos,
+        bg=self.COR_CARD_2,
+    )
+    frame_cabecalho_linha.pack(fill=tk.X)
+
+    tk.Label(
+        frame_cabecalho_linha,
         text="Configurações do sistema",
-        font=("Segoe UI", 15, "bold"),
+        font=("Segoe UI", 17, "bold"),
         fg=self.COR_TEXTO,
-        bg=self.COR_CARD,
+        bg=self.COR_CARD_2,
         anchor="w",
-    ).pack(fill=tk.X, pady=(0, 10))
+    ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    tk.Label(
+        frame_cabecalho_linha,
+        text="LUMUS-PCI",
+        font=("Segoe UI", 8, "bold"),
+        fg="#BBF7D0",
+        bg="#0F3D24",
+        padx=10,
+        pady=4,
+    ).pack(side=tk.RIGHT)
+
+    tk.Label(
+        frame_cabecalho_textos,
+        text=(
+            "Ajuste referências, LEDs fixos, armazenamento e perfil da "
+            "câmera sem alterar a tela principal."
+        ),
+        font=("Segoe UI", 9),
+        fg=self.COR_TEXTO_2,
+        bg=self.COR_CARD_2,
+        anchor="w",
+        justify=tk.LEFT,
+    ).pack(fill=tk.X, pady=(5, 0))
 
     estilo = ttk.Style(janela)
 
@@ -77,19 +140,38 @@ def abrir_janela_configuracoes(
         "Lumus.TNotebook",
         background=self.COR_CARD,
         borderwidth=0,
+        tabmargins=(0, 0, 0, 0),
     )
     estilo.configure(
         "Lumus.TNotebook.Tab",
         background=self.COR_CARD_2,
         foreground=self.COR_TEXTO_2,
-        padding=(18, 9),
+        padding=(24, 11),
         font=("Segoe UI", 9, "bold"),
         borderwidth=0,
     )
     estilo.map(
         "Lumus.TNotebook.Tab",
-        background=[("selected", "#0F3D24")],
-        foreground=[("selected", "#BBF7D0")],
+        background=[
+            ("selected", "#0F3D24"),
+            ("active", "#102033"),
+        ],
+        foreground=[
+            ("selected", "#BBF7D0"),
+            ("active", self.COR_TEXTO),
+        ],
+    )
+
+    estilo.configure(
+        "Lumus.TCombobox",
+        fieldbackground="#020617",
+        background=self.COR_CARD_2,
+        foreground=self.COR_TEXTO,
+        arrowcolor=self.COR_TEXTO_2,
+        bordercolor=self.COR_BORDA,
+        lightcolor=self.COR_BORDA,
+        darkcolor=self.COR_BORDA,
+        padding=(8, 5),
     )
 
     notebook = ttk.Notebook(
@@ -106,7 +188,7 @@ def abrir_janela_configuracoes(
 
     def criar_area_rolavel(parent):
         container = tk.Frame(parent, bg=self.COR_CARD)
-        container.pack(fill=tk.BOTH, expand=True)
+        container.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
 
         canvas = tk.Canvas(
             container,
@@ -155,7 +237,14 @@ def abrir_janela_configuracoes(
             highlightthickness=1,
             highlightbackground=self.COR_BORDA,
         )
-        card.pack(fill=tk.X, padx=(0, 6), pady=(0, 12))
+        card.pack(fill=tk.X, padx=(0, 8), pady=(0, 14))
+
+        # Faixa superior cria hierarquia visual sem destoar do tema escuro.
+        tk.Frame(
+            card,
+            bg="#22C55E",
+            height=3,
+        ).pack(fill=tk.X)
 
         tk.Label(
             card,
@@ -164,9 +253,18 @@ def abrir_janela_configuracoes(
             fg=self.COR_TEXTO,
             bg=self.COR_CARD_2,
             anchor="w",
-        ).pack(fill=tk.X, padx=12, pady=(10, 4))
+        ).pack(fill=tk.X, padx=14, pady=(12, 6))
 
-        return card
+        tk.Frame(
+            card,
+            bg="#172033",
+            height=1,
+        ).pack(fill=tk.X, padx=14, pady=(0, 10))
+
+        corpo = tk.Frame(card, bg=self.COR_CARD_2)
+        corpo.pack(fill=tk.X, padx=2, pady=(0, 2))
+
+        return corpo
 
     def executar_e_fechar(nome_callback: str) -> None:
         janela.destroy()
@@ -377,7 +475,7 @@ def abrir_janela_configuracoes(
     def obter_config(nome: str):
         return configuracoes_camera.get(
             nome,
-            DEFAULT_CAMERA_SETTINGS[nome],
+            DEFAULT_CAMERA_SETTINGS.get(nome),
         )
 
     frame_estado_camera = criar_card(
@@ -405,6 +503,179 @@ def abrir_janela_configuracoes(
         justify=tk.LEFT,
         anchor="w",
     ).pack(fill=tk.X, padx=12, pady=(0, 12))
+
+
+
+    frame_perfil_camera = criar_card(
+        conteudo_camera,
+        "Perfil de captura",
+    )
+
+    tk.Label(
+        frame_perfil_camera,
+        text=(
+            "Define a resolução, FPS e formato solicitados ao driver. "
+            "A resolução real entregue pela câmera é detectada durante a conexão."
+        ),
+        font=("Segoe UI", 9),
+        fg=self.COR_TEXTO_2,
+        bg=self.COR_CARD_2,
+        wraplength=600,
+        justify=tk.LEFT,
+        anchor="w",
+    ).pack(fill=tk.X, padx=12, pady=(0, 8))
+
+    mapa_label_para_resolucao = {
+        dados["label"]: modo
+        for modo, dados in CAMERA_RESOLUTION_PRESETS.items()
+    }
+    mapa_resolucao_para_label = {
+        modo: dados["label"]
+        for modo, dados in CAMERA_RESOLUTION_PRESETS.items()
+    }
+
+    modo_resolucao_atual = str(
+        obter_config("resolution_mode") or "auto"
+    )
+
+    if modo_resolucao_atual not in CAMERA_RESOLUTION_PRESETS:
+        modo_resolucao_atual = "auto"
+
+    valor_resolucao = tk.StringVar(
+        value=mapa_resolucao_para_label[modo_resolucao_atual]
+    )
+    valor_largura_camera = tk.IntVar(
+        value=int(obter_config("width") or DEFAULT_CAMERA_SETTINGS["width"])
+    )
+    valor_altura_camera = tk.IntVar(
+        value=int(obter_config("height") or DEFAULT_CAMERA_SETTINGS["height"])
+    )
+
+    fps_atual = int(obter_config("fps") or 0)
+    fps_modo_atual = str(obter_config("fps_mode") or "manual").lower()
+    valor_fps_camera = tk.StringVar(
+        value="Automático" if fps_modo_atual == "auto" or fps_atual <= 0 else str(fps_atual)
+    )
+    valor_formato_camera = tk.StringVar(
+        value=str(obter_config("format") or DEFAULT_CAMERA_SETTINGS["format"]).upper()
+    )
+
+    def criar_linha_combo(parent, titulo: str):
+        linha = tk.Frame(parent, bg=self.COR_CARD_2)
+        linha.pack(fill=tk.X, padx=12, pady=(4, 8))
+        tk.Label(
+            linha,
+            text=titulo,
+            width=14,
+            font=("Segoe UI", 9, "bold"),
+            fg=self.COR_TEXTO,
+            bg=self.COR_CARD_2,
+            anchor="w",
+        ).pack(side=tk.LEFT)
+        return linha
+
+    linha_resolucao = criar_linha_combo(frame_perfil_camera, "Resolução:")
+    combo_resolucao = ttk.Combobox(
+        linha_resolucao,
+        textvariable=valor_resolucao,
+        values=list(mapa_label_para_resolucao.keys()),
+        state="readonly",
+        width=24,
+        font=("Segoe UI", 9, "bold"),
+        style="Lumus.TCombobox",
+    )
+    combo_resolucao.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    linha_personalizada = tk.Frame(frame_perfil_camera, bg=self.COR_CARD_2)
+    linha_personalizada.pack(fill=tk.X, padx=12, pady=(0, 8))
+
+    tk.Label(
+        linha_personalizada,
+        text="Personalizada:",
+        width=14,
+        font=("Segoe UI", 9, "bold"),
+        fg=self.COR_TEXTO,
+        bg=self.COR_CARD_2,
+        anchor="w",
+    ).pack(side=tk.LEFT)
+
+    spin_largura = tk.Spinbox(
+        linha_personalizada,
+        from_=CAMERA_WIDTH_MIN,
+        to=CAMERA_WIDTH_MAX,
+        increment=10,
+        textvariable=valor_largura_camera,
+        width=8,
+        font=("Segoe UI", 9, "bold"),
+        bg="#020617",
+        fg=self.COR_TEXTO,
+        buttonbackground=self.COR_CARD_2,
+        relief=tk.FLAT,
+        bd=2,
+        justify=tk.CENTER,
+    )
+    spin_largura.pack(side=tk.LEFT, padx=(0, 6))
+
+    tk.Label(
+        linha_personalizada,
+        text="x",
+        font=("Segoe UI", 9, "bold"),
+        fg=self.COR_TEXTO_2,
+        bg=self.COR_CARD_2,
+    ).pack(side=tk.LEFT, padx=(0, 6))
+
+    spin_altura = tk.Spinbox(
+        linha_personalizada,
+        from_=CAMERA_HEIGHT_MIN,
+        to=CAMERA_HEIGHT_MAX,
+        increment=10,
+        textvariable=valor_altura_camera,
+        width=8,
+        font=("Segoe UI", 9, "bold"),
+        bg="#020617",
+        fg=self.COR_TEXTO,
+        buttonbackground=self.COR_CARD_2,
+        relief=tk.FLAT,
+        bd=2,
+        justify=tk.CENTER,
+    )
+    spin_altura.pack(side=tk.LEFT)
+
+    linha_fps = criar_linha_combo(frame_perfil_camera, "FPS:")
+    ttk.Combobox(
+        linha_fps,
+        textvariable=valor_fps_camera,
+        values=list(CAMERA_FPS_PRESETS),
+        state="readonly",
+        width=16,
+        font=("Segoe UI", 9, "bold"),
+        style="Lumus.TCombobox",
+    ).pack(side=tk.LEFT)
+
+    linha_formato = criar_linha_combo(frame_perfil_camera, "Formato:")
+    ttk.Combobox(
+        linha_formato,
+        textvariable=valor_formato_camera,
+        values=list(CAMERA_FORMATS),
+        state="readonly",
+        width=16,
+        font=("Segoe UI", 9, "bold"),
+        style="Lumus.TCombobox",
+    ).pack(side=tk.LEFT)
+
+    def atualizar_campos_resolucao(*_args):
+        modo = mapa_label_para_resolucao.get(valor_resolucao.get(), "auto")
+        estado = tk.NORMAL if modo == "custom" else tk.DISABLED
+        spin_largura.config(state=estado)
+        spin_altura.config(state=estado)
+
+        if modo != "custom":
+            preset = CAMERA_RESOLUTION_PRESETS[modo]
+            valor_largura_camera.set(int(preset["width"]))
+            valor_altura_camera.set(int(preset["height"]))
+
+    combo_resolucao.bind("<<ComboboxSelected>>", atualizar_campos_resolucao)
+    atualizar_campos_resolucao()
 
     frame_controles = criar_card(
         conteudo_camera,
@@ -644,6 +915,21 @@ def abrir_janela_configuracoes(
                 float(DEFAULT_CAMERA_SETTINGS[nome])
             )
 
+        valor_resolucao.set(
+            mapa_resolucao_para_label[
+                DEFAULT_CAMERA_SETTINGS["resolution_mode"]
+            ]
+        )
+        valor_largura_camera.set(int(DEFAULT_CAMERA_SETTINGS["width"]))
+        valor_altura_camera.set(int(DEFAULT_CAMERA_SETTINGS["height"]))
+        valor_fps_camera.set(
+            "Automático"
+            if str(DEFAULT_CAMERA_SETTINGS["fps_mode"]).lower() == "auto"
+            else str(int(DEFAULT_CAMERA_SETTINGS["fps"]))
+        )
+        valor_formato_camera.set(str(DEFAULT_CAMERA_SETTINGS["format"]).upper())
+        atualizar_campos_resolucao()
+
         valor_rotacao.set(
             f"{int(DEFAULT_CAMERA_SETTINGS['rotation'])}°"
         )
@@ -655,8 +941,20 @@ def abrir_janela_configuracoes(
     ).pack(anchor="w", padx=2, pady=(0, 14))
 
     # Botões gerais -------------------------------------------------------
-    frame_botoes = tk.Frame(frame_raiz, bg=self.COR_CARD)
-    frame_botoes.pack(fill=tk.X, pady=(12, 0))
+    frame_rodape = tk.Frame(frame_raiz, bg=self.COR_CARD)
+    frame_rodape.pack(fill=tk.X, pady=(14, 0))
+
+    tk.Label(
+        frame_rodape,
+        text="As alterações serão salvas no arquivo de configuração do LumusPCI.",
+        font=("Segoe UI", 8),
+        fg=self.COR_TEXTO_3,
+        bg=self.COR_CARD,
+        anchor="w",
+    ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    frame_botoes = tk.Frame(frame_rodape, bg=self.COR_CARD)
+    frame_botoes.pack(side=tk.RIGHT)
 
     def confirmar() -> None:
         try:
@@ -669,7 +967,36 @@ def abrir_janela_configuracoes(
             max(MIN_RADIUS_PX, raio_configurado_px),
         )
 
+        resolucao_modo = mapa_label_para_resolucao.get(
+            valor_resolucao.get(),
+            "auto",
+        )
+
+        try:
+            largura_camera = int(valor_largura_camera.get())
+        except (TypeError, ValueError):
+            largura_camera = int(DEFAULT_CAMERA_SETTINGS["width"])
+
+        try:
+            altura_camera = int(valor_altura_camera.get())
+        except (TypeError, ValueError):
+            altura_camera = int(DEFAULT_CAMERA_SETTINGS["height"])
+
+        fps_texto = valor_fps_camera.get()
+        fps_mode = "auto" if fps_texto == "Automático" else "manual"
+
+        try:
+            fps_camera = 0 if fps_mode == "auto" else int(fps_texto)
+        except (TypeError, ValueError):
+            fps_camera = int(DEFAULT_CAMERA_SETTINGS["fps"])
+
         configuracoes_camera_salvar = {
+            "resolution_mode": resolucao_modo,
+            "width": largura_camera,
+            "height": altura_camera,
+            "fps_mode": fps_mode,
+            "fps": fps_camera,
+            "format": str(valor_formato_camera.get()).upper(),
             "pan_enabled": bool(
                 variaveis_camera["pan_enabled"].get()
             ),

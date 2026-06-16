@@ -9,6 +9,7 @@ import numpy as np
 
 from config import (
     CAMERA_IMAGE_CONTROL_MAX,
+    CAMERA_FORMATS,
     CAMERA_IMAGE_CONTROL_MIN,
     CAMERA_PAN_MAX,
     CAMERA_PAN_MIN,
@@ -26,6 +27,11 @@ class CameraSnapshot:
     frame_id: int
     frame: object | None
     resolucao: tuple[int, int] | None
+    resolucao_solicitada: tuple[int, int] | None = None
+    fps_solicitado: int | None = None
+    fps_real: float | None = None
+    formato_solicitado: str | None = None
+    formato_real: str | None = None
 
 
 class CameraService:
@@ -75,9 +81,12 @@ class CameraService:
         self._ultimo_frame = None
         self._frame_id = 0
         self._resolucao: tuple[int, int] | None = None
+        self._fps_real: float | None = None
+        self._formato_real: str | None = None
         self._configuracoes_camera = self._normalizar_configuracoes_camera(
             configuracoes_camera
         )
+        self._aplicar_perfil_camera_inicial()
         self._versao_configuracoes_camera = 0
         self._versao_configuracoes_aplicada = -1
         self._status_controles_camera = {
@@ -95,6 +104,60 @@ class CameraService:
                 "rotation",
             )
         }
+
+
+    def _aplicar_perfil_camera_inicial(self) -> None:
+        configuracoes = self._configuracoes_camera
+
+        try:
+            largura = int(configuracoes.get("width", self.largura))
+        except (TypeError, ValueError):
+            largura = self.largura
+
+        try:
+            altura = int(configuracoes.get("height", self.altura))
+        except (TypeError, ValueError):
+            altura = self.altura
+
+        try:
+            fps = int(configuracoes.get("fps", self.fps))
+        except (TypeError, ValueError):
+            fps = self.fps
+
+        fps_mode = str(configuracoes.get("fps_mode", "manual")).lower()
+        formato = str(configuracoes.get("format", "MJPG")).upper()
+
+        if formato not in CAMERA_FORMATS:
+            formato = "MJPG"
+
+        self.largura = max(1, largura)
+        self.altura = max(1, altura)
+        self.fps = 0 if fps_mode == "auto" else max(0, fps)
+        self.formato_camera = formato
+        self._resolucao_solicitada = (self.largura, self.altura)
+        self._fps_solicitado = self.fps
+        self._formato_solicitado = self.formato_camera
+
+    @staticmethod
+    def _decodificar_fourcc(valor) -> str | None:
+        try:
+            numero = int(valor)
+        except (TypeError, ValueError):
+            return None
+
+        if numero <= 0:
+            return None
+
+        caracteres = []
+
+        for deslocamento in (0, 8, 16, 24):
+            codigo = (numero >> deslocamento) & 255
+
+            if 32 <= codigo <= 126:
+                caracteres.append(chr(codigo))
+
+        texto = "".join(caracteres).strip()
+        return texto or None
 
     def iniciar(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -149,7 +212,43 @@ class CameraService:
         if rotacao not in CAMERA_ROTATIONS:
             rotacao = int(padrao["rotation"])
 
+        try:
+            largura = int(origem.get("width", padrao["width"]))
+        except (TypeError, ValueError):
+            largura = int(padrao["width"])
+
+        try:
+            altura = int(origem.get("height", padrao["height"]))
+        except (TypeError, ValueError):
+            altura = int(padrao["height"])
+
+        try:
+            fps = int(origem.get("fps", padrao["fps"]))
+        except (TypeError, ValueError):
+            fps = int(padrao["fps"])
+
+        fps_mode = str(origem.get("fps_mode", padrao["fps_mode"])).lower()
+        if fps_mode not in ("auto", "manual"):
+            fps_mode = str(padrao["fps_mode"])
+
+        if fps_mode == "auto":
+            fps = 0
+
+        formato = str(origem.get("format", padrao["format"])).upper()
+        if formato not in CAMERA_FORMATS:
+            formato = str(padrao["format"]).upper()
+
+        modo_resolucao = str(
+            origem.get("resolution_mode", padrao["resolution_mode"])
+        )
+
         return {
+            "resolution_mode": modo_resolucao,
+            "width": max(1, largura),
+            "height": max(1, altura),
+            "fps_mode": fps_mode,
+            "fps": max(0, fps),
+            "format": formato,
             "pan_enabled": bool(
                 origem.get("pan_enabled", padrao["pan_enabled"])
             ),
@@ -393,6 +492,11 @@ class CameraService:
                 frame_id=self._frame_id,
                 frame=frame,
                 resolucao=self._resolucao,
+                resolucao_solicitada=self._resolucao_solicitada,
+                fps_solicitado=self._fps_solicitado,
+                fps_real=self._fps_real,
+                formato_solicitado=self._formato_solicitado,
+                formato_real=self._formato_real,
             )
 
     def _definir_estado(self, estado: str, mensagem: str) -> None:
@@ -408,7 +512,10 @@ class CameraService:
             self._frame_id += 1
             self._resolucao = (largura_frame, altura_frame)
             self._estado = self.ESTADO_CONECTADA
-            self._mensagem = "Câmera conectada."
+            self._mensagem = (
+                f"Câmera conectada. Resolução real: "
+                f"{largura_frame}x{altura_frame}."
+            )
 
     def _abrir_camera(self):
         capture = cv2.VideoCapture(self.indice_camera, cv2.CAP_DSHOW)
@@ -427,15 +534,21 @@ class CameraService:
                 pass
             return None
 
-        # O formato é negociado antes da resolução. Isso reduz frames MJPG
-        # parcialmente decodificados após reconectar o USB.
-        capture.set(
-            cv2.CAP_PROP_FOURCC,
-            cv2.VideoWriter_fourcc(*"MJPG"),
-        )
+        # O formato é negociado antes da resolução. Isso reduz frames
+        # parcialmente decodificados após reconectar o USB. Em modo AUTO,
+        # o driver escolhe o formato mais estável.
+        if self.formato_camera in ("MJPG", "YUY2"):
+            capture.set(
+                cv2.CAP_PROP_FOURCC,
+                cv2.VideoWriter_fourcc(*self.formato_camera),
+            )
+
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.largura)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.altura)
-        capture.set(cv2.CAP_PROP_FPS, self.fps)
+
+        if self.fps > 0:
+            capture.set(cv2.CAP_PROP_FPS, self.fps)
+
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         # Nem todo backend respeita estas propriedades, mas são seguras quando
@@ -455,6 +568,22 @@ class CameraService:
             capture,
             forcar=True,
         )
+
+        try:
+            fps_real = float(capture.get(cv2.CAP_PROP_FPS))
+        except Exception:
+            fps_real = None
+
+        try:
+            formato_real = self._decodificar_fourcc(
+                capture.get(cv2.CAP_PROP_FOURCC)
+            )
+        except Exception:
+            formato_real = None
+
+        with self._lock:
+            self._fps_real = fps_real
+            self._formato_real = formato_real
 
         return capture
 

@@ -1,4 +1,4 @@
-from pathlib import Path 
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -16,12 +16,65 @@ MIN_RADIUS_PX = 3
 MAX_RADIUS_PX = 50
 DEFAULT_SAVE_ANALYSIS_RESULTS = False
 
+# Perfis de resolução da câmera.
+# O LumusPCI solicita estes valores ao driver, mas a resolução real entregue
+# pela câmera é sempre detectada em tempo de execução.
+CAMERA_RESOLUTION_PRESETS = {
+    "auto": {
+        "label": "Automática recomendada",
+        "width": 1920,
+        "height": 1080,
+    },
+    "hd": {
+        "label": "1280x720",
+        "width": 1280,
+        "height": 720,
+    },
+    "full_hd": {
+        "label": "1920x1080",
+        "width": 1920,
+        "height": 1080,
+    },
+    "qhd": {
+        "label": "2560x1440",
+        "width": 2560,
+        "height": 1440,
+    },
+    "uhd": {
+        "label": "3840x2160",
+        "width": 3840,
+        "height": 2160,
+    },
+    "custom": {
+        "label": "Personalizada",
+        "width": 1920,
+        "height": 1080,
+    },
+}
+
+CAMERA_RESOLUTION_MODES = tuple(CAMERA_RESOLUTION_PRESETS.keys())
+CAMERA_WIDTH_MIN = 320
+CAMERA_WIDTH_MAX = 7680
+CAMERA_HEIGHT_MIN = 240
+CAMERA_HEIGHT_MAX = 4320
+
+CAMERA_FPS_PRESETS = ("Automático", "10", "15", "20", "30")
+CAMERA_FPS_MIN = 0
+CAMERA_FPS_MAX = 120
+CAMERA_FORMATS = ("AUTO", "MJPG", "YUY2")
+
 # Configurações da câmera.
 #
 # Os controles de panorâmica, inclinação, contraste, nitidez e saturação
 # dependem do suporte oferecido pelo driver da câmera. Quando o ajuste está
 # desativado, o LumusPCI preserva o valor padrão negociado pelo driver.
 DEFAULT_CAMERA_SETTINGS = {
+    "resolution_mode": "auto",
+    "width": 1920,
+    "height": 1080,
+    "fps_mode": "manual",
+    "fps": 15,
+    "format": "MJPG",
     "pan_enabled": False,
     "pan": 0.0,
     "tilt_enabled": False,

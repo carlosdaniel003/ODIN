@@ -164,6 +164,9 @@ class LumusPCIApp:
         rotacao_anterior = int(
             self.configuracoes_camera.get("rotation", 0)
         )
+        perfil_camera_anterior = self.perfil_camera_dinamico(
+            self.configuracoes_camera
+        )
 
         if raio_configurado_px is not None:
             self.raio_atual_px = min(
@@ -200,8 +203,12 @@ class LumusPCIApp:
         self.configuracoes_camera = (
             self.config_repository.obter_configuracoes_camera()
         )
+        perfil_camera_atual = self.perfil_camera_dinamico(
+            self.configuracoes_camera
+        )
+        perfil_camera_alterado = perfil_camera_atual != perfil_camera_anterior
 
-        if self.camera_service is not None:
+        if self.camera_service is not None and not perfil_camera_alterado:
             self.camera_service.atualizar_configuracoes_camera(
                 self.configuracoes_camera
             )
@@ -223,13 +230,26 @@ class LumusPCIApp:
             self.view.atualizar_estado_selecao_led(False)
             self.view.atualizar_faixa_resultado()
 
+        if perfil_camera_alterado and self.camera_ativa:
+            self.parar_tela_ao_vivo(manter_imagem=True)
+            self.root.after(250, self.iniciar_tela_ao_vivo)
+
         status_salvamento = (
             "ativado"
             if self.salvar_resultados_analise
             else "desativado"
         )
 
-        if rotacao_alterada:
+        if perfil_camera_alterado:
+            largura_camera, altura_camera, fps_camera = (
+                self.obter_parametros_camera_dinamicos()
+            )
+            fps_texto = "AUTO" if fps_camera <= 0 else f"{fps_camera} FPS"
+            mensagem = (
+                "perfil da câmera salvo. Reiniciando câmera com "
+                f"{largura_camera}x{altura_camera} @ {fps_texto}."
+            )
+        elif rotacao_alterada:
             mensagem = (
                 f"configurações salvas. Rotação alterada para "
                 f"{rotacao_atual}°. Reconfigure ou recarregue as posições "
@@ -256,6 +276,54 @@ class LumusPCIApp:
 
         renderizacoes_visuais = criar_pacote_renderizacoes_visuais(self.imagem_original, alvo)
         self.view.exibir_renderizacoes_visuais(renderizacoes_visuais)
+
+
+    def obter_parametros_camera_dinamicos(self) -> tuple[int, int, int]:
+        configuracoes = (
+            self.configuracoes_camera
+            if isinstance(self.configuracoes_camera, dict)
+            else {}
+        )
+
+        try:
+            largura = int(
+                configuracoes.get("width", CAMERA_LARGURA_DESEJADA)
+            )
+        except (TypeError, ValueError):
+            largura = CAMERA_LARGURA_DESEJADA
+
+        try:
+            altura = int(
+                configuracoes.get("height", CAMERA_ALTURA_DESEJADA)
+            )
+        except (TypeError, ValueError):
+            altura = CAMERA_ALTURA_DESEJADA
+
+        try:
+            fps = int(configuracoes.get("fps", CAMERA_FPS_DESEJADO))
+        except (TypeError, ValueError):
+            fps = CAMERA_FPS_DESEJADO
+
+        if str(configuracoes.get("fps_mode", "manual")).lower() == "auto":
+            fps = 0
+
+        return max(1, largura), max(1, altura), max(0, fps)
+
+    @staticmethod
+    def perfil_camera_dinamico(configuracoes_camera: dict | None) -> tuple:
+        configuracoes = (
+            configuracoes_camera
+            if isinstance(configuracoes_camera, dict)
+            else {}
+        )
+        return (
+            str(configuracoes.get("resolution_mode", "auto")),
+            int(configuracoes.get("width", CAMERA_LARGURA_DESEJADA)),
+            int(configuracoes.get("height", CAMERA_ALTURA_DESEJADA)),
+            str(configuracoes.get("fps_mode", "manual")),
+            int(configuracoes.get("fps", CAMERA_FPS_DESEJADO)),
+            str(configuracoes.get("format", "MJPG")).upper(),
+        )
 
     def selecionar_imagem(self, titulo: str):
         caminho_imagem = filedialog.askopenfilename(
@@ -421,11 +489,15 @@ class LumusPCIApp:
             self.camera_service.parar()
             self.camera_service = None
 
+        largura_camera, altura_camera, fps_camera = (
+            self.obter_parametros_camera_dinamicos()
+        )
+
         self.camera_service = CameraService(
             indice_camera=INDICE_CAMERA_PADRAO,
-            largura=CAMERA_LARGURA_DESEJADA,
-            altura=CAMERA_ALTURA_DESEJADA,
-            fps=CAMERA_FPS_DESEJADO,
+            largura=largura_camera,
+            altura=altura_camera,
+            fps=fps_camera,
             intervalo_reconexao_s=CAMERA_INTERVALO_RECONEXAO_S,
             frames_aquecimento=CAMERA_FRAMES_AQUECIMENTO,
             falhas_antes_reconexao=CAMERA_FALHAS_ANTES_AVISO,
@@ -459,7 +531,10 @@ class LumusPCIApp:
         self.view.atualizar_faixa_resultado()
         self.view.atualizar_estado_tela_ao_vivo(True)
         self.view.atualizar_estado_selecao_led(False)
-        self.view.atualizar_status("Conectando câmera...")
+        fps_texto = "AUTO" if fps_camera <= 0 else f"{fps_camera} FPS"
+        self.view.atualizar_status(
+            f"Conectando câmera em {largura_camera}x{altura_camera} @ {fps_texto}..."
+        )
         self.exibir_aviso_camera(
             "CONECTANDO CÂMERA",
             tipo="informacao",
@@ -651,12 +726,22 @@ class LumusPCIApp:
 
             if not self.camera_em_pausa_analise and (estado_mudou or foi_reconectada):
                 if foi_reconectada:
+                    resolucao_texto = ""
+                    if snapshot.resolucao is not None:
+                        resolucao_texto = (
+                            f" Resolução real: {snapshot.resolucao[0]}x{snapshot.resolucao[1]}."
+                        )
                     self.view.atualizar_status(
-                        "Câmera reconectada. Pressione ENTER para analisar."
+                        "Câmera reconectada." + resolucao_texto + " Pressione ENTER para analisar."
                     )
                 else:
+                    resolucao_texto = ""
+                    if snapshot.resolucao is not None:
+                        resolucao_texto = (
+                            f" Resolução real: {snapshot.resolucao[0]}x{snapshot.resolucao[1]}."
+                        )
                     self.view.atualizar_status(
-                        "tela ao vivo ativa. Pressione ENTER para capturar e analisar."
+                        "tela ao vivo ativa." + resolucao_texto + " Pressione ENTER para capturar e analisar."
                     )
 
         if snapshot.frame is not None:
@@ -715,21 +800,21 @@ class LumusPCIApp:
         leds_fixos_validos = []
 
         for led_fixo in leds_fixos:
+            led_adaptado = led_fixo.adaptar_para_resolucao(
+                largura_destino=self.largura_original,
+                altura_destino=self.altura_original,
+                raio_minimo=MIN_RADIUS_PX,
+                raio_maximo=RAIO_MAXIMO_LED_PX,
+            )
+
             if validar_centro_led(
-                led_fixo.centro_x,
-                led_fixo.centro_y,
-                led_fixo.raio,
+                led_adaptado.centro_x,
+                led_adaptado.centro_y,
+                led_adaptado.raio,
                 self.largura_original,
                 self.altura_original,
             ):
-                leds_fixos_validos.append(
-                    LedSelection(
-                        id=led_fixo.id,
-                        centro_x=led_fixo.centro_x,
-                        centro_y=led_fixo.centro_y,
-                        raio=led_fixo.raio,
-                    )
-                )
+                leds_fixos_validos.append(led_adaptado)
 
         return leds_fixos_validos
 
@@ -739,6 +824,34 @@ class LumusPCIApp:
     ) -> list[LedSelection]:
         if not leds_fixos or self.largura_original <= 0 or self.altura_original <= 0:
             return []
+
+        if all(
+            led_fixo.possui_coordenadas_normalizadas()
+            for led_fixo in leds_fixos
+        ):
+            leds_adaptados_normalizados = []
+
+            for led_fixo in leds_fixos:
+                led_adaptado = led_fixo.adaptar_para_resolucao(
+                    largura_destino=self.largura_original,
+                    altura_destino=self.altura_original,
+                    raio_minimo=MIN_RADIUS_PX,
+                    raio_maximo=RAIO_MAXIMO_LED_PX,
+                )
+
+                if not validar_centro_led(
+                    led_adaptado.centro_x,
+                    led_adaptado.centro_y,
+                    led_adaptado.raio,
+                    self.largura_original,
+                    self.altura_original,
+                ):
+                    break
+
+                leds_adaptados_normalizados.append(led_adaptado)
+
+            if len(leds_adaptados_normalizados) == len(leds_fixos):
+                return leds_adaptados_normalizados
 
         todos_validos_sem_escala = all(
             validar_centro_led(
@@ -1096,11 +1209,18 @@ class LumusPCIApp:
                 centro_x=led_selecionado.centro_x,
                 centro_y=led_selecionado.centro_y,
                 raio=led_selecionado.raio,
+            ).com_normalizacao(
+                largura_base=self.largura_original,
+                altura_base=self.altura_original,
             )
             for led_selecionado in self.leds_selecionados
         ]
 
-        self.configuracao_atual = self.config_repository.salvar_leds_fixos(self.leds_fixos_configurados)
+        self.configuracao_atual = self.config_repository.salvar_leds_fixos(
+            self.leds_fixos_configurados,
+            largura_base=self.largura_original,
+            altura_base=self.altura_original,
+        )
 
         self.modo_atual = "ocioso"
         self.view.atualizar_estado_selecao_led(False)

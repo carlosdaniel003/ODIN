@@ -2,13 +2,22 @@ import json
 from pathlib import Path
 
 from config import (
+    CAMERA_FORMATS,
+    CAMERA_FPS_MAX,
+    CAMERA_FPS_MIN,
+    CAMERA_HEIGHT_MAX,
+    CAMERA_HEIGHT_MIN,
     CAMERA_IMAGE_CONTROL_MAX,
     CAMERA_IMAGE_CONTROL_MIN,
     CAMERA_PAN_MAX,
     CAMERA_PAN_MIN,
+    CAMERA_RESOLUTION_MODES,
+    CAMERA_RESOLUTION_PRESETS,
     CAMERA_ROTATIONS,
     CAMERA_TILT_MAX,
     CAMERA_TILT_MIN,
+    CAMERA_WIDTH_MAX,
+    CAMERA_WIDTH_MIN,
     CONFIG_FILE,
     DEFAULT_CAMERA_SETTINGS,
     DEFAULT_RADIUS_PX,
@@ -39,13 +48,32 @@ class ConfigRepository:
             return {}
 
     @staticmethod
-    def _limitar_float(valor, minimo: float, maximo: float, padrao: float) -> float:
+    def _limitar_float(
+        valor,
+        minimo: float,
+        maximo: float,
+        padrao: float,
+    ) -> float:
         try:
             numero = float(valor)
         except (TypeError, ValueError):
             numero = float(padrao)
 
         return min(float(maximo), max(float(minimo), numero))
+
+    @staticmethod
+    def _limitar_int(
+        valor,
+        minimo: int,
+        maximo: int,
+        padrao: int,
+    ) -> int:
+        try:
+            numero = int(valor)
+        except (TypeError, ValueError):
+            numero = int(padrao)
+
+        return min(int(maximo), max(int(minimo), numero))
 
     @classmethod
     def normalizar_configuracoes_camera(
@@ -54,6 +82,60 @@ class ConfigRepository:
     ) -> dict:
         origem = configuracoes_camera if isinstance(configuracoes_camera, dict) else {}
         padrao = DEFAULT_CAMERA_SETTINGS
+
+        modo_resolucao = str(
+            origem.get("resolution_mode", padrao["resolution_mode"])
+        )
+
+        if modo_resolucao not in CAMERA_RESOLUTION_MODES:
+            modo_resolucao = str(padrao["resolution_mode"])
+
+        preset_resolucao = CAMERA_RESOLUTION_PRESETS.get(
+            modo_resolucao,
+            CAMERA_RESOLUTION_PRESETS[padrao["resolution_mode"]],
+        )
+
+        if modo_resolucao == "custom":
+            largura = cls._limitar_int(
+                origem.get("width", padrao["width"]),
+                CAMERA_WIDTH_MIN,
+                CAMERA_WIDTH_MAX,
+                padrao["width"],
+            )
+            altura = cls._limitar_int(
+                origem.get("height", padrao["height"]),
+                CAMERA_HEIGHT_MIN,
+                CAMERA_HEIGHT_MAX,
+                padrao["height"],
+            )
+        else:
+            largura = int(preset_resolucao["width"])
+            altura = int(preset_resolucao["height"])
+
+        fps_modo = str(origem.get("fps_mode", padrao["fps_mode"])).lower()
+        fps_origem = origem.get("fps", padrao["fps"])
+
+        if str(fps_origem).lower() in ("auto", "automático", "automatico", "0"):
+            fps_modo = "auto"
+            fps = 0
+        else:
+            fps = cls._limitar_int(
+                fps_origem,
+                CAMERA_FPS_MIN,
+                CAMERA_FPS_MAX,
+                padrao["fps"],
+            )
+
+            if fps <= 0:
+                fps_modo = "auto"
+                fps = 0
+            elif fps_modo not in ("auto", "manual"):
+                fps_modo = "manual"
+
+        formato = str(origem.get("format", padrao["format"])).upper()
+
+        if formato not in CAMERA_FORMATS:
+            formato = str(padrao["format"]).upper()
 
         try:
             rotacao = int(origem.get("rotation", padrao["rotation"]))
@@ -64,6 +146,12 @@ class ConfigRepository:
             rotacao = int(padrao["rotation"])
 
         return {
+            "resolution_mode": modo_resolucao,
+            "width": int(largura),
+            "height": int(altura),
+            "fps_mode": fps_modo,
+            "fps": int(fps),
+            "format": formato,
             "pan_enabled": bool(
                 origem.get("pan_enabled", padrao["pan_enabled"])
             ),
@@ -178,7 +266,7 @@ class ConfigRepository:
         if not configuracao:
             configuracao = {
                 "project": "LumusPCI",
-                "version": "0.7.0",
+                "version": "0.13.0",
                 "inspection_method": (
                     "single_selected_led_reference_classifier_modular"
                 ),
@@ -200,6 +288,10 @@ class ConfigRepository:
             )
         elif "camera" not in settings:
             settings["camera"] = self.normalizar_configuracoes_camera(None)
+        else:
+            settings["camera"] = self.normalizar_configuracoes_camera(
+                settings.get("camera")
+            )
 
         configuracao["settings"] = settings
 
@@ -252,7 +344,7 @@ class ConfigRepository:
 
         configuracao_final = {
             "project": "LumusPCI",
-            "version": "0.7.0",
+            "version": "0.13.0",
             "inspection_method": (
                 "single_selected_led_reference_classifier_modular"
             ),
@@ -297,13 +389,15 @@ class ConfigRepository:
     def salvar_leds_fixos(
         self,
         leds_fixos: list[LedSelection],
+        largura_base: int | None = None,
+        altura_base: int | None = None,
     ) -> dict:
         configuracao = self.carregar_configuracao_existente_sem_alerta()
 
         if not configuracao:
             configuracao = {
                 "project": "LumusPCI",
-                "version": "0.7.0",
+                "version": "0.13.0",
                 "inspection_method": (
                     "single_selected_led_reference_classifier_modular"
                 ),
@@ -323,10 +417,23 @@ class ConfigRepository:
             settings.get("camera")
         )
 
+        leds_para_salvar = []
+
+        for led_fixo in leds_fixos:
+            if largura_base and altura_base:
+                leds_para_salvar.append(
+                    led_fixo.com_normalizacao(
+                        largura_base=largura_base,
+                        altura_base=altura_base,
+                    )
+                )
+            else:
+                leds_para_salvar.append(led_fixo)
+
         configuracao["settings"] = settings
         configuracao["fixed_leds"] = [
             led_fixo.to_dict()
-            for led_fixo in leds_fixos
+            for led_fixo in leds_para_salvar
         ]
 
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
