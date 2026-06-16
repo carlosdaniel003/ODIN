@@ -2,13 +2,13 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-import cv2
 
 from config import CONFIG_DIR, CONFIG_FILE, DEFAULT_RADIUS_PX, MAX_RADIUS_PX, MIN_RADIUS_PX
 from src.core.classifier import ReferenceLedClassifier
 from src.core.debug_formatter import formatar_painel_inicial, formatar_resultado_textual_multiplos
 from src.core.feature_extractor import extrair_features_led, extrair_features_referencia_led, validar_centro_led
 from src.core.visual_renderer import criar_imagem_resultados_visuais, criar_pacote_renderizacoes_visuais
+from src.infra.camera_service import CameraService
 from src.infra.config_repository import ConfigRepository
 from src.infra.image_io import carregar_imagem_opencv
 from src.infra.result_repository import ResultRepository
@@ -26,6 +26,11 @@ CAMERA_FPS_DESEJADO = 30
 LIMITE_FRAME_PRETO_MEDIA = 4.0
 LIMITE_FRAME_PRETO_DESVIO = 3.0
 MARGEM_GUIAS_CAMERA_PERCENTUAL = 0.05
+CAMERA_FRAMES_AQUECIMENTO = 12
+CAMERA_LARGURA_MINIMA = 320
+CAMERA_ALTURA_MINIMA = 240
+CAMERA_FALHAS_ANTES_AVISO = 15
+CAMERA_INTERVALO_RECONEXAO_S = 2.0
 
 
 class LumusPCIApp:
@@ -53,13 +58,17 @@ class LumusPCIApp:
         self.resultados_led_atual = []
         self.configuracao_atual = {}
 
-        self.camera_capture = None
+        self.camera_service: CameraService | None = None
         self.camera_ativa = False
         self.camera_after_id = None
         self.camera_frame_atual = None
         self.camera_retomada_after_id = None
         self.camera_em_pausa_analise = False
         self.camera_falhas_consecutivas = 0
+        self.camera_ultimo_frame_id = -1
+        self.camera_estado_anterior = CameraService.ESTADO_PARADA
+        self.camera_desconectada = False
+        self.camera_aviso_estado: str | None = None
 
         self.config_repository = ConfigRepository()
         self.result_repository = ResultRepository()
@@ -320,45 +329,47 @@ class LumusPCIApp:
         if self.camera_ativa:
             return
 
-        self.camera_capture = cv2.VideoCapture(INDICE_CAMERA_PADRAO, cv2.CAP_DSHOW)
+        if self.camera_service is not None:
+            self.camera_service.parar()
+            self.camera_service = None
 
-        if not self.camera_capture.isOpened():
-            self.camera_capture.release()
-            self.camera_capture = cv2.VideoCapture(INDICE_CAMERA_PADRAO)
-
-        if not self.camera_capture.isOpened():
-            self.camera_capture = None
-            messagebox.showerror(
-                "Erro",
-                "Não foi possível abrir a câmera USB.\n\n"
-                "Teste trocar INDICE_CAMERA_PADRAO de 0 para 1.",
-            )
-            return
-
-        self.camera_capture.set(
-            cv2.CAP_PROP_FOURCC,
-            cv2.VideoWriter_fourcc(*"MJPG"),
+        self.camera_service = CameraService(
+            indice_camera=INDICE_CAMERA_PADRAO,
+            largura=CAMERA_LARGURA_DESEJADA,
+            altura=CAMERA_ALTURA_DESEJADA,
+            fps=CAMERA_FPS_DESEJADO,
+            intervalo_reconexao_s=CAMERA_INTERVALO_RECONEXAO_S,
+            frames_aquecimento=CAMERA_FRAMES_AQUECIMENTO,
+            falhas_antes_reconexao=CAMERA_FALHAS_ANTES_AVISO,
+            largura_minima=CAMERA_LARGURA_MINIMA,
+            altura_minima=CAMERA_ALTURA_MINIMA,
+            limite_preto_media=LIMITE_FRAME_PRETO_MEDIA,
+            limite_preto_desvio=LIMITE_FRAME_PRETO_DESVIO,
         )
-        self.camera_capture.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_LARGURA_DESEJADA)
-        self.camera_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_ALTURA_DESEJADA)
-        self.camera_capture.set(cv2.CAP_PROP_FPS, CAMERA_FPS_DESEJADO)
-        self.camera_capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         self.camera_ativa = True
         self.camera_em_pausa_analise = False
         self.camera_falhas_consecutivas = 0
+        self.camera_ultimo_frame_id = -1
+        self.camera_estado_anterior = CameraService.ESTADO_PARADA
+        self.camera_desconectada = False
+        self.camera_frame_atual = None
         self.modo_atual = "tela_ao_vivo"
         self.resultados_led_atual = []
         self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
         self.leds_selecionados = []
 
+        self.view.atualizar_faixa_resultado()
         self.view.atualizar_estado_tela_ao_vivo(True)
         self.view.atualizar_estado_selecao_led(False)
-        self.view.atualizar_status(
-            "tela ao vivo ativa. Pressione ENTER para capturar e analisar."
+        self.view.atualizar_status("Conectando câmera...")
+        self.exibir_aviso_camera(
+            "CONECTANDO CÂMERA",
+            tipo="informacao",
         )
 
-        self.atualizar_frame_camera()
+        self.camera_service.iniciar()
+        self.agendar_proximo_frame_camera(0)
 
     def parar_tela_ao_vivo(self, manter_imagem: bool = True) -> None:
         if self.camera_after_id is not None:
@@ -375,14 +386,20 @@ class LumusPCIApp:
                 pass
             self.camera_retomada_after_id = None
 
-        if self.camera_capture is not None:
-            self.camera_capture.release()
-            self.camera_capture = None
+        if self.camera_service is not None:
+            self.camera_service.parar()
+            self.camera_service = None
 
         self.camera_ativa = False
         self.camera_em_pausa_analise = False
         self.camera_falhas_consecutivas = 0
+        self.camera_ultimo_frame_id = -1
+        self.camera_estado_anterior = CameraService.ESTADO_PARADA
+        self.camera_desconectada = False
+
         self.view.atualizar_estado_tela_ao_vivo(False)
+        self.view.atualizar_faixa_resultado()
+        self.ocultar_aviso_camera()
 
         if not manter_imagem:
             self.camera_frame_atual = None
@@ -392,71 +409,185 @@ class LumusPCIApp:
 
         self.view.atualizar_status("tela ao vivo desativada.")
 
-    def frame_camera_valido(self, frame) -> bool:
-        if frame is None or frame.size == 0:
-            return False
-
-        frame_cinza = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        media_luminosidade = float(frame_cinza.mean())
-        desvio_luminosidade = float(frame_cinza.std())
-
-        if (
-            media_luminosidade <= LIMITE_FRAME_PRETO_MEDIA
-            and desvio_luminosidade <= LIMITE_FRAME_PRETO_DESVIO
-        ):
-            return False
-
-        return True
-
-    def atualizar_frame_camera(self) -> None:
-        if (
-            not self.camera_ativa
-            or self.camera_capture is None
-            or self.camera_em_pausa_analise
-        ):
+    def agendar_proximo_frame_camera(
+        self,
+        atraso_ms: int = INTERVALO_CAMERA_MS,
+    ) -> None:
+        if not self.camera_ativa or self.camera_service is None:
             return
 
-        sucesso, frame = self.camera_capture.read()
-
-        if not sucesso or not self.frame_camera_valido(frame):
-            self.camera_falhas_consecutivas += 1
-
-            if self.camera_falhas_consecutivas >= 15:
-                self.view.atualizar_status(
-                    "câmera instável: mantendo o último frame válido."
-                )
-
-            self.camera_after_id = self.root.after(
-                INTERVALO_CAMERA_MS,
-                self.atualizar_frame_camera,
-            )
+        if self.camera_after_id is not None:
             return
-
-        self.camera_falhas_consecutivas = 0
-        self.camera_frame_atual = frame.copy()
-        self.imagem_original = frame.copy()
-        self.caminho_imagem_atual = "camera_usb"
-        self.altura_original, self.largura_original = self.imagem_original.shape[:2]
-
-        if self.leds_fixos_configurados:
-            self.leds_selecionados = self.adaptar_leds_fixos_para_frame_camera(
-                self.leds_fixos_configurados
-            )
-        else:
-            self.leds_selecionados = []
-
-        self.resultados_led_atual = []
-
-        self.view.preparar_imagem_para_exibicao(self.imagem_original)
-        self.view.desenhar_canvas(
-            self.leds_selecionados,
-            self.resultados_led_atual,
-        )
 
         self.camera_after_id = self.root.after(
-            INTERVALO_CAMERA_MS,
+            max(0, int(atraso_ms)),
             self.atualizar_frame_camera,
         )
+
+    def exibir_aviso_camera(
+        self,
+        texto: str,
+        tipo: str = "erro",
+    ) -> None:
+        """Exibe um aviso não bloqueante sobre a imagem principal."""
+        if self.camera_aviso_estado == texto:
+            return
+
+        canvas = getattr(self.view, "canvas", None)
+
+        if canvas is None:
+            return
+
+        largura_canvas, _ = self.view.obter_tamanho_canvas_principal()
+        margem = 24
+        x_inicial = margem
+        x_final = max(x_inicial + 1, largura_canvas - margem)
+        y_inicial = 20
+        y_final = 88
+
+        cores = {
+            "erro": ("#7F1D1D", "#FECACA"),
+            "aviso": ("#78350F", "#FDE68A"),
+            "informacao": ("#1E3A5F", "#BFDBFE"),
+        }
+        cor_fundo, cor_texto = cores.get(tipo, cores["informacao"])
+
+        canvas.delete("aviso_camera")
+        canvas.create_rectangle(
+            x_inicial,
+            y_inicial,
+            x_final,
+            y_final,
+            fill=cor_fundo,
+            outline=cor_texto,
+            width=2,
+            tags=("aviso_camera",),
+        )
+        canvas.create_text(
+            largura_canvas / 2,
+            (y_inicial + y_final) / 2,
+            text=texto,
+            fill=cor_texto,
+            font=("Segoe UI", 14, "bold"),
+            justify="center",
+            tags=("aviso_camera",),
+        )
+        canvas.tag_raise("aviso_camera")
+        self.camera_aviso_estado = texto
+
+    def ocultar_aviso_camera(self) -> None:
+        canvas = getattr(self.view, "canvas", None)
+
+        if canvas is not None:
+            canvas.delete("aviso_camera")
+
+        self.camera_aviso_estado = None
+
+    def atualizar_frame_camera(self) -> None:
+        self.camera_after_id = None
+
+        if not self.camera_ativa or self.camera_service is None:
+            return
+
+        snapshot = self.camera_service.obter_snapshot(
+            self.camera_ultimo_frame_id
+        )
+        estado_anterior = self.camera_estado_anterior
+        estado_mudou = snapshot.estado != estado_anterior
+        self.camera_estado_anterior = snapshot.estado
+
+        # O estado é verificado em todos os ciclos, não apenas na transição.
+        # Isso impede que um aviso curto seja perdido entre duas leituras da UI.
+        if snapshot.estado == CameraService.ESTADO_DESCONECTADA:
+            primeira_notificacao = not self.camera_desconectada
+            self.camera_desconectada = True
+            self.camera_em_pausa_analise = False
+
+            if primeira_notificacao and self.camera_retomada_after_id is not None:
+                try:
+                    self.root.after_cancel(self.camera_retomada_after_id)
+                except Exception:
+                    pass
+                self.camera_retomada_after_id = None
+
+            self.view.atualizar_faixa_resultado()
+            self.view.atualizar_status(
+                "Câmera desconectada. Reconectando automaticamente..."
+            )
+            self.exibir_aviso_camera(
+                "CÂMERA DESCONECTADA\nReconectando automaticamente...",
+                tipo="erro",
+            )
+
+        elif snapshot.estado == CameraService.ESTADO_CONECTANDO:
+            if not self.camera_em_pausa_analise:
+                self.view.atualizar_status("Conectando câmera...")
+                self.exibir_aviso_camera(
+                    "CONECTANDO CÂMERA",
+                    tipo="informacao",
+                )
+
+        elif snapshot.estado == CameraService.ESTADO_ESTABILIZANDO:
+            if not self.camera_em_pausa_analise:
+                self.view.atualizar_status(snapshot.mensagem)
+
+                if self.camera_desconectada:
+                    self.exibir_aviso_camera(
+                        "CÂMERA RECONECTADA\nEstabilizando imagem...",
+                        tipo="aviso",
+                    )
+                else:
+                    self.exibir_aviso_camera(
+                        "CÂMERA CONECTADA\nEstabilizando imagem...",
+                        tipo="informacao",
+                    )
+
+        elif snapshot.estado == CameraService.ESTADO_CONECTADA:
+            foi_reconectada = self.camera_desconectada
+            self.camera_desconectada = False
+            self.ocultar_aviso_camera()
+
+            if not self.camera_em_pausa_analise and (estado_mudou or foi_reconectada):
+                if foi_reconectada:
+                    self.view.atualizar_status(
+                        "Câmera reconectada. Pressione ENTER para analisar."
+                    )
+                else:
+                    self.view.atualizar_status(
+                        "tela ao vivo ativa. Pressione ENTER para capturar e analisar."
+                    )
+
+        if snapshot.frame is not None:
+            self.camera_ultimo_frame_id = snapshot.frame_id
+            self.camera_frame_atual = snapshot.frame
+
+            if not self.camera_em_pausa_analise:
+                self.imagem_original = snapshot.frame.copy()
+                self.caminho_imagem_atual = "camera_usb"
+                self.altura_original, self.largura_original = (
+                    self.imagem_original.shape[:2]
+                )
+
+                if self.leds_fixos_configurados:
+                    self.leds_selecionados = (
+                        self.adaptar_leds_fixos_para_frame_camera(
+                            self.leds_fixos_configurados
+                        )
+                    )
+                else:
+                    self.leds_selecionados = []
+
+                self.resultados_led_atual = []
+
+                self.view.preparar_imagem_para_exibicao(
+                    self.imagem_original
+                )
+                self.view.desenhar_canvas(
+                    self.leds_selecionados,
+                    self.resultados_led_atual,
+                )
+
+        self.agendar_proximo_frame_camera()
 
     def obter_leds_fixos_validos_para_imagem(
         self,
@@ -593,29 +724,35 @@ class LumusPCIApp:
         if not self.camera_ativa or self.camera_em_pausa_analise:
             return
 
+        if (
+            self.camera_service is None
+            or self.camera_desconectada
+            or self.camera_estado_anterior
+            != CameraService.ESTADO_CONECTADA
+        ):
+            self.view.atualizar_status(
+                "Câmera desconectada. Aguarde a reconexão automática."
+            )
+            return
+
         if self.camera_frame_atual is None:
-            messagebox.showwarning(
-                "Atenção",
-                "Nenhum frame válido da câmera foi capturado ainda.",
+            self.view.atualizar_status(
+                "aguarde a câmera terminar de estabilizar."
             )
             return
 
         self.camera_em_pausa_analise = True
-
-        if self.camera_after_id is not None:
-            try:
-                self.root.after_cancel(self.camera_after_id)
-            except Exception:
-                pass
-            self.camera_after_id = None
-
         frame_capturado = self.camera_frame_atual.copy()
 
         self.imagem_original = frame_capturado
         self.caminho_imagem_atual = "camera_usb"
-        self.altura_original, self.largura_original = self.imagem_original.shape[:2]
+        self.altura_original, self.largura_original = (
+            self.imagem_original.shape[:2]
+        )
 
-        self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
+        self.leds_fixos_configurados = (
+            self.config_repository.carregar_leds_fixos()
+        )
         leds_fixos_validos = self.adaptar_leds_fixos_para_frame_camera(
             self.leds_fixos_configurados
         )
@@ -627,13 +764,14 @@ class LumusPCIApp:
                 "Nenhum LED fixo válido foi encontrado para a imagem da câmera.\n\n"
                 "Use Configurações > Configurar LEDs e salve as posições fixas.",
             )
-            self.atualizar_frame_camera()
             return
 
         self.leds_selecionados = leds_fixos_validos
         self.resultados_led_atual = []
 
-        self.view.preparar_imagem_para_exibicao(self.imagem_original)
+        self.view.preparar_imagem_para_exibicao(
+            self.imagem_original
+        )
         self.view.desenhar_canvas(
             self.leds_selecionados,
             self.resultados_led_atual,
@@ -647,9 +785,24 @@ class LumusPCIApp:
         if not self.camera_ativa:
             return
 
+        if self.camera_desconectada:
+            self.camera_em_pausa_analise = False
+            self.view.atualizar_faixa_resultado()
+            self.view.atualizar_status(
+                "Câmera desconectada. Reconectando automaticamente..."
+            )
+            return
+
         self.view.atualizar_status(
             "análise concluída. Retornando à câmera em 3 segundos..."
         )
+
+        if self.camera_retomada_after_id is not None:
+            try:
+                self.root.after_cancel(self.camera_retomada_after_id)
+            except Exception:
+                pass
+
         self.camera_retomada_after_id = self.root.after(
             TEMPO_RESULTADO_CAMERA_MS,
             self.retomar_tela_ao_vivo_apos_analise,
@@ -658,18 +811,23 @@ class LumusPCIApp:
     def retomar_tela_ao_vivo_apos_analise(self) -> None:
         self.camera_retomada_after_id = None
 
-        if not self.camera_ativa or self.camera_capture is None:
+        if not self.camera_ativa or self.camera_service is None:
             return
 
         self.camera_em_pausa_analise = False
         self.modo_atual = "tela_ao_vivo"
         self.resultados_led_atual = []
+        self.view.atualizar_faixa_resultado()
         self.view.atualizar_estado_tela_ao_vivo(True)
-        self.view.atualizar_status(
-            "tela ao vivo ativa. Pressione ENTER para capturar e analisar."
-        )
 
-        self.atualizar_frame_camera()
+        if self.camera_desconectada:
+            self.view.atualizar_status(
+                "Câmera desconectada. Reconectando automaticamente..."
+            )
+        else:
+            self.view.atualizar_status(
+                "tela ao vivo ativa. Pressione ENTER para capturar e analisar."
+            )
 
     def iniciar_selecao_led(self) -> None:
         if self.camera_ativa:
@@ -983,3 +1141,4 @@ class LumusPCIApp:
         self.view.atualizar_faixa_resultado()
         self.view.atualizar_status("seleção limpa. A imagem e as referências foram mantidas.")
         self.atualizar_painel_inicial()
+
