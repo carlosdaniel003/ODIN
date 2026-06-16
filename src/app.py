@@ -2,6 +2,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+import cv2
+
 from config import CONFIG_DIR, CONFIG_FILE, DEFAULT_RADIUS_PX, MAX_RADIUS_PX, MIN_RADIUS_PX
 from src.core.classifier import ReferenceLedClassifier
 from src.core.debug_formatter import formatar_painel_inicial, formatar_resultado_textual_multiplos
@@ -15,6 +17,15 @@ from src.ui.main_window import LumusPCIView
 
 
 RAIO_MAXIMO_LED_PX = MAX_RADIUS_PX
+INDICE_CAMERA_PADRAO = 1
+INTERVALO_CAMERA_MS = 45
+TEMPO_RESULTADO_CAMERA_MS = 3000
+CAMERA_LARGURA_DESEJADA = 1280
+CAMERA_ALTURA_DESEJADA = 720
+CAMERA_FPS_DESEJADO = 30
+LIMITE_FRAME_PRETO_MEDIA = 4.0
+LIMITE_FRAME_PRETO_DESVIO = 3.0
+MARGEM_GUIAS_CAMERA_PERCENTUAL = 0.05
 
 
 class LumusPCIApp:
@@ -42,6 +53,14 @@ class LumusPCIApp:
         self.resultados_led_atual = []
         self.configuracao_atual = {}
 
+        self.camera_capture = None
+        self.camera_ativa = False
+        self.camera_after_id = None
+        self.camera_frame_atual = None
+        self.camera_retomada_after_id = None
+        self.camera_em_pausa_analise = False
+        self.camera_falhas_consecutivas = 0
+
         self.config_repository = ConfigRepository()
         self.result_repository = ResultRepository()
         self.salvar_resultados_analise = self.config_repository.obter_salvar_resultados_analise()
@@ -65,6 +84,8 @@ class LumusPCIApp:
             "salvar_referencias": self.salvar_referencias,
             "carregar_configuracao": self.carregar_configuracao,
             "carregar_imagem": self.carregar_imagem,
+            "alternar_tela_ao_vivo": self.alternar_tela_ao_vivo,
+            "capturar_frame_camera_para_analise": self.capturar_frame_camera_para_analise,
             "iniciar_selecao_led": self.iniciar_selecao_led,
             "configurar_leds_fixos": self.configurar_leds_fixos,
             "salvar_leds_fixos": self.salvar_leds_fixos,
@@ -107,7 +128,7 @@ class LumusPCIApp:
         if raio_configurado_px is not None:
             self.raio_atual_px = min(
                 RAIO_MAXIMO_LED_PX,
-                max(MIN_RADIUS_PX, int(raio_configurado_px))
+                max(MIN_RADIUS_PX, int(raio_configurado_px)),
             )
             self.view.atualizar_label_raio(self.raio_atual_px)
 
@@ -233,7 +254,7 @@ class LumusPCIApp:
         self.caminho_referencia_apagada = referencia_apagada.image_path
         self.raio_atual_px = min(
             RAIO_MAXIMO_LED_PX,
-            max(MIN_RADIUS_PX, int(configuracao.get("default_radius_px", self.raio_atual_px)))
+            max(MIN_RADIUS_PX, int(configuracao.get("default_radius_px", self.raio_atual_px))),
         )
         self.view.atualizar_label_raio(self.raio_atual_px)
 
@@ -265,6 +286,9 @@ class LumusPCIApp:
         return carregar_imagem_opencv(caminho_imagem)
 
     def carregar_imagem(self) -> None:
+        if self.camera_ativa:
+            self.parar_tela_ao_vivo(manter_imagem=True)
+
         imagem, caminho_imagem = self.selecionar_imagem("Selecione a imagem da PCI para análise")
 
         if imagem is None:
@@ -285,7 +309,372 @@ class LumusPCIApp:
         self.view.atualizar_status("imagem carregada. Clique em Selecionar LEDs.")
         self.atualizar_painel_inicial()
 
+    def alternar_tela_ao_vivo(self) -> None:
+        if self.camera_ativa:
+            self.parar_tela_ao_vivo(manter_imagem=True)
+            return
+
+        self.iniciar_tela_ao_vivo()
+
+    def iniciar_tela_ao_vivo(self) -> None:
+        if self.camera_ativa:
+            return
+
+        self.camera_capture = cv2.VideoCapture(INDICE_CAMERA_PADRAO, cv2.CAP_DSHOW)
+
+        if not self.camera_capture.isOpened():
+            self.camera_capture.release()
+            self.camera_capture = cv2.VideoCapture(INDICE_CAMERA_PADRAO)
+
+        if not self.camera_capture.isOpened():
+            self.camera_capture = None
+            messagebox.showerror(
+                "Erro",
+                "Não foi possível abrir a câmera USB.\n\n"
+                "Teste trocar INDICE_CAMERA_PADRAO de 0 para 1.",
+            )
+            return
+
+        self.camera_capture.set(
+            cv2.CAP_PROP_FOURCC,
+            cv2.VideoWriter_fourcc(*"MJPG"),
+        )
+        self.camera_capture.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_LARGURA_DESEJADA)
+        self.camera_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_ALTURA_DESEJADA)
+        self.camera_capture.set(cv2.CAP_PROP_FPS, CAMERA_FPS_DESEJADO)
+        self.camera_capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        self.camera_ativa = True
+        self.camera_em_pausa_analise = False
+        self.camera_falhas_consecutivas = 0
+        self.modo_atual = "tela_ao_vivo"
+        self.resultados_led_atual = []
+        self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
+        self.leds_selecionados = []
+
+        self.view.atualizar_estado_tela_ao_vivo(True)
+        self.view.atualizar_estado_selecao_led(False)
+        self.view.atualizar_status(
+            "tela ao vivo ativa. Pressione ENTER para capturar e analisar."
+        )
+
+        self.atualizar_frame_camera()
+
+    def parar_tela_ao_vivo(self, manter_imagem: bool = True) -> None:
+        if self.camera_after_id is not None:
+            try:
+                self.root.after_cancel(self.camera_after_id)
+            except Exception:
+                pass
+            self.camera_after_id = None
+
+        if self.camera_retomada_after_id is not None:
+            try:
+                self.root.after_cancel(self.camera_retomada_after_id)
+            except Exception:
+                pass
+            self.camera_retomada_after_id = None
+
+        if self.camera_capture is not None:
+            self.camera_capture.release()
+            self.camera_capture = None
+
+        self.camera_ativa = False
+        self.camera_em_pausa_analise = False
+        self.camera_falhas_consecutivas = 0
+        self.view.atualizar_estado_tela_ao_vivo(False)
+
+        if not manter_imagem:
+            self.camera_frame_atual = None
+
+        if self.modo_atual == "tela_ao_vivo":
+            self.modo_atual = "ocioso"
+
+        self.view.atualizar_status("tela ao vivo desativada.")
+
+    def frame_camera_valido(self, frame) -> bool:
+        if frame is None or frame.size == 0:
+            return False
+
+        frame_cinza = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        media_luminosidade = float(frame_cinza.mean())
+        desvio_luminosidade = float(frame_cinza.std())
+
+        if (
+            media_luminosidade <= LIMITE_FRAME_PRETO_MEDIA
+            and desvio_luminosidade <= LIMITE_FRAME_PRETO_DESVIO
+        ):
+            return False
+
+        return True
+
+    def atualizar_frame_camera(self) -> None:
+        if (
+            not self.camera_ativa
+            or self.camera_capture is None
+            or self.camera_em_pausa_analise
+        ):
+            return
+
+        sucesso, frame = self.camera_capture.read()
+
+        if not sucesso or not self.frame_camera_valido(frame):
+            self.camera_falhas_consecutivas += 1
+
+            if self.camera_falhas_consecutivas >= 15:
+                self.view.atualizar_status(
+                    "câmera instável: mantendo o último frame válido."
+                )
+
+            self.camera_after_id = self.root.after(
+                INTERVALO_CAMERA_MS,
+                self.atualizar_frame_camera,
+            )
+            return
+
+        self.camera_falhas_consecutivas = 0
+        self.camera_frame_atual = frame.copy()
+        self.imagem_original = frame.copy()
+        self.caminho_imagem_atual = "camera_usb"
+        self.altura_original, self.largura_original = self.imagem_original.shape[:2]
+
+        if self.leds_fixos_configurados:
+            self.leds_selecionados = self.adaptar_leds_fixos_para_frame_camera(
+                self.leds_fixos_configurados
+            )
+        else:
+            self.leds_selecionados = []
+
+        self.resultados_led_atual = []
+
+        self.view.preparar_imagem_para_exibicao(self.imagem_original)
+        self.view.desenhar_canvas(
+            self.leds_selecionados,
+            self.resultados_led_atual,
+        )
+
+        self.camera_after_id = self.root.after(
+            INTERVALO_CAMERA_MS,
+            self.atualizar_frame_camera,
+        )
+
+    def obter_leds_fixos_validos_para_imagem(
+        self,
+        leds_fixos: list[LedSelection],
+    ) -> list[LedSelection]:
+        leds_fixos_validos = []
+
+        for led_fixo in leds_fixos:
+            if validar_centro_led(
+                led_fixo.centro_x,
+                led_fixo.centro_y,
+                led_fixo.raio,
+                self.largura_original,
+                self.altura_original,
+            ):
+                leds_fixos_validos.append(
+                    LedSelection(
+                        id=led_fixo.id,
+                        centro_x=led_fixo.centro_x,
+                        centro_y=led_fixo.centro_y,
+                        raio=led_fixo.raio,
+                    )
+                )
+
+        return leds_fixos_validos
+
+    def adaptar_leds_fixos_para_frame_camera(
+        self,
+        leds_fixos: list[LedSelection],
+    ) -> list[LedSelection]:
+        if not leds_fixos or self.largura_original <= 0 or self.altura_original <= 0:
+            return []
+
+        todos_validos_sem_escala = all(
+            validar_centro_led(
+                led_fixo.centro_x,
+                led_fixo.centro_y,
+                led_fixo.raio,
+                self.largura_original,
+                self.altura_original,
+            )
+            for led_fixo in leds_fixos
+        )
+
+        if todos_validos_sem_escala:
+            return [
+                LedSelection(
+                    id=led_fixo.id,
+                    centro_x=led_fixo.centro_x,
+                    centro_y=led_fixo.centro_y,
+                    raio=led_fixo.raio,
+                )
+                for led_fixo in leds_fixos
+            ]
+
+        limite_esquerdo = min(
+            led_fixo.centro_x - led_fixo.raio
+            for led_fixo in leds_fixos
+        )
+        limite_superior = min(
+            led_fixo.centro_y - led_fixo.raio
+            for led_fixo in leds_fixos
+        )
+        limite_direito = max(
+            led_fixo.centro_x + led_fixo.raio
+            for led_fixo in leds_fixos
+        )
+        limite_inferior = max(
+            led_fixo.centro_y + led_fixo.raio
+            for led_fixo in leds_fixos
+        )
+
+        largura_padrao = max(1, limite_direito - limite_esquerdo)
+        altura_padrao = max(1, limite_inferior - limite_superior)
+
+        margem_x = max(
+            12,
+            int(self.largura_original * MARGEM_GUIAS_CAMERA_PERCENTUAL),
+        )
+        margem_y = max(
+            12,
+            int(self.altura_original * MARGEM_GUIAS_CAMERA_PERCENTUAL),
+        )
+
+        largura_util = max(1, self.largura_original - (margem_x * 2))
+        altura_util = max(1, self.altura_original - (margem_y * 2))
+
+        escala = min(
+            largura_util / largura_padrao,
+            altura_util / altura_padrao,
+        )
+
+        largura_padrao_escalada = largura_padrao * escala
+        altura_padrao_escalada = altura_padrao * escala
+
+        deslocamento_x = (
+            (self.largura_original - largura_padrao_escalada) / 2
+            - (limite_esquerdo * escala)
+        )
+        deslocamento_y = (
+            (self.altura_original - altura_padrao_escalada) / 2
+            - (limite_superior * escala)
+        )
+
+        leds_adaptados = []
+
+        for led_fixo in leds_fixos:
+            centro_x = int(round((led_fixo.centro_x * escala) + deslocamento_x))
+            centro_y = int(round((led_fixo.centro_y * escala) + deslocamento_y))
+            raio = max(
+                MIN_RADIUS_PX,
+                int(round(led_fixo.raio * escala)),
+            )
+
+            if validar_centro_led(
+                centro_x,
+                centro_y,
+                raio,
+                self.largura_original,
+                self.altura_original,
+            ):
+                leds_adaptados.append(
+                    LedSelection(
+                        id=led_fixo.id,
+                        centro_x=centro_x,
+                        centro_y=centro_y,
+                        raio=raio,
+                    )
+                )
+
+        return leds_adaptados
+
+    def capturar_frame_camera_para_analise(self, evento=None) -> None:
+        if not self.camera_ativa or self.camera_em_pausa_analise:
+            return
+
+        if self.camera_frame_atual is None:
+            messagebox.showwarning(
+                "Atenção",
+                "Nenhum frame válido da câmera foi capturado ainda.",
+            )
+            return
+
+        self.camera_em_pausa_analise = True
+
+        if self.camera_after_id is not None:
+            try:
+                self.root.after_cancel(self.camera_after_id)
+            except Exception:
+                pass
+            self.camera_after_id = None
+
+        frame_capturado = self.camera_frame_atual.copy()
+
+        self.imagem_original = frame_capturado
+        self.caminho_imagem_atual = "camera_usb"
+        self.altura_original, self.largura_original = self.imagem_original.shape[:2]
+
+        self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
+        leds_fixos_validos = self.adaptar_leds_fixos_para_frame_camera(
+            self.leds_fixos_configurados
+        )
+
+        if not leds_fixos_validos:
+            self.camera_em_pausa_analise = False
+            messagebox.showwarning(
+                "Atenção",
+                "Nenhum LED fixo válido foi encontrado para a imagem da câmera.\n\n"
+                "Use Configurações > Configurar LEDs e salve as posições fixas.",
+            )
+            self.atualizar_frame_camera()
+            return
+
+        self.leds_selecionados = leds_fixos_validos
+        self.resultados_led_atual = []
+
+        self.view.preparar_imagem_para_exibicao(self.imagem_original)
+        self.view.desenhar_canvas(
+            self.leds_selecionados,
+            self.resultados_led_atual,
+        )
+        self.view.atualizar_status(
+            "frame capturado. Executando análise..."
+        )
+
+        self.analisar_led_selecionado()
+
+        if not self.camera_ativa:
+            return
+
+        self.view.atualizar_status(
+            "análise concluída. Retornando à câmera em 3 segundos..."
+        )
+        self.camera_retomada_after_id = self.root.after(
+            TEMPO_RESULTADO_CAMERA_MS,
+            self.retomar_tela_ao_vivo_apos_analise,
+        )
+
+    def retomar_tela_ao_vivo_apos_analise(self) -> None:
+        self.camera_retomada_after_id = None
+
+        if not self.camera_ativa or self.camera_capture is None:
+            return
+
+        self.camera_em_pausa_analise = False
+        self.modo_atual = "tela_ao_vivo"
+        self.resultados_led_atual = []
+        self.view.atualizar_estado_tela_ao_vivo(True)
+        self.view.atualizar_status(
+            "tela ao vivo ativa. Pressione ENTER para capturar e analisar."
+        )
+
+        self.atualizar_frame_camera()
+
     def iniciar_selecao_led(self) -> None:
+        if self.camera_ativa:
+            self.parar_tela_ao_vivo(manter_imagem=True)
+
         if self.imagem_original is None:
             messagebox.showwarning("Atenção", "Carregue a imagem da PCI antes de selecionar LEDs.")
             return
@@ -310,6 +699,9 @@ class LumusPCIApp:
         self.atualizar_painel_inicial()
 
     def configurar_leds_fixos(self) -> None:
+        if self.camera_ativa:
+            self.parar_tela_ao_vivo(manter_imagem=True)
+
         if self.imagem_original is None:
             messagebox.showwarning("Atenção", "Carregue a imagem da PCI antes de configurar LEDs fixos.")
             return
@@ -354,33 +746,29 @@ class LumusPCIApp:
 
     def carregar_leds_fixos(self) -> None:
         if self.imagem_original is None:
-            messagebox.showwarning("Atenção", "Carregue a imagem da PCI antes de carregar LEDs fixos.")
+            messagebox.showwarning(
+                "Atenção",
+                "Carregue a imagem da PCI antes de carregar LEDs fixos.",
+            )
             return
 
         self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
 
         if not self.leds_fixos_configurados:
-            messagebox.showwarning("Atenção", "Nenhum LED fixo configurado foi encontrado.")
+            messagebox.showwarning(
+                "Atenção",
+                "Nenhum LED fixo configurado foi encontrado.",
+            )
             return
 
-        leds_fixos_validos = []
-
-        for led_fixo in self.leds_fixos_configurados:
-            if validar_centro_led(
-                led_fixo.centro_x,
-                led_fixo.centro_y,
-                led_fixo.raio,
-                self.largura_original,
-                self.altura_original,
-            ):
-                leds_fixos_validos.append(
-                    LedSelection(
-                        id=led_fixo.id,
-                        centro_x=led_fixo.centro_x,
-                        centro_y=led_fixo.centro_y,
-                        raio=led_fixo.raio,
-                    )
-                )
+        if self.camera_ativa:
+            leds_fixos_validos = self.adaptar_leds_fixos_para_frame_camera(
+                self.leds_fixos_configurados
+            )
+        else:
+            leds_fixos_validos = self.obter_leds_fixos_validos_para_imagem(
+                self.leds_fixos_configurados
+            )
 
         if not leds_fixos_validos:
             messagebox.showwarning(
@@ -389,16 +777,29 @@ class LumusPCIApp:
             )
             return
 
-        self.modo_atual = "ocioso"
         self.leds_selecionados = leds_fixos_validos
         self.resultados_led_atual = []
 
+        if self.camera_ativa:
+            self.modo_atual = "tela_ao_vivo"
+            self.view.atualizar_estado_tela_ao_vivo(True)
+            self.view.atualizar_status(
+                f"{len(self.leds_selecionados)} guias de LEDs carregadas para a câmera."
+            )
+        else:
+            self.modo_atual = "ocioso"
+            self.view.atualizar_status(
+                f"{len(self.leds_selecionados)} LEDs fixos carregados. Clique em Analisar."
+            )
+
         self.view.atualizar_estado_selecao_led(False)
         self.view.preparar_imagem_para_exibicao(self.imagem_original)
-        self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
+        self.view.desenhar_canvas(
+            self.leds_selecionados,
+            self.resultados_led_atual,
+        )
         self.atualizar_renderizacoes_visuais(self.leds_selecionados)
         self.view.atualizar_faixa_resultado()
-        self.view.atualizar_status(f"{len(self.leds_selecionados)} LEDs fixos carregados. Clique em Analisar.")
         self.atualizar_painel_inicial()
 
     def evento_clique_esquerdo(self, evento) -> None:
@@ -566,6 +967,9 @@ class LumusPCIApp:
         self.atualizar_painel_inicial()
 
     def limpar_tela(self) -> None:
+        if self.camera_ativa:
+            self.parar_tela_ao_vivo(manter_imagem=False)
+
         self.modo_atual = "ocioso"
         self.view.atualizar_estado_selecao_led(False)
         self.leds_selecionados = []

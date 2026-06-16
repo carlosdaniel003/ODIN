@@ -1,3 +1,4 @@
+
 import base64
 from datetime import datetime
 import tkinter as tk
@@ -53,12 +54,14 @@ def criar_topo_profissional(self) -> None:
     self.frame_botoes = tk.Frame(self.frame_topo, bg=self.COR_TOPO)
     self.frame_botoes.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=18)
 
-    self.criar_botao_topo(
-        texto="Tela ao vivo",
-        comando=None,
-        ativo=False,
-        cor_fundo="#0F3D24",
-    ).pack(side=tk.LEFT, padx=4)
+    self.botao_tela_ao_vivo = self.criar_botao_topo(
+    texto="Tela ao vivo",
+    comando=self.callbacks["alternar_tela_ao_vivo"],
+    ativo=True,
+    cor_fundo="#0F3D24",
+    cor_texto="#BBF7D0",
+)
+    self.botao_tela_ao_vivo.pack(side=tk.LEFT, padx=4)
 
     self.criar_botao_topo(
         texto="Carregar imagem",
