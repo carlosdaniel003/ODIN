@@ -1,12 +1,4 @@
-import base64
-from datetime import datetime
 import tkinter as tk
-from tkinter import ttk
-
-import cv2
-
-from src.models.analysis_result import LedAnalysisResult
-from src.models.led_selection import LedSelection
 
 
 def desenhar_canvas(self, led_selecionado, resultado_led_atual) -> None:
@@ -18,7 +10,14 @@ def desenhar_canvas(self, led_selecionado, resultado_led_atual) -> None:
     self.canvas.delete("all")
 
     largura_canvas, altura_canvas = self.obter_tamanho_canvas_principal()
-    self.canvas.create_rectangle(0, 0, largura_canvas, altura_canvas, fill="#020617", outline="")
+    self.canvas.create_rectangle(
+        0,
+        0,
+        largura_canvas,
+        altura_canvas,
+        fill="#020617",
+        outline="",
+    )
 
     if self.imagem_tk is None:
         self.canvas.create_text(
@@ -40,12 +39,23 @@ def desenhar_canvas(self, led_selecionado, resultado_led_atual) -> None:
     if resultados_led:
         self.desenhar_resultados_led(resultados_led)
         self.atualizar_painel_resultado_multiplos(resultados_led)
+
         for resultado in resultados_led:
             self.adicionar_resultado_historico(resultado)
+
     elif leds_selecionados:
-        if getattr(self, "tela_ao_vivo_ativa", False):
+        selecao_manual_camera = bool(
+            getattr(self, "selecao_manual_camera_visivel", False)
+        )
+
+        if (
+            getattr(self, "tela_ao_vivo_ativa", False)
+            and not selecao_manual_camera
+        ):
+            # LEDs fixos carregados: guias tracejadas para posicionamento.
             self.desenhar_guias_leds_camera(leds_selecionados)
         else:
+            # Seleção manual de teste: marcações normais e sólidas.
             self.desenhar_leds_selecionados(leds_selecionados)
 
         self.atualizar_resumo_selecoes(leds_selecionados)
