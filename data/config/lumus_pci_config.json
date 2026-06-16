@@ -67,7 +67,20 @@
         }
     },
     "settings": {
-        "save_analysis_results": false
+        "save_analysis_results": false,
+        "camera": {
+            "pan_enabled": false,
+            "pan": 0.0,
+            "tilt_enabled": false,
+            "tilt": 0.0,
+            "contrast_enabled": false,
+            "contrast": 128.0,
+            "sharpness_enabled": false,
+            "sharpness": 128.0,
+            "saturation_enabled": false,
+            "saturation": 128.0,
+            "rotation": 0
+        }
     },
     "fixed_leds": [
         {

@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import math
 import threading
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
+
+from config import (
+    CAMERA_IMAGE_CONTROL_MAX,
+    CAMERA_IMAGE_CONTROL_MIN,
+    CAMERA_PAN_MAX,
+    CAMERA_PAN_MIN,
+    CAMERA_ROTATIONS,
+    CAMERA_TILT_MAX,
+    CAMERA_TILT_MIN,
+    DEFAULT_CAMERA_SETTINGS,
+)
 
 
 @dataclass(frozen=True)
@@ -38,6 +50,7 @@ class CameraService:
         limite_preto_desvio: float = 3.0,
         frames_estabilidade: int = 8,
         espera_apos_abrir_s: float = 0.45,
+        configuracoes_camera: dict | None = None,
     ) -> None:
         self.indice_camera = int(indice_camera)
         self.largura = int(largura)
@@ -62,6 +75,26 @@ class CameraService:
         self._ultimo_frame = None
         self._frame_id = 0
         self._resolucao: tuple[int, int] | None = None
+        self._configuracoes_camera = self._normalizar_configuracoes_camera(
+            configuracoes_camera
+        )
+        self._versao_configuracoes_camera = 0
+        self._versao_configuracoes_aplicada = -1
+        self._status_controles_camera = {
+            nome: {
+                "status": "aguardando_camera",
+                "valor_solicitado": None,
+                "valor_lido": None,
+            }
+            for nome in (
+                "pan",
+                "tilt",
+                "contrast",
+                "sharpness",
+                "saturation",
+                "rotation",
+            )
+        }
 
     def iniciar(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -79,6 +112,273 @@ class CameraService:
     def parar(self) -> None:
         self._stop_event.set()
         self._definir_estado(self.ESTADO_PARADA, "Câmera parada.")
+
+    @staticmethod
+    def _limitar_float(
+        valor,
+        minimo: float,
+        maximo: float,
+        padrao: float,
+    ) -> float:
+        try:
+            numero = float(valor)
+        except (TypeError, ValueError):
+            numero = float(padrao)
+
+        return min(float(maximo), max(float(minimo), numero))
+
+    @classmethod
+    def _normalizar_configuracoes_camera(
+        cls,
+        configuracoes_camera: dict | None,
+    ) -> dict:
+        origem = (
+            configuracoes_camera
+            if isinstance(configuracoes_camera, dict)
+            else {}
+        )
+        padrao = DEFAULT_CAMERA_SETTINGS
+
+        try:
+            rotacao = int(
+                origem.get("rotation", padrao["rotation"])
+            )
+        except (TypeError, ValueError):
+            rotacao = int(padrao["rotation"])
+
+        if rotacao not in CAMERA_ROTATIONS:
+            rotacao = int(padrao["rotation"])
+
+        return {
+            "pan_enabled": bool(
+                origem.get("pan_enabled", padrao["pan_enabled"])
+            ),
+            "pan": cls._limitar_float(
+                origem.get("pan", padrao["pan"]),
+                CAMERA_PAN_MIN,
+                CAMERA_PAN_MAX,
+                padrao["pan"],
+            ),
+            "tilt_enabled": bool(
+                origem.get("tilt_enabled", padrao["tilt_enabled"])
+            ),
+            "tilt": cls._limitar_float(
+                origem.get("tilt", padrao["tilt"]),
+                CAMERA_TILT_MIN,
+                CAMERA_TILT_MAX,
+                padrao["tilt"],
+            ),
+            "contrast_enabled": bool(
+                origem.get(
+                    "contrast_enabled",
+                    padrao["contrast_enabled"],
+                )
+            ),
+            "contrast": cls._limitar_float(
+                origem.get("contrast", padrao["contrast"]),
+                CAMERA_IMAGE_CONTROL_MIN,
+                CAMERA_IMAGE_CONTROL_MAX,
+                padrao["contrast"],
+            ),
+            "sharpness_enabled": bool(
+                origem.get(
+                    "sharpness_enabled",
+                    padrao["sharpness_enabled"],
+                )
+            ),
+            "sharpness": cls._limitar_float(
+                origem.get("sharpness", padrao["sharpness"]),
+                CAMERA_IMAGE_CONTROL_MIN,
+                CAMERA_IMAGE_CONTROL_MAX,
+                padrao["sharpness"],
+            ),
+            "saturation_enabled": bool(
+                origem.get(
+                    "saturation_enabled",
+                    padrao["saturation_enabled"],
+                )
+            ),
+            "saturation": cls._limitar_float(
+                origem.get("saturation", padrao["saturation"]),
+                CAMERA_IMAGE_CONTROL_MIN,
+                CAMERA_IMAGE_CONTROL_MAX,
+                padrao["saturation"],
+            ),
+            "rotation": rotacao,
+        }
+
+    def atualizar_configuracoes_camera(
+        self,
+        configuracoes_camera: dict | None,
+    ) -> None:
+        configuracoes = self._normalizar_configuracoes_camera(
+            configuracoes_camera
+        )
+
+        with self._lock:
+            self._configuracoes_camera = configuracoes
+            self._versao_configuracoes_camera += 1
+
+    def obter_configuracoes_camera(self) -> dict:
+        with self._lock:
+            return dict(self._configuracoes_camera)
+
+    def obter_status_controles_camera(self) -> dict:
+        with self._lock:
+            return {
+                nome: dict(status)
+                for nome, status in self._status_controles_camera.items()
+            }
+
+    def _obter_configuracoes_camera_com_versao(
+        self,
+    ) -> tuple[dict, int]:
+        with self._lock:
+            return (
+                dict(self._configuracoes_camera),
+                int(self._versao_configuracoes_camera),
+            )
+
+    def _registrar_status_controle(
+        self,
+        nome: str,
+        status: str,
+        valor_solicitado=None,
+        valor_lido=None,
+    ) -> None:
+        with self._lock:
+            self._status_controles_camera[nome] = {
+                "status": status,
+                "valor_solicitado": valor_solicitado,
+                "valor_lido": valor_lido,
+            }
+
+    def _aplicar_controle_hardware(
+        self,
+        capture,
+        nome: str,
+        propriedade: int | None,
+        habilitado: bool,
+        valor: float,
+    ) -> None:
+        if propriedade is None:
+            self._registrar_status_controle(
+                nome,
+                "nao_suportado",
+                valor_solicitado=valor,
+            )
+            return
+
+        if not habilitado:
+            valor_lido = None
+
+            try:
+                leitura = float(capture.get(propriedade))
+
+                if math.isfinite(leitura):
+                    valor_lido = leitura
+            except Exception:
+                pass
+
+            self._registrar_status_controle(
+                nome,
+                "padrao_driver",
+                valor_lido=valor_lido,
+            )
+            return
+
+        try:
+            aplicado = bool(capture.set(propriedade, float(valor)))
+        except Exception:
+            aplicado = False
+
+        valor_lido = None
+
+        try:
+            leitura = float(capture.get(propriedade))
+
+            if math.isfinite(leitura):
+                valor_lido = leitura
+        except Exception:
+            pass
+
+        self._registrar_status_controle(
+            nome,
+            "aplicado" if aplicado else "nao_suportado",
+            valor_solicitado=float(valor),
+            valor_lido=valor_lido,
+        )
+
+    def _aplicar_configuracoes_hardware(
+        self,
+        capture,
+        forcar: bool = False,
+    ) -> bool:
+        configuracoes, versao = (
+            self._obter_configuracoes_camera_com_versao()
+        )
+
+        if (
+            not forcar
+            and versao == self._versao_configuracoes_aplicada
+        ):
+            return False
+
+        propriedades = {
+            "pan": getattr(cv2, "CAP_PROP_PAN", None),
+            "tilt": getattr(cv2, "CAP_PROP_TILT", None),
+            "contrast": getattr(cv2, "CAP_PROP_CONTRAST", None),
+            "sharpness": getattr(cv2, "CAP_PROP_SHARPNESS", None),
+            "saturation": getattr(cv2, "CAP_PROP_SATURATION", None),
+        }
+
+        for nome in (
+            "pan",
+            "tilt",
+            "contrast",
+            "sharpness",
+            "saturation",
+        ):
+            self._aplicar_controle_hardware(
+                capture=capture,
+                nome=nome,
+                propriedade=propriedades[nome],
+                habilitado=bool(
+                    configuracoes.get(f"{nome}_enabled", False)
+                ),
+                valor=float(configuracoes.get(nome, 0.0)),
+            )
+
+        self._registrar_status_controle(
+            "rotation",
+            "aplicado_software",
+            valor_solicitado=int(
+                configuracoes.get("rotation", 0)
+            ),
+            valor_lido=int(configuracoes.get("rotation", 0)),
+        )
+        self._versao_configuracoes_aplicada = versao
+        return True
+
+    def _aplicar_rotacao(self, frame):
+        configuracoes, _ = (
+            self._obter_configuracoes_camera_com_versao()
+        )
+        rotacao = int(configuracoes.get("rotation", 0))
+
+        if rotacao == 90:
+            return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+        if rotacao == 180:
+            return cv2.rotate(frame, cv2.ROTATE_180)
+
+        if rotacao == 270:
+            return cv2.rotate(
+                frame,
+                cv2.ROTATE_90_COUNTERCLOCKWISE,
+            )
+
+        return frame
 
     def obter_snapshot(self, ultimo_frame_id: int = -1) -> CameraSnapshot:
         with self._lock:
@@ -150,6 +450,11 @@ class CameraService:
                 except Exception:
                     pass
                 return None
+
+        self._aplicar_configuracoes_hardware(
+            capture,
+            forcar=True,
+        )
 
         return capture
 
@@ -351,6 +656,19 @@ class CameraService:
             camera_estabilizada = False
 
             while not self._stop_event.is_set():
+                configuracao_alterada = (
+                    self._aplicar_configuracoes_hardware(capture)
+                )
+
+                if configuracao_alterada:
+                    self._definir_estado(
+                        self.ESTADO_ESTABILIZANDO,
+                        "Aplicando configurações da câmera...",
+                    )
+                    frames_descartar = max(frames_descartar, 5)
+                    frames_validos_consecutivos = 0
+                    camera_estabilizada = False
+
                 sucesso, frame = capture.read()
 
                 resolucao_obrigatoria = (
@@ -391,7 +709,8 @@ class CameraService:
                     camera_estabilizada = True
                     resolucao_preferida = resolucao_atual
 
-                self._publicar_frame(frame)
+                frame_processado = self._aplicar_rotacao(frame)
+                self._publicar_frame(frame_processado)
                 ja_conectou_antes = True
 
             try:

@@ -84,6 +84,7 @@ class LumusPCIApp:
         self.salvar_resultados_analise = self.config_repository.obter_salvar_resultados_analise()
         self.raio_atual_px = self.config_repository.obter_raio_padrao_led(RAIO_MAXIMO_LED_PX)
         self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
+        self.configuracoes_camera = self.config_repository.obter_configuracoes_camera()
 
         self.criar_pastas()
         self.carregar_referencias_automaticamente_se_necessario()
@@ -131,9 +132,25 @@ class LumusPCIApp:
         self.view.escrever_resultados(texto)
 
     def abrir_configuracoes(self) -> None:
+        camera_conectada = (
+            self.camera_ativa
+            and self.camera_service is not None
+            and self.camera_estado_anterior == CameraService.ESTADO_CONECTADA
+        )
+
+        status_controles_camera = {}
+
+        if self.camera_service is not None:
+            status_controles_camera = (
+                self.camera_service.obter_status_controles_camera()
+            )
+
         self.view.abrir_janela_configuracoes(
             salvar_resultados_analise=self.salvar_resultados_analise,
             raio_atual_px=self.raio_atual_px,
+            configuracoes_camera=self.configuracoes_camera,
+            camera_conectada=camera_conectada,
+            status_controles_camera=status_controles_camera,
             callback_salvar=self.salvar_configuracoes_sistema,
         )
 
@@ -141,8 +158,12 @@ class LumusPCIApp:
         self,
         salvar_resultados_analise: bool,
         raio_configurado_px: int | None = None,
+        configuracoes_camera: dict | None = None,
     ) -> None:
         self.salvar_resultados_analise = bool(salvar_resultados_analise)
+        rotacao_anterior = int(
+            self.configuracoes_camera.get("rotation", 0)
+        )
 
         if raio_configurado_px is not None:
             self.raio_atual_px = min(
@@ -156,19 +177,76 @@ class LumusPCIApp:
                     led_selecionado.raio = self.raio_atual_px
 
                 if self.imagem_original is not None:
-                    self.view.preparar_imagem_para_exibicao(self.imagem_original)
-                    self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
-                    self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+                    self.view.preparar_imagem_para_exibicao(
+                        self.imagem_original
+                    )
+                    self.view.desenhar_canvas(
+                        self.leds_selecionados,
+                        self.resultados_led_atual,
+                    )
 
-        self.configuracao_atual = self.config_repository.salvar_configuracoes_sistema(
-            salvar_resultados_analise=self.salvar_resultados_analise,
-            raio_atual_px=self.raio_atual_px,
+                    if not self.camera_ativa:
+                        self.atualizar_renderizacoes_visuais(
+                            self.leds_selecionados
+                        )
+
+        self.configuracao_atual = (
+            self.config_repository.salvar_configuracoes_sistema(
+                salvar_resultados_analise=self.salvar_resultados_analise,
+                raio_atual_px=self.raio_atual_px,
+                configuracoes_camera=configuracoes_camera,
+            )
+        )
+        self.configuracoes_camera = (
+            self.config_repository.obter_configuracoes_camera()
         )
 
-        status = "ativado" if self.salvar_resultados_analise else "desativado"
-        self.view.atualizar_status(
-            f"salvamento automático {status}. raio de seleção: {self.raio_atual_px}px."
+        if self.camera_service is not None:
+            self.camera_service.atualizar_configuracoes_camera(
+                self.configuracoes_camera
+            )
+
+        rotacao_atual = int(
+            self.configuracoes_camera.get("rotation", 0)
         )
+        rotacao_alterada = rotacao_atual != rotacao_anterior
+
+        if rotacao_alterada:
+            # As posições salvas pertencem à orientação anterior da imagem.
+            # Elas são apenas ocultadas; o arquivo JSON não é apagado.
+            self.guias_leds_fixos_visiveis = False
+            self.selecao_manual_camera_ativa = False
+            self.leds_manuais_camera = []
+            self.leds_selecionados = []
+            self.resultados_led_atual = []
+            self.view.selecao_manual_camera_visivel = False
+            self.view.atualizar_estado_selecao_led(False)
+            self.view.atualizar_faixa_resultado()
+
+        status_salvamento = (
+            "ativado"
+            if self.salvar_resultados_analise
+            else "desativado"
+        )
+
+        if rotacao_alterada:
+            mensagem = (
+                f"configurações salvas. Rotação alterada para "
+                f"{rotacao_atual}°. Reconfigure ou recarregue as posições "
+                "dos LEDs para a nova orientação."
+            )
+        elif self.camera_ativa:
+            mensagem = (
+                "configurações salvas e enviadas à câmera. "
+                f"Salvamento automático {status_salvamento}."
+            )
+        else:
+            mensagem = (
+                "configurações salvas. Os ajustes da câmera serão "
+                "aplicados ao iniciar a tela ao vivo."
+            )
+
+        self.view.atualizar_status(mensagem)
         self.atualizar_painel_inicial()
 
     def atualizar_renderizacoes_visuais(self, alvo=None) -> None:
@@ -357,6 +435,7 @@ class LumusPCIApp:
             limite_preto_desvio=LIMITE_FRAME_PRETO_DESVIO,
             frames_estabilidade=CAMERA_FRAMES_ESTABILIDADE,
             espera_apos_abrir_s=CAMERA_ESPERA_APOS_ABRIR_S,
+            configuracoes_camera=self.configuracoes_camera,
         )
 
         self.camera_ativa = True
