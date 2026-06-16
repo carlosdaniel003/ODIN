@@ -700,11 +700,16 @@ class CameraService:
             ):
                 return True
 
-        if CameraService._possui_corte_retilineo_suspeito(frame_cinza):
-            return True
-
-        if CameraService._possui_faixa_interna_suspeita(frame_cinza):
-            return True
+        # Os filtros abaixo foram mantidos no arquivo para diagnóstico futuro,
+        # mas não são usados como bloqueio no modo estável. Em placas PCI reais,
+        # trilhas, bordas de componentes e divisões naturais podem parecer
+        # cortes para esses filtros e impedir a transmissão contínua.
+        #
+        # if CameraService._possui_corte_retilineo_suspeito(frame_cinza):
+        #     return True
+        #
+        # if CameraService._possui_faixa_interna_suspeita(frame_cinza):
+        #     return True
 
         return False
 
@@ -834,7 +839,9 @@ class CameraService:
             resolucao_candidata: tuple[int, int] | None = None
             frames_descartar = self.frames_aquecimento
             frames_validos_consecutivos = 0
-            falhas_consecutivas = 0
+            falhas_leitura_consecutivas = 0
+            frames_invalidos_consecutivos = 0
+            limite_frames_invalidos = max(90, self.falhas_antes_reconexao * 20)
             camera_estabilizada = False
             assinatura_estabilidade_anterior = None
 
@@ -861,15 +868,33 @@ class CameraService:
                     else resolucao_candidata
                 )
 
-                if not sucesso or not self._frame_valido(
-                    frame,
-                    resolucao_obrigatoria,
-                ):
-                    falhas_consecutivas += 1
+                if not sucesso or frame is None:
+                    falhas_leitura_consecutivas += 1
                     frames_validos_consecutivos = 0
                     assinatura_estabilidade_anterior = None
 
-                    if falhas_consecutivas >= self.falhas_antes_reconexao:
+                    if falhas_leitura_consecutivas >= self.falhas_antes_reconexao:
+                        break
+                    continue
+
+                if not self._frame_valido(
+                    frame,
+                    resolucao_obrigatoria,
+                ):
+                    frames_invalidos_consecutivos += 1
+                    frames_validos_consecutivos = 0
+                    assinatura_estabilidade_anterior = None
+
+                    self._definir_estado(
+                        self.ESTADO_ESTABILIZANDO,
+                        "Câmera conectada. Aguardando frame estável...",
+                    )
+
+                    # Frame inválido não significa necessariamente câmera
+                    # desconectada. Pode ser apenas um frame parcial, preto,
+                    # borrado ou instável no início. Só força reconexão se
+                    # isso persistir por muitos frames.
+                    if frames_invalidos_consecutivos >= limite_frames_invalidos:
                         break
                     continue
 
@@ -879,7 +904,8 @@ class CameraService:
                 if resolucao_candidata is None:
                     resolucao_candidata = resolucao_atual
 
-                falhas_consecutivas = 0
+                falhas_leitura_consecutivas = 0
+                frames_invalidos_consecutivos = 0
 
                 if frames_descartar > 0:
                     frames_descartar -= 1
@@ -905,7 +931,7 @@ class CameraService:
                     )
                     assinatura_estabilidade_anterior = assinatura_atual
 
-                    if diferenca_estabilidade > 18.0:
+                    if diferenca_estabilidade > 45.0:
                         frames_validos_consecutivos = 1
                         continue
 
