@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from dataclasses import dataclass
 
 import cv2
@@ -35,12 +36,16 @@ class CameraSnapshot:
 
 class CameraService:
     """
-    Captura de câmera USB com negociação estável no Windows.
+    Serviço de câmera dirigido pelo polling do Tkinter.
 
-    No perfil automático, o driver escolhe resolução, FPS e formato.
-    A câmera só é considerada desconectada após falhas reais e consecutivas
-    de leitura. O conteúdo visual do frame não é usado para reiniciar o
-    dispositivo.
+    O aplicativo já chama obter_snapshot() periodicamente com root.after().
+    Portanto, a abertura e a leitura são feitas na mesma thread da interface,
+    sem uma segunda thread para o OpenCV/DirectShow. Isso evita diferenças de
+    COM/DirectShow observadas quando a câmera funciona no diagnóstico, mas não
+    entrega frames dentro da thread do serviço.
+
+    O perfil automático preserva a negociação padrão do driver, exatamente
+    como no teste que encontrou 640x480 via DirectShow.
     """
 
     ESTADO_PARADA = "parada"
@@ -75,29 +80,29 @@ class CameraService:
             0.5,
             float(intervalo_reconexao_s),
         )
-        self.frames_aquecimento = min(
-            15,
-            max(3, int(frames_aquecimento)),
-        )
         self.falhas_antes_reconexao = max(
-            24,
-            int(falhas_antes_reconexao) * 8,
+            12,
+            int(falhas_antes_reconexao) * 4,
         )
         self.largura_minima = max(1, int(largura_minima))
         self.altura_minima = max(1, int(altura_minima))
 
-        # Mantidos por compatibilidade com a assinatura usada pelo app.
+        # Mantidos para compatibilidade com a construção atual do serviço.
+        self.frames_aquecimento = max(1, int(frames_aquecimento))
         self.limite_preto_media = float(limite_preto_media)
         self.limite_preto_desvio = float(limite_preto_desvio)
         self.frames_estabilidade = max(1, int(frames_estabilidade))
-        self.espera_apos_abrir_s = min(
-            1.0,
-            max(0.10, float(espera_apos_abrir_s)),
+        self.espera_apos_abrir_s = max(
+            0.0,
+            float(espera_apos_abrir_s),
         )
 
-        self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._lock = threading.RLock()
+        self._capture = None
+        self._ativo = False
+        self._falhas_consecutivas = 0
+        self._proxima_reconexao_em = 0.0
+        self._controles_pendentes = True
 
         self._estado = self.ESTADO_PARADA
         self._mensagem = "Câmera parada."
@@ -109,15 +114,13 @@ class CameraService:
         self._fps_real: float | None = None
         self._formato_solicitado: str | None = None
         self._formato_real: str | None = None
-        self._backend_atual: str | None = None
+        self._backend_atual = "DirectShow"
 
         self._configuracoes_camera = self._normalizar_configuracoes_camera(
             configuracoes_camera
         )
         self._aplicar_perfil_camera_inicial()
 
-        self._versao_configuracoes_camera = 0
-        self._versao_configuracoes_aplicada = -1
         self._status_controles_camera = {
             nome: {
                 "status": "aguardando_camera",
@@ -178,6 +181,7 @@ class CameraService:
         fps_mode = str(
             origem.get("fps_mode", padrao["fps_mode"])
         ).lower()
+
         if fps_mode not in ("auto", "manual"):
             fps_mode = str(padrao["fps_mode"]).lower()
 
@@ -187,6 +191,7 @@ class CameraService:
         formato = str(
             origem.get("format", padrao["format"])
         ).upper()
+
         if formato not in CAMERA_FORMATS:
             formato = str(padrao["format"]).upper()
 
@@ -297,6 +302,7 @@ class CameraService:
         formato = str(
             configuracoes.get("format", "AUTO")
         ).upper()
+
         if formato not in CAMERA_FORMATS:
             formato = "AUTO"
 
@@ -332,6 +338,7 @@ class CameraService:
 
         for deslocamento in (0, 8, 16, 24):
             codigo = (numero >> deslocamento) & 255
+
             if 32 <= codigo <= 126:
                 caracteres.append(chr(codigo))
 
@@ -339,47 +346,40 @@ class CameraService:
         return texto or None
 
     def iniciar(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
+        if self._ativo:
             return
 
-        self._stop_event.clear()
+        self._ativo = True
+        self._falhas_consecutivas = 0
+        self._proxima_reconexao_em = 0.0
         self._definir_estado(
             self.ESTADO_CONECTANDO,
-            "Conectando câmera...",
+            (
+                f"Conectando câmera {self.indice_camera} "
+                "via DirectShow..."
+            ),
         )
-        self._thread = threading.Thread(
-            target=self._executar,
-            name="LumusPCI-CameraService",
-            daemon=True,
-        )
-        self._thread.start()
+        self._abrir_camera()
 
     def parar(self) -> None:
-        self._stop_event.set()
+        self._ativo = False
+        self._liberar_camera()
         self._definir_estado(
             self.ESTADO_PARADA,
             "Câmera parada.",
         )
 
-        thread = self._thread
-        if (
-            thread is not None
-            and thread.is_alive()
-            and thread is not threading.current_thread()
-        ):
-            thread.join(timeout=1.5)
-
     def atualizar_configuracoes_camera(
         self,
         configuracoes_camera: dict | None,
     ) -> None:
-        configuracoes = self._normalizar_configuracoes_camera(
-            configuracoes_camera
-        )
-
         with self._lock:
-            self._configuracoes_camera = configuracoes
-            self._versao_configuracoes_camera += 1
+            self._configuracoes_camera = (
+                self._normalizar_configuracoes_camera(
+                    configuracoes_camera
+                )
+            )
+            self._controles_pendentes = True
 
     def obter_configuracoes_camera(self) -> dict:
         with self._lock:
@@ -391,15 +391,6 @@ class CameraService:
                 nome: dict(status)
                 for nome, status in self._status_controles_camera.items()
             }
-
-    def _obter_configuracoes_camera_com_versao(
-        self,
-    ) -> tuple[dict, int]:
-        with self._lock:
-            return (
-                dict(self._configuracoes_camera),
-                int(self._versao_configuracoes_camera),
-            )
 
     def _registrar_status_controle(
         self,
@@ -431,9 +422,6 @@ class CameraService:
             )
             return
 
-        # Quando o controle está desativado, não consulta nem grava a
-        # propriedade no driver. Alguns drivers USB travam antes do primeiro
-        # frame quando recebem CAP_PROP_PAN/TILT/SHARPNESS nessa fase.
         if not habilitado:
             self._registrar_status_controle(
                 nome,
@@ -467,21 +455,13 @@ class CameraService:
             valor_lido=valor_lido,
         )
 
-    def _aplicar_configuracoes_hardware(
-        self,
-        capture,
-        forcar: bool = False,
-    ) -> bool:
-        configuracoes, versao = (
-            self._obter_configuracoes_camera_com_versao()
-        )
+    def _aplicar_configuracoes_hardware(self) -> None:
+        capture = self._capture
 
-        if (
-            not forcar
-            and versao == self._versao_configuracoes_aplicada
-        ):
-            return False
+        if capture is None or not self._controles_pendentes:
+            return
 
+        configuracoes = self.obter_configuracoes_camera()
         propriedades = {
             "pan": getattr(cv2, "CAP_PROP_PAN", None),
             "tilt": getattr(cv2, "CAP_PROP_TILT", None),
@@ -508,6 +488,7 @@ class CameraService:
             )
 
         rotacao = int(configuracoes.get("rotation", 0))
+
         self._registrar_status_controle(
             "rotation",
             "aplicado_software",
@@ -515,19 +496,18 @@ class CameraService:
             valor_lido=rotacao,
         )
 
-        self._versao_configuracoes_aplicada = versao
-        return True
+        self._controles_pendentes = False
 
     def _aplicar_rotacao(self, frame):
-        configuracoes, _ = (
-            self._obter_configuracoes_camera_com_versao()
-        )
+        configuracoes = self.obter_configuracoes_camera()
         rotacao = int(configuracoes.get("rotation", 0))
 
         if rotacao == 90:
             return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
         if rotacao == 180:
             return cv2.rotate(frame, cv2.ROTATE_180)
+
         if rotacao == 270:
             return cv2.rotate(
                 frame,
@@ -535,63 +515,6 @@ class CameraService:
             )
 
         return frame
-
-    def obter_snapshot(
-        self,
-        ultimo_frame_id: int = -1,
-    ) -> CameraSnapshot:
-        with self._lock:
-            frame = None
-
-            if (
-                self._ultimo_frame is not None
-                and self._frame_id != ultimo_frame_id
-            ):
-                frame = self._ultimo_frame.copy()
-
-            return CameraSnapshot(
-                estado=self._estado,
-                mensagem=self._mensagem,
-                frame_id=self._frame_id,
-                frame=frame,
-                resolucao=self._resolucao,
-                resolucao_solicitada=self._resolucao_solicitada,
-                fps_solicitado=self._fps_solicitado,
-                fps_real=self._fps_real,
-                formato_solicitado=self._formato_solicitado,
-                formato_real=self._formato_real,
-            )
-
-    def _definir_estado(
-        self,
-        estado: str,
-        mensagem: str,
-    ) -> None:
-        with self._lock:
-            self._estado = estado
-            self._mensagem = mensagem
-
-    def _publicar_frame(self, frame) -> None:
-        altura_frame, largura_frame = frame.shape[:2]
-
-        backend_texto = (
-            f" via {self._backend_atual}"
-            if self._backend_atual
-            else ""
-        )
-
-        with self._lock:
-            self._ultimo_frame = frame.copy()
-            self._frame_id += 1
-            self._resolucao = (
-                largura_frame,
-                altura_frame,
-            )
-            self._estado = self.ESTADO_CONECTADA
-            self._mensagem = (
-                f"Câmera conectada{backend_texto}. "
-                f"Resolução real: {largura_frame}x{altura_frame}."
-            )
 
     @staticmethod
     def _normalizar_frame(frame):
@@ -637,38 +560,9 @@ class CameraService:
             and altura_frame >= self.altura_minima
         )
 
-    def _obter_backends_candidatos(self) -> list[tuple[str, int]]:
-        candidatos = []
-
-        def adicionar(nome: str, valor: int) -> None:
-            if all(item[1] != valor for item in candidatos):
-                candidatos.append((nome, valor))
-
-        # DirectShow primeiro: é o backend que já conseguia abrir esta câmera
-        # antes da alteração e costuma ser mais previsível para webcams USB.
-        if hasattr(cv2, "CAP_DSHOW"):
-            adicionar("DirectShow", cv2.CAP_DSHOW)
-
-        # Media Foundation fica como fallback. Em algumas câmeras ele abre o
-        # dispositivo, mas bloqueia no primeiro read(), deixando a interface
-        # indefinidamente em "Conectando câmera".
-        if hasattr(cv2, "CAP_MSMF"):
-            adicionar("Media Foundation", cv2.CAP_MSMF)
-
-        adicionar("Automático", cv2.CAP_ANY)
-        return candidatos
-
-    def _abrir_video_capture(self, backend: int):
-        if backend == cv2.CAP_ANY:
-            return cv2.VideoCapture(self.indice_camera)
-
-        return cv2.VideoCapture(
-            self.indice_camera,
-            backend,
-        )
-
     def _aplicar_perfil_capture(self, capture) -> None:
-        # Automático: deixa o driver negociar tudo.
+        # No modo automático não toca nas propriedades do fluxo. O diagnóstico
+        # comprovou que o padrão negociado pelo driver funciona em 640x480.
         if self.perfil_automatico:
             return
 
@@ -704,28 +598,91 @@ class CameraService:
             except Exception:
                 pass
 
+    def _abrir_camera(self) -> bool:
+        self._liberar_camera()
+
+        self._definir_estado(
+            self.ESTADO_ESTABILIZANDO,
+            (
+                f"Abrindo câmera {self.indice_camera} "
+                "via DirectShow..."
+            ),
+        )
+
+        try:
+            capture = cv2.VideoCapture(
+                self.indice_camera,
+                cv2.CAP_DSHOW,
+            )
+        except Exception as erro:
+            self._capture = None
+            self._agendar_reconexao(
+                f"Falha ao abrir DirectShow: {type(erro).__name__}."
+            )
+            return False
+
+        if capture is None or not capture.isOpened():
+            if capture is not None:
+                try:
+                    capture.release()
+                except Exception:
+                    pass
+
+            self._capture = None
+            self._agendar_reconexao(
+                (
+                    f"Câmera {self.indice_camera} não abriu "
+                    "via DirectShow."
+                )
+            )
+            return False
+
+        self._capture = capture
+        self._aplicar_perfil_capture(capture)
+        self._controles_pendentes = True
+        self._falhas_consecutivas = 0
+
+        self._definir_estado(
+            self.ESTADO_ESTABILIZANDO,
+            (
+                f"Câmera {self.indice_camera} aberta via DirectShow. "
+                "Aguardando primeiro frame..."
+            ),
+        )
+        return True
+
+    def _liberar_camera(self) -> None:
+        capture = self._capture
+        self._capture = None
+
+        if capture is not None:
+            try:
+                capture.release()
+            except Exception:
+                pass
+
+    def _agendar_reconexao(self, motivo: str) -> None:
+        self._liberar_camera()
+        self._proxima_reconexao_em = (
+            time.monotonic() + self.intervalo_reconexao_s
+        )
+        self._definir_estado(
+            self.ESTADO_DESCONECTADA,
+            f"{motivo} Reconectando automaticamente...",
+        )
+
     def _registrar_parametros_reais(
         self,
         capture,
-        backend_nome: str,
         frame,
     ) -> None:
-        frame = self._normalizar_frame(frame)
-
-        if frame is not None:
-            altura_real, largura_real = frame.shape[:2]
-        else:
-            largura_real = int(
-                capture.get(cv2.CAP_PROP_FRAME_WIDTH)
-            )
-            altura_real = int(
-                capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
-            )
+        altura_real, largura_real = frame.shape[:2]
 
         try:
             fps_real = float(
                 capture.get(cv2.CAP_PROP_FPS)
             )
+
             if not math.isfinite(fps_real) or fps_real <= 0:
                 fps_real = None
         except Exception:
@@ -745,228 +702,104 @@ class CameraService:
             )
             self._fps_real = fps_real
             self._formato_real = formato_real
-            self._backend_atual = backend_nome
 
-    def _abrir_camera(self):
-        for backend_nome, backend in self._obter_backends_candidatos():
-            if self._stop_event.is_set():
-                return None, None
+    def _publicar_frame(self, frame) -> None:
+        altura_frame, largura_frame = frame.shape[:2]
 
-            self._definir_estado(
-                self.ESTADO_ESTABILIZANDO,
-                f"Abrindo câmera via {backend_nome}...",
+        with self._lock:
+            self._ultimo_frame = frame.copy()
+            self._frame_id += 1
+            self._resolucao = (
+                largura_frame,
+                altura_frame,
+            )
+            self._estado = self.ESTADO_CONECTADA
+            self._mensagem = (
+                "Câmera conectada via DirectShow. "
+                f"Resolução real: {largura_frame}x{altura_frame}."
             )
 
-            capture = None
+    def _ler_proximo_frame(self) -> None:
+        capture = self._capture
 
-            try:
-                capture = self._abrir_video_capture(backend)
-            except Exception:
-                capture = None
-
-            if capture is None or not capture.isOpened():
-                if capture is not None:
-                    try:
-                        capture.release()
-                    except Exception:
-                        pass
-                continue
-
-            self._aplicar_perfil_capture(capture)
-
-            # Pequena espera para o driver iniciar o fluxo. Não aplicamos os
-            # controles de imagem antes de receber o primeiro frame.
-            espera_inicial = min(0.35, self.espera_apos_abrir_s)
-
-            if self._stop_event.wait(espera_inicial):
-                try:
-                    capture.release()
-                except Exception:
-                    pass
-                return None, None
-
-            primeiro_frame = None
-
-            # Um único frame válido já é suficiente para publicar a imagem.
-            # A versão anterior exigia dois sucessos consecutivos e podia ficar
-            # presa na fase de conexão em certos drivers.
-            tentativas = max(20, self.frames_aquecimento)
-
-            for _ in range(tentativas):
-                if self._stop_event.is_set():
-                    break
-
-                try:
-                    sucesso, frame = capture.read()
-                except Exception:
-                    sucesso, frame = False, None
-
-                frame = (
-                    self._normalizar_frame(frame)
-                    if sucesso
-                    else None
-                )
-
-                if self._frame_basico_valido(frame):
-                    primeiro_frame = frame
-                    break
-
-                self._stop_event.wait(0.03)
-
-            if primeiro_frame is not None:
-                self._registrar_parametros_reais(
-                    capture,
-                    backend_nome,
-                    primeiro_frame,
-                )
-
-                # Só depois do primeiro frame, aplica os controles que foram
-                # explicitamente habilitados pelo usuário.
-                self._aplicar_configuracoes_hardware(
-                    capture,
-                    forcar=True,
-                )
-
-                return capture, primeiro_frame
-
-            try:
-                capture.release()
-            except Exception:
-                pass
-
-        return None, None
-
-    def _aguardar_reconexao(self) -> bool:
-        return self._stop_event.wait(
-            self.intervalo_reconexao_s
-        )
-
-    def _executar(self) -> None:
-        ja_conectou_antes = False
+        if capture is None:
+            return
 
         try:
-            while not self._stop_event.is_set():
-                self._definir_estado(
-                    (
-                        self.ESTADO_CONECTANDO
-                        if not ja_conectou_antes
-                        else self.ESTADO_DESCONECTADA
-                    ),
-                    (
-                        "Conectando câmera..."
-                        if not ja_conectou_antes
-                        else (
-                            "Câmera desconectada. "
-                            "Reconectando automaticamente..."
-                        )
-                    ),
+            sucesso, frame = capture.read()
+        except Exception:
+            sucesso, frame = False, None
+
+        frame = (
+            self._normalizar_frame(frame)
+            if sucesso
+            else None
+        )
+
+        if not self._frame_basico_valido(frame):
+            self._falhas_consecutivas += 1
+
+            if (
+                self._falhas_consecutivas
+                >= self.falhas_antes_reconexao
+            ):
+                self._agendar_reconexao(
+                    "A câmera parou de entregar frames."
                 )
 
-                try:
-                    capture, primeiro_frame = self._abrir_camera()
-                except Exception as erro:
-                    capture = None
-                    primeiro_frame = None
-                    self._definir_estado(
-                        self.ESTADO_DESCONECTADA,
-                        (
-                            "Falha ao abrir a câmera: "
-                            f"{type(erro).__name__}. Reconectando..."
-                        ),
-                    )
+            return
 
-                if capture is None or primeiro_frame is None:
-                    if self._stop_event.is_set():
-                        break
+        primeiro_frame = self._frame_id == 0
+        self._falhas_consecutivas = 0
 
-                    self._definir_estado(
-                        self.ESTADO_DESCONECTADA,
-                        (
-                            "A câmera foi encontrada, mas não entregou imagem. "
-                            "Reconectando automaticamente..."
-                        ),
-                    )
+        if primeiro_frame:
+            self._registrar_parametros_reais(
+                capture,
+                frame,
+            )
+            self._aplicar_configuracoes_hardware()
 
-                    if self._aguardar_reconexao():
-                        break
+        frame_processado = self._aplicar_rotacao(frame)
+        self._publicar_frame(frame_processado)
 
-                    continue
+    def obter_snapshot(
+        self,
+        ultimo_frame_id: int = -1,
+    ) -> CameraSnapshot:
+        if self._ativo:
+            if self._capture is None:
+                if time.monotonic() >= self._proxima_reconexao_em:
+                    self._abrir_camera()
+            else:
+                self._ler_proximo_frame()
 
-                frame_processado = self._aplicar_rotacao(
-                    primeiro_frame
-                )
-                self._publicar_frame(frame_processado)
-                ja_conectou_antes = True
-                falhas_consecutivas = 0
+        with self._lock:
+            frame = None
 
-                while not self._stop_event.is_set():
-                    self._aplicar_configuracoes_hardware(
-                        capture
-                    )
+            if (
+                self._ultimo_frame is not None
+                and self._frame_id != ultimo_frame_id
+            ):
+                frame = self._ultimo_frame.copy()
 
-                    try:
-                        sucesso, frame = capture.read()
-                    except Exception:
-                        sucesso, frame = False, None
+            return CameraSnapshot(
+                estado=self._estado,
+                mensagem=self._mensagem,
+                frame_id=self._frame_id,
+                frame=frame,
+                resolucao=self._resolucao,
+                resolucao_solicitada=self._resolucao_solicitada,
+                fps_solicitado=self._fps_solicitado,
+                fps_real=self._fps_real,
+                formato_solicitado=self._formato_solicitado,
+                formato_real=self._formato_real,
+            )
 
-                    frame = (
-                        self._normalizar_frame(frame)
-                        if sucesso
-                        else None
-                    )
-
-                    if not self._frame_basico_valido(frame):
-                        falhas_consecutivas += 1
-
-                        if (
-                            falhas_consecutivas
-                            >= self.falhas_antes_reconexao
-                        ):
-                            break
-
-                        self._stop_event.wait(0.02)
-                        continue
-
-                    falhas_consecutivas = 0
-                    frame_processado = self._aplicar_rotacao(
-                        frame
-                    )
-                    self._publicar_frame(frame_processado)
-
-                try:
-                    capture.release()
-                except Exception:
-                    pass
-
-                if self._stop_event.is_set():
-                    break
-
-                self._definir_estado(
-                    self.ESTADO_DESCONECTADA,
-                    (
-                        "Câmera sem resposta. "
-                        "Reconectando automaticamente..."
-                    ),
-                )
-
-                if self._aguardar_reconexao():
-                    break
-        except Exception as erro:
-            if not self._stop_event.is_set():
-                self._definir_estado(
-                    self.ESTADO_DESCONECTADA,
-                    (
-                        "Erro interno no serviço da câmera: "
-                        f"{type(erro).__name__}."
-                    ),
-                )
-        finally:
-            with self._lock:
-                self._thread = None
-
-            if self._stop_event.is_set():
-                self._definir_estado(
-                    self.ESTADO_PARADA,
-                    "Câmera parada.",
-                )
-
+    def _definir_estado(
+        self,
+        estado: str,
+        mensagem: str,
+    ) -> None:
+        with self._lock:
+            self._estado = estado
+            self._mensagem = mensagem
