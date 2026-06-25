@@ -431,19 +431,14 @@ class CameraService:
             )
             return
 
+        # Quando o controle está desativado, não consulta nem grava a
+        # propriedade no driver. Alguns drivers USB travam antes do primeiro
+        # frame quando recebem CAP_PROP_PAN/TILT/SHARPNESS nessa fase.
         if not habilitado:
-            valor_lido = None
-            try:
-                leitura = float(capture.get(propriedade))
-                if math.isfinite(leitura):
-                    valor_lido = leitura
-            except Exception:
-                pass
-
             self._registrar_status_controle(
                 nome,
                 "padrao_driver",
-                valor_lido=valor_lido,
+                valor_lido=None,
             )
             return
 
@@ -455,12 +450,15 @@ class CameraService:
             aplicado = False
 
         valor_lido = None
-        try:
-            leitura = float(capture.get(propriedade))
-            if math.isfinite(leitura):
-                valor_lido = leitura
-        except Exception:
-            pass
+
+        if aplicado:
+            try:
+                leitura = float(capture.get(propriedade))
+
+                if math.isfinite(leitura):
+                    valor_lido = leitura
+            except Exception:
+                pass
 
         self._registrar_status_controle(
             nome,
@@ -646,18 +644,18 @@ class CameraService:
             if all(item[1] != valor for item in candidatos):
                 candidatos.append((nome, valor))
 
-        if self.perfil_automatico:
-            if hasattr(cv2, "CAP_MSMF"):
-                adicionar("MSMF", cv2.CAP_MSMF)
-            if hasattr(cv2, "CAP_DSHOW"):
-                adicionar("DSHOW", cv2.CAP_DSHOW)
-        else:
-            if hasattr(cv2, "CAP_DSHOW"):
-                adicionar("DSHOW", cv2.CAP_DSHOW)
-            if hasattr(cv2, "CAP_MSMF"):
-                adicionar("MSMF", cv2.CAP_MSMF)
+        # DirectShow primeiro: é o backend que já conseguia abrir esta câmera
+        # antes da alteração e costuma ser mais previsível para webcams USB.
+        if hasattr(cv2, "CAP_DSHOW"):
+            adicionar("DirectShow", cv2.CAP_DSHOW)
 
-        adicionar("AUTO", cv2.CAP_ANY)
+        # Media Foundation fica como fallback. Em algumas câmeras ele abre o
+        # dispositivo, mas bloqueia no primeiro read(), deixando a interface
+        # indefinidamente em "Conectando câmera".
+        if hasattr(cv2, "CAP_MSMF"):
+            adicionar("Media Foundation", cv2.CAP_MSMF)
+
+        adicionar("Automático", cv2.CAP_ANY)
         return candidatos
 
     def _abrir_video_capture(self, backend: int):
@@ -754,6 +752,11 @@ class CameraService:
             if self._stop_event.is_set():
                 return None, None
 
+            self._definir_estado(
+                self.ESTADO_ESTABILIZANDO,
+                f"Abrindo câmera via {backend_nome}...",
+            )
+
             capture = None
 
             try:
@@ -771,22 +774,25 @@ class CameraService:
 
             self._aplicar_perfil_capture(capture)
 
-            if self._stop_event.wait(self.espera_apos_abrir_s):
+            # Pequena espera para o driver iniciar o fluxo. Não aplicamos os
+            # controles de imagem antes de receber o primeiro frame.
+            espera_inicial = min(0.35, self.espera_apos_abrir_s)
+
+            if self._stop_event.wait(espera_inicial):
                 try:
                     capture.release()
                 except Exception:
                     pass
                 return None, None
 
-            self._aplicar_configuracoes_hardware(
-                capture,
-                forcar=True,
-            )
-
             primeiro_frame = None
-            sucessos_consecutivos = 0
 
-            for _ in range(self.frames_aquecimento):
+            # Um único frame válido já é suficiente para publicar a imagem.
+            # A versão anterior exigia dois sucessos consecutivos e podia ficar
+            # presa na fase de conexão em certos drivers.
+            tentativas = max(20, self.frames_aquecimento)
+
+            for _ in range(tentativas):
                 if self._stop_event.is_set():
                     break
 
@@ -802,14 +808,10 @@ class CameraService:
                 )
 
                 if self._frame_basico_valido(frame):
-                    sucessos_consecutivos += 1
                     primeiro_frame = frame
+                    break
 
-                    if sucessos_consecutivos >= 2:
-                        break
-                else:
-                    sucessos_consecutivos = 0
-                    self._stop_event.wait(0.02)
+                self._stop_event.wait(0.03)
 
             if primeiro_frame is not None:
                 self._registrar_parametros_reais(
@@ -817,6 +819,14 @@ class CameraService:
                     backend_nome,
                     primeiro_frame,
                 )
+
+                # Só depois do primeiro frame, aplica os controles que foram
+                # explicitamente habilitados pelo usuário.
+                self._aplicar_configuracoes_hardware(
+                    capture,
+                    forcar=True,
+                )
+
                 return capture, primeiro_frame
 
             try:
@@ -852,7 +862,18 @@ class CameraService:
                     ),
                 )
 
-                capture, primeiro_frame = self._abrir_camera()
+                try:
+                    capture, primeiro_frame = self._abrir_camera()
+                except Exception as erro:
+                    capture = None
+                    primeiro_frame = None
+                    self._definir_estado(
+                        self.ESTADO_DESCONECTADA,
+                        (
+                            "Falha ao abrir a câmera: "
+                            f"{type(erro).__name__}. Reconectando..."
+                        ),
+                    )
 
                 if capture is None or primeiro_frame is None:
                     if self._stop_event.is_set():
@@ -861,7 +882,7 @@ class CameraService:
                     self._definir_estado(
                         self.ESTADO_DESCONECTADA,
                         (
-                            "Câmera indisponível. "
+                            "A câmera foi encontrada, mas não entregou imagem. "
                             "Reconectando automaticamente..."
                         ),
                     )
@@ -930,11 +951,22 @@ class CameraService:
 
                 if self._aguardar_reconexao():
                     break
+        except Exception as erro:
+            if not self._stop_event.is_set():
+                self._definir_estado(
+                    self.ESTADO_DESCONECTADA,
+                    (
+                        "Erro interno no serviço da câmera: "
+                        f"{type(erro).__name__}."
+                    ),
+                )
         finally:
             with self._lock:
                 self._thread = None
 
-            self._definir_estado(
-                self.ESTADO_PARADA,
-                "Câmera parada.",
-            )
+            if self._stop_event.is_set():
+                self._definir_estado(
+                    self.ESTADO_PARADA,
+                    "Câmera parada.",
+                )
+
