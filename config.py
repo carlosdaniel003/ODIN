@@ -16,9 +16,6 @@ MIN_RADIUS_PX = 3
 MAX_RADIUS_PX = 50
 DEFAULT_SAVE_ANALYSIS_RESULTS = False
 
-# Perfis de resolução da câmera.
-# O LumusPCI solicita estes valores ao driver, mas a resolução real entregue
-# pela câmera é sempre detectada em tempo de execução.
 CAMERA_RESOLUTION_PRESETS = {
     "auto": {
         "label": "Automática recomendada",
@@ -63,18 +60,13 @@ CAMERA_FPS_MIN = 0
 CAMERA_FPS_MAX = 120
 CAMERA_FORMATS = ("AUTO", "MJPG", "YUY2")
 
-# Configurações da câmera.
-#
-# Os controles de panorâmica, inclinação, contraste, nitidez e saturação
-# dependem do suporte oferecido pelo driver da câmera. Quando o ajuste está
-# desativado, o LumusPCI preserva o valor padrão negociado pelo driver.
 DEFAULT_CAMERA_SETTINGS = {
     "resolution_mode": "auto",
     "width": 1920,
     "height": 1080,
-    "fps_mode": "manual",
-    "fps": 15,
-    "format": "MJPG",
+    "fps_mode": "auto",
+    "fps": 0,
+    "format": "AUTO",
     "pan_enabled": False,
     "pan": 0.0,
     "tilt_enabled": False,

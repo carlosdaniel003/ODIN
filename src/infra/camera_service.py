@@ -5,11 +5,10 @@ import threading
 from dataclasses import dataclass
 
 import cv2
-import numpy as np
 
 from config import (
-    CAMERA_IMAGE_CONTROL_MAX,
     CAMERA_FORMATS,
+    CAMERA_IMAGE_CONTROL_MAX,
     CAMERA_IMAGE_CONTROL_MIN,
     CAMERA_PAN_MAX,
     CAMERA_PAN_MIN,
@@ -35,6 +34,15 @@ class CameraSnapshot:
 
 
 class CameraService:
+    """
+    Captura de câmera USB com negociação estável no Windows.
+
+    No perfil automático, o driver escolhe resolução, FPS e formato.
+    A câmera só é considerada desconectada após falhas reais e consecutivas
+    de leitura. O conteúdo visual do frame não é usado para reiniciar o
+    dispositivo.
+    """
+
     ESTADO_PARADA = "parada"
     ESTADO_CONECTANDO = "conectando"
     ESTADO_ESTABILIZANDO = "estabilizando"
@@ -59,18 +67,33 @@ class CameraService:
         configuracoes_camera: dict | None = None,
     ) -> None:
         self.indice_camera = int(indice_camera)
-        self.largura = int(largura)
-        self.altura = int(altura)
-        self.fps = int(fps)
-        self.intervalo_reconexao_s = max(0.25, float(intervalo_reconexao_s))
-        self.frames_aquecimento = max(60, int(frames_aquecimento))
-        self.falhas_antes_reconexao = max(5, int(falhas_antes_reconexao))
+        self.largura = max(1, int(largura))
+        self.altura = max(1, int(altura))
+        self.fps = max(0, int(fps))
+
+        self.intervalo_reconexao_s = max(
+            0.5,
+            float(intervalo_reconexao_s),
+        )
+        self.frames_aquecimento = min(
+            15,
+            max(3, int(frames_aquecimento)),
+        )
+        self.falhas_antes_reconexao = max(
+            24,
+            int(falhas_antes_reconexao) * 8,
+        )
         self.largura_minima = max(1, int(largura_minima))
         self.altura_minima = max(1, int(altura_minima))
+
+        # Mantidos por compatibilidade com a assinatura usada pelo app.
         self.limite_preto_media = float(limite_preto_media)
         self.limite_preto_desvio = float(limite_preto_desvio)
-        self.frames_estabilidade = max(15, int(frames_estabilidade))
-        self.espera_apos_abrir_s = max(0.8, float(espera_apos_abrir_s))
+        self.frames_estabilidade = max(1, int(frames_estabilidade))
+        self.espera_apos_abrir_s = min(
+            1.0,
+            max(0.10, float(espera_apos_abrir_s)),
+        )
 
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -81,12 +104,18 @@ class CameraService:
         self._ultimo_frame = None
         self._frame_id = 0
         self._resolucao: tuple[int, int] | None = None
+        self._resolucao_solicitada: tuple[int, int] | None = None
+        self._fps_solicitado: int | None = None
         self._fps_real: float | None = None
+        self._formato_solicitado: str | None = None
         self._formato_real: str | None = None
+        self._backend_atual: str | None = None
+
         self._configuracoes_camera = self._normalizar_configuracoes_camera(
             configuracoes_camera
         )
         self._aplicar_perfil_camera_inicial()
+
         self._versao_configuracoes_camera = 0
         self._versao_configuracoes_aplicada = -1
         self._status_controles_camera = {
@@ -104,77 +133,6 @@ class CameraService:
                 "rotation",
             )
         }
-
-
-    def _aplicar_perfil_camera_inicial(self) -> None:
-        configuracoes = self._configuracoes_camera
-
-        try:
-            largura = int(configuracoes.get("width", self.largura))
-        except (TypeError, ValueError):
-            largura = self.largura
-
-        try:
-            altura = int(configuracoes.get("height", self.altura))
-        except (TypeError, ValueError):
-            altura = self.altura
-
-        try:
-            fps = int(configuracoes.get("fps", self.fps))
-        except (TypeError, ValueError):
-            fps = self.fps
-
-        fps_mode = str(configuracoes.get("fps_mode", "manual")).lower()
-        formato = str(configuracoes.get("format", "MJPG")).upper()
-
-        if formato not in CAMERA_FORMATS:
-            formato = "MJPG"
-
-        self.largura = max(1, largura)
-        self.altura = max(1, altura)
-        self.fps = 0 if fps_mode == "auto" else max(0, fps)
-        self.formato_camera = formato
-        self._resolucao_solicitada = (self.largura, self.altura)
-        self._fps_solicitado = self.fps
-        self._formato_solicitado = self.formato_camera
-
-    @staticmethod
-    def _decodificar_fourcc(valor) -> str | None:
-        try:
-            numero = int(valor)
-        except (TypeError, ValueError):
-            return None
-
-        if numero <= 0:
-            return None
-
-        caracteres = []
-
-        for deslocamento in (0, 8, 16, 24):
-            codigo = (numero >> deslocamento) & 255
-
-            if 32 <= codigo <= 126:
-                caracteres.append(chr(codigo))
-
-        texto = "".join(caracteres).strip()
-        return texto or None
-
-    def iniciar(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
-            return
-
-        self._stop_event.clear()
-        self._definir_estado(self.ESTADO_CONECTANDO, "Conectando câmera...")
-        self._thread = threading.Thread(
-            target=self._executar,
-            name="LumusPCI-CameraService",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def parar(self) -> None:
-        self._stop_event.set()
-        self._definir_estado(self.ESTADO_PARADA, "Câmera parada.")
 
     @staticmethod
     def _limitar_float(
@@ -203,16 +161,6 @@ class CameraService:
         padrao = DEFAULT_CAMERA_SETTINGS
 
         try:
-            rotacao = int(
-                origem.get("rotation", padrao["rotation"])
-            )
-        except (TypeError, ValueError):
-            rotacao = int(padrao["rotation"])
-
-        if rotacao not in CAMERA_ROTATIONS:
-            rotacao = int(padrao["rotation"])
-
-        try:
             largura = int(origem.get("width", padrao["width"]))
         except (TypeError, ValueError):
             largura = int(padrao["width"])
@@ -227,23 +175,38 @@ class CameraService:
         except (TypeError, ValueError):
             fps = int(padrao["fps"])
 
-        fps_mode = str(origem.get("fps_mode", padrao["fps_mode"])).lower()
+        fps_mode = str(
+            origem.get("fps_mode", padrao["fps_mode"])
+        ).lower()
         if fps_mode not in ("auto", "manual"):
-            fps_mode = str(padrao["fps_mode"])
+            fps_mode = str(padrao["fps_mode"]).lower()
 
         if fps_mode == "auto":
             fps = 0
 
-        formato = str(origem.get("format", padrao["format"])).upper()
+        formato = str(
+            origem.get("format", padrao["format"])
+        ).upper()
         if formato not in CAMERA_FORMATS:
             formato = str(padrao["format"]).upper()
 
-        modo_resolucao = str(
-            origem.get("resolution_mode", padrao["resolution_mode"])
-        )
+        try:
+            rotacao = int(
+                origem.get("rotation", padrao["rotation"])
+            )
+        except (TypeError, ValueError):
+            rotacao = int(padrao["rotation"])
+
+        if rotacao not in CAMERA_ROTATIONS:
+            rotacao = int(padrao["rotation"])
 
         return {
-            "resolution_mode": modo_resolucao,
+            "resolution_mode": str(
+                origem.get(
+                    "resolution_mode",
+                    padrao["resolution_mode"],
+                )
+            ),
             "width": max(1, largura),
             "height": max(1, altura),
             "fps_mode": fps_mode,
@@ -305,6 +268,106 @@ class CameraService:
             ),
             "rotation": rotacao,
         }
+
+    def _aplicar_perfil_camera_inicial(self) -> None:
+        configuracoes = self._configuracoes_camera
+
+        self.modo_resolucao = str(
+            configuracoes.get("resolution_mode", "auto")
+        ).lower()
+        self.perfil_automatico = self.modo_resolucao == "auto"
+
+        self.largura = max(
+            1,
+            int(configuracoes.get("width", self.largura)),
+        )
+        self.altura = max(
+            1,
+            int(configuracoes.get("height", self.altura)),
+        )
+
+        fps_mode = str(
+            configuracoes.get("fps_mode", "auto")
+        ).lower()
+        fps_configurado = max(
+            0,
+            int(configuracoes.get("fps", self.fps)),
+        )
+
+        formato = str(
+            configuracoes.get("format", "AUTO")
+        ).upper()
+        if formato not in CAMERA_FORMATS:
+            formato = "AUTO"
+
+        if self.perfil_automatico:
+            self.fps = 0
+            self.formato_camera = "AUTO"
+            self._resolucao_solicitada = None
+            self._fps_solicitado = None
+            self._formato_solicitado = "AUTO"
+        else:
+            self.fps = 0 if fps_mode == "auto" else fps_configurado
+            self.formato_camera = formato
+            self._resolucao_solicitada = (
+                self.largura,
+                self.altura,
+            )
+            self._fps_solicitado = (
+                None if self.fps <= 0 else self.fps
+            )
+            self._formato_solicitado = self.formato_camera
+
+    @staticmethod
+    def _decodificar_fourcc(valor) -> str | None:
+        try:
+            numero = int(valor)
+        except (TypeError, ValueError):
+            return None
+
+        if numero <= 0:
+            return None
+
+        caracteres = []
+
+        for deslocamento in (0, 8, 16, 24):
+            codigo = (numero >> deslocamento) & 255
+            if 32 <= codigo <= 126:
+                caracteres.append(chr(codigo))
+
+        texto = "".join(caracteres).strip()
+        return texto or None
+
+    def iniciar(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self._definir_estado(
+            self.ESTADO_CONECTANDO,
+            "Conectando câmera...",
+        )
+        self._thread = threading.Thread(
+            target=self._executar,
+            name="LumusPCI-CameraService",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def parar(self) -> None:
+        self._stop_event.set()
+        self._definir_estado(
+            self.ESTADO_PARADA,
+            "Câmera parada.",
+        )
+
+        thread = self._thread
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=1.5)
 
     def atualizar_configuracoes_camera(
         self,
@@ -370,10 +433,8 @@ class CameraService:
 
         if not habilitado:
             valor_lido = None
-
             try:
                 leitura = float(capture.get(propriedade))
-
                 if math.isfinite(leitura):
                     valor_lido = leitura
             except Exception:
@@ -387,15 +448,15 @@ class CameraService:
             return
 
         try:
-            aplicado = bool(capture.set(propriedade, float(valor)))
+            aplicado = bool(
+                capture.set(propriedade, float(valor))
+            )
         except Exception:
             aplicado = False
 
         valor_lido = None
-
         try:
             leitura = float(capture.get(propriedade))
-
             if math.isfinite(leitura):
                 valor_lido = leitura
         except Exception:
@@ -448,14 +509,14 @@ class CameraService:
                 valor=float(configuracoes.get(nome, 0.0)),
             )
 
+        rotacao = int(configuracoes.get("rotation", 0))
         self._registrar_status_controle(
             "rotation",
             "aplicado_software",
-            valor_solicitado=int(
-                configuracoes.get("rotation", 0)
-            ),
-            valor_lido=int(configuracoes.get("rotation", 0)),
+            valor_solicitado=rotacao,
+            valor_lido=rotacao,
         )
+
         self._versao_configuracoes_aplicada = versao
         return True
 
@@ -467,10 +528,8 @@ class CameraService:
 
         if rotacao == 90:
             return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-
         if rotacao == 180:
             return cv2.rotate(frame, cv2.ROTATE_180)
-
         if rotacao == 270:
             return cv2.rotate(
                 frame,
@@ -479,11 +538,17 @@ class CameraService:
 
         return frame
 
-    def obter_snapshot(self, ultimo_frame_id: int = -1) -> CameraSnapshot:
+    def obter_snapshot(
+        self,
+        ultimo_frame_id: int = -1,
+    ) -> CameraSnapshot:
         with self._lock:
             frame = None
 
-            if self._ultimo_frame is not None and self._frame_id != ultimo_frame_id:
+            if (
+                self._ultimo_frame is not None
+                and self._frame_id != ultimo_frame_id
+            ):
                 frame = self._ultimo_frame.copy()
 
             return CameraSnapshot(
@@ -499,7 +564,11 @@ class CameraService:
                 formato_real=self._formato_real,
             )
 
-    def _definir_estado(self, estado: str, mensagem: str) -> None:
+    def _definir_estado(
+        self,
+        estado: str,
+        mensagem: str,
+    ) -> None:
         with self._lock:
             self._estado = estado
             self._mensagem = mensagem
@@ -507,70 +576,160 @@ class CameraService:
     def _publicar_frame(self, frame) -> None:
         altura_frame, largura_frame = frame.shape[:2]
 
+        backend_texto = (
+            f" via {self._backend_atual}"
+            if self._backend_atual
+            else ""
+        )
+
         with self._lock:
             self._ultimo_frame = frame.copy()
             self._frame_id += 1
-            self._resolucao = (largura_frame, altura_frame)
+            self._resolucao = (
+                largura_frame,
+                altura_frame,
+            )
             self._estado = self.ESTADO_CONECTADA
             self._mensagem = (
-                f"Câmera conectada. Resolução real: "
-                f"{largura_frame}x{altura_frame}."
+                f"Câmera conectada{backend_texto}. "
+                f"Resolução real: {largura_frame}x{altura_frame}."
             )
 
-    def _abrir_camera(self):
-        capture = cv2.VideoCapture(self.indice_camera, cv2.CAP_DSHOW)
-
-        if not capture.isOpened():
-            try:
-                capture.release()
-            except Exception:
-                pass
-            capture = cv2.VideoCapture(self.indice_camera)
-
-        if not capture.isOpened():
-            try:
-                capture.release()
-            except Exception:
-                pass
+    @staticmethod
+    def _normalizar_frame(frame):
+        if frame is None:
             return None
 
-        # O formato é negociado antes da resolução. Isso reduz frames
-        # parcialmente decodificados após reconectar o USB. Em modo AUTO,
-        # o driver escolhe o formato mais estável.
-        if self.formato_camera in ("MJPG", "YUY2"):
-            capture.set(
-                cv2.CAP_PROP_FOURCC,
-                cv2.VideoWriter_fourcc(*self.formato_camera),
+        try:
+            if frame.size == 0:
+                return None
+        except Exception:
+            return None
+
+        if len(frame.shape) == 2:
+            return cv2.cvtColor(
+                frame,
+                cv2.COLOR_GRAY2BGR,
             )
 
-        capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.largura)
-        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.altura)
+        if len(frame.shape) != 3:
+            return None
 
-        if self.fps > 0:
-            capture.set(cv2.CAP_PROP_FPS, self.fps)
+        if frame.shape[2] == 4:
+            return cv2.cvtColor(
+                frame,
+                cv2.COLOR_BGRA2BGR,
+            )
 
-        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if frame.shape[2] != 3:
+            return None
 
-        # Nem todo backend respeita estas propriedades, mas são seguras quando
-        # disponíveis e evitam leituras muito longas após retirar o USB.
-        if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
-            capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 700)
+        return frame
 
-        if self.espera_apos_abrir_s > 0:
-            if self._stop_event.wait(self.espera_apos_abrir_s):
-                try:
-                    capture.release()
-                except Exception:
-                    pass
-                return None
+    def _frame_basico_valido(self, frame) -> bool:
+        frame = self._normalizar_frame(frame)
 
-        self._aplicar_configuracoes_hardware(
-            capture,
-            forcar=True,
+        if frame is None:
+            return False
+
+        altura_frame, largura_frame = frame.shape[:2]
+
+        return (
+            largura_frame >= self.largura_minima
+            and altura_frame >= self.altura_minima
         )
 
+    def _obter_backends_candidatos(self) -> list[tuple[str, int]]:
+        candidatos = []
+
+        def adicionar(nome: str, valor: int) -> None:
+            if all(item[1] != valor for item in candidatos):
+                candidatos.append((nome, valor))
+
+        if self.perfil_automatico:
+            if hasattr(cv2, "CAP_MSMF"):
+                adicionar("MSMF", cv2.CAP_MSMF)
+            if hasattr(cv2, "CAP_DSHOW"):
+                adicionar("DSHOW", cv2.CAP_DSHOW)
+        else:
+            if hasattr(cv2, "CAP_DSHOW"):
+                adicionar("DSHOW", cv2.CAP_DSHOW)
+            if hasattr(cv2, "CAP_MSMF"):
+                adicionar("MSMF", cv2.CAP_MSMF)
+
+        adicionar("AUTO", cv2.CAP_ANY)
+        return candidatos
+
+    def _abrir_video_capture(self, backend: int):
+        if backend == cv2.CAP_ANY:
+            return cv2.VideoCapture(self.indice_camera)
+
+        return cv2.VideoCapture(
+            self.indice_camera,
+            backend,
+        )
+
+    def _aplicar_perfil_capture(self, capture) -> None:
+        # Automático: deixa o driver negociar tudo.
+        if self.perfil_automatico:
+            return
+
+        if self.formato_camera in ("MJPG", "YUY2"):
+            try:
+                capture.set(
+                    cv2.CAP_PROP_FOURCC,
+                    cv2.VideoWriter_fourcc(
+                        *self.formato_camera
+                    ),
+                )
+            except Exception:
+                pass
+
         try:
-            fps_real = float(capture.get(cv2.CAP_PROP_FPS))
+            capture.set(
+                cv2.CAP_PROP_FRAME_WIDTH,
+                self.largura,
+            )
+            capture.set(
+                cv2.CAP_PROP_FRAME_HEIGHT,
+                self.altura,
+            )
+        except Exception:
+            pass
+
+        if self.fps > 0:
+            try:
+                capture.set(
+                    cv2.CAP_PROP_FPS,
+                    self.fps,
+                )
+            except Exception:
+                pass
+
+    def _registrar_parametros_reais(
+        self,
+        capture,
+        backend_nome: str,
+        frame,
+    ) -> None:
+        frame = self._normalizar_frame(frame)
+
+        if frame is not None:
+            altura_real, largura_real = frame.shape[:2]
+        else:
+            largura_real = int(
+                capture.get(cv2.CAP_PROP_FRAME_WIDTH)
+            )
+            altura_real = int(
+                capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            )
+
+        try:
+            fps_real = float(
+                capture.get(cv2.CAP_PROP_FPS)
+            )
+            if not math.isfinite(fps_real) or fps_real <= 0:
+                fps_real = None
         except Exception:
             fps_real = None
 
@@ -582,514 +741,200 @@ class CameraService:
             formato_real = None
 
         with self._lock:
+            self._resolucao = (
+                largura_real,
+                altura_real,
+            )
             self._fps_real = fps_real
             self._formato_real = formato_real
+            self._backend_atual = backend_nome
 
-        return capture
+    def _abrir_camera(self):
+        for backend_nome, backend in self._obter_backends_candidatos():
+            if self._stop_event.is_set():
+                return None, None
 
-    @staticmethod
-    def _possui_metade_duplicada(frame_cinza) -> bool:
-        altura, largura = frame_cinza.shape[:2]
-        metade = largura // 2
+            capture = None
 
-        if metade < 32:
-            return False
+            try:
+                capture = self._abrir_video_capture(backend)
+            except Exception:
+                capture = None
 
-        esquerda = frame_cinza[:, :metade]
-        direita = frame_cinza[:, largura - metade:]
-
-        largura_teste = min(esquerda.shape[1], direita.shape[1], 320)
-        altura_teste = min(altura, 180)
-
-        esquerda = cv2.resize(esquerda, (largura_teste, altura_teste))
-        direita = cv2.resize(direita, (largura_teste, altura_teste))
-
-        diferenca_media = float(
-            np.mean(
-                np.abs(
-                    esquerda.astype(np.int16) - direita.astype(np.int16)
-                )
-            )
-        )
-
-        return diferenca_media <= 1.2
-
-    @staticmethod
-    def _reduzir_frame_cinza(
-        frame_cinza,
-        largura_maxima: int = 640,
-    ):
-        altura, largura = frame_cinza.shape[:2]
-
-        if largura <= largura_maxima:
-            return frame_cinza
-
-        largura_reduzida = int(largura_maxima)
-        altura_reduzida = max(
-            1,
-            int(altura * (largura_reduzida / largura)),
-        )
-        return cv2.resize(
-            frame_cinza,
-            (largura_reduzida, altura_reduzida),
-            interpolation=cv2.INTER_AREA,
-        )
-
-    @staticmethod
-    def _contar_cortes_retilineos(
-        diferencas,
-        vertical: bool,
-    ) -> int:
-        if vertical:
-            tamanho_eixo = diferencas.shape[1]
-            perfil = diferencas.mean(axis=0)
-        else:
-            tamanho_eixo = diferencas.shape[0]
-            perfil = diferencas.mean(axis=1)
-
-        if tamanho_eixo < 40:
-            return 0
-
-        mediana = float(np.median(perfil)) + 1.0
-        percentil_95 = float(np.percentile(perfil, 95)) + 1.0
-        limite_perfil = max(22.0, mediana * 5.5, percentil_95 * 1.65)
-        limite_pixel = max(24.0, mediana * 4.0)
-
-        inicio = int(tamanho_eixo * 0.08)
-        fim = int(tamanho_eixo * 0.92)
-        candidatos = []
-
-        for indice in range(inicio, fim):
-            valor = float(perfil[indice])
-
-            if valor < limite_perfil:
+            if capture is None or not capture.isOpened():
+                if capture is not None:
+                    try:
+                        capture.release()
+                    except Exception:
+                        pass
                 continue
 
-            if vertical:
-                fracao_forte = float(
-                    np.mean(diferencas[:, indice] >= limite_pixel)
-                )
-            else:
-                fracao_forte = float(
-                    np.mean(diferencas[indice, :] >= limite_pixel)
-                )
+            self._aplicar_perfil_capture(capture)
 
-            if fracao_forte >= 0.36:
-                candidatos.append(indice)
+            if self._stop_event.wait(self.espera_apos_abrir_s):
+                try:
+                    capture.release()
+                except Exception:
+                    pass
+                return None, None
 
-        if not candidatos:
-            return 0
-
-        grupos = 1
-        anterior = candidatos[0]
-
-        for indice in candidatos[1:]:
-            if indice - anterior > 5:
-                grupos += 1
-            anterior = indice
-
-        return grupos
-
-    @staticmethod
-    def _possui_corte_retilineo_suspeito(frame_cinza) -> bool:
-        cinza = CameraService._reduzir_frame_cinza(
-            frame_cinza,
-            largura_maxima=640,
-        ).astype(np.int16)
-
-        diferencas_x = np.abs(np.diff(cinza, axis=1))
-        diferencas_y = np.abs(np.diff(cinza, axis=0))
-
-        cortes_verticais = CameraService._contar_cortes_retilineos(
-            diferencas_x,
-            vertical=True,
-        )
-        cortes_horizontais = CameraService._contar_cortes_retilineos(
-            diferencas_y,
-            vertical=False,
-        )
-
-        return cortes_verticais >= 2 or cortes_horizontais >= 2
-
-    @staticmethod
-    def _possui_faixa_interna_suspeita(frame_cinza) -> bool:
-        cinza = CameraService._reduzir_frame_cinza(
-            frame_cinza,
-            largura_maxima=640,
-        ).astype(np.float32)
-
-        altura, largura = cinza.shape[:2]
-
-        if altura < 120 or largura < 160:
-            return False
-
-        # Frames parcialmente decodificados costumam apresentar blocos com
-        # textura/luminosidade muito diferente separados por linhas retas.
-        # A checagem abaixo compara faixas internas com suas vizinhas.
-        faixas_x = 12
-        largura_faixa = max(8, largura // faixas_x)
-        medias_x = []
-        desvios_x = []
-
-        for indice in range(faixas_x):
-            x1 = indice * largura_faixa
-            x2 = largura if indice == faixas_x - 1 else (indice + 1) * largura_faixa
-            trecho = cinza[:, x1:x2]
-            medias_x.append(float(trecho.mean()))
-            desvios_x.append(float(trecho.std()))
-
-        saltos_media_x = np.abs(np.diff(np.array(medias_x)))
-        saltos_desvio_x = np.abs(np.diff(np.array(desvios_x)))
-
-        if (
-            float(np.max(saltos_media_x)) >= 42.0
-            and float(np.percentile(saltos_media_x, 85)) >= 18.0
-            and float(np.max(saltos_desvio_x)) >= 18.0
-        ):
-            return True
-
-        faixas_y = 8
-        altura_faixa = max(8, altura // faixas_y)
-        medias_y = []
-        desvios_y = []
-
-        for indice in range(faixas_y):
-            y1 = indice * altura_faixa
-            y2 = altura if indice == faixas_y - 1 else (indice + 1) * altura_faixa
-            trecho = cinza[y1:y2, :]
-            medias_y.append(float(trecho.mean()))
-            desvios_y.append(float(trecho.std()))
-
-        saltos_media_y = np.abs(np.diff(np.array(medias_y)))
-        saltos_desvio_y = np.abs(np.diff(np.array(desvios_y)))
-
-        return (
-            float(np.max(saltos_media_y)) >= 42.0
-            and float(np.percentile(saltos_media_y, 85)) >= 18.0
-            and float(np.max(saltos_desvio_y)) >= 18.0
-        )
-
-    @staticmethod
-    def _possui_emenda_suspeita(frame_cinza) -> bool:
-        altura, largura = frame_cinza.shape[:2]
-
-        if largura < 160 or altura < 120:
-            return False
-
-        largura_reduzida = min(480, largura)
-        altura_reduzida = max(1, int(altura * (largura_reduzida / largura)))
-        cinza = cv2.resize(
-            frame_cinza,
-            (largura_reduzida, altura_reduzida),
-            interpolation=cv2.INTER_AREA,
-        )
-        cinza = cinza.astype(np.int16)
-
-        diferencas_x = np.abs(np.diff(cinza, axis=1))
-        pontuacao_colunas = diferencas_x.mean(axis=0)
-        mediana_x = float(np.median(pontuacao_colunas)) + 1.0
-
-        inicio_x = int(len(pontuacao_colunas) * 0.20)
-        fim_x = int(len(pontuacao_colunas) * 0.80)
-
-        if fim_x > inicio_x:
-            trecho = pontuacao_colunas[inicio_x:fim_x]
-            indice_local = int(np.argmax(trecho))
-            indice = inicio_x + indice_local
-            valor = float(pontuacao_colunas[indice])
-            fracao_linhas_fortes = float(
-                np.mean(diferencas_x[:, indice] >= 30)
+            self._aplicar_configuracoes_hardware(
+                capture,
+                forcar=True,
             )
 
-            if (
-                valor >= max(28.0, mediana_x * 5.0)
-                and fracao_linhas_fortes >= 0.42
-            ):
-                return True
+            primeiro_frame = None
+            sucessos_consecutivos = 0
 
-        diferencas_y = np.abs(np.diff(cinza, axis=0))
-        pontuacao_linhas = diferencas_y.mean(axis=1)
-        mediana_y = float(np.median(pontuacao_linhas)) + 1.0
-
-        inicio_y = int(len(pontuacao_linhas) * 0.20)
-        fim_y = int(len(pontuacao_linhas) * 0.80)
-
-        if fim_y > inicio_y:
-            trecho = pontuacao_linhas[inicio_y:fim_y]
-            indice_local = int(np.argmax(trecho))
-            indice = inicio_y + indice_local
-            valor = float(pontuacao_linhas[indice])
-            fracao_colunas_fortes = float(
-                np.mean(diferencas_y[indice, :] >= 30)
-            )
-
-            if (
-                valor >= max(28.0, mediana_y * 5.0)
-                and fracao_colunas_fortes >= 0.42
-            ):
-                return True
-
-        # Os filtros abaixo foram mantidos no arquivo para diagnóstico futuro,
-        # mas não são usados como bloqueio no modo estável. Em placas PCI reais,
-        # trilhas, bordas de componentes e divisões naturais podem parecer
-        # cortes para esses filtros e impedir a transmissão contínua.
-        #
-        # if CameraService._possui_corte_retilineo_suspeito(frame_cinza):
-        #     return True
-        #
-        # if CameraService._possui_faixa_interna_suspeita(frame_cinza):
-        #     return True
-
-        return False
-
-    @staticmethod
-    def _calcular_assinatura_estabilidade(frame_cinza):
-        assinatura = cv2.resize(
-            frame_cinza,
-            (96, 54),
-            interpolation=cv2.INTER_AREA,
-        )
-        assinatura = cv2.GaussianBlur(assinatura, (5, 5), 0)
-        return assinatura.astype(np.int16)
-
-    @staticmethod
-    def _diferenca_assinaturas(assinatura_atual, assinatura_anterior) -> float:
-        if assinatura_atual is None or assinatura_anterior is None:
-            return 0.0
-
-        return float(
-            np.mean(
-                np.abs(assinatura_atual - assinatura_anterior)
-            )
-        )
-
-    def _frame_valido(
-        self,
-        frame,
-        resolucao_obrigatoria: tuple[int, int] | None,
-    ) -> bool:
-        if frame is None or frame.size == 0:
-            return False
-
-        if len(frame.shape) != 3 or frame.shape[2] != 3:
-            return False
-
-        altura_frame, largura_frame = frame.shape[:2]
-
-        if (
-            largura_frame < self.largura_minima
-            or altura_frame < self.altura_minima
-        ):
-            return False
-
-        if resolucao_obrigatoria is not None:
-            largura_esperada, altura_esperada = resolucao_obrigatoria
-
-            if (
-                largura_frame != largura_esperada
-                or altura_frame != altura_esperada
-            ):
-                return False
-
-        frame_cinza = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        media_luminosidade = float(frame_cinza.mean())
-        desvio_luminosidade = float(frame_cinza.std())
-
-        if (
-            media_luminosidade <= self.limite_preto_media
-            and desvio_luminosidade <= self.limite_preto_desvio
-        ):
-            return False
-
-        metade = largura_frame // 2
-
-        if metade > 0:
-            esquerda = frame_cinza[:, :metade]
-            direita = frame_cinza[:, metade:]
-            desvio_esquerda = float(esquerda.std())
-            desvio_direita = float(direita.std())
-
-            if (
-                desvio_esquerda <= 1.0 and desvio_direita >= 8.0
-            ) or (
-                desvio_direita <= 1.0 and desvio_esquerda >= 8.0
-            ):
-                return False
-
-        if self._possui_metade_duplicada(frame_cinza):
-            return False
-
-        if self._possui_emenda_suspeita(frame_cinza):
-            return False
-
-        return True
-
-    def _aguardar_reconexao(self) -> bool:
-        return self._stop_event.wait(self.intervalo_reconexao_s)
-
-    def _executar(self) -> None:
-        ja_conectou_antes = False
-        resolucao_preferida: tuple[int, int] | None = None
-
-        while not self._stop_event.is_set():
-            self._definir_estado(
-                self.ESTADO_CONECTANDO if not ja_conectou_antes else self.ESTADO_DESCONECTADA,
-                (
-                    "Conectando câmera..."
-                    if not ja_conectou_antes
-                    else "Câmera desconectada. Reconectando automaticamente..."
-                ),
-            )
-
-            capture = self._abrir_camera()
-
-            if capture is None:
+            for _ in range(self.frames_aquecimento):
                 if self._stop_event.is_set():
                     break
 
-                self._definir_estado(
-                    self.ESTADO_DESCONECTADA,
-                    "Câmera desconectada. Reconectando automaticamente...",
+                try:
+                    sucesso, frame = capture.read()
+                except Exception:
+                    sucesso, frame = False, None
+
+                frame = (
+                    self._normalizar_frame(frame)
+                    if sucesso
+                    else None
                 )
 
-                if self._aguardar_reconexao():
-                    break
-                continue
+                if self._frame_basico_valido(frame):
+                    sucessos_consecutivos += 1
+                    primeiro_frame = frame
 
-            self._definir_estado(
-                self.ESTADO_ESTABILIZANDO,
-                (
-                    "Câmera reconectada. Estabilizando imagem..."
-                    if ja_conectou_antes
-                    else "Câmera conectada. Estabilizando imagem..."
-                ),
-            )
-
-            resolucao_candidata: tuple[int, int] | None = None
-            frames_descartar = self.frames_aquecimento
-            frames_validos_consecutivos = 0
-            falhas_leitura_consecutivas = 0
-            frames_invalidos_consecutivos = 0
-            limite_frames_invalidos = max(90, self.falhas_antes_reconexao * 20)
-            camera_estabilizada = False
-            assinatura_estabilidade_anterior = None
-
-            while not self._stop_event.is_set():
-                configuracao_alterada = (
-                    self._aplicar_configuracoes_hardware(capture)
-                )
-
-                if configuracao_alterada:
-                    self._definir_estado(
-                        self.ESTADO_ESTABILIZANDO,
-                        "Aplicando configurações da câmera...",
-                    )
-                    frames_descartar = max(frames_descartar, 15)
-                    frames_validos_consecutivos = 0
-                    camera_estabilizada = False
-                    assinatura_estabilidade_anterior = None
-
-                sucesso, frame = capture.read()
-
-                resolucao_obrigatoria = (
-                    resolucao_preferida
-                    if ja_conectou_antes and resolucao_preferida is not None
-                    else resolucao_candidata
-                )
-
-                if not sucesso or frame is None:
-                    falhas_leitura_consecutivas += 1
-                    frames_validos_consecutivos = 0
-                    assinatura_estabilidade_anterior = None
-
-                    if falhas_leitura_consecutivas >= self.falhas_antes_reconexao:
+                    if sucessos_consecutivos >= 2:
                         break
-                    continue
+                else:
+                    sucessos_consecutivos = 0
+                    self._stop_event.wait(0.02)
 
-                if not self._frame_valido(
-                    frame,
-                    resolucao_obrigatoria,
-                ):
-                    frames_invalidos_consecutivos += 1
-                    frames_validos_consecutivos = 0
-                    assinatura_estabilidade_anterior = None
-
-                    self._definir_estado(
-                        self.ESTADO_ESTABILIZANDO,
-                        "Câmera conectada. Aguardando frame estável...",
-                    )
-
-                    # Frame inválido não significa necessariamente câmera
-                    # desconectada. Pode ser apenas um frame parcial, preto,
-                    # borrado ou instável no início. Só força reconexão se
-                    # isso persistir por muitos frames.
-                    if frames_invalidos_consecutivos >= limite_frames_invalidos:
-                        break
-                    continue
-
-                altura_frame, largura_frame = frame.shape[:2]
-                resolucao_atual = (largura_frame, altura_frame)
-
-                if resolucao_candidata is None:
-                    resolucao_candidata = resolucao_atual
-
-                falhas_leitura_consecutivas = 0
-                frames_invalidos_consecutivos = 0
-
-                if frames_descartar > 0:
-                    frames_descartar -= 1
-                    continue
-
-                frame_cinza_estabilidade = cv2.cvtColor(
-                    frame,
-                    cv2.COLOR_BGR2GRAY,
+            if primeiro_frame is not None:
+                self._registrar_parametros_reais(
+                    capture,
+                    backend_nome,
+                    primeiro_frame,
                 )
-                assinatura_atual = self._calcular_assinatura_estabilidade(
-                    frame_cinza_estabilidade
-                )
-
-                if not camera_estabilizada:
-                    if assinatura_estabilidade_anterior is None:
-                        assinatura_estabilidade_anterior = assinatura_atual
-                        frames_validos_consecutivos = 1
-                        continue
-
-                    diferenca_estabilidade = self._diferenca_assinaturas(
-                        assinatura_atual,
-                        assinatura_estabilidade_anterior,
-                    )
-                    assinatura_estabilidade_anterior = assinatura_atual
-
-                    if diferenca_estabilidade > 45.0:
-                        frames_validos_consecutivos = 1
-                        continue
-
-                    frames_validos_consecutivos += 1
-
-                    if frames_validos_consecutivos < self.frames_estabilidade:
-                        continue
-
-                    camera_estabilizada = True
-                    resolucao_preferida = resolucao_atual
-
-                frame_processado = self._aplicar_rotacao(frame)
-                self._publicar_frame(frame_processado)
-                ja_conectou_antes = True
+                return capture, primeiro_frame
 
             try:
                 capture.release()
             except Exception:
                 pass
 
-            if self._stop_event.is_set():
-                break
+        return None, None
+
+    def _aguardar_reconexao(self) -> bool:
+        return self._stop_event.wait(
+            self.intervalo_reconexao_s
+        )
+
+    def _executar(self) -> None:
+        ja_conectou_antes = False
+
+        try:
+            while not self._stop_event.is_set():
+                self._definir_estado(
+                    (
+                        self.ESTADO_CONECTANDO
+                        if not ja_conectou_antes
+                        else self.ESTADO_DESCONECTADA
+                    ),
+                    (
+                        "Conectando câmera..."
+                        if not ja_conectou_antes
+                        else (
+                            "Câmera desconectada. "
+                            "Reconectando automaticamente..."
+                        )
+                    ),
+                )
+
+                capture, primeiro_frame = self._abrir_camera()
+
+                if capture is None or primeiro_frame is None:
+                    if self._stop_event.is_set():
+                        break
+
+                    self._definir_estado(
+                        self.ESTADO_DESCONECTADA,
+                        (
+                            "Câmera indisponível. "
+                            "Reconectando automaticamente..."
+                        ),
+                    )
+
+                    if self._aguardar_reconexao():
+                        break
+
+                    continue
+
+                frame_processado = self._aplicar_rotacao(
+                    primeiro_frame
+                )
+                self._publicar_frame(frame_processado)
+                ja_conectou_antes = True
+                falhas_consecutivas = 0
+
+                while not self._stop_event.is_set():
+                    self._aplicar_configuracoes_hardware(
+                        capture
+                    )
+
+                    try:
+                        sucesso, frame = capture.read()
+                    except Exception:
+                        sucesso, frame = False, None
+
+                    frame = (
+                        self._normalizar_frame(frame)
+                        if sucesso
+                        else None
+                    )
+
+                    if not self._frame_basico_valido(frame):
+                        falhas_consecutivas += 1
+
+                        if (
+                            falhas_consecutivas
+                            >= self.falhas_antes_reconexao
+                        ):
+                            break
+
+                        self._stop_event.wait(0.02)
+                        continue
+
+                    falhas_consecutivas = 0
+                    frame_processado = self._aplicar_rotacao(
+                        frame
+                    )
+                    self._publicar_frame(frame_processado)
+
+                try:
+                    capture.release()
+                except Exception:
+                    pass
+
+                if self._stop_event.is_set():
+                    break
+
+                self._definir_estado(
+                    self.ESTADO_DESCONECTADA,
+                    (
+                        "Câmera sem resposta. "
+                        "Reconectando automaticamente..."
+                    ),
+                )
+
+                if self._aguardar_reconexao():
+                    break
+        finally:
+            with self._lock:
+                self._thread = None
 
             self._definir_estado(
-                self.ESTADO_DESCONECTADA,
-                "Câmera desconectada. Reconectando automaticamente...",
+                self.ESTADO_PARADA,
+                "Câmera parada.",
             )
-
-            if self._aguardar_reconexao():
-                break
-
-        self._definir_estado(self.ESTADO_PARADA, "Câmera parada.")

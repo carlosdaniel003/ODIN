@@ -31,15 +31,43 @@ def abrir_janela_configuracoes(
     camera_conectada: bool = False,
     status_controles_camera: dict | None = None,
 ) -> None:
-    largura_janela = 760
-    altura_janela = 820
+    largura_preferida = 820
+    altura_preferida = 860
 
     janela = tk.Toplevel(self.root)
     janela.title("Configurações - LumusPCI")
     janela.withdraw()
-    janela.resizable(False, False)
+    janela.overrideredirect(False)
+    janela.resizable(True, True)
     janela.configure(bg=self.COR_CARD)
-    janela.transient(self.root)
+    janela.minsize(680, 620)
+
+    # Quando a janela principal está em fullscreen sem bordas, usar
+    # transient pode fazer o Windows ocultar a moldura da janela filha.
+    try:
+        raiz_sem_bordas = bool(self.root.overrideredirect())
+    except tk.TclError:
+        raiz_sem_bordas = False
+
+    if not raiz_sem_bordas:
+        janela.transient(self.root)
+
+    def fechar_janela(evento=None) -> str | None:
+        try:
+            janela.grab_release()
+        except tk.TclError:
+            pass
+
+        if janela.winfo_exists():
+            janela.destroy()
+
+        if evento is not None:
+            return "break"
+
+        return None
+
+    janela.protocol("WM_DELETE_WINDOW", fechar_janela)
+    janela.bind("<Escape>", fechar_janela)
     janela.grab_set()
 
     self.root.update_idletasks()
@@ -49,11 +77,32 @@ def abrir_janela_configuracoes(
     posicao_root_x = self.root.winfo_x()
     posicao_root_y = self.root.winfo_y()
 
+    largura_tela = max(680, janela.winfo_screenwidth())
+    altura_tela = max(620, janela.winfo_screenheight())
+
+    largura_janela = min(
+        largura_preferida,
+        max(680, largura_tela - 80),
+    )
+    altura_janela = min(
+        altura_preferida,
+        max(620, altura_tela - 100),
+    )
+
     posicao_janela_x = posicao_root_x + int(
         (largura_root - largura_janela) / 2
     )
     posicao_janela_y = posicao_root_y + int(
         (altura_root - altura_janela) / 2
+    )
+
+    posicao_janela_x = max(
+        10,
+        min(posicao_janela_x, largura_tela - largura_janela - 10),
+    )
+    posicao_janela_y = max(
+        10,
+        min(posicao_janela_y, altura_tela - altura_janela - 50),
     )
 
     janela.geometry(
@@ -106,6 +155,23 @@ def abrir_janela_configuracoes(
         anchor="w",
     ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+    botao_fechar = tk.Button(
+        frame_cabecalho_linha,
+        text="✕",
+        command=fechar_janela,
+        width=3,
+        bg=self.COR_CARD_2,
+        fg=self.COR_TEXTO_3,
+        activebackground="#7F1D1D",
+        activeforeground="#FECACA",
+        relief=tk.FLAT,
+        bd=0,
+        font=("Segoe UI Symbol", 10, "bold"),
+        cursor="hand2",
+        takefocus=True,
+    )
+    botao_fechar.pack(side=tk.RIGHT, padx=(10, 0))
+
     tk.Label(
         frame_cabecalho_linha,
         text="LUMUS-PCI",
@@ -131,10 +197,28 @@ def abrir_janela_configuracoes(
 
     estilo = ttk.Style(janela)
 
-    try:
-        estilo.theme_use("clam")
-    except tk.TclError:
-        pass
+    # O tema ttk é global para toda a aplicação. Não alteramos o tema aqui,
+    # para que abrir Configurações não modifique a aparência da tela principal.
+    janela.option_add(
+        "*TCombobox*Listbox.background",
+        "#020617",
+    )
+    janela.option_add(
+        "*TCombobox*Listbox.foreground",
+        self.COR_TEXTO,
+    )
+    janela.option_add(
+        "*TCombobox*Listbox.selectBackground",
+        "#0F3D24",
+    )
+    janela.option_add(
+        "*TCombobox*Listbox.selectForeground",
+        "#BBF7D0",
+    )
+    janela.option_add(
+        "*TCombobox*Listbox.font",
+        "Segoe UI 9",
+    )
 
     estilo.configure(
         "Lumus.TNotebook",
@@ -167,11 +251,38 @@ def abrir_janela_configuracoes(
         fieldbackground="#020617",
         background=self.COR_CARD_2,
         foreground=self.COR_TEXTO,
+        selectbackground="#0F3D24",
+        selectforeground="#BBF7D0",
         arrowcolor=self.COR_TEXTO_2,
         bordercolor=self.COR_BORDA,
         lightcolor=self.COR_BORDA,
         darkcolor=self.COR_BORDA,
-        padding=(8, 5),
+        padding=(8, 6),
+        relief="flat",
+    )
+    estilo.map(
+        "Lumus.TCombobox",
+        fieldbackground=[
+            ("readonly", "#020617"),
+            ("disabled", self.COR_CARD),
+        ],
+        foreground=[
+            ("readonly", self.COR_TEXTO),
+            ("disabled", self.COR_TEXTO_3),
+        ],
+        background=[
+            ("readonly", self.COR_CARD_2),
+            ("active", "#102033"),
+            ("disabled", self.COR_CARD),
+        ],
+        arrowcolor=[
+            ("readonly", self.COR_TEXTO_2),
+            ("disabled", self.COR_TEXTO_3),
+        ],
+        bordercolor=[
+            ("focus", self.COR_AZUL),
+            ("readonly", self.COR_BORDA),
+        ],
     )
 
     notebook = ttk.Notebook(
@@ -267,7 +378,7 @@ def abrir_janela_configuracoes(
         return corpo
 
     def executar_e_fechar(nome_callback: str) -> None:
-        janela.destroy()
+        fechar_janela()
         self.root.after(80, self.callbacks[nome_callback])
 
     # Aba Sistema ---------------------------------------------------------
@@ -411,6 +522,9 @@ def abrir_janela_configuracoes(
         bg="#020617",
         fg=self.COR_TEXTO,
         buttonbackground=self.COR_CARD_2,
+        disabledbackground=self.COR_CARD,
+        disabledforeground=self.COR_TEXTO_3,
+        readonlybackground="#020617",
         relief=tk.FLAT,
         bd=2,
         justify=tk.CENTER,
@@ -610,6 +724,9 @@ def abrir_janela_configuracoes(
         bg="#020617",
         fg=self.COR_TEXTO,
         buttonbackground=self.COR_CARD_2,
+        disabledbackground=self.COR_CARD,
+        disabledforeground=self.COR_TEXTO_3,
+        readonlybackground="#020617",
         relief=tk.FLAT,
         bd=2,
         justify=tk.CENTER,
@@ -635,6 +752,9 @@ def abrir_janela_configuracoes(
         bg="#020617",
         fg=self.COR_TEXTO,
         buttonbackground=self.COR_CARD_2,
+        disabledbackground=self.COR_CARD,
+        disabledforeground=self.COR_TEXTO_3,
+        readonlybackground="#020617",
         relief=tk.FLAT,
         bd=2,
         justify=tk.CENTER,
@@ -881,6 +1001,7 @@ def abrir_janela_configuracoes(
         state="readonly",
         width=12,
         font=("Segoe UI", 10, "bold"),
+        style="Lumus.TCombobox",
     )
     combo_rotacao.pack(
         anchor="w",
@@ -1033,12 +1154,12 @@ def abrir_janela_configuracoes(
             raio_configurado_px,
             configuracoes_camera_salvar,
         )
-        janela.destroy()
+        fechar_janela()
 
     tk.Button(
         frame_botoes,
         text="Cancelar",
-        command=janela.destroy,
+        command=fechar_janela,
         width=12,
         height=2,
         bg=self.COR_CARD_2,
@@ -1067,6 +1188,12 @@ def abrir_janela_configuracoes(
         cursor="hand2",
     ).pack(side=tk.RIGHT)
 
+    janela.bind(
+        "<Control-Return>",
+        lambda _evento: confirmar(),
+    )
+
+    janela.update_idletasks()
     janela.deiconify()
     janela.lift()
     janela.focus_force()
