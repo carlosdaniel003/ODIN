@@ -5,8 +5,16 @@ import cv2
 
 
 def _converter_imagem_bgr_para_photoimage(imagem_bgr):
-    imagem_rgb = cv2.cvtColor(imagem_bgr, cv2.COLOR_BGR2RGB)
-    sucesso, buffer = cv2.imencode(".png", imagem_rgb)
+    """
+    Converte imagem BGR do OpenCV para PhotoImage.
+
+    Aqui NÃO pode converter BGR -> RGB, porque estamos usando cv2.imencode().
+    O cv2.imencode espera a imagem no padrão BGR do OpenCV.
+    """
+    if imagem_bgr is None or imagem_bgr.size == 0:
+        return None
+
+    sucesso, buffer = cv2.imencode(".png", imagem_bgr)
 
     if not sucesso:
         return None
@@ -65,9 +73,10 @@ def desenhar_lupa_canvas(
     centro_lupa_y = int((imagem_y - y1) * escala_y)
     raio_lupa = max(8, int(raio_atual * ((escala_x + escala_y) / 2)))
 
+    # Cores em BGR, porque o desenho é feito com OpenCV.
     cor_azul = (248, 189, 56)
     cor_verde = (94, 234, 212)
-    cor_fundo = (15, 23, 42)
+    cor_branco = (255, 255, 255)
 
     cv2.circle(
         recorte_ampliado,
@@ -97,7 +106,7 @@ def desenhar_lupa_canvas(
         recorte_ampliado,
         (centro_lupa_x, centro_lupa_y),
         2,
-        (255, 255, 255),
+        cor_branco,
         -1,
     )
 
@@ -116,6 +125,7 @@ def desenhar_lupa_canvas(
         return
 
     self.lupa_tk = imagem_tk
+
     self.canvas.delete("lupa_canvas")
 
     largura_canvas, altura_canvas = self.obter_tamanho_canvas_principal()
