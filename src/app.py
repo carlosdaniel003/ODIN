@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -19,6 +20,7 @@ from src.ui.main_window import LumusPCIView
 RAIO_MAXIMO_LED_PX = MAX_RADIUS_PX
 INDICE_CAMERA_PADRAO = 0
 INTERVALO_CAMERA_MS = 45
+INTERVALO_RENDERIZACOES_CAMERA_MS = 250
 TEMPO_RESULTADO_CAMERA_MS = 3000
 CAMERA_LARGURA_DESEJADA = 1280
 CAMERA_ALTURA_DESEJADA = 720
@@ -71,6 +73,7 @@ class LumusPCIApp:
         self.camera_estado_anterior = CameraService.ESTADO_PARADA
         self.camera_desconectada = False
         self.camera_aviso_estado: str | None = None
+        self.camera_ultima_renderizacao_auxiliar_s = 0.0
 
         # Estado visual e temporário da seleção durante a câmera ao vivo.
         # Os LEDs fixos permanecem salvos no JSON mesmo quando suas guias
@@ -188,7 +191,11 @@ class LumusPCIApp:
                         self.resultados_led_atual,
                     )
 
-                    if not self.camera_ativa:
+                    if self.camera_ativa:
+                        self.atualizar_renderizacoes_camera_se_necessario(
+                            forcar=True
+                        )
+                    else:
                         self.atualizar_renderizacoes_visuais(
                             self.leds_selecionados
                         )
@@ -274,8 +281,56 @@ class LumusPCIApp:
             self.view.limpar_renderizacoes_visuais()
             return
 
-        renderizacoes_visuais = criar_pacote_renderizacoes_visuais(self.imagem_original, alvo)
-        self.view.exibir_renderizacoes_visuais(renderizacoes_visuais)
+        renderizacoes_visuais = (
+            criar_pacote_renderizacoes_visuais(
+                self.imagem_original,
+                alvo,
+            )
+        )
+        self.view.exibir_renderizacoes_visuais(
+            renderizacoes_visuais
+        )
+
+    def atualizar_renderizacoes_camera_se_necessario(
+        self,
+        forcar: bool = False,
+    ) -> None:
+        """
+        Atualiza os painéis auxiliares da câmera em frequência reduzida.
+
+        A imagem principal continua no intervalo normal da câmera. Canal V,
+        heatmap, máscara e ROI debug são atualizados a cada 250 ms para não
+        sobrecarregar o Tkinter com quatro codificações PNG por frame.
+        """
+        if (
+            not self.camera_ativa
+            or self.imagem_original is None
+            or self.camera_em_pausa_analise
+        ):
+            return
+
+        agora = time.monotonic()
+        intervalo_s = (
+            INTERVALO_RENDERIZACOES_CAMERA_MS
+            / 1000.0
+        )
+
+        if (
+            not forcar
+            and agora
+            - self.camera_ultima_renderizacao_auxiliar_s
+            < intervalo_s
+        ):
+            return
+
+        alvo = (
+            self.resultados_led_atual
+            if self.resultados_led_atual
+            else self.leds_selecionados
+        )
+
+        self.atualizar_renderizacoes_visuais(alvo)
+        self.camera_ultima_renderizacao_auxiliar_s = agora
 
 
     def obter_parametros_camera_dinamicos(self) -> tuple[int, int, int]:
@@ -517,6 +572,7 @@ class LumusPCIApp:
         self.camera_estado_anterior = CameraService.ESTADO_PARADA
         self.camera_desconectada = False
         self.camera_frame_atual = None
+        self.camera_ultima_renderizacao_auxiliar_s = 0.0
         self.modo_atual = "tela_ao_vivo"
         self.resultados_led_atual = []
         self.leds_fixos_configurados = self.config_repository.carregar_leds_fixos()
@@ -569,6 +625,7 @@ class LumusPCIApp:
         self.camera_ultimo_frame_id = -1
         self.camera_estado_anterior = CameraService.ESTADO_PARADA
         self.camera_desconectada = False
+        self.camera_ultima_renderizacao_auxiliar_s = 0.0
         self.guias_leds_fixos_visiveis = True
         self.selecao_manual_camera_ativa = False
         self.leds_manuais_camera = []
@@ -789,6 +846,7 @@ class LumusPCIApp:
                     self.leds_selecionados,
                     self.resultados_led_atual,
                 )
+                self.atualizar_renderizacoes_camera_se_necessario()
 
         self.agendar_proximo_frame_camera()
 
@@ -1083,6 +1141,10 @@ class LumusPCIApp:
             )
             self.view.atualizar_estado_selecao_led(False)
 
+        self.atualizar_renderizacoes_camera_se_necessario(
+            forcar=True
+        )
+
         if self.camera_desconectada:
             self.view.atualizar_status(
                 "Câmera desconectada. Reconectando automaticamente..."
@@ -1292,8 +1354,14 @@ class LumusPCIApp:
             self.resultados_led_atual,
         )
 
-        if not self.camera_ativa:
-            self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+        if self.camera_ativa:
+            self.atualizar_renderizacoes_camera_se_necessario(
+                forcar=True
+            )
+        else:
+            self.atualizar_renderizacoes_visuais(
+                self.leds_selecionados
+            )
 
         self.view.atualizar_faixa_resultado()
         self.atualizar_painel_inicial()
@@ -1311,33 +1379,157 @@ class LumusPCIApp:
             self.selecionar_led_para_analise(evento.x, evento.y)
 
 
-    def selecionar_led_para_analise(self, canvas_x: int, canvas_y: int) -> None:
-        coordenadas_imagem = self.view.converter_canvas_para_imagem_original(canvas_x, canvas_y)
+    def _obter_led_ja_selecionado_proximo(
+        self,
+        centro_x: int,
+        centro_y: int,
+        raio: int,
+    ):
+        """
+        Retorna um LED existente quando o novo clique ocorre praticamente
+        sobre uma seleção já registrada.
+
+        Isso impede que vários cliques no mesmo LED criem TESTE_001,
+        TESTE_002, TESTE_003... na mesma posição.
+        """
+        if self.modo_atual == "selecionar_leds_camera":
+            leds_existentes = self.leds_manuais_camera
+        else:
+            leds_existentes = self.leds_selecionados
+
+        for led in leds_existentes:
+            raio_existente = max(
+                1,
+                int(getattr(led, "raio", raio)),
+            )
+            limite_distancia = max(
+                10,
+                int(max(raio, raio_existente) * 0.85),
+            )
+
+            delta_x = int(led.centro_x) - centro_x
+            delta_y = int(led.centro_y) - centro_y
+
+            if (
+                delta_x * delta_x + delta_y * delta_y
+                <= limite_distancia * limite_distancia
+            ):
+                return led
+
+        return None
+
+    def _mostrar_confirmacao_selecao_na_lupa(
+        self,
+        canvas_x: int,
+        canvas_y: int,
+        led,
+        tipo: str,
+    ) -> None:
+        """
+        Registra e redesenha imediatamente o feedback visual da lupa.
+
+        tipo:
+        - "selecionado": novo LED confirmado;
+        - "duplicado": clique sobre um LED já selecionado.
+        """
+        if led is None:
+            return
+
+        self.view._lupa_confirmacao = {
+            "tipo": tipo,
+            "id": str(getattr(led, "id", "LED")),
+            "centro_x": int(led.centro_x),
+            "centro_y": int(led.centro_y),
+            "total": len(self.leds_selecionados),
+            "expira_em": time.monotonic() + 1.25,
+        }
+
+        # O clique pode ocorrer sem movimento posterior do mouse. Por isso,
+        # a lupa é redesenhada aqui, em vez de esperar outro evento <Motion>.
+        self.view.desenhar_lupa_canvas(
+            canvas_x=canvas_x,
+            canvas_y=canvas_y,
+            imagem_x=int(led.centro_x),
+            imagem_y=int(led.centro_y),
+        )
+
+    def selecionar_led_para_analise(
+        self,
+        canvas_x: int,
+        canvas_y: int,
+    ) -> None:
+        coordenadas_imagem = (
+            self.view.converter_canvas_para_imagem_original(
+                canvas_x,
+                canvas_y,
+            )
+        )
 
         if coordenadas_imagem is None:
-            self.view.atualizar_status("clique ignorado: fora da imagem exibida.")
+            self.view.atualizar_status(
+                "clique ignorado: fora da imagem exibida."
+            )
             return
 
         centro_x, centro_y = coordenadas_imagem
-        raio = min(RAIO_MAXIMO_LED_PX, self.raio_atual_px)
+        raio = min(
+            RAIO_MAXIMO_LED_PX,
+            self.raio_atual_px,
+        )
 
         if self.raio_atual_px != raio:
             self.raio_atual_px = raio
-            self.view.atualizar_label_raio(self.raio_atual_px)
+            self.view.atualizar_label_raio(
+                self.raio_atual_px
+            )
 
-        if not validar_centro_led(centro_x, centro_y, raio, self.largura_original, self.altura_original):
-            self.view.atualizar_status("clique ignorado: LED fora da área válida da imagem.")
+        if not validar_centro_led(
+            centro_x,
+            centro_y,
+            raio,
+            self.largura_original,
+            self.altura_original,
+        ):
+            self.view.atualizar_status(
+                "clique ignorado: LED fora da área válida da imagem."
+            )
+            return
+
+        led_duplicado = (
+            self._obter_led_ja_selecionado_proximo(
+                centro_x,
+                centro_y,
+                raio,
+            )
+        )
+
+        if led_duplicado is not None:
+            self._mostrar_confirmacao_selecao_na_lupa(
+                canvas_x=canvas_x,
+                canvas_y=canvas_y,
+                led=led_duplicado,
+                tipo="duplicado",
+            )
+            self.view.atualizar_status(
+                f"{led_duplicado.id} já está selecionado. "
+                f"Total mantido: {len(self.leds_selecionados)}."
+            )
             return
 
         if self.modo_atual == "selecionar_leds_camera":
-            id_led = f"TESTE_{len(self.leds_manuais_camera) + 1:03d}"
-            novo_led = LedSelection(
+            id_led = (
+                f"TESTE_"
+                f"{len(self.leds_manuais_camera) + 1:03d}"
+            )
+            led_confirmado = LedSelection(
                 id=id_led,
                 centro_x=centro_x,
                 centro_y=centro_y,
                 raio=raio,
             )
-            self.leds_manuais_camera.append(novo_led)
+            self.leds_manuais_camera.append(
+                led_confirmado
+            )
             self.leds_selecionados = [
                 LedSelection(
                     id=led.id,
@@ -1350,34 +1542,72 @@ class LumusPCIApp:
             self.guias_leds_fixos_visiveis = False
             self.view.selecao_manual_camera_visivel = True
         else:
-            id_led = f"LED_{len(self.leds_selecionados) + 1:03d}"
+            id_led = (
+                f"LED_"
+                f"{len(self.leds_selecionados) + 1:03d}"
+            )
+            led_confirmado = LedSelection(
+                id=id_led,
+                centro_x=centro_x,
+                centro_y=centro_y,
+                raio=raio,
+            )
             self.leds_selecionados.append(
-                LedSelection(
-                    id=id_led,
-                    centro_x=centro_x,
-                    centro_y=centro_y,
-                    raio=raio,
-                )
+                led_confirmado
             )
 
         self.resultados_led_atual = []
 
-        self.view.preparar_imagem_para_exibicao(self.imagem_original)
-        self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
+        self.view.preparar_imagem_para_exibicao(
+            self.imagem_original
+        )
+        self.view.desenhar_canvas(
+            self.leds_selecionados,
+            self.resultados_led_atual,
+        )
 
-        if not self.camera_ativa:
-            self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+        if self.camera_ativa:
+            self.atualizar_renderizacoes_camera_se_necessario(
+                forcar=True
+            )
+        else:
+            self.atualizar_renderizacoes_visuais(
+                self.leds_selecionados
+            )
 
         self.view.atualizar_faixa_resultado()
 
+        # A confirmação é desenhada depois da atualização do Canvas para
+        # permanecer acima da imagem e das marcações principais.
+        self._mostrar_confirmacao_selecao_na_lupa(
+            canvas_x=canvas_x,
+            canvas_y=canvas_y,
+            led=led_confirmado,
+            tipo="selecionado",
+        )
+
+        total_selecionado = len(
+            self.leds_selecionados
+        )
+
         if self.modo_atual == "configurar_leds_fixos":
-            self.view.atualizar_status(f"{id_led} fixo selecionado. Depois salve em Configurações > Salvar LEDs.")
+            self.view.atualizar_status(
+                f"{id_led} fixo selecionado. "
+                f"Total: {total_selecionado}. "
+                "Depois salve em Configurações > Salvar LEDs."
+            )
         elif self.modo_atual == "selecionar_leds_camera":
             self.view.atualizar_status(
-                f"{id_led} selecionado para teste. Continue clicando ou pressione ENTER."
+                f"{id_led} selecionado para teste. "
+                f"Total: {total_selecionado}. "
+                "Continue clicando ou pressione ENTER."
             )
         else:
-            self.view.atualizar_status(f"{id_led} selecionado. Continue clicando ou clique em Analisar.")
+            self.view.atualizar_status(
+                f"{id_led} selecionado. "
+                f"Total: {total_selecionado}. "
+                "Continue clicando ou clique em Analisar."
+            )
 
         self.atualizar_painel_inicial()
 
@@ -1499,8 +1729,14 @@ class LumusPCIApp:
             self.view.preparar_imagem_para_exibicao(self.imagem_original)
             self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
 
-            if not self.camera_ativa:
-                self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+            if self.camera_ativa:
+                self.atualizar_renderizacoes_camera_se_necessario(
+                    forcar=True
+                )
+            else:
+                self.atualizar_renderizacoes_visuais(
+                    self.leds_selecionados
+                )
 
             self.view.atualizar_faixa_resultado()
 
@@ -1534,8 +1770,14 @@ class LumusPCIApp:
             self.view.preparar_imagem_para_exibicao(self.imagem_original)
             self.view.desenhar_canvas(self.leds_selecionados, self.resultados_led_atual)
 
-            if not self.camera_ativa:
-                self.atualizar_renderizacoes_visuais(self.leds_selecionados)
+            if self.camera_ativa:
+                self.atualizar_renderizacoes_camera_se_necessario(
+                    forcar=True
+                )
+            else:
+                self.atualizar_renderizacoes_visuais(
+                    self.leds_selecionados
+                )
 
             self.view.atualizar_faixa_resultado()
 
@@ -1595,5 +1837,3 @@ class LumusPCIApp:
         self.view.atualizar_faixa_resultado()
         self.view.atualizar_status("seleção limpa. A imagem e as referências foram mantidas.")
         self.atualizar_painel_inicial()
-
-

@@ -1,74 +1,18 @@
 {
     "project": "LumusPCI",
-    "version": "0.4.0",
-    "inspection_method": "single_selected_led_reference_classifier_v2",
+    "version": "0.13.0",
+    "inspection_method": "single_selected_led_reference_classifier_modular",
     "threshold_v": 160,
-    "default_radius_px": 22,
-    "reference_on": {
-        "image_path": "C:/Users/cdaniel/Documents/Imagens para Análise/Led Aceso.JPG",
-        "features": {
-            "v_mean": 158.7136,
-            "v_max": 255.0,
-            "v_min": 113.0,
-            "v_std": 39.8228,
-            "v_p90": 230.4,
-            "v_p95": 248.2,
-            "v_p99": 255.0,
-            "s_mean": 50.1392,
-            "s_std": 29.4202,
-            "s_p90": 98.0,
-            "h_mean": 22.3803,
-            "inner_v_mean": 224.4743,
-            "ring_v_mean": 135.5073,
-            "center_to_ring_v": 88.967,
-            "inner_s_mean": 94.5968,
-            "ring_s_mean": 32.0671,
-            "center_to_ring_s": 62.5298,
-            "percent_on": 0.349244,
-            "percent_hot_220": 0.127287,
-            "percent_hot_235": 0.085919,
-            "percent_hot_245": 0.059666,
-            "percent_hot_250": 0.047733,
-            "glow_score": 168.6728,
-            "area_pixels": 1257,
-            "inner_area_pixels": 253,
-            "ring_area_pixels": 820
-        }
-    },
-    "reference_off": {
-        "image_path": "C:/Users/cdaniel/Documents/Imagens para Análise/Led Apagado.JPG",
-        "features": {
-            "v_mean": 145.6396,
-            "v_max": 233.0,
-            "v_min": 100.0,
-            "v_std": 29.8638,
-            "v_p90": 204.4,
-            "v_p95": 218.0,
-            "v_p99": 226.0,
-            "s_mean": 25.253,
-            "s_std": 6.3775,
-            "s_p90": 34.0,
-            "h_mean": 72.5807,
-            "inner_v_mean": 193.8498,
-            "ring_v_mean": 131.6976,
-            "center_to_ring_v": 62.1522,
-            "inner_s_mean": 18.9644,
-            "ring_s_mean": 28.022,
-            "center_to_ring_s": -9.0575,
-            "percent_on": 0.236277,
-            "percent_hot_220": 0.042164,
-            "percent_hot_235": 0.0,
-            "percent_hot_245": 0.0,
-            "percent_hot_250": 0.0,
-            "glow_score": 113.8474,
-            "area_pixels": 1257,
-            "inner_area_pixels": 253,
-            "ring_area_pixels": 820
-        }
-    },
+    "default_radius_px": 15,
     "settings": {
         "save_analysis_results": false,
         "camera": {
+            "resolution_mode": "auto",
+            "width": 1920,
+            "height": 1080,
+            "fps_mode": "auto",
+            "fps": 0,
+            "format": "AUTO",
             "pan_enabled": false,
             "pan": 0.0,
             "tilt_enabled": false,
@@ -86,254 +30,694 @@
         {
             "id": "LED_001",
             "centro_x": 164,
-            "centro_y": 368,
-            "raio": 15
+            "centro_y": 366,
+            "raio": 15,
+            "normalized": {
+                "x": 0.1410146173688736,
+                "y": 0.46923076923076923,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_002",
-            "centro_x": 76,
-            "centro_y": 383,
-            "raio": 15
+            "centro_x": 73,
+            "centro_y": 386,
+            "raio": 15,
+            "normalized": {
+                "x": 0.06276870163370593,
+                "y": 0.4948717948717949,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_003",
-            "centro_x": 41,
-            "centro_y": 462,
-            "raio": 15
+            "centro_x": 40,
+            "centro_y": 461,
+            "raio": 15,
+            "normalized": {
+                "x": 0.034393809114359415,
+                "y": 0.591025641025641,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_004",
-            "centro_x": 91,
-            "centro_y": 529,
-            "raio": 15
+            "centro_x": 92,
+            "centro_y": 534,
+            "raio": 15,
+            "normalized": {
+                "x": 0.07910576096302666,
+                "y": 0.6846153846153846,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_005",
             "centro_x": 184,
-            "centro_y": 516,
-            "raio": 15
+            "centro_y": 517,
+            "raio": 15,
+            "normalized": {
+                "x": 0.1582115219260533,
+                "y": 0.6628205128205128,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_006",
-            "centro_x": 216,
-            "centro_y": 437,
-            "raio": 15
+            "centro_x": 221,
+            "centro_y": 436,
+            "raio": 15,
+            "normalized": {
+                "x": 0.19002579535683578,
+                "y": 0.558974358974359,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_007",
-            "centro_x": 357,
+            "centro_x": 351,
             "centro_y": 363,
-            "raio": 15
+            "raio": 15,
+            "normalized": {
+                "x": 0.30180567497850386,
+                "y": 0.4653846153846154,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_008",
-            "centro_x": 341,
-            "centro_y": 279,
-            "raio": 15
+            "centro_x": 342,
+            "centro_y": 284,
+            "raio": 15,
+            "normalized": {
+                "x": 0.294067067927773,
+                "y": 0.3641025641025641,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_009",
-            "centro_x": 363,
-            "centro_y": 195,
-            "raio": 15
+            "centro_x": 367,
+            "centro_y": 190,
+            "raio": 15,
+            "normalized": {
+                "x": 0.31556319862424764,
+                "y": 0.24358974358974358,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_010",
-            "centro_x": 406,
-            "centro_y": 119,
-            "raio": 15
+            "centro_x": 409,
+            "centro_y": 121,
+            "raio": 15,
+            "normalized": {
+                "x": 0.351676698194325,
+                "y": 0.15512820512820513,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_011",
-            "centro_x": 478,
-            "centro_y": 65,
-            "raio": 15
+            "centro_x": 476,
+            "centro_y": 61,
+            "raio": 15,
+            "normalized": {
+                "x": 0.40928632846087704,
+                "y": 0.0782051282051282,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_012",
             "centro_x": 557,
-            "centro_y": 39,
-            "raio": 15
+            "centro_y": 42,
+            "raio": 15,
+            "normalized": {
+                "x": 0.47893379191745483,
+                "y": 0.05384615384615385,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_013",
-            "centro_x": 644,
+            "centro_x": 643,
             "centro_y": 42,
-            "raio": 15
+            "raio": 15,
+            "normalized": {
+                "x": 0.5528804815133276,
+                "y": 0.05384615384615385,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_014",
-            "centro_x": 726,
-            "centro_y": 67,
-            "raio": 15
+            "centro_x": 728,
+            "centro_y": 71,
+            "raio": 15,
+            "normalized": {
+                "x": 0.6259673258813414,
+                "y": 0.09102564102564102,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_015",
-            "centro_x": 792,
-            "centro_y": 124,
-            "raio": 15
+            "centro_x": 793,
+            "centro_y": 123,
+            "raio": 15,
+            "normalized": {
+                "x": 0.6818572656921754,
+                "y": 0.1576923076923077,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_016",
-            "centro_x": 840,
+            "centro_x": 843,
             "centro_y": 197,
-            "raio": 15
+            "raio": 15,
+            "normalized": {
+                "x": 0.7248495270851246,
+                "y": 0.25256410256410255,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_017",
-            "centro_x": 857,
-            "centro_y": 281,
-            "raio": 15
+            "centro_x": 853,
+            "centro_y": 278,
+            "raio": 15,
+            "normalized": {
+                "x": 0.7334479793637145,
+                "y": 0.3564102564102564,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_018",
-            "centro_x": 842,
+            "centro_x": 841,
             "centro_y": 369,
-            "raio": 15
+            "raio": 15,
+            "normalized": {
+                "x": 0.7231298366294067,
+                "y": 0.47307692307692306,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_019",
-            "centro_x": 801,
-            "centro_y": 445,
-            "raio": 15
+            "centro_x": 797,
+            "centro_y": 447,
+            "raio": 15,
+            "normalized": {
+                "x": 0.6852966466036113,
+                "y": 0.573076923076923,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_020",
-            "centro_x": 732,
+            "centro_x": 728,
             "centro_y": 501,
-            "raio": 15
+            "raio": 15,
+            "normalized": {
+                "x": 0.6259673258813414,
+                "y": 0.6423076923076924,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_021",
-            "centro_x": 646,
-            "centro_y": 531,
-            "raio": 15
+            "centro_x": 645,
+            "centro_y": 532,
+            "raio": 15,
+            "normalized": {
+                "x": 0.5546001719690455,
+                "y": 0.6820512820512821,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_022",
-            "centro_x": 555,
-            "centro_y": 531,
-            "raio": 15
+            "centro_x": 551,
+            "centro_y": 536,
+            "raio": 15,
+            "normalized": {
+                "x": 0.47377472055030095,
+                "y": 0.6871794871794872,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_023",
             "centro_x": 467,
-            "centro_y": 501,
-            "raio": 15
+            "centro_y": 497,
+            "raio": 15,
+            "normalized": {
+                "x": 0.40154772141014616,
+                "y": 0.6371794871794871,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_024",
-            "centro_x": 398,
-            "centro_y": 443,
-            "raio": 15
+            "centro_x": 397,
+            "centro_y": 442,
+            "raio": 15,
+            "normalized": {
+                "x": 0.3413585554600172,
+                "y": 0.5666666666666667,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_025",
-            "centro_x": 490,
-            "centro_y": 277,
-            "raio": 15
+            "centro_x": 511,
+            "centro_y": 334,
+            "raio": 15,
+            "normalized": {
+                "x": 0.43938091143594155,
+                "y": 0.4282051282051282,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_026",
-            "centro_x": 506,
-            "centro_y": 225,
-            "raio": 15
+            "centro_x": 492,
+            "centro_y": 282,
+            "raio": 15,
+            "normalized": {
+                "x": 0.4230438521066208,
+                "y": 0.36153846153846153,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_027",
-            "centro_x": 547,
-            "centro_y": 188,
-            "raio": 15
+            "centro_x": 507,
+            "centro_y": 222,
+            "raio": 15,
+            "normalized": {
+                "x": 0.43594153052450557,
+                "y": 0.2846153846153846,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_028",
-            "centro_x": 602,
-            "centro_y": 171,
-            "raio": 15
+            "centro_x": 545,
+            "centro_y": 186,
+            "raio": 15,
+            "normalized": {
+                "x": 0.468615649183147,
+                "y": 0.23846153846153847,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_029",
-            "centro_x": 656,
-            "centro_y": 188,
-            "raio": 15
+            "centro_x": 605,
+            "centro_y": 174,
+            "raio": 15,
+            "normalized": {
+                "x": 0.5202063628546861,
+                "y": 0.2230769230769231,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_030",
-            "centro_x": 697,
-            "centro_y": 227,
-            "raio": 15
+            "centro_x": 655,
+            "centro_y": 190,
+            "raio": 15,
+            "normalized": {
+                "x": 0.5631986242476354,
+                "y": 0.24358974358974358,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_031",
-            "centro_x": 711,
-            "centro_y": 285,
-            "raio": 15
+            "centro_x": 692,
+            "centro_y": 228,
+            "raio": 15,
+            "normalized": {
+                "x": 0.5950128976784179,
+                "y": 0.2923076923076923,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_032",
-            "centro_x": 697,
-            "centro_y": 337,
-            "raio": 15
+            "centro_x": 718,
+            "centro_y": 282,
+            "raio": 15,
+            "normalized": {
+                "x": 0.6173688736027515,
+                "y": 0.36153846153846153,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_033",
-            "centro_x": 657,
-            "centro_y": 376,
-            "raio": 15
+            "centro_x": 701,
+            "centro_y": 336,
+            "raio": 15,
+            "normalized": {
+                "x": 0.6027515047291487,
+                "y": 0.4307692307692308,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_034",
-            "centro_x": 602,
-            "centro_y": 389,
-            "raio": 15
+            "centro_x": 655,
+            "centro_y": 382,
+            "raio": 15,
+            "normalized": {
+                "x": 0.5631986242476354,
+                "y": 0.4897435897435897,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_035",
-            "centro_x": 544,
-            "centro_y": 372,
-            "raio": 15
+            "centro_x": 599,
+            "centro_y": 392,
+            "raio": 15,
+            "normalized": {
+                "x": 0.5150472914875323,
+                "y": 0.5025641025641026,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_036",
-            "centro_x": 503,
-            "centro_y": 333,
-            "raio": 15
+            "centro_x": 544,
+            "centro_y": 378,
+            "raio": 15,
+            "normalized": {
+                "x": 0.46775580395528804,
+                "y": 0.4846153846153846,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_037",
-            "centro_x": 974,
-            "centro_y": 436,
-            "raio": 15
+            "centro_x": 972,
+            "centro_y": 438,
+            "raio": 15,
+            "normalized": {
+                "x": 0.8357695614789338,
+                "y": 0.5615384615384615,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_038",
-            "centro_x": 1023,
-            "centro_y": 372,
-            "raio": 15
+            "centro_x": 1024,
+            "centro_y": 374,
+            "raio": 15,
+            "normalized": {
+                "x": 0.880481513327601,
+                "y": 0.4794871794871795,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_039",
-            "centro_x": 1108,
-            "centro_y": 387,
-            "raio": 15
+            "centro_x": 1105,
+            "centro_y": 392,
+            "raio": 15,
+            "normalized": {
+                "x": 0.9501289767841788,
+                "y": 0.5025641025641026,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_040",
-            "centro_x": 1136,
-            "centro_y": 464,
-            "raio": 15
+            "centro_x": 1141,
+            "centro_y": 465,
+            "raio": 15,
+            "normalized": {
+                "x": 0.9810834049871023,
+                "y": 0.5961538461538461,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_041",
-            "centro_x": 1088,
-            "centro_y": 529,
-            "raio": 15
+            "centro_x": 1086,
+            "centro_y": 534,
+            "raio": 15,
+            "normalized": {
+                "x": 0.9337919174548581,
+                "y": 0.6846153846153846,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         },
         {
             "id": "LED_042",
-            "centro_x": 1006,
-            "centro_y": 514,
-            "raio": 15
+            "centro_x": 1007,
+            "centro_y": 515,
+            "raio": 15,
+            "normalized": {
+                "x": 0.8658641444539983,
+                "y": 0.6602564102564102,
+                "radius": 0.012897678417884782
+            },
+            "base_resolution": {
+                "width": 1163,
+                "height": 780
+            }
         }
-    ]
+    ],
+    "reference_on": {
+        "image_path": "C:/Users/cdaniel/Downloads/Led Aceso.png",
+        "features": {
+            "v_mean": 183.6107,
+            "v_max": 254.0,
+            "v_min": 140.0,
+            "v_std": 37.8188,
+            "v_p90": 251.0,
+            "v_p95": 253.0,
+            "v_p99": 253.52,
+            "s_mean": 114.7785,
+            "s_std": 56.7831,
+            "s_p90": 171.4,
+            "h_mean": 11.953,
+            "inner_v_mean": 245.7931,
+            "ring_v_mean": 161.1154,
+            "center_to_ring_v": 84.6777,
+            "inner_s_mean": 19.4138,
+            "ring_s_mean": 149.0385,
+            "center_to_ring_s": -129.6247,
+            "percent_on": 0.651007,
+            "percent_hot_220": 0.234899,
+            "percent_hot_235": 0.201342,
+            "percent_hot_245": 0.134228,
+            "percent_hot_250": 0.107383,
+            "glow_score": 159.7587,
+            "area_pixels": 149,
+            "inner_area_pixels": 29,
+            "ring_area_pixels": 104
+        }
+    },
+    "reference_off": {
+        "image_path": "C:/Users/cdaniel/Downloads/Led Apagado.png",
+        "features": {
+            "v_mean": 199.4518,
+            "v_max": 234.0,
+            "v_min": 151.0,
+            "v_std": 20.1243,
+            "v_p90": 225.4,
+            "v_p95": 230.0,
+            "v_p99": 233.04,
+            "s_mean": 78.5381,
+            "s_std": 17.042,
+            "s_p90": 94.0,
+            "h_mean": 71.6041,
+            "inner_v_mean": 178.2759,
+            "ring_v_mean": 204.7105,
+            "center_to_ring_v": -26.4347,
+            "inner_s_mean": 61.6897,
+            "ring_s_mean": 82.7961,
+            "center_to_ring_s": -21.1064,
+            "percent_on": 0.974619,
+            "percent_hot_220": 0.152284,
+            "percent_hot_235": 0.0,
+            "percent_hot_245": 0.0,
+            "percent_hot_250": 0.0,
+            "glow_score": 20.581,
+            "area_pixels": 197,
+            "inner_area_pixels": 29,
+            "ring_area_pixels": 152
+        }
+    }
 }
