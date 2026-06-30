@@ -33,7 +33,7 @@ def criar_topo_profissional(self) -> None:
 
     self.label_titulo = tk.Label(
         self.frame_titulo,
-        text="LumusPCI",
+        text="ODIN",
         font=("Segoe UI", 22, "bold"),
         fg=self.COR_TEXTO,
         bg=self.COR_TOPO,
@@ -43,7 +43,7 @@ def criar_topo_profissional(self) -> None:
 
     self.label_subtitulo = tk.Label(
         self.frame_titulo,
-        text="Análise Visual de LED",
+        text="Observador Digital Inteligente",
         font=("Segoe UI", 9, "bold"),
         fg=self.COR_TEXTO_3,
         bg=self.COR_TOPO,

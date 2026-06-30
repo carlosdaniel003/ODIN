@@ -1,5 +1,5 @@
 {
-    "project": "LumusPCI",
+    "project": "ODIN",
     "version": "0.13.0",
     "inspection_method": "single_selected_led_reference_classifier_modular",
     "threshold_v": 160,

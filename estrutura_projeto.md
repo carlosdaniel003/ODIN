@@ -1,8 +1,8 @@
-# Estrutura do Projeto — LumusPCI v10
+# Estrutura do Projeto — ODIN v10
 
 ## Objetivo desta versão
 
-Modularizar somente o arquivo `src/ui/main_window.py`, mantendo a classe pública `LumusPCIView` e preservando nomes de funções, variáveis, callbacks e regras de negócio.
+Modularizar somente o arquivo `src/ui/main_window.py`, mantendo a classe pública `ODINView` e preservando nomes de funções, variáveis, callbacks e regras de negócio.
 
 ## Estrutura da interface modularizada
 
@@ -31,10 +31,10 @@ src/ui/
 `src/ui/main_window.py` continua sendo o ponto público usado pelo restante do sistema:
 
 ```python
-from src.ui.main_window import LumusPCIView
+from src.ui.main_window import ODINView
 ```
 
-Os métodos foram movidos para `src/ui/main_window_parts/` e vinculados novamente dentro da classe `LumusPCIView`, mantendo os mesmos nomes.
+Os métodos foram movidos para `src/ui/main_window_parts/` e vinculados novamente dentro da classe `ODINView`, mantendo os mesmos nomes.
 
 ## Responsabilidades por pasta
 

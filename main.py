@@ -1,11 +1,11 @@
 import tkinter as tk
 
-from src.app import LumusPCIApp
+from src.app import ODINApp
 
 
 def main() -> None:
     root = tk.Tk()
-    LumusPCIApp(root)
+    ODINApp(root)
     root.mainloop()
 
 

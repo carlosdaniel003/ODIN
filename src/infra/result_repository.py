@@ -74,7 +74,7 @@ class ResultRepository:
             salvar_imagem_opencv(caminho_roi_debug, roi_debug)
 
         resultado_json = {
-            "project": "LumusPCI",
+            "project": "ODIN",
             "version": "0.9.0",
             "inspection_method": "multi_selected_led_reference_classifier_modular",
             "image": caminho_imagem_atual,

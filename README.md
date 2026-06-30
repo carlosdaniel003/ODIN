@@ -1,4 +1,4 @@
-# LUMUS-PCI
+# ODIN
 
 Sistema desktop em **Python** para análise visual de LEDs em placas PCI, desenvolvido para apoiar processos de inspeção, validação e diagnóstico técnico em ambiente produtivo.
 
@@ -8,7 +8,7 @@ O projeto permite carregar imagens de placas, selecionar LEDs, executar uma aná
 
 ## Visão geral
 
-O **LUMUS-PCI** foi criado para reduzir a dependência de inspeção puramente visual em placas com múltiplos LEDs.
+O **ODIN** foi criado para reduzir a dependência de inspeção puramente visual em placas com múltiplos LEDs.
 
 Em processos repetitivos, a validação manual pode se tornar cansativa, sujeita a falhas e difícil de padronizar. A proposta do sistema é oferecer uma camada de apoio técnico para o operador, combinando análise visual, seleção de regiões de interesse e exibição clara dos resultados.
 
@@ -30,7 +30,7 @@ A aplicação centraliza em uma única tela:
 
 ### Tela principal de análise
 
-![Tela principal do LumusPCI](docs/images/01-lumuspci-dashboard.png)
+![Tela principal do ODIN](docs/images/01-odin-dashboard.png)
 
 A interface foi pensada para uso técnico e operacional, permitindo que o operador acompanhe o resultado da análise sem precisar alternar entre várias telas.
 
@@ -38,7 +38,7 @@ A interface foi pensada para uso técnico e operacional, permitindo que o operad
 
 ## Objetivo do projeto
 
-O objetivo do LUMUS-PCI é apoiar a inspeção visual de placas PCI com LEDs, tornando o processo mais padronizado, rastreável e menos dependente apenas da observação humana.
+O objetivo do ODIN é apoiar a inspeção visual de placas PCI com LEDs, tornando o processo mais padronizado, rastreável e menos dependente apenas da observação humana.
 
 O sistema foi desenvolvido com foco em:
 
@@ -105,7 +105,7 @@ flowchart TD
 
 Um fluxo básico de operação do sistema segue esta lógica:
 
-1. O operador abre o LUMUS-PCI.
+1. O operador abre o ODIN.
 2. Carrega a imagem da placa.
 3. Seleciona os LEDs que devem ser analisados.
 4. Executa a análise.
@@ -119,7 +119,7 @@ Um fluxo básico de operação do sistema segue esta lógica:
 ## Estrutura do projeto
 
 ```bash
-LUMUS-PCI/
+ODIN/
 ├── assets/
 ├── data/
 │   └── config/
@@ -134,7 +134,7 @@ LUMUS-PCI/
 
 ## Organização da interface
 
-A interface foi modularizada para facilitar manutenção e evolução do projeto, preservando a classe pública principal `LumusPCIView`.
+A interface foi modularizada para facilitar manutenção e evolução do projeto, preservando a classe pública principal `ODINView`.
 
 A organização da interface separa responsabilidades como:
 
@@ -170,13 +170,13 @@ Essa separação torna o código mais organizado e facilita futuras melhorias se
 ### 1. Clone o repositório
 
 ```bash
-git clone https://github.com/carlosdaniel003/LUMUS-PCI.git
+git clone https://github.com/carlosdaniel003/ODIN.git
 ```
 
 ### 2. Acesse a pasta do projeto
 
 ```bash
-cd LUMUS-PCI
+cd ODIN
 ```
 
 ### 3. Instale as dependências
@@ -195,7 +195,7 @@ python main.py
 
 ## Aplicações possíveis
 
-O LUMUS-PCI pode ser utilizado como apoio em cenários como:
+O ODIN pode ser utilizado como apoio em cenários como:
 
 * inspeção visual de placas PCI com LEDs;
 * validação de placas em bancada;

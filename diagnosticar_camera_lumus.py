@@ -163,7 +163,7 @@ def executar_teste(
 
 def main() -> int:
     print("=" * 72)
-    print("DIAGNÓSTICO DE CÂMERAS — LUMUS-PCI")
+    print("DIAGNÓSTICO DE CÂMERAS — ODIN")
     print("=" * 72)
     print(f"Python: {sys.version.split()[0]}")
     print(f"OpenCV: {cv2.__version__}")

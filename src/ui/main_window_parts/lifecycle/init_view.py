@@ -32,7 +32,7 @@ def __init__(self, root: tk.Tk, callbacks: dict, raio_atual_px: int) -> None:
     self.logo_tk = None
     self.lupa_tk = None
 
-    self.root.title("LumusPCI - Estação de Inspeção Visual de LED")
+    self.root.title("ODIN - Observador Digital Inteligente")
     self.root.geometry("1600x900")
     self.root.minsize(1280, 760)
     self.root.configure(bg=self.COR_FUNDO_APP)

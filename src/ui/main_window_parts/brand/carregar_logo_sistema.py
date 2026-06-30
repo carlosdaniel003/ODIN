@@ -5,7 +5,7 @@ import cv2
 import tkinter as tk
 
 
-def carregar_logo_sistema(self, caminho_logo: str = "assets/logo_lumus.png", tamanho_px: int = 58):
+def carregar_logo_sistema(self, caminho_logo: str = "assets/logo_odin.png", tamanho_px: int = 58):
     caminho_logo_path = Path(caminho_logo)
 
     if not caminho_logo_path.exists():

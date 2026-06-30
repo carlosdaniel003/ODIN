@@ -14,7 +14,7 @@ from src.infra.config_repository import ConfigRepository
 from src.infra.image_io import carregar_imagem_opencv
 from src.infra.result_repository import ResultRepository
 from src.models.led_selection import LedSelection
-from src.ui.main_window import LumusPCIView
+from src.ui.main_window import ODINView
 
 
 RAIO_MAXIMO_LED_PX = MAX_RADIUS_PX
@@ -37,7 +37,7 @@ CAMERA_FRAMES_ESTABILIDADE = 8
 CAMERA_ESPERA_APOS_ABRIR_S = 0.45
 
 
-class LumusPCIApp:
+class ODINApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
 
@@ -91,7 +91,7 @@ class LumusPCIApp:
 
         self.criar_pastas()
         self.carregar_referencias_automaticamente_se_necessario()
-        self.view = LumusPCIView(
+        self.view = ODINView(
             root=self.root,
             callbacks=self.criar_callbacks(),
             raio_atual_px=self.raio_atual_px,
@@ -459,7 +459,7 @@ class LumusPCIApp:
         self.salvar_referencias_automaticamente_se_completas()
         self.view.atualizar_status("referências salvas.")
         self.atualizar_painel_inicial()
-        messagebox.showinfo("LumusPCI", f"Referências salvas em:\n{CONFIG_FILE}")
+        messagebox.showinfo("ODIN", f"Referências salvas em:\n{CONFIG_FILE}")
 
     def carregar_configuracao(self) -> None:
         if not CONFIG_FILE.exists():
@@ -1291,7 +1291,7 @@ class LumusPCIApp:
         self.view.atualizar_status(f"{len(self.leds_fixos_configurados)} LEDs fixos salvos.")
         self.atualizar_painel_inicial()
 
-        messagebox.showinfo("LumusPCI", f"{len(self.leds_fixos_configurados)} LEDs fixos salvos com sucesso.")
+        messagebox.showinfo("ODIN", f"{len(self.leds_fixos_configurados)} LEDs fixos salvos com sucesso.")
 
     def carregar_leds_fixos(self) -> None:
         if self.imagem_original is None:

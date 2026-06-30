@@ -35,7 +35,7 @@ def abrir_janela_configuracoes(
     altura_preferida = 860
 
     janela = tk.Toplevel(self.root)
-    janela.title("Configurações - LumusPCI")
+    janela.title("Configurações - ODIN")
     janela.withdraw()
     janela.overrideredirect(False)
     janela.resizable(True, True)
@@ -174,7 +174,7 @@ def abrir_janela_configuracoes(
 
     tk.Label(
         frame_cabecalho_linha,
-        text="LUMUS-PCI",
+        text="ODIN",
         font=("Segoe UI", 8, "bold"),
         fg="#BBF7D0",
         bg="#0F3D24",
@@ -221,13 +221,13 @@ def abrir_janela_configuracoes(
     )
 
     estilo.configure(
-        "Lumus.TNotebook",
+        "Odin.TNotebook",
         background=self.COR_CARD,
         borderwidth=0,
         tabmargins=(0, 0, 0, 0),
     )
     estilo.configure(
-        "Lumus.TNotebook.Tab",
+        "Odin.TNotebook.Tab",
         background=self.COR_CARD_2,
         foreground=self.COR_TEXTO_2,
         padding=(24, 11),
@@ -235,7 +235,7 @@ def abrir_janela_configuracoes(
         borderwidth=0,
     )
     estilo.map(
-        "Lumus.TNotebook.Tab",
+        "Odin.TNotebook.Tab",
         background=[
             ("selected", "#0F3D24"),
             ("active", "#102033"),
@@ -247,7 +247,7 @@ def abrir_janela_configuracoes(
     )
 
     estilo.configure(
-        "Lumus.TCombobox",
+        "Odin.TCombobox",
         fieldbackground="#020617",
         background=self.COR_CARD_2,
         foreground=self.COR_TEXTO,
@@ -261,7 +261,7 @@ def abrir_janela_configuracoes(
         relief="flat",
     )
     estilo.map(
-        "Lumus.TCombobox",
+        "Odin.TCombobox",
         fieldbackground=[
             ("readonly", "#020617"),
             ("disabled", self.COR_CARD),
@@ -287,7 +287,7 @@ def abrir_janela_configuracoes(
 
     notebook = ttk.Notebook(
         frame_raiz,
-        style="Lumus.TNotebook",
+        style="Odin.TNotebook",
     )
     notebook.pack(fill=tk.BOTH, expand=True)
 
@@ -696,7 +696,7 @@ def abrir_janela_configuracoes(
         state="readonly",
         width=24,
         font=("Segoe UI", 9, "bold"),
-        style="Lumus.TCombobox",
+        style="Odin.TCombobox",
     )
     combo_resolucao.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -769,7 +769,7 @@ def abrir_janela_configuracoes(
         state="readonly",
         width=16,
         font=("Segoe UI", 9, "bold"),
-        style="Lumus.TCombobox",
+        style="Odin.TCombobox",
     ).pack(side=tk.LEFT)
 
     linha_formato = criar_linha_combo(frame_perfil_camera, "Formato:")
@@ -780,7 +780,7 @@ def abrir_janela_configuracoes(
         state="readonly",
         width=16,
         font=("Segoe UI", 9, "bold"),
-        style="Lumus.TCombobox",
+        style="Odin.TCombobox",
     ).pack(side=tk.LEFT)
 
     def atualizar_campos_resolucao(*_args):
@@ -979,7 +979,7 @@ def abrir_janela_configuracoes(
     tk.Label(
         frame_rotacao,
         text=(
-            "A rotação é realizada pelo LumusPCI e funciona mesmo "
+            "A rotação é realizada pelo ODIN e funciona mesmo "
             "quando o driver não oferece esse controle."
         ),
         font=("Segoe UI", 9),
@@ -1001,7 +1001,7 @@ def abrir_janela_configuracoes(
         state="readonly",
         width=12,
         font=("Segoe UI", 10, "bold"),
-        style="Lumus.TCombobox",
+        style="Odin.TCombobox",
     )
     combo_rotacao.pack(
         anchor="w",
@@ -1067,7 +1067,7 @@ def abrir_janela_configuracoes(
 
     tk.Label(
         frame_rodape,
-        text="As alterações serão salvas no arquivo de configuração do LumusPCI.",
+        text="As alterações serão salvas no arquivo de configuração de ODIN.",
         font=("Segoe UI", 8),
         fg=self.COR_TEXTO_3,
         bg=self.COR_CARD,

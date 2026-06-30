@@ -67,12 +67,12 @@ from src.ui.main_window_parts.magnifier.atualizar_lupa_canvas import atualizar_l
 from src.ui.main_window_parts.magnifier.desenhar_lupa_canvas import desenhar_lupa_canvas
 from src.ui.main_window_parts.magnifier.limpar_lupa_canvas import limpar_lupa_canvas
 
-class LumusPCIView:
+class ODINView:
     """
-    Interface principal do LumusPCI.
+    Interface principal do ODIN.
 
     Responsabilidade deste arquivo:
-    - manter a classe pública LumusPCIView;
+    - manter a classe pública ODINView;
     - centralizar as constantes visuais;
     - vincular métodos modularizados em src/ui/main_window_parts/;
     - não executar regra de classificação de LED.

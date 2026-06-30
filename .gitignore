@@ -25,7 +25,7 @@ datacapturas
 .bak
 
 # Dados locais de configuração
-dataconfiglumus_pci_config.json
+dataconfigodin_pci_config.json
 
 # Amostrasimagens locais de LED
 dataconfigroi_samples

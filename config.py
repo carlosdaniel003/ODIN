@@ -7,7 +7,7 @@ CONFIG_DIR = DATA_DIR / "config"
 RESULTS_DIR = DATA_DIR / "resultados"
 CAPTURES_DIR = DATA_DIR / "capturas"
 
-CONFIG_FILE = CONFIG_DIR / "lumus_pci_config.json"
+CONFIG_FILE = CONFIG_DIR / "odin_pci_config.json"
 
 DEFAULT_THRESHOLD_V = 160
 DEFAULT_MIN_PERCENT_ON = 0.12

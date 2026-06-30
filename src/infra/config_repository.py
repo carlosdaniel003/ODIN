@@ -265,7 +265,7 @@ class ConfigRepository:
 
         if not configuracao:
             configuracao = {
-                "project": "LumusPCI",
+                "project": "ODIN",
                 "version": "0.13.0",
                 "inspection_method": (
                     "single_selected_led_reference_classifier_modular"
@@ -343,7 +343,7 @@ class ConfigRepository:
         fixed_leds = configuracao_existente.get("fixed_leds", [])
 
         configuracao_final = {
-            "project": "LumusPCI",
+            "project": "ODIN",
             "version": "0.13.0",
             "inspection_method": (
                 "single_selected_led_reference_classifier_modular"
@@ -396,7 +396,7 @@ class ConfigRepository:
 
         if not configuracao:
             configuracao = {
-                "project": "LumusPCI",
+                "project": "ODIN",
                 "version": "0.13.0",
                 "inspection_method": (
                     "single_selected_led_reference_classifier_modular"
