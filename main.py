@@ -1,13 +1,1 @@
-import tkinter as tk
-
-from src.app import ODINApp
-
-
-def main() -> None:
-    root = tk.Tk()
-    ODINApp(root)
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
+from main_rpi import *
