@@ -11,6 +11,8 @@ class OperationWindow:
     """Tela de produção leve com prévia persistente da câmera."""
 
     COLOR_WAITING = "#111827"
+    COLOR_POSITIONING = "#1D4ED8"
+    COLOR_WAITING_REMOVAL = "#334155"
     COLOR_PROCESSING = "#F59E0B"
     COLOR_OK = "#16A34A"
     COLOR_NG = "#DC2626"
@@ -415,7 +417,39 @@ class OperationWindow:
             background=self.COLOR_WAITING,
             foreground="#FFFFFF",
             status="AGUARDANDO",
-            detail=f"{led_count} LEDs preparados — pressione ENTER",
+            detail=f"{led_count} LEDs preparados — insira uma placa",
+        )
+        self._set_counters(total, ok_count, ng_count)
+
+    def show_positioning(
+        self,
+        delay_seconds: float,
+        total: int,
+        ok_count: int,
+        ng_count: int,
+    ) -> None:
+        self._set_state(
+            background=self.COLOR_POSITIONING,
+            foreground="#FFFFFF",
+            status="POSICIONANDO",
+            detail=(
+                "Placa detectada — estabilizando por "
+                f"{delay_seconds:.1f} s"
+            ),
+        )
+        self._set_counters(total, ok_count, ng_count)
+
+    def show_waiting_removal(
+        self,
+        total: int,
+        ok_count: int,
+        ng_count: int,
+    ) -> None:
+        self._set_state(
+            background=self.COLOR_WAITING_REMOVAL,
+            foreground="#FFFFFF",
+            status="RETIRE A PLACA",
+            detail="A próxima inspeção será liberada após retirar a placa",
         )
         self._set_counters(total, ok_count, ng_count)
 
