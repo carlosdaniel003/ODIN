@@ -227,7 +227,15 @@ class RaspberryPi3ODINApp(ODINApp):
         self.operacao_engine.invalidate()
         self.operacao_leds_preview = []
         self.operacao_window.show()
-        self.operacao_window.clear_preview()
+
+        if self.camera_frame_atual is not None:
+            self.operacao_window.update_preview(
+                self.camera_frame_atual,
+                self.operacao_leds_preview,
+            )
+        else:
+            self.operacao_window.clear_preview()
+
         self.operacao_window.show_preparing()
 
         if not self.camera_ativa:
@@ -289,26 +297,19 @@ class RaspberryPi3ODINApp(ODINApp):
         )
 
     def _atualizar_preview_operacao(self) -> None:
-        after_id_atual = self._operacao_preview_after_id
         self._operacao_preview_after_id = None
-
-        if after_id_atual is not None:
-            try:
-                self.root.after_cancel(after_id_atual)
-            except Exception:
-                pass
 
         if not self.operacao_ativa:
             return
 
         if self.camera_desconectada:
-            self.operacao_window.clear_preview(
-                "Câmera desconectada"
+            self.operacao_window.set_preview_status(
+                "Última imagem • câmera desconectada",
+                "#FCA5A5",
             )
-        elif (
-            not self.operacao_processando
-            and self.camera_frame_atual is not None
-        ):
+        elif self.operacao_processando:
+            self.operacao_window.set_preview_paused(True)
+        elif self.camera_frame_atual is not None:
             self.operacao_window.update_preview(
                 self.camera_frame_atual,
                 self.operacao_leds_preview,
@@ -335,6 +336,10 @@ class RaspberryPi3ODINApp(ODINApp):
         if self.camera_desconectada:
             self.operacao_window.show_preparing(
                 "Câmera desconectada — reconectando"
+            )
+            self.operacao_window.set_preview_status(
+                "Última imagem • câmera desconectada",
+                "#FCA5A5",
             )
             self._agendar_preparo_operacao(250)
             return
@@ -446,7 +451,6 @@ class RaspberryPi3ODINApp(ODINApp):
             ng_count=self.operacao_ng,
         )
         self.operacao_window.set_preview_paused(False)
-        self._atualizar_preview_operacao()
 
     def _mostrar_erro_operacao(self, mensagem: str) -> None:
         self.operacao_processando = False
