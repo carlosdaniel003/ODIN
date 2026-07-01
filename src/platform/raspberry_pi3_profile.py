@@ -28,6 +28,9 @@ from src.platform.raspberry_pi3_settings import (
     CAMERA_HEIGHT,
     CAMERA_WIDTH,
     FRAME_INTERVAL_MS,
+    OPERATION_PREVIEW_HEIGHT,
+    OPERATION_PREVIEW_INTERVAL_MS,
+    OPERATION_PREVIEW_WIDTH,
     PARAMETERIZATION_PREVIEW_INTERVAL_MS,
 )
 from src.ui.operation_window import OperationWindow
@@ -45,7 +48,9 @@ class RaspberryPi3ODINApp(ODINApp):
         self.operacao_ng = 0
         self.operacao_engine = OperationEngine()
         self.operacao_window = None
+        self.operacao_leds_preview = []
         self._operacao_preparo_after_id = None
+        self._operacao_preview_after_id = None
 
         super().__init__(root)
         self._instalar_tela_operacao()
@@ -55,6 +60,8 @@ class RaspberryPi3ODINApp(ODINApp):
             root=self.root,
             on_trigger=self.disparar_inspecao_operacao,
             on_close=self.fechar_tela_operacao,
+            preview_width=OPERATION_PREVIEW_WIDTH,
+            preview_height=OPERATION_PREVIEW_HEIGHT,
         )
         self.botao_operacao = tk.Button(
             self.root,
@@ -218,7 +225,9 @@ class RaspberryPi3ODINApp(ODINApp):
         self.operacao_ativa = True
         self.operacao_processando = False
         self.operacao_engine.invalidate()
+        self.operacao_leds_preview = []
         self.operacao_window.show()
+        self.operacao_window.clear_preview()
         self.operacao_window.show_preparing()
 
         if not self.camera_ativa:
@@ -226,9 +235,11 @@ class RaspberryPi3ODINApp(ODINApp):
 
         self.camera_em_pausa_analise = True
         self._agendar_preparo_operacao(80)
+        self._agendar_preview_operacao(0)
 
     def fechar_tela_operacao(self) -> None:
         self.operacao_ativa = False
+        self.operacao_processando = False
         self.camera_em_pausa_analise = False
 
         if self._operacao_preparo_after_id is not None:
@@ -239,6 +250,15 @@ class RaspberryPi3ODINApp(ODINApp):
             except Exception:
                 pass
             self._operacao_preparo_after_id = None
+
+        if self._operacao_preview_after_id is not None:
+            try:
+                self.root.after_cancel(
+                    self._operacao_preview_after_id
+                )
+            except Exception:
+                pass
+            self._operacao_preview_after_id = None
 
         self.operacao_window.hide()
         self._ultima_renderizacao_parametrizacao_s = 0.0
@@ -253,6 +273,40 @@ class RaspberryPi3ODINApp(ODINApp):
             max(20, int(atraso_ms)),
             self.preparar_tela_operacao,
         )
+
+    def _agendar_preview_operacao(
+        self,
+        atraso_ms: int = OPERATION_PREVIEW_INTERVAL_MS,
+    ) -> None:
+        if not self.operacao_ativa:
+            return
+        if self._operacao_preview_after_id is not None:
+            return
+
+        self._operacao_preview_after_id = self.root.after(
+            max(0, int(atraso_ms)),
+            self._atualizar_preview_operacao,
+        )
+
+    def _atualizar_preview_operacao(self) -> None:
+        self._operacao_preview_after_id = None
+        if not self.operacao_ativa:
+            return
+
+        if self.camera_desconectada:
+            self.operacao_window.clear_preview(
+                "Câmera desconectada"
+            )
+        elif (
+            not self.operacao_processando
+            and self.camera_frame_atual is not None
+        ):
+            self.operacao_window.update_preview(
+                self.camera_frame_atual,
+                self.operacao_leds_preview,
+            )
+
+        self._agendar_preview_operacao()
 
     def preparar_tela_operacao(self) -> None:
         self._operacao_preparo_after_id = None
@@ -314,6 +368,11 @@ class RaspberryPi3ODINApp(ODINApp):
                 frame_height=altura_frame,
             )
             self.leds_fixos_configurados = leds_salvos
+            self.operacao_leds_preview = leds_adaptados
+            self.operacao_window.update_preview(
+                frame,
+                self.operacao_leds_preview,
+            )
             self.operacao_window.show_waiting(
                 led_count=self.operacao_engine.led_count,
                 total=self.operacao_total,
@@ -342,6 +401,7 @@ class RaspberryPi3ODINApp(ODINApp):
                 return
 
         self.operacao_processando = True
+        self.operacao_window.set_preview_paused(True)
         self.operacao_window.show_processing(
             total=self.operacao_total,
             ok_count=self.operacao_ok,
@@ -354,6 +414,7 @@ class RaspberryPi3ODINApp(ODINApp):
             resultado = self.operacao_engine.analyze(frame)
         except Exception as erro:
             self.operacao_processando = False
+            self.operacao_window.set_preview_paused(False)
             self._mostrar_erro_operacao(
                 "FALHA NA INSPEÇÃO\n"
                 f"{type(erro).__name__}: {erro}"
@@ -376,8 +437,12 @@ class RaspberryPi3ODINApp(ODINApp):
             ok_count=self.operacao_ok,
             ng_count=self.operacao_ng,
         )
+        self.operacao_window.set_preview_paused(False)
+        self._atualizar_preview_operacao()
 
     def _mostrar_erro_operacao(self, mensagem: str) -> None:
+        self.operacao_processando = False
+        self.operacao_window.set_preview_paused(False)
         self.operacao_window.show_error(
             mensagem,
             total=self.operacao_total,
