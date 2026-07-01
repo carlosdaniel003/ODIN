@@ -22,6 +22,17 @@ class OperationWindow:
     PREVIEW_GUIDE = "#22D3EE"
     PREVIEW_BOARD_GUIDE = "#FBBF24"
 
+    STATUS_FONT_SIZES = {
+        "OK": 88,
+        "NG": 88,
+        "ERRO": 60,
+        "AGUARDANDO": 44,
+        "POSICIONANDO": 40,
+        "PROCESSANDO": 42,
+        "RETIRE A PLACA": 38,
+        "PREPARANDO": 42,
+    }
+
     def __init__(
         self,
         root: tk.Tk,
@@ -39,6 +50,8 @@ class OperationWindow:
         self._preview_image_item = None
         self._preview_guide_signature = None
         self._preview_use_ppm = True
+        self._configured_led_count = 0
+        self._has_led_result = False
 
         self.container = tk.Frame(
             root,
@@ -75,7 +88,7 @@ class OperationWindow:
             row=1,
             column=0,
             sticky="nsew",
-            padx=(34, 20),
+            padx=(24, 16),
             pady=16,
         )
         self.status_frame.grid_rowconfigure(0, weight=1)
@@ -84,36 +97,54 @@ class OperationWindow:
         self.status_label = tk.Label(
             self.status_frame,
             text="AGUARDANDO",
-            font=("DejaVu Sans", 76, "bold"),
+            font=("DejaVu Sans", 44, "bold"),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
             anchor="center",
             justify="center",
-            wraplength=760,
+            wraplength=0,
         )
         self.status_label.grid(
             row=0,
             column=0,
-            sticky="",
-            padx=12,
+            sticky="ew",
+            padx=4,
         )
 
         self.detail_label = tk.Label(
             self.status_frame,
-            text="Pressione ENTER para inspecionar",
-            font=("DejaVu Sans", 20),
+            text="Insira uma placa para iniciar",
+            font=("DejaVu Sans", 18),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
             anchor="center",
             justify="center",
-            wraplength=700,
+            wraplength=620,
         )
         self.detail_label.grid(
             row=1,
             column=0,
-            sticky="",
-            padx=12,
-            pady=(0, 18),
+            sticky="ew",
+            padx=8,
+            pady=(0, 8),
+        )
+
+        self.led_summary_label = tk.Label(
+            self.status_frame,
+            text="LEDS CONFIGURADOS: 0",
+            font=("DejaVu Sans", 17, "bold"),
+            bg=self.COLOR_WAITING,
+            fg="#FFFFFF",
+            anchor="center",
+            justify="center",
+            wraplength=0,
+        )
+        self.led_summary_label.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=8,
+            pady=(0, 14),
         )
 
         self.preview_frame = tk.Frame(
@@ -128,7 +159,7 @@ class OperationWindow:
             row=1,
             column=1,
             sticky="e",
-            padx=(0, 34),
+            padx=(0, 24),
             pady=16,
         )
         self.preview_frame.grid_propagate(False)
@@ -413,6 +444,16 @@ class OperationWindow:
         ok_count: int,
         ng_count: int,
     ) -> None:
+        led_count = max(0, int(led_count))
+        if led_count != self._configured_led_count:
+            self._configured_led_count = led_count
+            self._has_led_result = False
+
+        if not self._has_led_result:
+            self.led_summary_label.configure(
+                text=f"LEDS CONFIGURADOS: {led_count}"
+            )
+
         self._set_state(
             background=self.COLOR_WAITING,
             foreground="#FFFFFF",
@@ -478,6 +519,13 @@ class OperationWindow:
     ) -> None:
         background = self.COLOR_OK if is_ok else self.COLOR_NG
         status = "OK" if is_ok else "NG"
+        off_count = len(failed_led_ids)
+        lit_count = max(0, self._configured_led_count - off_count)
+
+        self._has_led_result = True
+        self.led_summary_label.configure(
+            text=f"ACESOS: {lit_count}    APAGADOS: {off_count}"
+        )
 
         if is_ok:
             detail = f"Tempo de inspeção: {elapsed_seconds:.3f} s"
@@ -536,16 +584,20 @@ class OperationWindow:
             self.brand_label,
             self.status_label,
             self.detail_label,
+            self.led_summary_label,
             self.counter_label,
             self.footer_label,
         ):
             widget.configure(bg=background)
 
+        status_font_size = self.STATUS_FONT_SIZES.get(status, 42)
         self.status_label.configure(
             text=status,
+            font=("DejaVu Sans", status_font_size, "bold"),
             fg=foreground,
             anchor="center",
             justify="center",
+            wraplength=0,
         )
         self.detail_label.configure(
             text=detail,
@@ -554,6 +606,7 @@ class OperationWindow:
             justify="center",
         )
         self.brand_label.configure(fg=foreground)
+        self.led_summary_label.configure(fg=foreground)
         self.counter_label.configure(fg=foreground)
         self.footer_label.configure(fg=foreground)
         self._raise_preview()
