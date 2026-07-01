@@ -259,15 +259,7 @@ class RaspberryPi3ODINApp(ODINApp):
                 pass
             self._operacao_preparo_after_id = None
 
-        if self._operacao_preview_after_id is not None:
-            try:
-                self.root.after_cancel(
-                    self._operacao_preview_after_id
-                )
-            except Exception:
-                pass
-            self._operacao_preview_after_id = None
-
+        self._cancelar_preview_operacao()
         self.operacao_window.hide()
         self._ultima_renderizacao_parametrizacao_s = 0.0
         self.view.atualizar_status(
@@ -281,6 +273,15 @@ class RaspberryPi3ODINApp(ODINApp):
             max(20, int(atraso_ms)),
             self.preparar_tela_operacao,
         )
+
+    def _cancelar_preview_operacao(self) -> None:
+        if self._operacao_preview_after_id is None:
+            return
+        try:
+            self.root.after_cancel(self._operacao_preview_after_id)
+        except Exception:
+            pass
+        self._operacao_preview_after_id = None
 
     def _agendar_preview_operacao(
         self,
@@ -413,6 +414,7 @@ class RaspberryPi3ODINApp(ODINApp):
             if not self.operacao_engine.ready:
                 return
 
+        self._cancelar_preview_operacao()
         self.operacao_processando = True
         self.operacao_window.set_preview_paused(True)
         self.operacao_window.show_processing(
@@ -451,6 +453,9 @@ class RaspberryPi3ODINApp(ODINApp):
             ng_count=self.operacao_ng,
         )
         self.operacao_window.set_preview_paused(False)
+        self._agendar_preview_operacao(
+            OPERATION_PREVIEW_INTERVAL_MS
+        )
 
     def _mostrar_erro_operacao(self, mensagem: str) -> None:
         self.operacao_processando = False
@@ -460,4 +465,7 @@ class RaspberryPi3ODINApp(ODINApp):
             total=self.operacao_total,
             ok_count=self.operacao_ok,
             ng_count=self.operacao_ng,
+        )
+        self._agendar_preview_operacao(
+            OPERATION_PREVIEW_INTERVAL_MS
         )
