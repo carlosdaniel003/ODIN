@@ -289,7 +289,15 @@ class RaspberryPi3ODINApp(ODINApp):
         )
 
     def _atualizar_preview_operacao(self) -> None:
+        after_id_atual = self._operacao_preview_after_id
         self._operacao_preview_after_id = None
+
+        if after_id_atual is not None:
+            try:
+                self.root.after_cancel(after_id_atual)
+            except Exception:
+                pass
+
         if not self.operacao_ativa:
             return
 
