@@ -8,7 +8,7 @@ import cv2
 
 
 class OperationWindow:
-    """Tela de produção leve com prévia reduzida da câmera."""
+    """Tela de produção leve com prévia persistente da câmera."""
 
     COLOR_WAITING = "#111827"
     COLOR_PROCESSING = "#F59E0B"
@@ -33,7 +33,6 @@ class OperationWindow:
         self.on_close = on_close
         self.preview_width = max(160, int(preview_width))
         self.preview_height = max(120, int(preview_height))
-        self._blink_after_ids: list[str] = []
         self._preview_tk = None
         self._preview_image_item = None
         self._preview_guide_signature = None
@@ -45,34 +44,37 @@ class OperationWindow:
             highlightthickness=0,
             takefocus=True,
         )
+        self.container.grid_rowconfigure(1, weight=1)
+        self.container.grid_columnconfigure(0, weight=1)
 
         self.brand_label = tk.Label(
             self.container,
             text="ODIN",
             font=("DejaVu Sans", 28, "bold"),
             bg=self.COLOR_WAITING,
-            fg="#D1D5DB",
+            fg="#FFFFFF",
         )
-        self.brand_label.pack(pady=(34, 8))
+        self.brand_label.grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            pady=(28, 8),
+        )
 
-        self.content_frame = tk.Frame(
+        self.status_frame = tk.Frame(
             self.container,
             bg=self.COLOR_WAITING,
             highlightthickness=0,
         )
-        self.content_frame.pack(fill="both", expand=True, padx=34)
-
-        self.status_frame = tk.Frame(
-            self.content_frame,
-            bg=self.COLOR_WAITING,
-            highlightthickness=0,
+        self.status_frame.grid(
+            row=1,
+            column=0,
+            sticky="nsew",
+            padx=(34, 20),
+            pady=16,
         )
-        self.status_frame.pack(
-            side="left",
-            fill="both",
-            expand=True,
-            padx=(0, 24),
-        )
+        self.status_frame.grid_rowconfigure(0, weight=1)
+        self.status_frame.grid_columnconfigure(0, weight=1)
 
         self.status_label = tk.Label(
             self.status_frame,
@@ -82,32 +84,39 @@ class OperationWindow:
             fg="#FFFFFF",
             justify="center",
         )
-        self.status_label.pack(expand=True)
+        self.status_label.grid(row=0, column=0, sticky="nsew")
 
         self.detail_label = tk.Label(
             self.status_frame,
             text="Pressione ENTER para inspecionar",
             font=("DejaVu Sans", 20),
             bg=self.COLOR_WAITING,
-            fg="#E5E7EB",
+            fg="#FFFFFF",
             justify="center",
         )
-        self.detail_label.pack(pady=(0, 24))
+        self.detail_label.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            pady=(0, 18),
+        )
 
         self.preview_frame = tk.Frame(
-            self.content_frame,
+            self.container,
             bg=self.PREVIEW_BACKGROUND,
             highlightbackground=self.PREVIEW_BORDER,
             highlightthickness=2,
             width=self.preview_width + 28,
             height=self.preview_height + 78,
         )
-        self.preview_frame.pack(
-            side="right",
-            anchor="center",
-            padx=(0, 8),
+        self.preview_frame.grid(
+            row=1,
+            column=1,
+            sticky="e",
+            padx=(0, 34),
+            pady=16,
         )
-        self.preview_frame.pack_propagate(False)
+        self.preview_frame.grid_propagate(False)
 
         self.preview_title = tk.Label(
             self.preview_frame,
@@ -142,18 +151,28 @@ class OperationWindow:
             text="TOTAL 0    OK 0    NG 0",
             font=("DejaVu Sans", 16, "bold"),
             bg=self.COLOR_WAITING,
-            fg="#D1D5DB",
+            fg="#FFFFFF",
         )
-        self.counter_label.pack(pady=(10, 12))
+        self.counter_label.grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            pady=(4, 10),
+        )
 
         self.footer_label = tk.Label(
             self.container,
             text="F1 ou ESC: parametrização",
             font=("DejaVu Sans", 12),
             bg=self.COLOR_WAITING,
-            fg="#9CA3AF",
+            fg="#FFFFFF",
         )
-        self.footer_label.pack(pady=(0, 16))
+        self.footer_label.grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            pady=(0, 14),
+        )
 
         self.container.bind("<Return>", self._handle_trigger)
         self.container.bind("<KP_Enter>", self._handle_trigger)
@@ -172,18 +191,15 @@ class OperationWindow:
             relheight=1.0,
         )
         self.container.lift()
+        self._raise_preview()
         self.container.focus_force()
 
     def hide(self) -> None:
-        self._cancel_blink()
         self.container.place_forget()
 
     def update_preview(self, frame, leds=()) -> bool:
         if frame is None or getattr(frame, "size", 0) == 0:
-            self.set_preview_status(
-                "Sem imagem da câmera",
-                "#FCA5A5",
-            )
+            self.set_preview_status("Sem imagem da câmera", "#FCA5A5")
             return False
 
         frame_height, frame_width = frame.shape[:2]
@@ -224,12 +240,8 @@ class OperationWindow:
             frame_width=frame_width,
             frame_height=frame_height,
         )
-        self.preview_canvas.tag_lower("preview_image")
-        self.preview_canvas.tag_raise("preview_guide")
-        self.set_preview_status(
-            "Ao vivo • 1 FPS",
-            "#86EFAC",
-        )
+        self._raise_preview()
+        self.set_preview_status("Ao vivo • 1 FPS", "#86EFAC")
         return True
 
     def _create_preview_image(self, preview):
@@ -259,10 +271,7 @@ class OperationWindow:
         return tk.PhotoImage(data=image_data)
 
     def set_preview_status(self, message: str, color: str) -> None:
-        self.preview_status.configure(
-            text=message,
-            fg=color,
-        )
+        self.preview_status.configure(text=message, fg=color)
 
     def set_preview_paused(self, paused: bool) -> None:
         if paused:
@@ -271,10 +280,8 @@ class OperationWindow:
                 "#FDE68A",
             )
         else:
-            self.set_preview_status(
-                "Ao vivo • 1 FPS",
-                "#86EFAC",
-            )
+            self.set_preview_status("Ao vivo • 1 FPS", "#86EFAC")
+        self._raise_preview()
 
     def clear_preview(self, message: str = "Aguardando câmera") -> None:
         self._preview_tk = None
@@ -282,6 +289,15 @@ class OperationWindow:
         self._preview_guide_signature = None
         self.preview_canvas.delete("all")
         self.set_preview_status(message, "#94A3B8")
+
+    def _raise_preview(self) -> None:
+        try:
+            self.preview_frame.lift()
+            if self._preview_image_item is not None:
+                self.preview_canvas.tag_lower("preview_image")
+            self.preview_canvas.tag_raise("preview_guide")
+        except tk.TclError:
+            pass
 
     def _update_guides(
         self,
@@ -424,7 +440,6 @@ class OperationWindow:
             detail=detail,
         )
         self._set_counters(total, ok_count, ng_count)
-        self._blink_result(background)
 
     def show_error(
         self,
@@ -458,35 +473,8 @@ class OperationWindow:
         status: str,
         detail: str,
     ) -> None:
-        self._cancel_blink()
-        self._apply_background(background)
-        self.status_label.configure(text=status, fg=foreground)
-        self.detail_label.configure(text=detail, fg=foreground)
-        self.brand_label.configure(fg=foreground)
-        self.counter_label.configure(fg=foreground)
-        self.footer_label.configure(fg=foreground)
-        self.root.update_idletasks()
-
-    def _blink_result(self, result_color: str) -> None:
-        sequence = (
-            (120, self.COLOR_WAITING),
-            (240, result_color),
-            (360, self.COLOR_WAITING),
-            (480, result_color),
-        )
-        for delay_ms, color in sequence:
-            after_id = self.root.after(
-                delay_ms,
-                lambda selected_color=color: self._apply_background(
-                    selected_color
-                ),
-            )
-            self._blink_after_ids.append(after_id)
-
-    def _apply_background(self, background: str) -> None:
         for widget in (
             self.container,
-            self.content_frame,
             self.status_frame,
             self.brand_label,
             self.status_label,
@@ -496,13 +484,13 @@ class OperationWindow:
         ):
             widget.configure(bg=background)
 
-    def _cancel_blink(self) -> None:
-        for after_id in self._blink_after_ids:
-            try:
-                self.root.after_cancel(after_id)
-            except tk.TclError:
-                pass
-        self._blink_after_ids.clear()
+        self.status_label.configure(text=status, fg=foreground)
+        self.detail_label.configure(text=detail, fg=foreground)
+        self.brand_label.configure(fg=foreground)
+        self.counter_label.configure(fg=foreground)
+        self.footer_label.configure(fg=foreground)
+        self._raise_preview()
+        self.root.update_idletasks()
 
     def _handle_trigger(self, _event=None) -> str:
         self.on_trigger()
