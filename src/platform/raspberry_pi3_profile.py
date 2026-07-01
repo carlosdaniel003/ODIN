@@ -31,6 +31,7 @@ from src.platform.raspberry_pi3_settings import (
     OPERATION_PREVIEW_HEIGHT,
     OPERATION_PREVIEW_INTERVAL_MS,
     OPERATION_PREVIEW_WIDTH,
+    OPERATION_RESULT_DISPLAY_MS,
     PARAMETERIZATION_PREVIEW_INTERVAL_MS,
 )
 from src.ui.operation_window import OperationWindow
@@ -51,6 +52,7 @@ class RaspberryPi3ODINApp(ODINApp):
         self.operacao_leds_preview = []
         self._operacao_preparo_after_id = None
         self._operacao_preview_after_id = None
+        self._operacao_resultado_after_id = None
 
         super().__init__(root)
         self._instalar_tela_operacao()
@@ -222,6 +224,7 @@ class RaspberryPi3ODINApp(ODINApp):
         return None
 
     def abrir_tela_operacao(self) -> None:
+        self._cancelar_retorno_aguardando()
         self.operacao_ativa = True
         self.operacao_processando = False
         self.operacao_engine.invalidate()
@@ -260,6 +263,7 @@ class RaspberryPi3ODINApp(ODINApp):
             self._operacao_preparo_after_id = None
 
         self._cancelar_preview_operacao()
+        self._cancelar_retorno_aguardando()
         self.operacao_window.hide()
         self._ultima_renderizacao_parametrizacao_s = 0.0
         self.view.atualizar_status(
@@ -317,6 +321,49 @@ class RaspberryPi3ODINApp(ODINApp):
             )
 
         self._agendar_preview_operacao()
+
+    def _cancelar_retorno_aguardando(self) -> None:
+        if self._operacao_resultado_after_id is None:
+            return
+        try:
+            self.root.after_cancel(
+                self._operacao_resultado_after_id
+            )
+        except Exception:
+            pass
+        self._operacao_resultado_after_id = None
+
+    def _agendar_retorno_aguardando(self) -> None:
+        self._cancelar_retorno_aguardando()
+        if not self.operacao_ativa:
+            return
+        self._operacao_resultado_after_id = self.root.after(
+            OPERATION_RESULT_DISPLAY_MS,
+            self._retornar_aguardando_operacao,
+        )
+
+    def _retornar_aguardando_operacao(self) -> None:
+        self._operacao_resultado_after_id = None
+
+        if not self.operacao_ativa:
+            return
+
+        if self.camera_desconectada or self.camera_frame_atual is None:
+            self.operacao_window.show_error(
+                "CÂMERA DESCONECTADA",
+                total=self.operacao_total,
+                ok_count=self.operacao_ok,
+                ng_count=self.operacao_ng,
+            )
+            return
+
+        self.operacao_window.show_waiting(
+            led_count=self.operacao_engine.led_count,
+            total=self.operacao_total,
+            ok_count=self.operacao_ok,
+            ng_count=self.operacao_ng,
+        )
+        self.operacao_window.set_preview_paused(False)
 
     def preparar_tela_operacao(self) -> None:
         self._operacao_preparo_after_id = None
@@ -402,7 +449,11 @@ class RaspberryPi3ODINApp(ODINApp):
             )
 
     def disparar_inspecao_operacao(self) -> None:
-        if not self.operacao_ativa or self.operacao_processando:
+        if (
+            not self.operacao_ativa
+            or self.operacao_processando
+            or self._operacao_resultado_after_id is not None
+        ):
             return
 
         if self.camera_desconectada or self.camera_frame_atual is None:
@@ -456,9 +507,11 @@ class RaspberryPi3ODINApp(ODINApp):
         self._agendar_preview_operacao(
             OPERATION_PREVIEW_INTERVAL_MS
         )
+        self._agendar_retorno_aguardando()
 
     def _mostrar_erro_operacao(self, mensagem: str) -> None:
         self.operacao_processando = False
+        self._cancelar_retorno_aguardando()
         self.operacao_window.set_preview_paused(False)
         self.operacao_window.show_error(
             mensagem,
