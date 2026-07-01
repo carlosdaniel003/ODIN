@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from queue import Empty, Queue
 import tkinter as tk
 
 from src.platform.gpio_trigger_service import GPIOTriggerService
 from src.platform.raspberry_pi3_profile import RaspberryPi3ODINApp
 from src.platform.raspberry_pi3_settings import (
+    GPIO_EVENT_POLL_MS,
     GPIO_POSITIONING_DELAY_MS,
     GPIO_TRIGGER_BCM_PIN,
     GPIO_TRIGGER_BOUNCE_S,
@@ -19,10 +21,13 @@ class GPIOEnabledRaspberryPi3ODINApp(RaspberryPi3ODINApp):
         self._gpio_waiting_removal = False
         self._gpio_armed = False
         self._gpio_positioning_after_id = None
+        self._gpio_poll_after_id = None
+        self._gpio_event_queue: Queue[str] = Queue()
         self.gpio_trigger_service = None
 
         super().__init__(root)
         self._initialize_gpio_trigger()
+        self._schedule_gpio_event_poll()
         self.root.bind(
             "<Destroy>",
             self._on_root_destroy,
@@ -33,8 +38,8 @@ class GPIOEnabledRaspberryPi3ODINApp(RaspberryPi3ODINApp):
         self.gpio_trigger_service = GPIOTriggerService(
             bcm_pin=GPIO_TRIGGER_BCM_PIN,
             bounce_time_s=GPIO_TRIGGER_BOUNCE_S,
-            on_pressed=self._dispatch_gpio_pressed,
-            on_released=self._dispatch_gpio_released,
+            on_pressed=self._queue_gpio_pressed,
+            on_released=self._queue_gpio_released,
         )
         started = self.gpio_trigger_service.start()
         self._gpio_armed = (
@@ -47,17 +52,37 @@ class GPIOEnabledRaspberryPi3ODINApp(RaspberryPi3ODINApp):
                 f"{self.gpio_trigger_service.error_message}"
             )
 
-    def _dispatch_gpio_pressed(self) -> None:
+    def _queue_gpio_pressed(self) -> None:
+        self._gpio_event_queue.put("pressed")
+
+    def _queue_gpio_released(self) -> None:
+        self._gpio_event_queue.put("released")
+
+    def _schedule_gpio_event_poll(self) -> None:
+        if self._gpio_poll_after_id is not None:
+            return
         try:
-            self.root.after(0, self._handle_gpio_pressed)
+            self._gpio_poll_after_id = self.root.after(
+                GPIO_EVENT_POLL_MS,
+                self._poll_gpio_events,
+            )
         except tk.TclError:
+            self._gpio_poll_after_id = None
+
+    def _poll_gpio_events(self) -> None:
+        self._gpio_poll_after_id = None
+
+        try:
+            while True:
+                event_name = self._gpio_event_queue.get_nowait()
+                if event_name == "pressed":
+                    self._handle_gpio_pressed()
+                elif event_name == "released":
+                    self._handle_gpio_released()
+        except Empty:
             pass
 
-    def _dispatch_gpio_released(self) -> None:
-        try:
-            self.root.after(0, self._handle_gpio_released)
-        except tk.TclError:
-            pass
+        self._schedule_gpio_event_poll()
 
     def _handle_gpio_pressed(self) -> None:
         if (
@@ -243,6 +268,14 @@ class GPIOEnabledRaspberryPi3ODINApp(RaspberryPi3ODINApp):
     def _on_root_destroy(self, event) -> None:
         if event.widget is not self.root:
             return
+
+        if self._gpio_poll_after_id is not None:
+            try:
+                self.root.after_cancel(self._gpio_poll_after_id)
+            except Exception:
+                pass
+            self._gpio_poll_after_id = None
+
         service = self.gpio_trigger_service
         if service is not None:
             service.close()
