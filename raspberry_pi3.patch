@@ -1,7 +1,8 @@
 diff --git a/src/app.py b/src/app.py
+index aec413d..e568a2e 100644
 --- a/src/app.py
 +++ b/src/app.py
-@@ -21,12 +21,12 @@ from src.ui.main_window import ODINView
+@@ -4,12 +4,12 @@ import tkinter as tk
  
  RAIO_MAXIMO_LED_PX = MAX_RADIUS_PX
  INDICE_CAMERA_PADRAO = 0
@@ -18,43 +19,35 @@ diff --git a/src/app.py b/src/app.py
  LIMITE_FRAME_PRETO_MEDIA = 4.0
  LIMITE_FRAME_PRETO_DESVIO = 3.0
  MARGEM_GUIAS_CAMERA_PERCENTUAL = 0.05
-@@ -297,6 +297,10 @@ class ODINApp:
+@@ -34,6 +34,10 @@ class ODINApp:
          heatmap, máscara e ROI debug são atualizados a cada 250 ms para não
          sobrecarregar o Tkinter com quatro codificações PNG por frame.
          """
-+        # Perfil Raspberry Pi 3: os painéis auxiliares permanecem congelados
-+        # durante o ao vivo e são gerados somente após a análise pelo ENTER.
++        # No Raspberry Pi 3, os painéis técnicos ficam congelados durante
++        # o ao vivo e são atualizados somente após a análise pelo ENTER.
 +        return
 +
          if (
              not self.camera_ativa
              or self.imagem_original is None
-@@ -547,6 +551,18 @@ class ODINApp:
-             self.camera_service.parar()
-             self.camera_service = None
+@@ -66,6 +70,12 @@ class ODINApp:
  
-+        self.configuracoes_camera = dict(
-+            self.configuracoes_camera or {}
-+        )
-+        self.configuracoes_camera.update(
-+            {
-+                "resolution_mode": "custom",
-+                "width": CAMERA_LARGURA_DESEJADA,
-+                "height": CAMERA_ALTURA_DESEJADA,
-+                "fps_mode": "manual",
-+                "fps": CAMERA_FPS_DESEJADO,
-+                "format": "MJPG",
-+            }
+ 
+     def obter_parametros_camera_dinamicos(self) -> tuple[int, int, int]:
++        return (
++            CAMERA_LARGURA_DESEJADA,
++            CAMERA_ALTURA_DESEJADA,
++            CAMERA_FPS_DESEJADO,
 +        )
 +
-         largura_camera, altura_camera, fps_camera = (
-             self.obter_parametros_camera_dinamicos()
-         )
+         configuracoes = (
+             self.configuracoes_camera
+             if isinstance(self.configuracoes_camera, dict)
 diff --git a/src/infra/camera_service.py b/src/infra/camera_service.py
+index 59c22dc..8934793 100644
 --- a/src/infra/camera_service.py
 +++ b/src/infra/camera_service.py
-@@ -389,7 +389,7 @@ class CameraService:
-         self._definir_estado(
+@@ -12,7 +12,7 @@ class CameraService:
              self.ESTADO_CONECTANDO,
              (
                  f"Conectando câmera {self.indice_camera} "
@@ -63,7 +56,7 @@ diff --git a/src/infra/camera_service.py b/src/infra/camera_service.py
              ),
          )
          self._abrir_camera()
-@@ -605,7 +605,7 @@ class CameraService:
+@@ -24,19 +24,19 @@ class CameraService:
              self.ESTADO_ESTABILIZANDO,
              (
                  f"Abrindo câmera {self.indice_camera} "
@@ -72,7 +65,7 @@ diff --git a/src/infra/camera_service.py b/src/infra/camera_service.py
              ),
          )
  
-@@ -613,11 +613,11 @@ class CameraService:
+         try:
              capture = cv2.VideoCapture(
                  self.indice_camera,
 -                cv2.CAP_DSHOW,
@@ -85,7 +78,8 @@ diff --git a/src/infra/camera_service.py b/src/infra/camera_service.py
 +                f"Falha ao abrir V4L2: {type(erro).__name__}."
              )
              return False
-@@ -630,7 +630,7 @@ class CameraService:
+ 
+@@ -51,7 +51,7 @@ class CameraService:
              self._agendar_reconexao(
                  (
                      f"Câmera {self.indice_camera} não abriu "
@@ -94,7 +88,8 @@ diff --git a/src/infra/camera_service.py b/src/infra/camera_service.py
                  )
              )
              return False
-@@ -644,7 +644,7 @@ class CameraService:
+@@ -64,7 +64,7 @@ class CameraService:
+         self._definir_estado(
              self.ESTADO_ESTABILIZANDO,
              (
 -                f"Câmera {self.indice_camera} aberta via DirectShow. "
@@ -102,10 +97,7 @@ diff --git a/src/infra/camera_service.py b/src/infra/camera_service.py
                  "Aguardando primeiro frame..."
              ),
          )
-@@ -713,7 +713,7 @@ class CameraService:
-             self._resolucao = (
-                 largura_frame,
-                 altura_frame,
+@@ -82,6 +82,6 @@ class CameraService:
              )
              self._estado = self.ESTADO_CONECTADA
              self._mensagem = (
