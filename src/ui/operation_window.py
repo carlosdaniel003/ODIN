@@ -1,33 +1,48 @@
 from __future__ import annotations
 
+import base64
 import tkinter as tk
 from collections.abc import Callable
 
+import cv2
+
 
 class OperationWindow:
-    """Tela de produção leve exibida sobre a parametrização."""
+    """Tela de produção leve com prévia reduzida da câmera."""
 
     COLOR_WAITING = "#111827"
     COLOR_PROCESSING = "#F59E0B"
     COLOR_OK = "#16A34A"
     COLOR_NG = "#DC2626"
     COLOR_ERROR = "#7F1D1D"
+    PREVIEW_BACKGROUND = "#020617"
+    PREVIEW_BORDER = "#334155"
+    PREVIEW_GUIDE = "#22D3EE"
+    PREVIEW_BOARD_GUIDE = "#FBBF24"
 
     def __init__(
         self,
         root: tk.Tk,
         on_trigger: Callable[[], None],
         on_close: Callable[[], None],
+        preview_width: int = 320,
+        preview_height: int = 240,
     ) -> None:
         self.root = root
         self.on_trigger = on_trigger
         self.on_close = on_close
+        self.preview_width = max(160, int(preview_width))
+        self.preview_height = max(120, int(preview_height))
         self._blink_after_ids: list[str] = []
+        self._preview_tk = None
+        self._preview_image_item = None
+        self._preview_guide_signature = None
 
         self.container = tk.Frame(
             root,
             bg=self.COLOR_WAITING,
             highlightthickness=0,
+            takefocus=True,
         )
 
         self.brand_label = tk.Label(
@@ -37,12 +52,31 @@ class OperationWindow:
             bg=self.COLOR_WAITING,
             fg="#D1D5DB",
         )
-        self.brand_label.pack(pady=(42, 0))
+        self.brand_label.pack(pady=(34, 8))
+
+        self.content_frame = tk.Frame(
+            self.container,
+            bg=self.COLOR_WAITING,
+            highlightthickness=0,
+        )
+        self.content_frame.pack(fill="both", expand=True, padx=34)
+
+        self.status_frame = tk.Frame(
+            self.content_frame,
+            bg=self.COLOR_WAITING,
+            highlightthickness=0,
+        )
+        self.status_frame.pack(
+            side="left",
+            fill="both",
+            expand=True,
+            padx=(0, 24),
+        )
 
         self.status_label = tk.Label(
-            self.container,
+            self.status_frame,
             text="AGUARDANDO",
-            font=("DejaVu Sans", 86, "bold"),
+            font=("DejaVu Sans", 82, "bold"),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
             justify="center",
@@ -50,7 +84,7 @@ class OperationWindow:
         self.status_label.pack(expand=True)
 
         self.detail_label = tk.Label(
-            self.container,
+            self.status_frame,
             text="Pressione ENTER para inspecionar",
             font=("DejaVu Sans", 20),
             bg=self.COLOR_WAITING,
@@ -59,6 +93,49 @@ class OperationWindow:
         )
         self.detail_label.pack(pady=(0, 24))
 
+        self.preview_frame = tk.Frame(
+            self.content_frame,
+            bg=self.PREVIEW_BACKGROUND,
+            highlightbackground=self.PREVIEW_BORDER,
+            highlightthickness=2,
+            width=self.preview_width + 28,
+            height=self.preview_height + 78,
+        )
+        self.preview_frame.pack(
+            side="right",
+            anchor="center",
+            padx=(0, 8),
+        )
+        self.preview_frame.pack_propagate(False)
+
+        self.preview_title = tk.Label(
+            self.preview_frame,
+            text="CÂMERA AO VIVO",
+            font=("DejaVu Sans", 12, "bold"),
+            bg=self.PREVIEW_BACKGROUND,
+            fg="#E2E8F0",
+        )
+        self.preview_title.pack(pady=(10, 6))
+
+        self.preview_canvas = tk.Canvas(
+            self.preview_frame,
+            width=self.preview_width,
+            height=self.preview_height,
+            bg=self.PREVIEW_BACKGROUND,
+            highlightthickness=0,
+            bd=0,
+        )
+        self.preview_canvas.pack()
+
+        self.preview_status = tk.Label(
+            self.preview_frame,
+            text="Aguardando câmera",
+            font=("DejaVu Sans", 10),
+            bg=self.PREVIEW_BACKGROUND,
+            fg="#94A3B8",
+        )
+        self.preview_status.pack(pady=(7, 8))
+
         self.counter_label = tk.Label(
             self.container,
             text="TOTAL 0    OK 0    NG 0",
@@ -66,7 +143,7 @@ class OperationWindow:
             bg=self.COLOR_WAITING,
             fg="#D1D5DB",
         )
-        self.counter_label.pack(pady=(0, 16))
+        self.counter_label.pack(pady=(10, 12))
 
         self.footer_label = tk.Label(
             self.container,
@@ -75,12 +152,12 @@ class OperationWindow:
             bg=self.COLOR_WAITING,
             fg="#9CA3AF",
         )
-        self.footer_label.pack(pady=(0, 18))
+        self.footer_label.pack(pady=(0, 16))
 
-        root.bind("<Return>", self._handle_trigger, add="+")
-        root.bind("<KP_Enter>", self._handle_trigger, add="+")
-        root.bind("<F1>", self._handle_close, add="+")
-        root.bind("<Escape>", self._handle_close, add="+")
+        self.container.bind("<Return>", self._handle_trigger)
+        self.container.bind("<KP_Enter>", self._handle_trigger)
+        self.container.bind("<F1>", self._handle_close)
+        self.container.bind("<Escape>", self._handle_close)
 
     @property
     def visible(self) -> bool:
@@ -94,13 +171,169 @@ class OperationWindow:
             relheight=1.0,
         )
         self.container.lift()
-        self.container.focus_set()
+        self.container.focus_force()
 
     def hide(self) -> None:
         self._cancel_blink()
         self.container.place_forget()
 
-    def show_preparing(self, detail: str = "Preparando câmera e parâmetros") -> None:
+    def update_preview(self, frame, leds=()) -> bool:
+        if frame is None or getattr(frame, "size", 0) == 0:
+            self.preview_status.configure(
+                text="Sem imagem da câmera",
+                fg="#FCA5A5",
+            )
+            return False
+
+        frame_height, frame_width = frame.shape[:2]
+        if frame_width <= 0 or frame_height <= 0:
+            return False
+
+        preview = cv2.resize(
+            frame,
+            (self.preview_width, self.preview_height),
+            interpolation=cv2.INTER_AREA,
+        )
+        encoded, buffer = cv2.imencode(
+            ".png",
+            preview,
+            [cv2.IMWRITE_PNG_COMPRESSION, 1],
+        )
+        if not encoded:
+            self.preview_status.configure(
+                text="Falha ao renderizar prévia",
+                fg="#FCA5A5",
+            )
+            return False
+
+        image_data = base64.b64encode(buffer).decode("ascii")
+        image_tk = tk.PhotoImage(data=image_data)
+        self._preview_tk = image_tk
+
+        if self._preview_image_item is None:
+            self._preview_image_item = self.preview_canvas.create_image(
+                0,
+                0,
+                image=image_tk,
+                anchor=tk.NW,
+                tags=("preview_image",),
+            )
+        else:
+            self.preview_canvas.itemconfigure(
+                self._preview_image_item,
+                image=image_tk,
+            )
+
+        self._update_guides(
+            leds=leds,
+            frame_width=frame_width,
+            frame_height=frame_height,
+        )
+        self.preview_canvas.tag_lower("preview_image")
+        self.preview_canvas.tag_raise("preview_guide")
+        self.preview_status.configure(
+            text="Ao vivo • 4 FPS",
+            fg="#86EFAC",
+        )
+        return True
+
+    def set_preview_paused(self, paused: bool) -> None:
+        if paused:
+            self.preview_status.configure(
+                text="Prévia pausada durante a inspeção",
+                fg="#FDE68A",
+            )
+        else:
+            self.preview_status.configure(
+                text="Ao vivo • 4 FPS",
+                fg="#86EFAC",
+            )
+
+    def clear_preview(self, message: str = "Aguardando câmera") -> None:
+        self._preview_tk = None
+        self._preview_image_item = None
+        self._preview_guide_signature = None
+        self.preview_canvas.delete("all")
+        self.preview_status.configure(
+            text=message,
+            fg="#94A3B8",
+        )
+
+    def _update_guides(
+        self,
+        leds,
+        frame_width: int,
+        frame_height: int,
+    ) -> None:
+        led_list = list(leds or ())
+        signature = (
+            frame_width,
+            frame_height,
+            tuple(
+                (
+                    str(getattr(led, "id", "")),
+                    int(getattr(led, "centro_x", 0)),
+                    int(getattr(led, "centro_y", 0)),
+                    int(getattr(led, "raio", 0)),
+                )
+                for led in led_list
+            ),
+        )
+        if signature == self._preview_guide_signature:
+            return
+
+        self._preview_guide_signature = signature
+        self.preview_canvas.delete("preview_guide")
+
+        if not led_list:
+            return
+
+        scale_x = self.preview_width / frame_width
+        scale_y = self.preview_height / frame_height
+        radius_scale = min(scale_x, scale_y)
+        left = self.preview_width
+        top = self.preview_height
+        right = 0
+        bottom = 0
+
+        for led in led_list:
+            center_x = int(getattr(led, "centro_x", 0) * scale_x)
+            center_y = int(getattr(led, "centro_y", 0) * scale_y)
+            radius = max(
+                2,
+                int(getattr(led, "raio", 1) * radius_scale),
+            )
+            left = min(left, center_x - radius)
+            top = min(top, center_y - radius)
+            right = max(right, center_x + radius)
+            bottom = max(bottom, center_y + radius)
+
+            self.preview_canvas.create_oval(
+                center_x - radius,
+                center_y - radius,
+                center_x + radius,
+                center_y + radius,
+                outline=self.PREVIEW_GUIDE,
+                width=1,
+                tags=("preview_guide",),
+            )
+
+        margin = 8
+        self.preview_canvas.create_rectangle(
+            max(1, left - margin),
+            max(1, top - margin),
+            min(self.preview_width - 1, right + margin),
+            min(self.preview_height - 1, bottom + margin),
+            outline=self.PREVIEW_BOARD_GUIDE,
+            width=2,
+            dash=(6, 4),
+            tags=("preview_guide",),
+        )
+
+    def show_preparing(
+        self,
+        detail: str = "Preparando câmera e parâmetros",
+    ) -> None:
         self._set_state(
             background=self.COLOR_PROCESSING,
             foreground="#111827",
@@ -229,6 +462,8 @@ class OperationWindow:
     def _apply_background(self, background: str) -> None:
         for widget in (
             self.container,
+            self.content_frame,
+            self.status_frame,
             self.brand_label,
             self.status_label,
             self.detail_label,
@@ -245,14 +480,10 @@ class OperationWindow:
                 pass
         self._blink_after_ids.clear()
 
-    def _handle_trigger(self, _event=None):
-        if self.visible:
-            self.on_trigger()
-            return "break"
-        return None
+    def _handle_trigger(self, _event=None) -> str:
+        self.on_trigger()
+        return "break"
 
-    def _handle_close(self, _event=None):
-        if self.visible:
-            self.on_close()
-            return "break"
-        return None
+    def _handle_close(self, _event=None) -> str:
+        self.on_close()
+        return "break"
