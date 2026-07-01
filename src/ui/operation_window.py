@@ -53,11 +53,14 @@ class OperationWindow:
             font=("DejaVu Sans", 28, "bold"),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
+            anchor="center",
+            justify="center",
         )
         self.brand_label.grid(
             row=0,
             column=0,
             columnspan=2,
+            sticky="ew",
             pady=(28, 8),
         )
 
@@ -79,12 +82,19 @@ class OperationWindow:
         self.status_label = tk.Label(
             self.status_frame,
             text="AGUARDANDO",
-            font=("DejaVu Sans", 82, "bold"),
+            font=("DejaVu Sans", 76, "bold"),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
+            anchor="center",
             justify="center",
+            wraplength=760,
         )
-        self.status_label.grid(row=0, column=0, sticky="nsew")
+        self.status_label.grid(
+            row=0,
+            column=0,
+            sticky="",
+            padx=12,
+        )
 
         self.detail_label = tk.Label(
             self.status_frame,
@@ -92,12 +102,15 @@ class OperationWindow:
             font=("DejaVu Sans", 20),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
+            anchor="center",
             justify="center",
+            wraplength=700,
         )
         self.detail_label.grid(
             row=1,
             column=0,
-            sticky="ew",
+            sticky="",
+            padx=12,
             pady=(0, 18),
         )
 
@@ -124,8 +137,10 @@ class OperationWindow:
             font=("DejaVu Sans", 12, "bold"),
             bg=self.PREVIEW_BACKGROUND,
             fg="#E2E8F0",
+            anchor="center",
+            justify="center",
         )
-        self.preview_title.pack(pady=(10, 6))
+        self.preview_title.pack(fill="x", pady=(10, 6))
 
         self.preview_canvas = tk.Canvas(
             self.preview_frame,
@@ -143,8 +158,10 @@ class OperationWindow:
             font=("DejaVu Sans", 10),
             bg=self.PREVIEW_BACKGROUND,
             fg="#94A3B8",
+            anchor="center",
+            justify="center",
         )
-        self.preview_status.pack(pady=(7, 8))
+        self.preview_status.pack(fill="x", pady=(7, 8))
 
         self.counter_label = tk.Label(
             self.container,
@@ -152,11 +169,14 @@ class OperationWindow:
             font=("DejaVu Sans", 16, "bold"),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
+            anchor="center",
+            justify="center",
         )
         self.counter_label.grid(
             row=2,
             column=0,
             columnspan=2,
+            sticky="ew",
             pady=(4, 10),
         )
 
@@ -166,11 +186,14 @@ class OperationWindow:
             font=("DejaVu Sans", 12),
             bg=self.COLOR_WAITING,
             fg="#FFFFFF",
+            anchor="center",
+            justify="center",
         )
         self.footer_label.grid(
             row=3,
             column=0,
             columnspan=2,
+            sticky="ew",
             pady=(0, 14),
         )
 
@@ -484,8 +507,18 @@ class OperationWindow:
         ):
             widget.configure(bg=background)
 
-        self.status_label.configure(text=status, fg=foreground)
-        self.detail_label.configure(text=detail, fg=foreground)
+        self.status_label.configure(
+            text=status,
+            fg=foreground,
+            anchor="center",
+            justify="center",
+        )
+        self.detail_label.configure(
+            text=detail,
+            fg=foreground,
+            anchor="center",
+            justify="center",
+        )
         self.brand_label.configure(fg=foreground)
         self.counter_label.configure(fg=foreground)
         self.footer_label.configure(fg=foreground)
