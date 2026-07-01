@@ -37,6 +37,7 @@ class OperationWindow:
         self._preview_tk = None
         self._preview_image_item = None
         self._preview_guide_signature = None
+        self._preview_use_ppm = True
 
         self.container = tk.Frame(
             root,
@@ -179,9 +180,9 @@ class OperationWindow:
 
     def update_preview(self, frame, leds=()) -> bool:
         if frame is None or getattr(frame, "size", 0) == 0:
-            self.preview_status.configure(
-                text="Sem imagem da câmera",
-                fg="#FCA5A5",
+            self.set_preview_status(
+                "Sem imagem da câmera",
+                "#FCA5A5",
             )
             return False
 
@@ -194,20 +195,14 @@ class OperationWindow:
             (self.preview_width, self.preview_height),
             interpolation=cv2.INTER_AREA,
         )
-        encoded, buffer = cv2.imencode(
-            ".png",
-            preview,
-            [cv2.IMWRITE_PNG_COMPRESSION, 1],
-        )
-        if not encoded:
-            self.preview_status.configure(
-                text="Falha ao renderizar prévia",
-                fg="#FCA5A5",
+        image_tk = self._create_preview_image(preview)
+        if image_tk is None:
+            self.set_preview_status(
+                "Falha ao renderizar prévia",
+                "#FCA5A5",
             )
             return False
 
-        image_data = base64.b64encode(buffer).decode("ascii")
-        image_tk = tk.PhotoImage(data=image_data)
         self._preview_tk = image_tk
 
         if self._preview_image_item is None:
@@ -231,22 +226,54 @@ class OperationWindow:
         )
         self.preview_canvas.tag_lower("preview_image")
         self.preview_canvas.tag_raise("preview_guide")
-        self.preview_status.configure(
-            text="Ao vivo • 4 FPS",
-            fg="#86EFAC",
+        self.set_preview_status(
+            "Ao vivo • 1 FPS",
+            "#86EFAC",
         )
         return True
 
+    def _create_preview_image(self, preview):
+        if self._preview_use_ppm:
+            try:
+                rgb = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
+                header = (
+                    f"P6\n{self.preview_width} "
+                    f"{self.preview_height}\n255\n"
+                ).encode("ascii")
+                return tk.PhotoImage(
+                    data=header + rgb.tobytes(),
+                    format="PPM",
+                )
+            except tk.TclError:
+                self._preview_use_ppm = False
+
+        encoded, buffer = cv2.imencode(
+            ".png",
+            preview,
+            [cv2.IMWRITE_PNG_COMPRESSION, 1],
+        )
+        if not encoded:
+            return None
+
+        image_data = base64.b64encode(buffer).decode("ascii")
+        return tk.PhotoImage(data=image_data)
+
+    def set_preview_status(self, message: str, color: str) -> None:
+        self.preview_status.configure(
+            text=message,
+            fg=color,
+        )
+
     def set_preview_paused(self, paused: bool) -> None:
         if paused:
-            self.preview_status.configure(
-                text="Prévia pausada durante a inspeção",
-                fg="#FDE68A",
+            self.set_preview_status(
+                "Imagem mantida • processando",
+                "#FDE68A",
             )
         else:
-            self.preview_status.configure(
-                text="Ao vivo • 4 FPS",
-                fg="#86EFAC",
+            self.set_preview_status(
+                "Ao vivo • 1 FPS",
+                "#86EFAC",
             )
 
     def clear_preview(self, message: str = "Aguardando câmera") -> None:
@@ -254,10 +281,7 @@ class OperationWindow:
         self._preview_image_item = None
         self._preview_guide_signature = None
         self.preview_canvas.delete("all")
-        self.preview_status.configure(
-            text=message,
-            fg="#94A3B8",
-        )
+        self.set_preview_status(message, "#94A3B8")
 
     def _update_guides(
         self,
