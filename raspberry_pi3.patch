@@ -1,0 +1,115 @@
+diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -21,12 +21,12 @@ from src.ui.main_window import ODINView
+ 
+ RAIO_MAXIMO_LED_PX = MAX_RADIUS_PX
+ INDICE_CAMERA_PADRAO = 0
+-INTERVALO_CAMERA_MS = 45
++INTERVALO_CAMERA_MS = 100
+ INTERVALO_RENDERIZACOES_CAMERA_MS = 250
+ TEMPO_RESULTADO_CAMERA_MS = 3000
+-CAMERA_LARGURA_DESEJADA = 1280
+-CAMERA_ALTURA_DESEJADA = 720
+-CAMERA_FPS_DESEJADO = 30
++CAMERA_LARGURA_DESEJADA = 640
++CAMERA_ALTURA_DESEJADA = 480
++CAMERA_FPS_DESEJADO = 15
+ LIMITE_FRAME_PRETO_MEDIA = 4.0
+ LIMITE_FRAME_PRETO_DESVIO = 3.0
+ MARGEM_GUIAS_CAMERA_PERCENTUAL = 0.05
+@@ -297,6 +297,10 @@ class ODINApp:
+         heatmap, máscara e ROI debug são atualizados a cada 250 ms para não
+         sobrecarregar o Tkinter com quatro codificações PNG por frame.
+         """
++        # Perfil Raspberry Pi 3: os painéis auxiliares permanecem congelados
++        # durante o ao vivo e são gerados somente após a análise pelo ENTER.
++        return
++
+         if (
+             not self.camera_ativa
+             or self.imagem_original is None
+@@ -547,6 +551,18 @@ class ODINApp:
+             self.camera_service.parar()
+             self.camera_service = None
+ 
++        self.configuracoes_camera = dict(
++            self.configuracoes_camera or {}
++        )
++        self.configuracoes_camera.update(
++            {
++                "resolution_mode": "custom",
++                "width": CAMERA_LARGURA_DESEJADA,
++                "height": CAMERA_ALTURA_DESEJADA,
++                "fps_mode": "manual",
++                "fps": CAMERA_FPS_DESEJADO,
++                "format": "MJPG",
++            }
++        )
++
+         largura_camera, altura_camera, fps_camera = (
+             self.obter_parametros_camera_dinamicos()
+         )
+diff --git a/src/infra/camera_service.py b/src/infra/camera_service.py
+--- a/src/infra/camera_service.py
++++ b/src/infra/camera_service.py
+@@ -389,7 +389,7 @@ class CameraService:
+         self._definir_estado(
+             self.ESTADO_CONECTANDO,
+             (
+                 f"Conectando câmera {self.indice_camera} "
+-                "via DirectShow..."
++                "via V4L2..."
+             ),
+         )
+         self._abrir_camera()
+@@ -605,7 +605,7 @@ class CameraService:
+             self.ESTADO_ESTABILIZANDO,
+             (
+                 f"Abrindo câmera {self.indice_camera} "
+-                "via DirectShow..."
++                "via V4L2..."
+             ),
+         )
+ 
+@@ -613,11 +613,11 @@ class CameraService:
+             capture = cv2.VideoCapture(
+                 self.indice_camera,
+-                cv2.CAP_DSHOW,
++                cv2.CAP_V4L2,
+             )
+         except Exception as erro:
+             self._capture = None
+             self._agendar_reconexao(
+-                f"Falha ao abrir DirectShow: {type(erro).__name__}."
++                f"Falha ao abrir V4L2: {type(erro).__name__}."
+             )
+             return False
+@@ -630,7 +630,7 @@ class CameraService:
+             self._agendar_reconexao(
+                 (
+                     f"Câmera {self.indice_camera} não abriu "
+-                    "via DirectShow."
++                    "via V4L2."
+                 )
+             )
+             return False
+@@ -644,7 +644,7 @@ class CameraService:
+             self.ESTADO_ESTABILIZANDO,
+             (
+-                f"Câmera {self.indice_camera} aberta via DirectShow. "
++                f"Câmera {self.indice_camera} aberta via V4L2. "
+                 "Aguardando primeiro frame..."
+             ),
+         )
+@@ -713,7 +713,7 @@ class CameraService:
+             self._resolucao = (
+                 largura_frame,
+                 altura_frame,
+             )
+             self._estado = self.ESTADO_CONECTADA
+             self._mensagem = (
+-                "Câmera conectada via DirectShow. "
++                "Câmera conectada via V4L2. "
+                 f"Resolução real: {largura_frame}x{altura_frame}."
+             )
