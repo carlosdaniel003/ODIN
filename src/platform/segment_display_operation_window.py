@@ -34,6 +34,12 @@ F2_RESULT_PREVIEW_SHARE = 0.42
 F2_RESULT_PREVIEW_RESIZE_DEBOUNCE_MS = 80
 F2_RESULT_PREVIEW_MIN_WIDTH = 150
 F2_RESULT_PREVIEW_MIN_HEIGHT = 110
+F2_RESULT_PREVIEW_HORIZONTAL_PADDING = 38
+F2_RESULT_MASK_NORMAL_BGR = (238, 211, 34)
+F2_RESULT_MASK_NG_BGR = (235, 99, 37)
+F2_RESULT_MASK_NG_ALPHA = 0.28
+F2_RESULT_MASK_NORMAL_THICKNESS = 2
+F2_RESULT_MASK_NG_THICKNESS = 5
 
 F2_BOARD_STATUS_UI = {
     "board_on": ("PLACA PRESENTE — LIGADA", "#86EFAC"),
@@ -71,6 +77,41 @@ def largura_texto_com_preview_resultado_f2(panel_width: int) -> int:
         width = 640
     text_share = max(0.50, 1.0 - F2_RESULT_PREVIEW_SHARE)
     return max(220, int(round(width * text_share)) - 28)
+
+
+def calcular_tamanho_quadro_resultado_f2(
+    panel_width: int,
+    frame_width: int,
+    frame_height: int,
+) -> tuple[int, int]:
+    """Calcula um quadro responsivo com a mesma proporção do frame analisado."""
+    try:
+        available_width = max(320, int(panel_width))
+    except (TypeError, ValueError):
+        available_width = 640
+    try:
+        source_width = max(1, int(frame_width))
+        source_height = max(1, int(frame_height))
+    except (TypeError, ValueError):
+        source_width, source_height = 4, 3
+
+    preferred_width = (
+        int(round(available_width * F2_RESULT_PREVIEW_SHARE))
+        - F2_RESULT_PREVIEW_HORIZONTAL_PADDING
+    )
+    max_width = max(
+        F2_RESULT_PREVIEW_MIN_WIDTH,
+        available_width - 56,
+    )
+    width = min(
+        max_width,
+        max(F2_RESULT_PREVIEW_MIN_WIDTH, preferred_width),
+    )
+    height = max(
+        1,
+        int(round(width * source_height / float(source_width))),
+    )
+    return int(width), int(height)
 
 
 def renderizar_overlay_rois_f2(frame, leds, states: dict[str, str] | None):
@@ -140,6 +181,99 @@ def renderizar_overlay_rois_f2(frame, leds, states: dict[str, str] | None):
     return result
 
 
+def renderizar_mascaras_resultado_f2(frame, leds, failed_led_ids=()):
+    """Sobrepõe as máscaras no frame congelado, enfatizando as máscaras NG."""
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return frame
+
+    result = frame.copy()
+    tint = result.copy()
+    failed_ids = frozenset(str(item) for item in (failed_led_ids or ()))
+    outlines: list[tuple[str, object, bool]] = []
+    has_failed_fill = False
+
+    for led in tuple(leds or ()):
+        led_id = str(getattr(led, "id", ""))
+        failed = led_id in failed_ids
+        tipo = normalizar_tipo_roi(getattr(led, "tipo_roi", None))
+
+        if tipo == TIPO_ROI_SEGMENTO:
+            points = np.asarray(
+                [(int(round(x)), int(round(y))) for x, y in pontos_segmento(led)],
+                dtype=np.int32,
+            )
+            if len(points) < 3:
+                continue
+            geometry = points.reshape((-1, 1, 2))
+            if failed:
+                cv2.fillPoly(
+                    tint,
+                    [geometry],
+                    F2_RESULT_MASK_NG_BGR,
+                    lineType=cv2.LINE_AA,
+                )
+                has_failed_fill = True
+            outlines.append(("segment", geometry, failed))
+            continue
+
+        center = (
+            int(getattr(led, "centro_x", 0)),
+            int(getattr(led, "centro_y", 0)),
+        )
+        radius = max(2, int(getattr(led, "raio", 2)))
+        geometry = (center, radius)
+        if failed:
+            cv2.circle(
+                tint,
+                center,
+                radius,
+                F2_RESULT_MASK_NG_BGR,
+                -1,
+                cv2.LINE_AA,
+            )
+            has_failed_fill = True
+        outlines.append(("circle", geometry, failed))
+
+    if has_failed_fill:
+        cv2.addWeighted(
+            tint,
+            F2_RESULT_MASK_NG_ALPHA,
+            result,
+            1.0 - F2_RESULT_MASK_NG_ALPHA,
+            0.0,
+            dst=result,
+        )
+
+    for kind, geometry, failed in outlines:
+        color = F2_RESULT_MASK_NG_BGR if failed else F2_RESULT_MASK_NORMAL_BGR
+        thickness = (
+            F2_RESULT_MASK_NG_THICKNESS
+            if failed
+            else F2_RESULT_MASK_NORMAL_THICKNESS
+        )
+        if kind == "segment":
+            cv2.polylines(
+                result,
+                [geometry],
+                True,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+        else:
+            center, radius = geometry
+            cv2.circle(
+                result,
+                center,
+                radius,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+
+    return result
+
+
 class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
     """Prévia F2 capaz de desenhar simultaneamente círculos e segmentos."""
 
@@ -153,6 +287,8 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
         self._result_snapshot_resize_after_id = None
         self._result_snapshot_visible = False
         self._result_snapshot_is_ok: bool | None = None
+        self._result_snapshot_leds = ()
+        self._result_snapshot_failed_ids: frozenset[str] = frozenset()
         super().__init__(*args, **kwargs)
         try:
             self.preview_legend.configure(text="AZUL: ROI APAGADA")
@@ -187,8 +323,8 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
             highlightbackground="#475569",
             highlightthickness=1,
         )
-        self.result_snapshot_panel.grid_rowconfigure(1, weight=1)
-        self.result_snapshot_panel.grid_columnconfigure(0, weight=1)
+        self.result_snapshot_panel.grid_rowconfigure(1, weight=0)
+        self.result_snapshot_panel.grid_columnconfigure(0, weight=0)
 
         header = tk.Frame(
             self.result_snapshot_panel,
@@ -206,7 +342,7 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
 
         self.result_snapshot_title = tk.Label(
             header,
-            text="FRAME ANALISADO",
+            text="FRAME ANALISADO • MÁSCARAS",
             font=("DejaVu Sans", 9, "bold"),
             bg="#08111F",
             fg="#CBD5E1",
@@ -238,7 +374,7 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
         self.result_snapshot_canvas.grid(
             row=1,
             column=0,
-            sticky="nsew",
+            sticky="nw",
             padx=8,
             pady=(0, 8),
         )
@@ -249,24 +385,24 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
         self.result_snapshot_panel.grid_remove()
 
     def _set_result_snapshot_layout(self, visible: bool) -> None:
-        """Usa somente o espaço do resultado; a câmera ao vivo permanece intacta."""
+        """Reserva um quadro proporcional sem esticar a miniatura verticalmente."""
         self._result_snapshot_visible = bool(visible)
         if visible:
             self.status_frame.grid_columnconfigure(
                 0,
-                weight=42,
-                uniform="f2_result_content",
+                weight=0,
+                uniform="",
             )
             self.status_frame.grid_columnconfigure(
                 1,
-                weight=58,
-                uniform="f2_result_content",
+                weight=1,
+                uniform="",
             )
             self.result_snapshot_panel.grid(
                 row=0,
                 column=0,
                 rowspan=2,
-                sticky="nsew",
+                sticky="nw",
                 padx=(0, 12),
                 pady=4,
             )
@@ -326,6 +462,8 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
             self._result_snapshot_bgr = None
             self._result_snapshot_tk = None
             self._result_snapshot_is_ok = None
+            self._result_snapshot_leds = ()
+            self._result_snapshot_failed_ids = frozenset()
             try:
                 self.result_snapshot_canvas.delete("all")
             except Exception:
@@ -345,15 +483,16 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
         *,
         is_ok: bool,
         failed_led_ids=(),
+        leds=None,
     ) -> bool:
-        """Congela exatamente o frame que originou o último OK/NG do F2.
+        """Congela o frame do OK/NG e associa somente dados visuais das máscaras.
 
-        ``failed_led_ids`` é aceito para manter o contexto da inspeção disponível
-        à interface, mas a miniatura permanece o frame bruto realmente enviado ao
-        motor. Assim ela não pode ser confundida com a câmera ao vivo nem com uma
-        reconstrução posterior do resultado.
+        O frame bruto continua sendo exatamente o enviado ao motor. As máscaras
+        são aplicadas somente numa cópia de apresentação dentro desta preview;
+        não participam novamente do julgamento nem alteram contadores/rearme.
+        ``leds=None`` preserva a geometria já publicada pelo fluxo base quando um
+        wrapper posterior apenas reafirma o mesmo resultado.
         """
-        del failed_led_ids
         if frame is None or getattr(frame, "size", 0) == 0:
             self._hide_result_snapshot(clear=True)
             return False
@@ -364,37 +503,61 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
             self._hide_result_snapshot(clear=True)
             return False
 
+        if leds is not None:
+            self._result_snapshot_leds = tuple(leds or ())
+        self._result_snapshot_failed_ids = frozenset(
+            str(item) for item in (failed_led_ids or ())
+        )
         self._result_snapshot_is_ok = bool(is_ok)
         try:
             self.result_snapshot_result.configure(
                 text="OK" if is_ok else "NG",
-                fg="#86EFAC" if is_ok else "#FCA5A5",
+                fg="#86EFAC" if is_ok else "#60A5FA",
             )
         except Exception:
             pass
         return self._show_result_snapshot()
 
-    def _result_snapshot_canvas_size(self) -> tuple[int, int]:
+    def _result_snapshot_target_size(self) -> tuple[int, int]:
+        frame = getattr(self, "_result_snapshot_bgr", None)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return F2_RESULT_PREVIEW_MIN_WIDTH, F2_RESULT_PREVIEW_MIN_HEIGHT
         try:
-            width = int(self.result_snapshot_canvas.winfo_width())
-            height = int(self.result_snapshot_canvas.winfo_height())
+            frame_height, frame_width = frame.shape[:2]
         except Exception:
-            width = height = 0
+            frame_width, frame_height = 4, 3
+        try:
+            panel_width = int(self.analysis_panel.winfo_width())
+        except Exception:
+            panel_width = 640
+        if panel_width <= 2:
+            panel_width = 640
+        return calcular_tamanho_quadro_resultado_f2(
+            panel_width,
+            frame_width,
+            frame_height,
+        )
 
-        if width <= 2 or height <= 2:
+    def _configure_result_snapshot_canvas(self) -> tuple[int, int]:
+        target_width, target_height = self._result_snapshot_target_size()
+        try:
+            current_width = int(float(self.result_snapshot_canvas.cget("width")))
+            current_height = int(float(self.result_snapshot_canvas.cget("height")))
+        except Exception:
+            current_width = current_height = -1
+        if (current_width, current_height) != (target_width, target_height):
             try:
-                panel_width = int(self.analysis_panel.winfo_width())
+                self.result_snapshot_canvas.configure(
+                    width=target_width,
+                    height=target_height,
+                )
             except Exception:
-                panel_width = 640
-            width = max(
-                F2_RESULT_PREVIEW_MIN_WIDTH,
-                int(max(320, panel_width) * F2_RESULT_PREVIEW_SHARE) - 38,
-            )
-            height = max(
-                F2_RESULT_PREVIEW_MIN_HEIGHT,
-                int(round(width * 0.75)),
-            )
-        return max(1, width), max(1, height)
+                pass
+        return target_width, target_height
+
+    def _result_snapshot_canvas_size(self) -> tuple[int, int]:
+        """Retorna a geometria proporcional configurada, nunca o espaço esticado."""
+        return self._configure_result_snapshot_canvas()
 
     def _render_result_snapshot(self) -> bool:
         frame = getattr(self, "_result_snapshot_bgr", None)
@@ -409,34 +572,34 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
             return False
 
         canvas_width, canvas_height = self._result_snapshot_canvas_size()
-        scale = min(
-            canvas_width / float(frame_width),
-            canvas_height / float(frame_height),
+        decorated = renderizar_mascaras_resultado_f2(
+            frame,
+            getattr(self, "_result_snapshot_leds", ()),
+            getattr(self, "_result_snapshot_failed_ids", ()),
         )
-        render_width = max(1, int(round(frame_width * scale)))
-        render_height = max(1, int(round(frame_height * scale)))
+        if decorated is None or getattr(decorated, "size", 0) == 0:
+            return False
+
         interpolation = (
             cv2.INTER_AREA
-            if render_width < frame_width or render_height < frame_height
+            if canvas_width < frame_width or canvas_height < frame_height
             else cv2.INTER_LINEAR
         )
         preview = cv2.resize(
-            frame,
-            (render_width, render_height),
+            decorated,
+            (canvas_width, canvas_height),
             interpolation=interpolation,
         )
         image_tk = self._create_preview_image(preview)
         if image_tk is None:
             return False
 
-        offset_x = max(0, (canvas_width - render_width) // 2)
-        offset_y = max(0, (canvas_height - render_height) // 2)
         self._result_snapshot_tk = image_tk
         try:
             self.result_snapshot_canvas.delete("all")
             self.result_snapshot_canvas.create_image(
-                offset_x,
-                offset_y,
+                0,
+                0,
                 image=image_tk,
                 anchor=tk.NW,
             )
