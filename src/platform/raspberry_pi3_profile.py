@@ -509,6 +509,7 @@ class RaspberryPi3ODINApp(ODINApp):
                     frame,
                     is_ok=resultado.ok,
                     failed_led_ids=resultado.failed_led_ids,
+                    leds=self.operacao_leds_preview,
                 )
             except Exception:
                 # A miniatura é somente visual: nunca interromper o fluxo F2.
