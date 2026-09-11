@@ -13,8 +13,6 @@ configurada que divergir bloqueia o OK. O overlay e o status apenas exibem a
 falha; eles nao participam do julgamento.
 """
 
-from copy import deepcopy
-
 import cv2
 
 import src.platform.display_auto_check_runtime as runtime_module
@@ -252,9 +250,9 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
 
         failed_ids = list(summary.get("failed_mask_ids") or ())
         if failed_ids:
-            # Regra central: uma unica mascara configurada divergente e suficiente
-            # para impedir aprovacao. O debounce/politica do runtime continua
-            # decidindo quando essa divergencia vira NG oficial.
+            # Uma unica mascara configurada divergente basta para impedir OK.
+            # O debounce/politica do runtime continua decidindo quando a falha
+            # confirmada vira NG oficial; esta camada nunca reduz esse debounce.
             analysis["approved"] = False
             analysis["reason"] = "check_diverge_mascara_configurada"
         else:
@@ -294,7 +292,13 @@ def _install_failed_mask_overlay() -> None:
         app = overlay_module._app_from_window(window)
         analysis = getattr(app, "_display_auto_last_analysis", None) if app else None
         result = dict(context)
-        result["failed_masks"] = _failure_items(analysis)
+        # O contexto base só publica classifications quando a analise pertence ao
+        # CHECK logico atual. Assim nao reaproveitamos uma falha do CHECK anterior.
+        result["failed_masks"] = (
+            _failure_items(analysis)
+            if dict(result.get("classifications") or {})
+            else {}
+        )
         return result
 
     def render(frame, context):
@@ -396,12 +400,12 @@ def _install_failed_mask_overlay() -> None:
                         int(moments["m01"] / moments["m00"]),
                     )
                 else:
-                    anchor = tuple(int(v) for v in polygon[0])
+                    point = polygon.reshape(-1, 2)[0]
+                    anchor = (int(point[0]), int(point[1]))
 
-            label = f"NG {mask_id}"
             cv2.putText(
                 rendered,
-                label,
+                f"NG {mask_id}",
                 (max(2, anchor[0] - 24), max(14, anchor[1] - 10)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 font_scale,
@@ -436,7 +440,9 @@ def _install_failed_mask_status() -> None:
             return text, color
 
         first_id, failure = next(iter(failures.items()))
-        expected = str(failure.get("expected_label") or failure.get("expected") or "?").upper()
+        expected = str(
+            failure.get("expected_label") or failure.get("expected") or "?"
+        ).upper()
         classified = str(
             failure.get("classified_label") or failure.get("classified") or "?"
         ).upper()
@@ -452,13 +458,34 @@ def _install_failed_mask_status() -> None:
 
 def _install_manual_debug_authority() -> None:
     # O Debug Tecnico continua mostrando o gabarito fotografico como diagnostico,
-    # mas a secao de aprendizado passa a executar a mesma autoridade estrita da
-    # producao, evitando que o relatorio diga que o proprio CHECK se aprovou.
+    # mas a secao de aprendizado usa a mesma autoridade estrita da producao.
     try:
         import src.platform.display_f3_manual_snapshot_debug as debug_module
 
         debug_module.F3SameMaskReferenceAnalyzer = F3StrictMaskConformityAnalyzer
         debug_module._display_f3_strict_mask_authority = True
+    except Exception:
+        pass
+
+
+def _install_positive_probe_authority() -> None:
+    """Impede H1/BLUE de avançarem por auto-referencia da foto do proprio CHECK."""
+    try:
+        import src.platform.display_f3_live_diagnostic_trace as trace_module
+
+        trace_module.F3ExactCheckTemplateAnalyzer = F3StrictMaskConformityAnalyzer
+        trace_module._display_f3_strict_positive_probe = True
+    except Exception:
+        pass
+
+    # A camada historica da sonda restaura um alias capturado no import. Mantemos
+    # esse alias coerente caso algum instalador seja reinvocado no mesmo processo.
+    try:
+        import src.platform.display_f3_h1_single_frame_probe as probe_module
+
+        probe_module.LearnedDisplayAutomaticCheckAnalyzer = (
+            F3StrictMaskConformityAnalyzer
+        )
     except Exception:
         pass
 
@@ -469,11 +496,16 @@ _INSTALLED = False
 def instalar_conformidade_estrita_mascaras_display_f3() -> None:
     """Torna a conformidade por mascara a autoridade final somente do F3."""
     global _INSTALLED
+
+    # Estas atribuicoes sao idempotentes e ficam fora do guard para que nenhuma
+    # camada historica consiga recolocar o analisador fotografico/generico depois.
+    runtime_module.DisplayAutomaticCheckAnalyzer = F3StrictMaskConformityAnalyzer
+    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3StrictMaskConformityAnalyzer
+    _install_positive_probe_authority()
+
     if _INSTALLED:
         return
 
-    runtime_module.DisplayAutomaticCheckAnalyzer = F3StrictMaskConformityAnalyzer
-    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3StrictMaskConformityAnalyzer
     _install_failed_mask_overlay()
     _install_failed_mask_status()
     _install_manual_debug_authority()
