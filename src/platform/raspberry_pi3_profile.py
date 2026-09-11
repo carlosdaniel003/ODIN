@@ -495,6 +495,25 @@ class RaspberryPi3ODINApp(ODINApp):
         else:
             self.operacao_ng += 1
 
+        # Publica o mesmo frame entregue ao motor ANTES de renderizar OK/NG.
+        # Isso elimina a dependência de wrappers do modo automático e garante
+        # a preview também em Enter/GPIO/manual, sem tocar no julgamento.
+        preview_setter = getattr(
+            self.operacao_window,
+            "set_result_preview_frame",
+            None,
+        )
+        if callable(preview_setter):
+            try:
+                preview_setter(
+                    frame,
+                    is_ok=resultado.ok,
+                    failed_led_ids=resultado.failed_led_ids,
+                )
+            except Exception:
+                # A miniatura é somente visual: nunca interromper o fluxo F2.
+                pass
+
         self.operacao_window.show_result(
             is_ok=resultado.ok,
             elapsed_seconds=resultado.elapsed_seconds,
