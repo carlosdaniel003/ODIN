@@ -30,6 +30,11 @@ F2_ANALYZED_WAITING_TEXT = "PLACA JÁ ANALISADA\nCOLOQUE OUTRA PLACA"
 F2_ANALYZED_WAITING_FONT_MAX = 28
 F2_ANALYZED_WAITING_FONT_MIN = 14
 
+F2_RESULT_PREVIEW_SHARE = 0.42
+F2_RESULT_PREVIEW_RESIZE_DEBOUNCE_MS = 80
+F2_RESULT_PREVIEW_MIN_WIDTH = 150
+F2_RESULT_PREVIEW_MIN_HEIGHT = 110
+
 F2_BOARD_STATUS_UI = {
     "board_on": ("PLACA PRESENTE — LIGADA", "#86EFAC"),
     "board_off": ("PLACA PRESENTE — DESLIGADA", "#FBBF24"),
@@ -56,6 +61,16 @@ def tamanho_fonte_status_analisado_f2(panel_width: int) -> int:
         F2_ANALYZED_WAITING_FONT_MIN,
         min(F2_ANALYZED_WAITING_FONT_MAX, estimated),
     )
+
+
+def largura_texto_com_preview_resultado_f2(panel_width: int) -> int:
+    """Reserva espaço para o snapshot sem comprimir o texto de resultado."""
+    try:
+        width = max(320, int(panel_width))
+    except (TypeError, ValueError):
+        width = 640
+    text_share = max(0.50, 1.0 - F2_RESULT_PREVIEW_SHARE)
+    return max(220, int(round(width * text_share)) - 28)
 
 
 def renderizar_overlay_rois_f2(frame, leds, states: dict[str, str] | None):
@@ -133,6 +148,11 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
         self._live_roi_overlay_enabled = False
         self._board_presence_status = "unknown"
         self._f2_analyzed_waiting_active = False
+        self._result_snapshot_bgr = None
+        self._result_snapshot_tk = None
+        self._result_snapshot_resize_after_id = None
+        self._result_snapshot_visible = False
+        self._result_snapshot_is_ok: bool | None = None
         super().__init__(*args, **kwargs)
         try:
             self.preview_legend.configure(text="AZUL: ROI APAGADA")
@@ -156,6 +176,286 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
             pady=(7, 0),
         )
         self.board_presence_label.grid_remove()
+
+        self._instalar_preview_frame_resultado_f2()
+
+    def _instalar_preview_frame_resultado_f2(self) -> None:
+        """Adiciona o último frame analisado à esquerda do resultado do F2."""
+        self.result_snapshot_panel = tk.Frame(
+            self.status_frame,
+            bg="#08111F",
+            highlightbackground="#475569",
+            highlightthickness=1,
+        )
+        self.result_snapshot_panel.grid_rowconfigure(1, weight=1)
+        self.result_snapshot_panel.grid_columnconfigure(0, weight=1)
+
+        header = tk.Frame(
+            self.result_snapshot_panel,
+            bg="#08111F",
+            highlightthickness=0,
+        )
+        header.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=9,
+            pady=(7, 5),
+        )
+        header.grid_columnconfigure(0, weight=1)
+
+        self.result_snapshot_title = tk.Label(
+            header,
+            text="FRAME ANALISADO",
+            font=("DejaVu Sans", 9, "bold"),
+            bg="#08111F",
+            fg="#CBD5E1",
+            anchor="w",
+            justify="left",
+        )
+        self.result_snapshot_title.grid(row=0, column=0, sticky="w")
+
+        self.result_snapshot_result = tk.Label(
+            header,
+            text="",
+            font=("DejaVu Sans", 9, "bold"),
+            bg="#08111F",
+            fg="#FFFFFF",
+            anchor="e",
+            justify="right",
+        )
+        self.result_snapshot_result.grid(row=0, column=1, sticky="e")
+
+        self.result_snapshot_canvas = tk.Canvas(
+            self.result_snapshot_panel,
+            bg=self.PREVIEW_BACKGROUND,
+            highlightbackground="#1E293B",
+            highlightthickness=1,
+            bd=0,
+            width=F2_RESULT_PREVIEW_MIN_WIDTH,
+            height=F2_RESULT_PREVIEW_MIN_HEIGHT,
+        )
+        self.result_snapshot_canvas.grid(
+            row=1,
+            column=0,
+            sticky="nsew",
+            padx=8,
+            pady=(0, 8),
+        )
+        self.result_snapshot_canvas.bind(
+            "<Configure>",
+            self._on_result_snapshot_resize,
+        )
+        self.result_snapshot_panel.grid_remove()
+
+    def _set_result_snapshot_layout(self, visible: bool) -> None:
+        """Usa somente o espaço do resultado; a câmera ao vivo permanece intacta."""
+        self._result_snapshot_visible = bool(visible)
+        if visible:
+            self.status_frame.grid_columnconfigure(
+                0,
+                weight=42,
+                uniform="f2_result_content",
+            )
+            self.status_frame.grid_columnconfigure(
+                1,
+                weight=58,
+                uniform="f2_result_content",
+            )
+            self.result_snapshot_panel.grid(
+                row=0,
+                column=0,
+                rowspan=2,
+                sticky="nsew",
+                padx=(0, 12),
+                pady=4,
+            )
+            self.status_label.grid_configure(
+                row=0,
+                column=1,
+                sticky="nsew",
+                padx=8,
+            )
+            self.detail_label.grid_configure(
+                row=1,
+                column=1,
+                sticky="ew",
+                padx=12,
+                pady=(0, 8),
+            )
+        else:
+            self.result_snapshot_panel.grid_remove()
+            self.status_frame.grid_columnconfigure(
+                0,
+                weight=1,
+                uniform="",
+            )
+            self.status_frame.grid_columnconfigure(
+                1,
+                weight=0,
+                uniform="",
+            )
+            self.status_label.grid_configure(
+                row=0,
+                column=0,
+                sticky="nsew",
+                padx=8,
+            )
+            self.detail_label.grid_configure(
+                row=1,
+                column=0,
+                sticky="ew",
+                padx=16,
+                pady=(0, 8),
+            )
+
+    def _cancel_result_snapshot_resize(self) -> None:
+        after_id = getattr(self, "_result_snapshot_resize_after_id", None)
+        self._result_snapshot_resize_after_id = None
+        if after_id is None:
+            return
+        try:
+            self.root.after_cancel(after_id)
+        except Exception:
+            pass
+
+    def _hide_result_snapshot(self, clear: bool = False) -> None:
+        self._cancel_result_snapshot_resize()
+        self._set_result_snapshot_layout(False)
+        if clear:
+            self._result_snapshot_bgr = None
+            self._result_snapshot_tk = None
+            self._result_snapshot_is_ok = None
+            try:
+                self.result_snapshot_canvas.delete("all")
+            except Exception:
+                pass
+
+    def _show_result_snapshot(self) -> bool:
+        frame = getattr(self, "_result_snapshot_bgr", None)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            self._set_result_snapshot_layout(False)
+            return False
+        self._set_result_snapshot_layout(True)
+        return self._render_result_snapshot()
+
+    def set_result_preview_frame(
+        self,
+        frame,
+        *,
+        is_ok: bool,
+        failed_led_ids=(),
+    ) -> bool:
+        """Congela exatamente o frame que originou o último OK/NG do F2.
+
+        ``failed_led_ids`` é aceito para manter o contexto da inspeção disponível
+        à interface, mas a miniatura permanece o frame bruto realmente enviado ao
+        motor. Assim ela não pode ser confundida com a câmera ao vivo nem com uma
+        reconstrução posterior do resultado.
+        """
+        del failed_led_ids
+        if frame is None or getattr(frame, "size", 0) == 0:
+            self._hide_result_snapshot(clear=True)
+            return False
+
+        try:
+            self._result_snapshot_bgr = frame.copy()
+        except Exception:
+            self._hide_result_snapshot(clear=True)
+            return False
+
+        self._result_snapshot_is_ok = bool(is_ok)
+        try:
+            self.result_snapshot_result.configure(
+                text="OK" if is_ok else "NG",
+                fg="#86EFAC" if is_ok else "#FCA5A5",
+            )
+        except Exception:
+            pass
+        return self._show_result_snapshot()
+
+    def _result_snapshot_canvas_size(self) -> tuple[int, int]:
+        try:
+            width = int(self.result_snapshot_canvas.winfo_width())
+            height = int(self.result_snapshot_canvas.winfo_height())
+        except Exception:
+            width = height = 0
+
+        if width <= 2 or height <= 2:
+            try:
+                panel_width = int(self.analysis_panel.winfo_width())
+            except Exception:
+                panel_width = 640
+            width = max(
+                F2_RESULT_PREVIEW_MIN_WIDTH,
+                int(max(320, panel_width) * F2_RESULT_PREVIEW_SHARE) - 38,
+            )
+            height = max(
+                F2_RESULT_PREVIEW_MIN_HEIGHT,
+                int(round(width * 0.75)),
+            )
+        return max(1, width), max(1, height)
+
+    def _render_result_snapshot(self) -> bool:
+        frame = getattr(self, "_result_snapshot_bgr", None)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return False
+
+        try:
+            frame_height, frame_width = frame.shape[:2]
+        except Exception:
+            return False
+        if frame_width <= 0 or frame_height <= 0:
+            return False
+
+        canvas_width, canvas_height = self._result_snapshot_canvas_size()
+        scale = min(
+            canvas_width / float(frame_width),
+            canvas_height / float(frame_height),
+        )
+        render_width = max(1, int(round(frame_width * scale)))
+        render_height = max(1, int(round(frame_height * scale)))
+        interpolation = (
+            cv2.INTER_AREA
+            if render_width < frame_width or render_height < frame_height
+            else cv2.INTER_LINEAR
+        )
+        preview = cv2.resize(
+            frame,
+            (render_width, render_height),
+            interpolation=interpolation,
+        )
+        image_tk = self._create_preview_image(preview)
+        if image_tk is None:
+            return False
+
+        offset_x = max(0, (canvas_width - render_width) // 2)
+        offset_y = max(0, (canvas_height - render_height) // 2)
+        self._result_snapshot_tk = image_tk
+        try:
+            self.result_snapshot_canvas.delete("all")
+            self.result_snapshot_canvas.create_image(
+                offset_x,
+                offset_y,
+                image=image_tk,
+                anchor=tk.NW,
+            )
+        except Exception:
+            return False
+        return True
+
+    def _on_result_snapshot_resize(self, _event=None) -> None:
+        if not bool(getattr(self, "_result_snapshot_visible", False)):
+            return
+        self._cancel_result_snapshot_resize()
+        try:
+            self._result_snapshot_resize_after_id = self.root.after(
+                F2_RESULT_PREVIEW_RESIZE_DEBOUNCE_MS,
+                self._render_result_snapshot,
+            )
+        except Exception:
+            self._result_snapshot_resize_after_id = None
+            self._render_result_snapshot()
 
     def _set_state(
         self,
@@ -188,7 +488,12 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
         if int(panel_width or 0) <= 2:
             panel_width = 640
 
-        font_size = tamanho_fonte_status_analisado_f2(int(panel_width))
+        available_width = int(panel_width)
+        if bool(getattr(self, "_result_snapshot_visible", False)):
+            available_width = largura_texto_com_preview_resultado_f2(
+                available_width
+            )
+        font_size = tamanho_fonte_status_analisado_f2(available_width)
         self.status_label.configure(
             text=F2_ANALYZED_WAITING_TEXT,
             font=("DejaVu Sans", font_size, "bold"),
@@ -197,6 +502,56 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
             justify="center",
             anchor="center",
             wraplength=0,
+        )
+
+    def show_preparing(
+        self,
+        detail: str = "Preparando câmera e parâmetros",
+    ) -> None:
+        self._hide_result_snapshot(clear=True)
+        return super().show_preparing(detail)
+
+    def show_positioning(
+        self,
+        delay_seconds: float,
+        total: int,
+        ok_count: int,
+        ng_count: int,
+    ) -> None:
+        self._hide_result_snapshot(clear=True)
+        return super().show_positioning(
+            delay_seconds=delay_seconds,
+            total=total,
+            ok_count=ok_count,
+            ng_count=ng_count,
+        )
+
+    def show_processing(
+        self,
+        total: int,
+        ok_count: int,
+        ng_count: int,
+    ) -> None:
+        self._hide_result_snapshot(clear=True)
+        return super().show_processing(
+            total=total,
+            ok_count=ok_count,
+            ng_count=ng_count,
+        )
+
+    def show_error(
+        self,
+        message: str,
+        total: int,
+        ok_count: int,
+        ng_count: int,
+    ) -> None:
+        self._hide_result_snapshot(clear=True)
+        return super().show_error(
+            message=message,
+            total=total,
+            ok_count=ok_count,
+            ng_count=ng_count,
         )
 
     def show_waiting(
@@ -217,17 +572,31 @@ class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
             bool(getattr(self, "_has_led_result", False))
             and getattr(self, "_last_result_ok", None) is not None
         ):
+            self._hide_result_snapshot(clear=True)
             return
+
+        self._show_result_snapshot()
         self._f2_analyzed_waiting_active = True
         self._aplicar_status_pos_analise_f2()
 
     def _on_analysis_resize(self, event) -> None:
         super()._on_analysis_resize(event)
-        if bool(getattr(self, "_f2_analyzed_waiting_active", False)):
+        try:
+            width = int(event.width)
+        except (TypeError, ValueError, AttributeError):
+            width = 640
+
+        if bool(getattr(self, "_result_snapshot_visible", False)):
+            text_width = largura_texto_com_preview_resultado_f2(width)
             try:
-                width = int(event.width)
-            except (TypeError, ValueError, AttributeError):
-                width = 640
+                self.detail_label.configure(
+                    wraplength=max(180, text_width - 28)
+                )
+            except Exception:
+                pass
+            self._on_result_snapshot_resize()
+
+        if bool(getattr(self, "_f2_analyzed_waiting_active", False)):
             self._aplicar_status_pos_analise_f2(width)
 
     def set_board_presence_status(
