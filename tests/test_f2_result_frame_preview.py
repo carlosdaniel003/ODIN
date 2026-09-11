@@ -5,6 +5,10 @@ import numpy as np
 
 from src.platform.f2_automatic_analysis import F2AutomaticAnalysisMixin
 from src.platform.raspberry_pi3_profile import RaspberryPi3ODINApp
+from src.platform.segment_display_operation_window import (
+    calcular_tamanho_quadro_resultado_f2,
+    renderizar_mascaras_resultado_f2,
+)
 
 
 class _FakeWindow:
@@ -19,12 +23,14 @@ class _FakeWindow:
         *,
         is_ok: bool,
         failed_led_ids=(),
+        leds=None,
     ):
         self.preview_calls.append(
             {
                 "frame": frame.copy(),
                 "is_ok": bool(is_ok),
                 "failed_led_ids": tuple(failed_led_ids or ()),
+                "leds": None if leds is None else tuple(leds or ()),
             }
         )
         return True
@@ -133,7 +139,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertEqual(0, app.operacao_ok)
         self.assertEqual(1, app.operacao_ng)
 
-    def test_fluxo_base_f2_publica_frame_antes_de_renderizar_resultado(self):
+    def test_fluxo_base_f2_publica_frame_e_geometria_das_mascaras(self):
         app = RaspberryPi3ODINApp.__new__(RaspberryPi3ODINApp)
         app.operacao_ativa = True
         app.operacao_processando = False
@@ -145,6 +151,10 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         ).reshape((8, 10, 3))
         app.operacao_engine = _FakeEngine(ok=False)
         app.operacao_window = _CanonicalWindow()
+        app.operacao_leds_preview = (
+            SimpleNamespace(id="LED_001"),
+            SimpleNamespace(id="LED_002"),
+        )
         app.operacao_total = 0
         app.operacao_ok = 0
         app.operacao_ng = 0
@@ -161,6 +171,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         call = app.operacao_window.preview_calls[0]
         self.assertFalse(call["is_ok"])
         self.assertEqual(("LED_002",), call["failed_led_ids"])
+        self.assertEqual(app.operacao_leds_preview, call["leds"])
         np.testing.assert_array_equal(
             app.operacao_engine.received_frames[0],
             call["frame"],
@@ -168,6 +179,51 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertEqual(1, app.operacao_total)
         self.assertEqual(0, app.operacao_ok)
         self.assertEqual(1, app.operacao_ng)
+
+    def test_quadro_resultado_preserva_proporcao_da_camera(self):
+        width, height = calcular_tamanho_quadro_resultado_f2(
+            panel_width=640,
+            frame_width=640,
+            frame_height=480,
+        )
+
+        self.assertGreaterEqual(width, 150)
+        self.assertEqual(round(width * 480 / 640), height)
+        self.assertAlmostEqual(4 / 3, width / height, places=2)
+
+    def test_overlay_resultado_destaca_ng_sem_alterar_frame_original(self):
+        frame = np.zeros((100, 120, 3), dtype=np.uint8)
+        leds = (
+            SimpleNamespace(
+                id="LED_001",
+                centro_x=30,
+                centro_y=50,
+                raio=10,
+                tipo_roi=None,
+            ),
+            SimpleNamespace(
+                id="LED_002",
+                centro_x=90,
+                centro_y=50,
+                raio=10,
+                tipo_roi=None,
+            ),
+        )
+
+        rendered = renderizar_mascaras_resultado_f2(
+            frame,
+            leds,
+            failed_led_ids=("LED_002",),
+        )
+
+        np.testing.assert_array_equal(frame, np.zeros_like(frame))
+        self.assertGreater(int(rendered[50, 90, 0]), 0)
+        self.assertGreater(
+            int(rendered[50, 90, 0]),
+            int(rendered[50, 90, 2]),
+        )
+        self.assertEqual(0, int(rendered[50, 30].sum()))
+        self.assertGreater(int(rendered[50, 40].sum()), 0)
 
 
 if __name__ == "__main__":
