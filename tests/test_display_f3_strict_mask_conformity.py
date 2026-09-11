@@ -207,15 +207,38 @@ class DisplayF3StrictMaskConformityTests(TestCase):
         self.assertEqual(DISPLAY_AUTO_DECISION_SEARCHING, decision["decision"])
         self.assertFalse(decision["confirmed_ng"])
 
-    def test_instalacao_estrita_ocorre_depois_do_gabarito_fotografico(self):
+    def test_instalacao_estrita_e_a_ultima_autoridade_de_analisador(self):
         source = Path("src/platform/raspberry_pi3_production_app.py").read_text(
             encoding="utf-8"
         )
         exact_call = source.index("instalar_gabarito_exato_checks_display_f3()")
+        fast_gate_call = source.index("instalar_gate_rapido_check_esperado_display_f3()")
         strict_call = source.index(
             "instalar_conformidade_estrita_mascaras_display_f3()"
         )
-        self.assertLess(exact_call, strict_call)
+        self.assertLess(exact_call, fast_gate_call)
+        self.assertLess(fast_gate_call, strict_call)
+
+    def test_sonda_positiva_tambem_recebe_analisador_estrito(self):
+        source = Path(
+            "src/platform/display_f3_strict_mask_conformity.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "trace_module.F3ExactCheckTemplateAnalyzer = F3StrictMaskConformityAnalyzer",
+            source,
+        )
+        self.assertIn(
+            "probe_module.LearnedDisplayAutomaticCheckAnalyzer",
+            source,
+        )
+
+    def test_overlay_e_status_expoem_a_mascara_ng(self):
+        source = Path(
+            "src/platform/display_f3_strict_mask_conformity.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('f"NG {mask_id}"', source)
+        self.assertIn('f" • FALHA {first_id}: {expected}→{classified}"', source)
+        self.assertIn("AZUL FORTE: MÁSCARA NG", source)
 
     def test_modulo_estrito_nao_depende_do_f2(self):
         source = Path(
