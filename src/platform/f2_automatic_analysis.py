@@ -401,12 +401,76 @@ class F2AutomaticAnalysisMixin:
         self._agendar_preview_operacao()
 
     def disparar_inspecao_operacao(self) -> None:
+        """Preserva o frame exato usado pelo motor para a preview do último resultado."""
         total_before = int(getattr(self, "operacao_total", 0) or 0)
-        result = super().disparar_inspecao_operacao()
-        if (
-            self._f2_auto_enabled()
-            and int(getattr(self, "operacao_total", 0) or 0) > total_before
-        ):
+        ok_before = int(getattr(self, "operacao_ok", 0) or 0)
+        ng_before = int(getattr(self, "operacao_ng", 0) or 0)
+
+        window = getattr(self, "operacao_window", None)
+        preview_setter = getattr(window, "set_result_preview_frame", None)
+        engine = getattr(self, "operacao_engine", None)
+        original_analyze = getattr(engine, "analyze", None)
+        captured: dict[str, object] = {}
+        wrapped = False
+
+        # Captura o próprio argumento entregue a OperationEngine.analyze(). Isso
+        # garante que a miniatura não seja um frame posterior da câmera ao vivo.
+        if callable(preview_setter) and callable(original_analyze):
+            def analyze_with_result_frame(frame, *args, **kwargs):
+                try:
+                    captured["frame"] = frame.copy()
+                except Exception:
+                    captured["frame"] = None
+                return original_analyze(frame, *args, **kwargs)
+
+            try:
+                engine.analyze = analyze_with_result_frame
+                wrapped = True
+            except Exception:
+                wrapped = False
+
+        try:
+            result = super().disparar_inspecao_operacao()
+        finally:
+            if wrapped:
+                try:
+                    engine.analyze = original_analyze
+                except Exception:
+                    pass
+
+        total_after = int(getattr(self, "operacao_total", 0) or 0)
+        ok_after = int(getattr(self, "operacao_ok", 0) or 0)
+        ng_after = int(getattr(self, "operacao_ng", 0) or 0)
+        inspection_completed = total_after > total_before
+
+        if inspection_completed and callable(preview_setter):
+            result_frame = captured.get("frame")
+            if result_frame is not None and getattr(result_frame, "size", 0) > 0:
+                is_ok = None
+                if ok_after > ok_before:
+                    is_ok = True
+                elif ng_after > ng_before:
+                    is_ok = False
+                else:
+                    last_result = getattr(window, "_last_result_ok", None)
+                    if last_result is not None:
+                        is_ok = bool(last_result)
+
+                if is_ok is not None:
+                    try:
+                        preview_setter(
+                            result_frame,
+                            is_ok=is_ok,
+                            failed_led_ids=tuple(
+                                getattr(window, "_failed_led_ids", ()) or ()
+                            ),
+                        )
+                    except Exception:
+                        # A miniatura é apenas apresentação e nunca pode afetar
+                        # contadores, OK/NG ou o rearme produtivo do F2.
+                        pass
+
+        if self._f2_auto_enabled() and inspection_completed:
             # Também protege quando o operador usa Enter/GPIO com o automático
             # ativo: a mesma placa não pode ser inspecionada novamente.
             self._f2_auto_latch.disarm()
