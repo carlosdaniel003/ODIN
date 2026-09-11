@@ -72,6 +72,9 @@ from src.platform.display_f3_same_mask_reference_fix import (
 from src.platform.display_f3_status_layout_fix import (
     instalar_layout_status_f3_estavel,
 )
+from src.platform.display_f3_strict_mask_conformity import (
+    instalar_conformidade_estrita_mascaras_display_f3,
+)
 from src.platform.display_production_f3 import (
     DisplayProductionF3Mixin,
 )
@@ -252,6 +255,10 @@ class RaspberryPi3ProductionApp(
         instalar_referencias_por_mesma_mascara_display_f3()
         instalar_politica_fisica_e_aprendizado_display_f3()
         instalar_gabarito_exato_checks_display_f3()
+        # A foto exata do CHECK permanece disponivel para diagnostico/presenca,
+        # mas a ultima autoridade produtiva passa a ser o gabarito configurado
+        # por mascara, sem auto-referencia da propria foto do CHECK.
+        instalar_conformidade_estrita_mascaras_display_f3()
         instalar_gate_rapido_check_esperado_display_f3()
         super().__init__(root)
         iniciar_debug_periodico_camera_windows(self)
