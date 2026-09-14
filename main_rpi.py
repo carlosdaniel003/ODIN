@@ -23,11 +23,15 @@ from src.platform.display_f3_mask_confidence_fix import (  # noqa: E402
 from src.platform.display_f3_check_reference_zoom import (  # noqa: E402
     instalar_zoom_foto_check_display_f3,
 )
+from src.platform.display_f3_visual_best_match_fix import (  # noqa: E402
+    instalar_melhor_correspondencia_visual_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
 instalar_correcao_confianca_mascaras_display_f3()
 instalar_zoom_foto_check_display_f3()
+instalar_melhor_correspondencia_visual_display_f3()
 
 
 def main() -> None:
