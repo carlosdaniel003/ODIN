@@ -29,6 +29,10 @@ from src.platform.display_f3_visual_best_match_fix import (  # noqa: E402
 from src.platform.display_f3_preview_clarity_fix import (  # noqa: E402
     instalar_preview_claro_display_f3,
 )
+from src.platform.display_f3_mask_visibility_ui import (  # noqa: E402
+    instalar_guias_mascaras_inicio_display_f3,
+    instalar_numeros_editor_mascaras_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
@@ -36,6 +40,8 @@ instalar_correcao_confianca_mascaras_display_f3()
 instalar_zoom_foto_check_display_f3()
 instalar_melhor_correspondencia_visual_display_f3()
 instalar_preview_claro_display_f3()
+instalar_guias_mascaras_inicio_display_f3()
+instalar_numeros_editor_mascaras_display_f3()
 
 
 def main() -> None:
@@ -43,8 +49,10 @@ def main() -> None:
     RaspberryPi3ProductionApp(root)
     # Alguns instaladores históricos do F3 são executados durante __init__ e
     # podem substituir renderizadores globais. Reafirmamos somente o renderer
-    # visual final, sem criar novo timer, callback de câmera ou análise.
+    # visual final e a guia inicial, sem criar novo timer, callback de câmera ou
+    # análise.
     instalar_preview_claro_display_f3()
+    instalar_guias_mascaras_inicio_display_f3()
     root.mainloop()
 
 
