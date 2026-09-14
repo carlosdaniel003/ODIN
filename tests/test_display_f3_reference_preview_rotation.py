@@ -2,11 +2,41 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from copy import deepcopy
 
 import cv2
 import numpy as np
 
 import src.platform.display_f3_reference_preview_rotation as rotation
+
+
+class _Repository:
+    def __init__(self):
+        self.project = {
+            "name": "DISPLAY TESTE",
+            "master_resolution": {"width": 120, "height": 80},
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 25,
+                    "cy": 30,
+                    "radius": 8,
+                },
+                {
+                    "id": "MASK_002",
+                    "type": "segment",
+                    "cx": 80,
+                    "cy": 45,
+                    "width": 24,
+                    "height": 8,
+                    "angle": 0.0,
+                },
+            ],
+        }
+
+    def carregar_projeto(self, _name):
+        return deepcopy(self.project)
 
 
 class DisplayF3ReferencePreviewRotationTests(unittest.TestCase):
@@ -25,6 +55,51 @@ class DisplayF3ReferencePreviewRotationTests(unittest.TestCase):
                 self.assertIsNotNone(restored)
                 for key in ("x", "y", "width", "height"):
                     self.assertAlmostEqual(roi[key], restored[key], places=5)
+
+    def test_preview_180_desenha_mascaras_depois_de_reduzir_imagem(self):
+        repository = _Repository()
+        image = np.zeros((80, 120, 3), dtype=np.uint8)
+        preview, mask_count = rotation.preparar_preview_referencia_com_mascaras_f3(
+            image_raw=image,
+            metadata={"width": 120, "height": 80},
+            repository=repository,
+            project_name="DISPLAY TESTE",
+            rotacao=180,
+            target_width=60,
+            target_height=40,
+        )
+
+        self.assertEqual(2, mask_count)
+        self.assertEqual((40, 60, 3), preview.shape)
+        self.assertGreater(int(np.count_nonzero(preview)), 0)
+
+    def test_preview_nao_depende_das_mascaras_injetadas_no_metadata(self):
+        repository = _Repository()
+        image = np.zeros((80, 120, 3), dtype=np.uint8)
+        preview, mask_count = rotation.preparar_preview_referencia_com_mascaras_f3(
+            image_raw=image,
+            metadata={
+                "width": 120,
+                "height": 80,
+                "_display_mask_regions": [],
+            },
+            repository=repository,
+            project_name="DISPLAY TESTE",
+            rotacao=0,
+            target_width=60,
+            target_height=40,
+        )
+
+        self.assertEqual(2, mask_count)
+        self.assertGreater(int(np.count_nonzero(preview)), 0)
+
+    def test_rotacao_visual_nao_reintroduz_seletor_retangular(self):
+        source = inspect.getsource(rotation)
+        self.assertIn("preparar_check_visual_display", source)
+        self.assertIn("_display_mask_regions", source)
+        self.assertIn("ROI: {mask_count}", source)
+        self.assertNotIn("DisplayReferenceRoiDialog(", source)
+        self.assertNotIn("store.set_roi(", source)
 
     def test_rotation_is_visual_only_and_does_not_patch_capture_store(self):
         source = inspect.getsource(rotation)
