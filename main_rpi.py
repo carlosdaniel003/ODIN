@@ -17,9 +17,13 @@ from src.platform.raspberry_pi3_production_app import (  # noqa: E402
 from src.platform.display_reference_roi_runtime_fix import (  # noqa: E402
     instalar_correcao_referencias_mascaras_f3,
 )
+from src.platform.display_f3_mask_confidence_fix import (  # noqa: E402
+    instalar_correcao_confianca_mascaras_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
+instalar_correcao_confianca_mascaras_display_f3()
 
 
 def main() -> None:
