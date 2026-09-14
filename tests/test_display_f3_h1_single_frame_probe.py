@@ -25,7 +25,7 @@ class _App:
         return str((context or {}).get("check_name") or "").upper() == "BLUE"
 
 
-def _exact_analysis(*, failed_on: bool = False, off_mismatches: int = 2) -> dict:
+def _exact_analysis(*, failed_on: bool = False, off_mismatches: int = 0) -> dict:
     results = []
     for index in range(7):
         matched = not (failed_on and index == 3)
@@ -37,7 +37,7 @@ def _exact_analysis(*, failed_on: bool = False, off_mismatches: int = 2) -> dict
                 "matched": matched,
             }
         )
-    for index in range(3):
+    for index in range(21):
         matched = index >= off_mismatches
         results.append(
             {
@@ -52,37 +52,35 @@ def _exact_analysis(*, failed_on: bool = False, off_mismatches: int = 2) -> dict
         "approved": all(bool(item["matched"]) for item in results),
         "reference_authority": F3_EXACT_TEMPLATE_SOURCE,
         "mask_results": results,
+        "active_mask_count": len(results),
+        "matched_mask_count": sum(1 for item in results if item["matched"]),
+        "reason": "base",
     }
 
 
 class DisplayF3H1SingleFrameProbeTests(unittest.TestCase):
-    def test_h1_first_check_needs_one_exact_positive_frame(self):
+    def test_h1_first_check_needs_two_positive_frames(self):
         result = module.frames_necessarios_sonda_positiva_f3(
             _App(),
             {"current_index": 0, "check_name": "H1"},
         )
-        self.assertEqual(1, result)
+        self.assertEqual(2, result)
 
-    def test_blue_needs_one_exact_positive_frame(self):
+    def test_blue_keeps_one_frame_because_it_is_transient(self):
         result = module.frames_necessarios_sonda_positiva_f3(
             _App(),
             {"current_index": 1, "check_name": "BLUE"},
         )
         self.assertEqual(1, result)
 
-    def test_stable_usb_keeps_two_frames(self):
-        result = module.frames_necessarios_sonda_positiva_f3(
-            _App(),
-            {"current_index": 2, "check_name": "USB"},
-        )
-        self.assertEqual(2, result)
-
-    def test_h1_positive_probe_ignores_only_off_template_photometric_mismatches(self):
-        analysis = _exact_analysis(failed_on=False, off_mismatches=2)
+    def test_aux_superset_does_not_approve_h1_only_because_all_h1_on_masks_match(self):
+        # Reproduz o padrão do debug real: os 7 segmentos ACESOS do H1 estão
+        # acesos, porém 9 segmentos que H1 espera APAGADOS também estão acesos.
+        analysis = _exact_analysis(failed_on=False, off_mismatches=9)
         evidence = module.avaliar_sonda_positiva_f3(
             _App(),
             {
-                "project_name": "TESTE",
+                "project_name": "CM-550-L",
                 "check_id": "CHECK_001",
                 "check_name": "H1",
                 "current_index": 0,
@@ -90,36 +88,22 @@ class DisplayF3H1SingleFrameProbeTests(unittest.TestCase):
             analysis,
         )
 
-        self.assertTrue(evidence["approved"])
-        self.assertEqual(module.F3_POSITIVE_PROBE_MODE_ON_MASKS, evidence["mode"])
         self.assertEqual(7, evidence["on_total"])
         self.assertEqual(7, evidence["on_matched"])
-        self.assertEqual(2, evidence["off_template_mismatches"])
-        self.assertFalse(evidence["original_approved"])
-
-    def test_h1_positive_probe_never_confirms_when_one_expected_on_mask_fails(self):
-        analysis = _exact_analysis(failed_on=True, off_mismatches=0)
-        evidence = module.avaliar_sonda_positiva_f3(
-            _App(),
-            {
-                "project_name": "TESTE",
-                "check_id": "CHECK_001",
-                "check_name": "H1",
-                "current_index": 0,
-            },
-            analysis,
-        )
-
+        self.assertEqual(9, evidence["off_template_mismatches"])
         self.assertFalse(evidence["approved"])
-        self.assertEqual(6, evidence["on_matched"])
+        self.assertFalse(evidence["full_mask_conformity"])
+        self.assertEqual(module.F3_POSITIVE_PROBE_MODE_FULL_MASKS, evidence["mode"])
 
-    def test_h1_exact_probe_advances_in_first_frame_when_all_expected_on_match(self):
+    def test_h1_probe_never_overwrites_failed_full_analysis(self):
         app = _App()
-        analysis = _exact_analysis(failed_on=False, off_mismatches=2)
+        analysis = _exact_analysis(failed_on=False, off_mismatches=9)
+        original_reason = analysis["reason"]
+
         stability = module.atualizar_estabilidade_sonda_positiva_f3(
             app,
             {
-                "project_name": "TESTE",
+                "project_name": "CM-550-L",
                 "check_id": "CHECK_001",
                 "check_name": "H1",
                 "current_index": 0,
@@ -127,29 +111,54 @@ class DisplayF3H1SingleFrameProbeTests(unittest.TestCase):
             analysis,
         )
 
-        self.assertTrue(stability["confirm"])
-        self.assertEqual(1, stability["required"])
-        self.assertTrue(analysis["positive_probe_approved"])
-        self.assertFalse(analysis["exact_all_masks_approved"])
-        self.assertEqual(7, analysis["positive_on_matched_count"])
-        self.assertIn("7_de_7", analysis["reason"])
+        self.assertFalse(stability["confirm"])
+        self.assertEqual(2, stability["required"])
+        self.assertFalse(analysis["approved"])
+        self.assertEqual(original_reason, analysis["reason"])
+        self.assertTrue(analysis["positive_probe_requires_full_mask_conformity"])
+        self.assertFalse(analysis["positive_probe_approved"])
 
-    def test_semantic_analysis_is_not_relaxed_by_positive_exact_probe_rule(self):
-        analysis = _exact_analysis(failed_on=False, off_mismatches=1)
+    def test_h1_requires_two_consecutive_full_approvals(self):
+        app = _App()
+        context = {
+            "project_name": "CM-550-L",
+            "check_id": "CHECK_001",
+            "check_name": "H1",
+            "current_index": 0,
+        }
+        first = module.atualizar_estabilidade_sonda_positiva_f3(
+            app, context, _exact_analysis()
+        )
+        second = module.atualizar_estabilidade_sonda_positiva_f3(
+            app, context, _exact_analysis()
+        )
+        self.assertFalse(first["confirm"])
+        self.assertTrue(second["confirm"])
+        self.assertEqual(2, second["required"])
+
+    def test_blue_can_confirm_one_full_approval_frame(self):
+        app = _App()
+        result = module.atualizar_estabilidade_sonda_positiva_f3(
+            app,
+            {
+                "project_name": "CM-550-L",
+                "check_id": "CHECK_002",
+                "check_name": "BLUE",
+                "current_index": 1,
+            },
+            _exact_analysis(),
+        )
+        self.assertTrue(result["confirm"])
+        self.assertEqual(1, result["required"])
+
+    def test_semantic_analysis_stays_full_analysis(self):
+        analysis = _exact_analysis(off_mismatches=1)
         analysis.pop("reference_authority", None)
-        analysis["approved"] = False
-
         evidence = module.avaliar_sonda_positiva_f3(
             _App(),
-            {
-                "project_name": "TESTE",
-                "check_id": "CHECK_001",
-                "check_name": "H1",
-                "current_index": 0,
-            },
+            {"current_index": 0, "check_name": "H1"},
             analysis,
         )
-
         self.assertFalse(evidence["approved"])
         self.assertEqual("full_analysis", evidence["mode"])
 
