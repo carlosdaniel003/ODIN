@@ -29,7 +29,10 @@ from src.platform.display_project_repository import (
 )
 
 
-F3_PREVIEW_CLEAR_ALPHA = 0.10
+# 10% ficou tênue demais na preview real. 22% mantém o segmento visível por
+# baixo da máscara, mas deixa verde/vermelho/amarelo distinguíveis à distância.
+F3_PREVIEW_CLEAR_ALPHA = 0.22
+F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 2
 
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
@@ -245,8 +248,8 @@ def renderizar_preview_claro_display_f3(frame, context):
         dst=result,
     )
 
-    # Contorno fino: ajuda a localizar a máscara sem esconder o segmento real.
-    thickness = 1
+    # Contorno moderado: torna a máscara legível sem encobrir o segmento real.
+    thickness = F3_PREVIEW_CLEAR_CONTOUR_THICKNESS
     for geometry, color in geometries:
         if geometry[0] == "circle":
             _kind, center, axes = geometry
