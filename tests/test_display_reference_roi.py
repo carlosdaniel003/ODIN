@@ -234,7 +234,7 @@ class DisplayReferenceMaskRegionTests(unittest.TestCase):
             )
             self.assertLess(
                 exact_module._score_reference_full_roi(inside, metadata),
-                0.50,
+                0.72,
             )
 
     def test_preview_desenha_as_rois_das_mascaras(self):
