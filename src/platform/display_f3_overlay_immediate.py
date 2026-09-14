@@ -49,6 +49,10 @@ def _prepare_geometry(app, visual_rotation: int | None = None):
     if window is None or repository is None:
         return None
 
+    # Guarda uma referência direta ao app. O overlay não precisa depender do
+    # callback CONFIGURAR para reencontrar o runtime em todo frame.
+    window._display_f3_app = app
+
     try:
         project_name = str(repository.obter_projeto_ativo() or "")
     except Exception:
@@ -135,8 +139,21 @@ def _prepare_geometry(app, visual_rotation: int | None = None):
 
 
 def _context(window, visual_rotation: int):
-    app = overlay._app_from_window(window)
+    app = getattr(window, "_display_f3_app", None)
     if app is None:
+        app = overlay._app_from_window(window)
+
+    # Mesmo sem reencontrar o app, se a geometria já foi pré-carregada durante
+    # a abertura do F3 ela deve ser desenhada imediatamente em estado neutro.
+    if app is None:
+        masks = getattr(window, "_display_roi_overlay_masks", ())
+        resolution = getattr(window, "_display_roi_overlay_resolution", None)
+        if masks and resolution is not None:
+            return {
+                "resolution": resolution,
+                "masks": masks,
+                "classifications": {},
+            }
         return None
 
     try:
