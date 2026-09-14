@@ -14,6 +14,12 @@ Regra visual final:
 - enquanto nenhum segmento ACESO foi reconhecido, segmentos APAGADOS não são
   pintados. Isso evita abrir o F3 com o H1 inteiro vermelho antes de a placa
   realmente acender.
+
+A geometria das máscaras não depende de existir uma análise produtiva naquele
+exato instante. Ela vem diretamente do Projeto Display ativo. A classificação
+usa somente análises do CHECK lógico atual e possui fallbacks para o cache de
+overlay e para a última sonda ao vivo, evitando a máscara desaparecer quando
+algum gate limpa temporariamente ``_display_auto_last_analysis``.
 """
 
 from copy import deepcopy
@@ -26,11 +32,12 @@ from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LOW_LIGH
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
+    normalizar_resolucao_display,
 )
+from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
-# 10% ficou tênue demais na preview real. 22% mantém o segmento visível por
-# baixo da máscara, mas deixa verde/vermelho/amarelo distinguíveis à distância.
+# Mantém o segmento real visível, mas com cor suficiente para leitura rápida.
 F3_PREVIEW_CLEAR_ALPHA = 0.22
 F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 2
 
@@ -52,12 +59,7 @@ def estado_visual_mascara_f3(
     *,
     has_any_on: bool,
 ) -> str | None:
-    """Converte classificação+gabarito em somente verde/vermelho/amarelo.
-
-    O gate ``has_any_on`` é proposital: enquanto a placa ainda está totalmente
-    apagada, não pintamos todas as máscaras do primeiro CHECK de vermelho e não
-    marcamos "apagado quando deveria estar aceso" como divergência.
-    """
+    """Converte classificação+gabarito em somente verde/vermelho/amarelo."""
     current = str(classified or "").strip().lower()
     target = str(expected or "").strip().lower()
 
@@ -79,74 +81,178 @@ def estado_visual_mascara_f3(
     return None
 
 
-def _expected_states_for_current_check(window) -> dict[str, str]:
+def _project_preview_context(window, visual_rotation: int) -> dict | None:
+    """Carrega geometria/estado esperado direto do projeto, sem depender da análise."""
     app = overlay_module._app_from_window(window)
     if app is None:
-        return {}
+        return None
 
-    analysis = getattr(app, "_display_auto_last_analysis", None)
-    if not isinstance(analysis, dict):
-        return {}
-
-    project_name = str(analysis.get("project_name") or "")
-    check_id = overlay_module._current_check_id(app)
     repository = getattr(app, "display_project_repository", None)
-    if not project_name or not check_id or repository is None:
-        return {}
+    if repository is None:
+        return None
+
+    try:
+        project_name = str(repository.obter_projeto_ativo() or "")
+    except Exception:
+        project_name = ""
+    check_id = overlay_module._current_check_id(app)
+    if not project_name or not check_id:
+        return None
 
     cache_key = (
         project_name,
         check_id,
+        int(visual_rotation or 0) % 360,
         overlay_module._config_signature(repository),
     )
-    if cache_key == getattr(window, "_display_f3_clear_preview_expected_key", None):
-        return dict(
-            getattr(window, "_display_f3_clear_preview_expected_states", {}) or {}
-        )
+    if cache_key == getattr(window, "_display_f3_clear_preview_project_key", None):
+        cached = getattr(window, "_display_f3_clear_preview_project_context", None)
+        return deepcopy(cached) if isinstance(cached, dict) else None
 
     try:
         project = repository.carregar_projeto(project_name)
     except Exception:
         project = None
+    if not isinstance(project, dict):
+        return None
 
-    expected: dict[str, str] = {}
-    if isinstance(project, dict):
-        checks = list(project.get("checks", []) or [])
-        check = next(
-            (
-                item
-                for item in checks
-                if isinstance(item, dict)
-                and str(item.get("id") or "") == str(check_id)
-            ),
+    resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    if resolution is None:
+        return None
+
+    checks = list(project.get("checks", []) or [])
+    check = next(
+        (
+            item
+            for item in checks
+            if isinstance(item, dict)
+            and str(item.get("id") or "") == check_id
+        ),
+        None,
+    )
+    if not isinstance(check, dict):
+        return None
+
+    states = (
+        check.get("mask_states", {})
+        if isinstance(check.get("mask_states"), dict)
+        else {}
+    )
+    expected = {
+        str(mask_id): str(state).strip().lower()
+        for mask_id, state in states.items()
+        if str(state).strip().lower()
+        in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
+    }
+    active_masks = [
+        deepcopy(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict)
+        and expected.get(str(mask.get("id") or ""))
+        in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
+    ]
+
+    try:
+        _, visual_resolution, visual_masks = preparar_check_visual_display(
             None,
+            resolution,
+            active_masks,
+            int(visual_rotation or 0) % 360,
         )
-        if isinstance(check, dict):
-            states = (
-                check.get("mask_states", {})
-                if isinstance(check.get("mask_states"), dict)
-                else {}
-            )
-            expected = {
-                str(mask_id): str(state)
-                for mask_id, state in states.items()
-                if str(state) in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
-            }
+    except Exception:
+        return None
 
-    window._display_f3_clear_preview_expected_key = cache_key
-    window._display_f3_clear_preview_expected_states = deepcopy(expected)
-    return expected
+    result = {
+        "project_name": project_name,
+        "check_id": check_id,
+        "resolution": tuple(visual_resolution),
+        "masks": tuple(visual_masks),
+        "expected_states": expected,
+    }
+    window._display_f3_clear_preview_project_key = cache_key
+    window._display_f3_clear_preview_project_context = deepcopy(result)
+    return result
+
+
+def _classifications_from_analysis(
+    analysis: dict | None,
+    *,
+    project_name: str,
+    check_id: str,
+) -> dict[str, str]:
+    if not isinstance(analysis, dict):
+        return {}
+    if str(analysis.get("project_name") or "") != str(project_name or ""):
+        return {}
+    if str(analysis.get("check_id") or "") != str(check_id or ""):
+        return {}
+
+    result = {}
+    for item in analysis.get("mask_results", []) or []:
+        if not isinstance(item, dict):
+            continue
+        mask_id = str(item.get("mask_id") or "")
+        state = str(item.get("classified") or "").strip().lower()
+        if mask_id and state:
+            result[mask_id] = state
+    return result
+
+
+def _classifications_for_current_check(
+    window,
+    *,
+    project_name: str,
+    check_id: str,
+    base: dict | None = None,
+) -> dict[str, str]:
+    """Obtém a leitura atual sem deixar gates transitórios apagarem o overlay."""
+    classifications = {
+        str(key): str(value).strip().lower()
+        for key, value in dict((base or {}).get("classifications") or {}).items()
+    }
+    if classifications:
+        return classifications
+
+    app = overlay_module._app_from_window(window)
+    if app is None:
+        return {}
+
+    for attr in (
+        "_display_auto_last_analysis",
+        "_display_f3_overlay_analysis_cache",
+        "_display_f3_live_probe_last_analysis",
+    ):
+        analysis = getattr(app, attr, None)
+        classifications = _classifications_from_analysis(
+            analysis,
+            project_name=project_name,
+            check_id=check_id,
+        )
+        if classifications:
+            return classifications
+    return {}
 
 
 def _contexto_preview_claro(original):
     def build(window, visual_rotation: int):
-        context = original(window, visual_rotation)
-        if not isinstance(context, dict):
-            return context
+        base = original(window, visual_rotation)
+        project_context = _project_preview_context(window, visual_rotation)
 
-        result = dict(context)
-        classifications = dict(result.get("classifications") or {})
-        result["expected_states"] = _expected_states_for_current_check(window)
+        if not isinstance(project_context, dict):
+            return base
+
+        result = dict(base) if isinstance(base, dict) else {}
+        result["resolution"] = project_context["resolution"]
+        result["masks"] = project_context["masks"]
+        result["expected_states"] = dict(project_context["expected_states"])
+
+        classifications = _classifications_for_current_check(
+            window,
+            project_name=str(project_context.get("project_name") or ""),
+            check_id=str(project_context.get("check_id") or ""),
+            base=result,
+        )
+        result["classifications"] = classifications
         result["has_any_on"] = any(
             str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
             for state in classifications.values()
@@ -248,8 +354,6 @@ def renderizar_preview_claro_display_f3(frame, context):
         dst=result,
     )
 
-    # Contorno moderado: torna a máscara legível sem encobrir o segmento real.
-    thickness = F3_PREVIEW_CLEAR_CONTOUR_THICKNESS
     for geometry, color in geometries:
         if geometry[0] == "circle":
             _kind, center, axes = geometry
@@ -261,7 +365,7 @@ def renderizar_preview_claro_display_f3(frame, context):
                 0,
                 360,
                 color,
-                thickness,
+                F3_PREVIEW_CLEAR_CONTOUR_THICKNESS,
                 cv2.LINE_AA,
             )
         else:
@@ -271,7 +375,7 @@ def renderizar_preview_claro_display_f3(frame, context):
                 [polygon],
                 True,
                 color,
-                thickness,
+                F3_PREVIEW_CLEAR_CONTOUR_THICKNESS,
                 cv2.LINE_AA,
             )
 
@@ -279,12 +383,18 @@ def renderizar_preview_claro_display_f3(frame, context):
 
 
 def _aplicar_render_final() -> None:
-    if bool(getattr(overlay_module, "_display_f3_clear_preview_installed", False)):
-        return
+    """Reafirma o renderer final; o contexto é embrulhado somente uma vez."""
+    if not bool(
+        getattr(overlay_module, "_display_f3_clear_preview_context_installed", False)
+    ):
+        overlay_module._overlay_context = _contexto_preview_claro(
+            overlay_module._overlay_context
+        )
+        overlay_module._display_f3_clear_preview_context_installed = True
 
-    overlay_module._overlay_context = _contexto_preview_claro(
-        overlay_module._overlay_context
-    )
+    # Estas atribuições são deliberadamente repetíveis. Alguns instaladores F3
+    # históricos substituem o renderer durante a construção do app; uma chamada
+    # posterior restaura esta camada sem duplicar wrappers nem callbacks.
     overlay_module.renderizar_overlay_rois_display_f3 = (
         renderizar_preview_claro_display_f3
     )
@@ -309,20 +419,17 @@ _INSTALLED = False
 def instalar_preview_claro_display_f3() -> None:
     """Garante que esta apresentação seja a última camada visual do F3."""
     global _INSTALLED
-    if _INSTALLED:
-        return
 
-    previous = strict_module._install_failed_mask_overlay
+    if not _INSTALLED:
+        previous = strict_module._install_failed_mask_overlay
 
-    def install_failed_mask_overlay_then_clear() -> None:
-        previous()
-        _aplicar_render_final()
+        def install_failed_mask_overlay_then_clear() -> None:
+            previous()
+            _aplicar_render_final()
 
-    strict_module._install_failed_mask_overlay = install_failed_mask_overlay_then_clear
+        strict_module._install_failed_mask_overlay = install_failed_mask_overlay_then_clear
+        _INSTALLED = True
 
-    # Permite uso seguro em testes ou em runtimes onde a camada estrita já tenha
-    # sido instalada antes deste módulo.
-    if bool(getattr(overlay_module, "_display_f3_strict_failure_overlay", False)):
-        _aplicar_render_final()
-
-    _INSTALLED = True
+    # Também é seguro chamar depois da construção completa do app para recuperar
+    # o renderer caso qualquer camada posterior o tenha substituído.
+    _aplicar_render_final()
