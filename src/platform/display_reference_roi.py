@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-"""Região visual das referências do Display F3 baseada nas máscaras do projeto.
+"""Referências visuais do F3 usando as máscaras já desenhadas do projeto.
 
-Esta camada é deliberadamente pequena: o runtime produtivo do F3 permanece o
-mesmo que existia antes da troca do recorte retangular. A única mudança é a
-região considerada pelas fotos de presença/referência: em vez de ``metadata.roi``
-retangular, usa-se a união das máscaras já desenhadas em "Seleção, ajuste e
-máscara".
+O runtime produtivo do F3 permanece inalterado. Esta camada troca somente a
+região das fotos de presença/referência: o antigo recorte retangular perde a
+autoridade e a comparação passa a considerar a união das máscaras persistidas em
+"Seleção, ajuste e máscara".
 
-Não altera o loop de preview, não cria timers, não executa uma segunda análise e
-não interfere no F2.
+Também garante que as telas de configuração recebam um frame válido da câmera e
+que as previews de referência desenhem as mesmas máscaras do projeto.
 """
 
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -21,9 +21,14 @@ import numpy as np
 
 import src.platform.display_check_presence_reference as check_module
 import src.platform.display_visual_reference_status as visual_module
-from src.core.roi_geometry import criar_mascara_roi_global
-from src.platform.display_auto_check_analyzer import display_mask_to_analysis_selection
-from src.platform.display_project_repository import normalizar_resolucao_display
+from src.platform.display_mask_geometry import (
+    converter_mascara_legada_para_editor,
+    pontos_mascara_display,
+)
+from src.platform.display_project_repository import (
+    normalizar_nome_projeto_display,
+    normalizar_resolucao_display,
+)
 
 
 DISPLAY_REFERENCE_ROI_MIN_FRACTION = 0.015
@@ -37,6 +42,10 @@ DISPLAY_REFERENCE_COMPARE_WIDTH = 360
 
 _PROJECT_MASK_CACHE: dict[tuple, tuple] = {}
 _UNION_CACHE: dict[tuple, np.ndarray] = {}
+
+
+def _valid_frame(frame) -> bool:
+    return frame is not None and getattr(frame, "size", 0) > 0
 
 
 def normalizar_roi_referencia(roi) -> dict | None:
@@ -126,6 +135,7 @@ def _project_mask_context(repository, project_name: str):
         project = None
     if not isinstance(project, dict):
         return None, [], ""
+
     resolution = normalizar_resolucao_display(project.get("master_resolution"))
     masks = tuple(
         deepcopy(mask)
@@ -153,6 +163,102 @@ def _decorate_metadata(repository, project_name: str, metadata: dict | None):
     return result
 
 
+def _encode_jpeg_to_path(path: Path, image) -> bool:
+    try:
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            image,
+            [cv2.IMWRITE_JPEG_QUALITY, 92],
+        )
+        if not ok:
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(encoded.tobytes())
+        return True
+    except Exception:
+        return False
+
+
+def _capture_check_reference_fallback(
+    store,
+    project_name: str,
+    check_id: str,
+    frame,
+    master_resolution,
+):
+    resolution = normalizar_resolucao_display(master_resolution)
+    if resolution is None or not _valid_frame(frame):
+        return None
+    image = check_module._prepare_bgr(frame, resolution)
+    if not _valid_frame(image):
+        return None
+
+    project = normalizar_nome_projeto_display(project_name)
+    check = check_module._normalizar_check_id(check_id)
+    if not project or not check:
+        return None
+
+    path = store.image_dir / f"{check_module._slug(project)}_{check_module._slug(check)}.jpg"
+    if not _encode_jpeg_to_path(path, image):
+        return None
+
+    metadata = {
+        "image_path": str(path),
+        "threshold": check_module.DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD,
+        "width": int(resolution[0]),
+        "height": int(resolution[1]),
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        data = store._load()
+        data["references"][check_module._reference_key(project, check)] = metadata
+        store._write(data)
+    except Exception:
+        return None
+    return deepcopy(metadata)
+
+
+def _capture_project_reference_fallback(
+    store,
+    project_name: str,
+    kind: str,
+    frame,
+    master_resolution,
+):
+    project = normalizar_nome_projeto_display(project_name)
+    ref_kind = str(kind or "").strip().lower()
+    resolution = normalizar_resolucao_display(master_resolution)
+    if (
+        not project
+        or ref_kind not in visual_module.DISPLAY_PROJECT_REFERENCE_TYPES
+        or resolution is None
+        or not _valid_frame(frame)
+    ):
+        return None
+
+    image = visual_module._prepare_bgr(frame, resolution)
+    if not _valid_frame(image):
+        return None
+    path = store.image_dir / f"{visual_module._slug(project)}_{ref_kind}.jpg"
+    if not _encode_jpeg_to_path(path, image):
+        return None
+
+    metadata = {
+        "image_path": str(path),
+        "threshold": check_module.DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD,
+        "width": int(resolution[0]),
+        "height": int(resolution[1]),
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        data = store._load()
+        data["projects"].setdefault(project, {})[ref_kind] = metadata
+        store._write(data)
+    except Exception:
+        return None
+    return deepcopy(metadata)
+
+
 def _install_store_masks() -> None:
     check_cls = check_module.DisplayCheckPresenceReferenceStore
     if not bool(getattr(check_cls, "_display_mask_regions_installed", False)):
@@ -168,6 +274,14 @@ def _install_store_masks() -> None:
 
         def capture(self, project_name, check_id, frame, master_resolution):
             result = original_capture(self, project_name, check_id, frame, master_resolution)
+            if result is None:
+                result = _capture_check_reference_fallback(
+                    self,
+                    project_name,
+                    check_id,
+                    frame,
+                    master_resolution,
+                )
             return _decorate_metadata(self.repository, project_name, result)
 
         check_cls.get = get
@@ -196,6 +310,14 @@ def _install_store_masks() -> None:
 
         def capture(self, project_name, kind, frame, master_resolution):
             result = original_capture(self, project_name, kind, frame, master_resolution)
+            if result is None:
+                result = _capture_project_reference_fallback(
+                    self,
+                    project_name,
+                    kind,
+                    frame,
+                    master_resolution,
+                )
             return _decorate_metadata(self.repository, project_name, result)
 
         project_cls.get = get
@@ -204,9 +326,45 @@ def _install_store_masks() -> None:
         project_cls._display_mask_regions_installed = True
 
 
+def _rasterize_single_mask(mask: dict, width: int, height: int) -> np.ndarray | None:
+    if not isinstance(mask, dict) or width < 1 or height < 1:
+        return None
+    item = converter_mascara_legada_para_editor(deepcopy(mask))
+    kind = str(item.get("type", "")).lower()
+    region = np.zeros((int(height), int(width)), dtype=np.uint8)
+
+    try:
+        if kind == "circle":
+            cv2.circle(
+                region,
+                (int(round(item.get("cx", 0))), int(round(item.get("cy", 0)))),
+                max(1, int(round(item.get("radius", 1)))),
+                255,
+                -1,
+                cv2.LINE_AA,
+            )
+            return region if np.any(region) else None
+
+        points = pontos_mascara_display(item)
+        if len(points) < 3:
+            return None
+        polygon = np.asarray(
+            [[int(round(x)), int(round(y))] for x, y in points],
+            dtype=np.int32,
+        )
+        cv2.fillPoly(region, [polygon], 255, lineType=cv2.LINE_AA)
+        return region if np.any(region) else None
+    except Exception:
+        return None
+
+
 def _union_mask(metadata: dict | None, width: int, height: int) -> np.ndarray | None:
     data = metadata if isinstance(metadata, dict) else {}
-    masks = [m for m in (data.get("_display_mask_regions", []) or []) if isinstance(m, dict)]
+    masks = [
+        mask
+        for mask in (data.get("_display_mask_regions", []) or [])
+        if isinstance(mask, dict)
+    ]
     if not masks:
         return None
 
@@ -222,14 +380,9 @@ def _union_mask(metadata: dict | None, width: int, height: int) -> np.ndarray | 
 
     union = np.zeros((master_h, master_w), dtype=np.uint8)
     for mask in masks:
-        try:
-            selection = display_mask_to_analysis_selection(mask)
-            region = criar_mascara_roi_global(selection, master_w, master_h)
-        except Exception:
-            continue
-        if region is None or region.shape[:2] != union.shape[:2]:
-            continue
-        union = cv2.bitwise_or(union, region.astype(np.uint8))
+        region = _rasterize_single_mask(mask, master_w, master_h)
+        if region is not None:
+            union = cv2.bitwise_or(union, region)
 
     if not np.any(union):
         return None
@@ -313,13 +466,18 @@ def _install_matchers_masks() -> None:
             if not isinstance(metadata, dict) or not metadata.get("_display_mask_regions"):
                 return original_check_eval(frame, metadata)
             reference, path = _read_reference(metadata)
-            if reference is None or frame is None or getattr(frame, "size", 0) == 0:
+            if reference is None or not _valid_frame(frame):
                 return original_check_eval(frame, metadata)
             score = calcular_similaridade_referencia_por_mascaras(reference, frame, metadata)
             if score is None:
                 return original_check_eval(frame, metadata)
             try:
-                threshold = float(metadata.get("threshold", check_module.DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD))
+                threshold = float(
+                    metadata.get(
+                        "threshold",
+                        check_module.DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD,
+                    )
+                )
             except (TypeError, ValueError):
                 threshold = check_module.DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD
             return {
@@ -360,7 +518,7 @@ def _install_matchers_masks() -> None:
 
         def score_exact(frame, metadata):
             reference, _path = _read_reference(metadata)
-            if reference is None or frame is None or getattr(frame, "size", 0) == 0:
+            if reference is None or not _valid_frame(frame):
                 return None
             return calcular_similaridade_referencia_por_mascaras(
                 reference,
@@ -374,12 +532,45 @@ def _install_matchers_masks() -> None:
 
 
 def _decorate_reference_image(image, metadata):
-    if image is None or getattr(image, "size", 0) == 0:
+    """Desenha cada ROI/máscara individual sobre a foto de referência."""
+    if not _valid_frame(image):
         return image
-    union = _union_mask(metadata, int(image.shape[1]), int(image.shape[0]))
-    if union is None:
+    data = metadata if isinstance(metadata, dict) else {}
+    masks = [
+        mask
+        for mask in (data.get("_display_mask_regions", []) or [])
+        if isinstance(mask, dict)
+    ]
+    if not masks:
         return image
+
+    master = normalizar_resolucao_display(data.get("_display_master_resolution"))
+    if master is None:
+        master = (int(image.shape[1]), int(image.shape[0]))
+    master_w, master_h = int(master[0]), int(master[1])
+    image_h, image_w = image.shape[:2]
+
     result = image.copy()
+    union = np.zeros((image_h, image_w), dtype=np.uint8)
+    regions: list[np.ndarray] = []
+    for mask in masks:
+        region = _rasterize_single_mask(mask, master_w, master_h)
+        if region is None:
+            continue
+        if (master_w, master_h) != (image_w, image_h):
+            region = cv2.resize(
+                region,
+                (image_w, image_h),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        if not np.any(region):
+            continue
+        regions.append(region)
+        union = cv2.bitwise_or(union, region)
+
+    if not regions:
+        return image
+
     tint = result.copy()
     tint[union > 0] = DISPLAY_REFERENCE_MASK_PREVIEW_BGR
     result = cv2.addWeighted(
@@ -389,9 +580,24 @@ def _decorate_reference_image(image, metadata):
         1.0 - DISPLAY_REFERENCE_MASK_PREVIEW_ALPHA,
         0.0,
     )
-    contours, _ = cv2.findContours(union, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if contours:
-        cv2.drawContours(result, contours, -1, DISPLAY_REFERENCE_MASK_PREVIEW_BGR, 2, cv2.LINE_AA)
+
+    # Contorno por máscara, não apenas o contorno externo da união. Assim cada
+    # segmento continua visível mesmo quando duas ROIs se encostam.
+    for region in regions:
+        contours, _ = cv2.findContours(
+            region,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if contours:
+            cv2.drawContours(
+                result,
+                contours,
+                -1,
+                DISPLAY_REFERENCE_MASK_PREVIEW_BGR,
+                2,
+                cv2.LINE_AA,
+            )
     return result
 
 
@@ -454,8 +660,76 @@ def _install_preview_masks() -> None:
         project_cls._display_mask_preview_installed = True
 
 
+def _install_config_frame_provider() -> None:
+    """Entrega ao editor/captura um frame real sem tocar no loop de produção."""
+    try:
+        import src.platform.display_production_f3 as production_module
+    except Exception:
+        return
+
+    cls = production_module.DisplayProductionF3Mixin
+    if bool(getattr(cls, "_display_f3_config_frame_fallback_installed", False)):
+        return
+    original_get = cls._obter_frame_para_configuracao_display
+
+    def get_frame(self):
+        candidates = (
+            getattr(self, "camera_frame_atual", None),
+            getattr(self, "imagem_original", None),
+            getattr(self, "_display_f3_last_config_frame", None),
+        )
+        for frame in candidates:
+            if not _valid_frame(frame):
+                continue
+            try:
+                copied = frame.copy()
+            except Exception:
+                copied = frame
+            self._display_f3_last_config_frame = copied
+            try:
+                return copied.copy()
+            except Exception:
+                return copied
+
+        # Último recurso: solicita um snapshot atual diretamente ao serviço.
+        # Isto só ocorre quando o usuário abre/captura uma configuração; não é
+        # executado no callback contínuo do preview F3.
+        service = getattr(self, "camera_service", None)
+        if service is not None:
+            try:
+                snapshot = service.obter_snapshot(-1)
+                frame = getattr(snapshot, "frame", None)
+            except Exception:
+                frame = None
+            if _valid_frame(frame):
+                try:
+                    copied = frame.copy()
+                except Exception:
+                    copied = frame
+                self._display_f3_last_config_frame = copied
+                try:
+                    return copied.copy()
+                except Exception:
+                    return copied
+
+        try:
+            frame = original_get(self)
+        except Exception:
+            frame = None
+        if _valid_frame(frame):
+            try:
+                self._display_f3_last_config_frame = frame.copy()
+            except Exception:
+                self._display_f3_last_config_frame = frame
+        return frame
+
+    cls._obter_frame_para_configuracao_display = get_frame
+    cls._display_f3_config_frame_fallback_installed = True
+
+
 def instalar_roi_referencias_display_f3() -> None:
-    """Troca apenas a região das referências; não altera o loop produtivo F3."""
+    """Troca somente a ROI das referências e corrige previews de configuração."""
+    _install_config_frame_provider()
     _install_store_masks()
     _install_matchers_masks()
     _install_preview_masks()
