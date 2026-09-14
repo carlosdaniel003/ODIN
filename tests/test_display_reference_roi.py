@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import inspect
+import tempfile
 import unittest
 from copy import deepcopy
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 import src.platform.display_reference_roi as roi
+from src.platform.display_check_presence_reference import (
+    DisplayCheckPresenceReferenceStore,
+)
 
 
 class _Repository:
-    def __init__(self):
+    def __init__(self, config_file: Path | None = None):
         self.calls = 0
+        self.config_file = config_file or Path("odin_display_projects.json")
         self.project = {
             "name": "PROJETO A",
             "master_resolution": {"width": 120, "height": 80},
@@ -26,10 +32,11 @@ class _Repository:
                 },
                 {
                     "id": "MASK_002",
-                    "type": "circle",
-                    "cx": 80,
-                    "cy": 40,
-                    "radius": 10,
+                    "type": "rectangle",
+                    "x": 70,
+                    "y": 34,
+                    "width": 20,
+                    "height": 12,
                 },
             ],
         }
@@ -80,7 +87,7 @@ class DisplayReferenceMaskRoiTests(unittest.TestCase):
         reference = np.zeros((80, 120, 3), dtype=np.uint8)
         current = np.full((80, 120, 3), 255, dtype=np.uint8)
         cv2.circle(current, (40, 40), 10, (0, 0, 0), -1)
-        cv2.circle(current, (80, 40), 10, (0, 0, 0), -1)
+        cv2.rectangle(current, (70, 34), (90, 46), (0, 0, 0), -1)
 
         score = roi.calcular_similaridade_referencia_por_mascaras(
             reference,
@@ -103,18 +110,48 @@ class DisplayReferenceMaskRoiTests(unittest.TestCase):
         self.assertIsNotNone(score)
         self.assertLess(score, 0.90)
 
-    def test_preview_desenha_as_mascaras_na_foto_de_referencia(self):
+    def test_preview_desenha_cada_mascara_na_foto_de_referencia(self):
         image = np.zeros((80, 120, 3), dtype=np.uint8)
         decorated = roi._decorate_reference_image(image, self.metadata)
         self.assertEqual(image.shape, decorated.shape)
-        self.assertGreater(int(np.count_nonzero(decorated)), 0)
+        self.assertGreater(int(np.count_nonzero(decorated[30:51, 28:53])), 0)
+        self.assertGreater(int(np.count_nonzero(decorated[30:51, 66:95])), 0)
+        self.assertEqual(0, int(np.count_nonzero(decorated[0:10, 0:10])))
+
+    def test_fallback_de_captura_check_salva_jpeg_e_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repository = _Repository(Path(tmp) / "odin_display_projects.json")
+            store = DisplayCheckPresenceReferenceStore(repository)
+            frame = np.full((80, 120, 3), 70, dtype=np.uint8)
+
+            metadata = roi._capture_check_reference_fallback(
+                store,
+                "PROJETO A",
+                "CHECK_001",
+                frame,
+                (120, 80),
+            )
+
+            self.assertIsInstance(metadata, dict)
+            self.assertTrue(Path(metadata["image_path"]).is_file())
+            persisted = store.get("PROJETO A", "CHECK_001")
+            self.assertIsInstance(persisted, dict)
+            self.assertEqual(120, persisted["width"])
+            self.assertEqual(80, persisted["height"])
+
+    def test_frame_de_configuracao_tem_fallback_sem_alterar_loop_produtivo(self):
+        source = inspect.getsource(roi._install_config_frame_provider)
+        self.assertIn('getattr(self, "camera_frame_atual", None)', source)
+        self.assertIn('getattr(self, "imagem_original", None)', source)
+        self.assertIn("service.obter_snapshot(-1)", source)
+        self.assertNotIn("_atualizar_preview_display_f3", source)
+        self.assertNotIn("root.after(", source)
 
     def test_instalador_nao_altera_loop_preview_ou_cria_timer(self):
         source = inspect.getsource(roi)
-        self.assertNotIn("_atualizar_preview_display_f3", source)
-        self.assertNotIn("root.after(", source)
         self.assertNotIn("DISPLAY_F3_PREVIEW_INTERVAL_MS", source)
         self.assertNotIn("SELECIONAR ÁREA", source)
+        self.assertNotIn("root.after(", source)
 
     def test_modulo_permanece_isolado_do_f2(self):
         source = inspect.getsource(roi).lower()
