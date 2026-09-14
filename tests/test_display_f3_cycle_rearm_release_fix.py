@@ -5,10 +5,12 @@ import unittest
 import numpy as np
 
 import src.platform.display_f3_live_runtime_fix as live_module
+import src.platform.display_f3_operational_status as operational_module
 from src.platform.display_f3_cycle_rearm_release_fix import (
     F3_NEW_BOARD_STABLE_FRAMES,
     F3_REARM_EMPTY_STABLE_FRAMES,
     aplicar_rearme_fisico_dedicado_f3,
+    instalar_rearme_fisico_final_display_f3,
 )
 
 
@@ -183,6 +185,7 @@ class DisplayF3CycleRearmReleaseFixTests(unittest.TestCase):
         self.assertFalse(new_board_first["allow_auto"])
         self.assertEqual("check", new_board_second["kind"])
         self.assertTrue(new_board_second["allow_auto"])
+        self.assertTrue(new_board_second["cycle_new_board_confirmed"])
         self.assertFalse(app._display_f3_waiting_new_board_after_empty)
 
     def test_mesma_placa_sem_empty_continua_bloqueada_e_memoria_permanece(self):
@@ -212,6 +215,45 @@ class DisplayF3CycleRearmReleaseFixTests(unittest.TestCase):
         self.assertEqual(0, app.display_check_runtime.restart_calls)
         self.assertEqual("CHECK_AUX", app._display_f3_physical_status_memory_check_id)
         self.assertEqual("AUX", app._display_f3_physical_status_memory_check_name)
+
+    def test_instalador_final_reaplica_rearme_se_builder_for_substituido(self):
+        original_builder = operational_module._build_operational_state
+        original_flag = getattr(
+            operational_module,
+            "_display_f3_dedicated_cycle_rearm_release_installed",
+            False,
+        )
+
+        def builder_substituto(self, frame, project_name, context):
+            return {
+                "kind": "check",
+                "check_id": "CHECK_H1",
+                "check_name": "H1",
+                "allow_auto": True,
+            }
+
+        try:
+            # Reproduz a ordem real que causou a regressão: uma camada posterior
+            # troca o builder, mas o booleano antigo continua marcado como instalado.
+            operational_module._build_operational_state = builder_substituto
+            operational_module._display_f3_dedicated_cycle_rearm_release_installed = True
+
+            instalar_rearme_fisico_final_display_f3()
+            installed = operational_module._build_operational_state
+
+            self.assertIsNot(installed, builder_substituto)
+            self.assertTrue(
+                getattr(installed, "_odin_f3_dedicated_cycle_rearm_release", False)
+            )
+            self.assertIs(
+                builder_substituto,
+                getattr(installed, "_odin_f3_dedicated_cycle_rearm_base", None),
+            )
+        finally:
+            operational_module._build_operational_state = original_builder
+            operational_module._display_f3_dedicated_cycle_rearm_release_installed = (
+                original_flag
+            )
 
 
 if __name__ == "__main__":
