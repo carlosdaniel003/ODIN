@@ -1,207 +1,113 @@
 from __future__ import annotations
 
 import inspect
-import tempfile
 import unittest
-from pathlib import Path
-from types import SimpleNamespace
+from copy import deepcopy
 
 import cv2
 import numpy as np
 
-import src.platform.display_check_presence_reference as check_module
-import src.platform.display_reference_roi as roi_module
-import src.platform.display_visual_reference_status as visual_module
-from src.platform.display_reference_roi import (
-    descricao_roi_referencia,
-    instalar_roi_referencias_display_f3,
-    normalizar_roi_referencia,
-    recortar_roi_referencia,
-)
+import src.platform.display_reference_roi as roi
 
 
-class DisplayReferenceRoiTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        instalar_roi_referencias_display_f3()
+class _Repository:
+    def __init__(self):
+        self.project = {
+            "name": "PROJETO A",
+            "master_resolution": {"width": 120, "height": 80},
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 40,
+                    "cy": 40,
+                    "radius": 10,
+                },
+                {
+                    "id": "MASK_002",
+                    "type": "circle",
+                    "cx": 80,
+                    "cy": 40,
+                    "radius": 10,
+                },
+            ],
+        }
 
-    def test_roi_normalizada_e_limitada_a_imagem(self):
-        roi = normalizar_roi_referencia(
-            {"x": 0.25, "y": 0.20, "width": 0.50, "height": 0.60}
-        )
-        self.assertEqual(
-            {"x": 0.25, "y": 0.20, "width": 0.50, "height": 0.60},
-            roi,
-        )
-        clipped = normalizar_roi_referencia(
-            {"x": 0.80, "y": 0.75, "width": 0.50, "height": 0.50}
-        )
-        self.assertAlmostEqual(0.20, clipped["width"])
-        self.assertAlmostEqual(0.25, clipped["height"])
+    def carregar_projeto(self, _name):
+        return deepcopy(self.project)
 
-    def test_imagem_inteira_e_representada_sem_roi(self):
-        self.assertIsNone(
-            normalizar_roi_referencia(
-                {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}
-            )
-        )
-        self.assertEqual("IMAGEM TODA", descricao_roi_referencia({}))
-        self.assertEqual(
-            "RECORTE ATIVO",
-            descricao_roi_referencia(
-                {"roi": {"x": 0.1, "y": 0.1, "width": 0.4, "height": 0.4}}
-            ),
-        )
 
-    def test_recorte_usa_as_coordenadas_relativas(self):
-        image = np.zeros((100, 200, 3), dtype=np.uint8)
-        crop = recortar_roi_referencia(
-            image,
-            {"x": 0.25, "y": 0.20, "width": 0.50, "height": 0.60},
-        )
-        self.assertEqual((60, 100, 3), crop.shape)
-
-    def test_seletor_reserva_altura_para_acoes_inferiores(self):
-        self.assertGreaterEqual(
-            roi_module.DISPLAY_REFERENCE_ROI_VERTICAL_UI_RESERVE,
-            300,
-        )
-        source = inspect.getsource(roi_module.DisplayReferenceRoiDialog.__init__)
-        self.assertIn("DISPLAY_REFERENCE_ROI_VERTICAL_UI_RESERVE", source)
-        self.assertIn("DISPLAY_REFERENCE_ROI_MIN_DRAW_HEIGHT", source)
-
-    def test_check_store_persiste_roi_por_referencia(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            repository = SimpleNamespace(
-                config_file=Path(tmp) / "odin_display_projects.json"
-            )
-            store = check_module.DisplayCheckPresenceReferenceStore(repository)
-            frame = np.full((120, 160, 3), 70, dtype=np.uint8)
-            self.assertIsNotNone(store.capture("Projeto A", "H1", frame, (160, 120)))
-            roi = {"x": 0.2, "y": 0.25, "width": 0.4, "height": 0.5}
-            self.assertTrue(store.set_roi("Projeto A", "H1", roi))
-            loaded = store.get("Projeto A", "H1")
-            self.assertEqual(normalizar_roi_referencia(roi), loaded["roi"])
-
-            # Uma nova captura da mesma referência não deve apagar o recorte.
-            self.assertIsNotNone(store.capture("Projeto A", "H1", frame, (160, 120)))
-            loaded_again = store.get("Projeto A", "H1")
-            self.assertEqual(normalizar_roi_referencia(roi), loaded_again["roi"])
-
-            self.assertTrue(store.set_roi("Projeto A", "H1", None))
-            self.assertNotIn("roi", store.get("Projeto A", "H1"))
-
-    def test_presenca_projeto_persiste_roi_independente_por_foto(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            repository = SimpleNamespace(
-                config_file=Path(tmp) / "odin_display_projects.json"
-            )
-            store = visual_module.DisplayProjectPresenceReferenceStore(repository)
-            frame = np.full((120, 160, 3), 90, dtype=np.uint8)
-            self.assertIsNotNone(
-                store.capture(
-                    "Projeto A",
-                    visual_module.DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
-                    frame,
-                    (160, 120),
-                )
-            )
-            self.assertIsNotNone(
-                store.capture(
-                    "Projeto A",
-                    visual_module.DISPLAY_PROJECT_REFERENCE_EMPTY_SUPPORT,
-                    frame,
-                    (160, 120),
-                )
-            )
-            roi_off = {"x": 0.1, "y": 0.2, "width": 0.35, "height": 0.5}
-            roi_empty = {"x": 0.5, "y": 0.1, "width": 0.4, "height": 0.6}
-            self.assertTrue(
-                store.set_roi(
-                    "Projeto A",
-                    visual_module.DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
-                    roi_off,
-                )
-            )
-            self.assertTrue(
-                store.set_roi(
-                    "Projeto A",
-                    visual_module.DISPLAY_PROJECT_REFERENCE_EMPTY_SUPPORT,
-                    roi_empty,
-                )
-            )
-            self.assertEqual(
-                normalizar_roi_referencia(roi_off),
-                store.get(
-                    "Projeto A", visual_module.DISPLAY_PROJECT_REFERENCE_BOARD_OFF
-                )["roi"],
-            )
-            self.assertEqual(
-                normalizar_roi_referencia(roi_empty),
-                store.get(
-                    "Projeto A", visual_module.DISPLAY_PROJECT_REFERENCE_EMPTY_SUPPORT
-                )["roi"],
-            )
-
-    def test_matcher_ignora_alteracao_fora_da_roi(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            repository = SimpleNamespace(
-                config_file=Path(tmp) / "odin_display_projects.json"
-            )
-            reference = np.zeros((100, 100, 3), dtype=np.uint8)
-            path = Path(tmp) / "reference.jpg"
-            cv2.imwrite(str(path), reference)
-            metadata = {
-                "image_path": str(path),
+class DisplayReferenceMaskRoiTests(unittest.TestCase):
+    def setUp(self):
+        roi._UNION_CACHE.clear()
+        self.repository = _Repository()
+        self.metadata = roi._decorate_metadata(
+            self.repository,
+            "PROJETO A",
+            {
+                "image_path": "reference.jpg",
                 "threshold": 0.72,
-                "roi": {"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5},
-            }
-            matcher = visual_module.DisplayVisualReferenceMatcher(repository)
-
-            outside_changed = np.full((100, 100, 3), 255, dtype=np.uint8)
-            outside_changed[25:75, 25:75] = 0
-            score_outside = matcher._score(outside_changed, metadata)
-
-            inside_changed = np.zeros((100, 100, 3), dtype=np.uint8)
-            inside_changed[25:75, 25:75] = 255
-            score_inside = matcher._score(inside_changed, metadata)
-
-            self.assertGreater(score_outside, 0.98)
-            self.assertLess(score_inside, 0.50)
-
-    def test_check_analyzer_tambem_respeita_roi(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            reference = np.zeros((100, 100, 3), dtype=np.uint8)
-            path = Path(tmp) / "check.jpg"
-            cv2.imwrite(str(path), reference)
-            metadata = {
-                "image_path": str(path),
-                "threshold": 0.72,
-                "roi": {"x": 0.2, "y": 0.2, "width": 0.6, "height": 0.6},
-            }
-            current = np.full((100, 100, 3), 255, dtype=np.uint8)
-            current[20:80, 20:80] = 0
-            result = check_module.avaliar_referencia_presenca_display(current, metadata)
-            self.assertTrue(result["matched"])
-            self.assertGreater(result["score"], 0.98)
-            self.assertEqual(normalizar_roi_referencia(metadata["roi"]), result["roi"])
-
-    def test_interfaces_expoem_selecao_de_area(self):
-        # O botão pode ser inserido por uma extensão posterior do F3; o contrato
-        # estável é a ação pública de seleção, não o texto literal dentro do
-        # método base que monta o painel.
-        self.assertTrue(
-            hasattr(
-                check_module.DisplayCheckManagerPresenceWindow,
-                "select_presence_reference_roi",
-            )
+                "roi": {"x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8},
+            },
         )
-        self.assertTrue(
-            hasattr(
-                visual_module.DisplayProjectConfigPresenceWindow,
-                "select_project_presence_reference_roi",
-            )
+
+    def test_recorte_retangular_antigo_perde_autoridade(self):
+        self.assertNotIn("roi", self.metadata)
+        self.assertEqual(2, self.metadata["mask_region_count"])
+        self.assertEqual("project_mask_union", self.metadata["comparison_mode"])
+        self.assertEqual("MÁSCARAS DO PROJETO", roi.descricao_roi_referencia(self.metadata))
+
+    def test_uniao_contem_exatamente_as_regioes_das_mascaras(self):
+        union = roi._union_mask(self.metadata, 120, 80)
+        self.assertEqual((80, 120), union.shape)
+        self.assertGreater(int(union[40, 40]), 0)
+        self.assertGreater(int(union[40, 80]), 0)
+        self.assertEqual(0, int(union[10, 10]))
+        self.assertEqual(0, int(union[40, 60]))
+
+    def test_alteracao_fora_das_mascaras_nao_afeta_score(self):
+        reference = np.zeros((80, 120, 3), dtype=np.uint8)
+        current = np.full((80, 120, 3), 255, dtype=np.uint8)
+        cv2.circle(current, (40, 40), 10, (0, 0, 0), -1)
+        cv2.circle(current, (80, 40), 10, (0, 0, 0), -1)
+
+        score = roi.calcular_similaridade_referencia_por_mascaras(
+            reference,
+            current,
+            self.metadata,
         )
+        self.assertIsNotNone(score)
+        self.assertGreater(score, 0.98)
+
+    def test_alteracao_dentro_da_mascara_reduz_score(self):
+        reference = np.zeros((80, 120, 3), dtype=np.uint8)
+        current = reference.copy()
+        cv2.circle(current, (40, 40), 10, (255, 255, 255), -1)
+
+        score = roi.calcular_similaridade_referencia_por_mascaras(
+            reference,
+            current,
+            self.metadata,
+        )
+        self.assertIsNotNone(score)
+        self.assertLess(score, 0.90)
+
+    def test_preview_desenha_as_mascaras_na_foto_de_referencia(self):
+        image = np.zeros((80, 120, 3), dtype=np.uint8)
+        decorated = roi._decorate_reference_image(image, self.metadata)
+        self.assertEqual(image.shape, decorated.shape)
+        self.assertGreater(int(np.count_nonzero(decorated)), 0)
+
+    def test_instalador_nao_altera_loop_preview_ou_cria_timer(self):
+        source = inspect.getsource(roi)
+        self.assertNotIn("_atualizar_preview_display_f3", source)
+        self.assertNotIn("root.after(", source)
+        self.assertNotIn("DISPLAY_F3_PREVIEW_INTERVAL_MS", source)
+        self.assertNotIn("SELECIONAR ÁREA", source)
+
+    def test_modulo_permanece_isolado_do_f2(self):
+        source = inspect.getsource(roi).lower()
+        self.assertNotIn("src.platform.f2_", source)
 
 
 if __name__ == "__main__":
