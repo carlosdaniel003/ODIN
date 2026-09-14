@@ -10,16 +10,23 @@ Regra visual final:
 - verde: segmento classificado como ACESO e coerente com o CHECK;
 - vermelho: segmento classificado como APAGADO e coerente com o CHECK;
 - amarelo: POUCA LUZ ou divergência ACESO/APAGADO contra o CHECK;
+- divergência confirmada recebe amarelo muito mais forte que as máscaras normais;
 - nenhuma cor cinza/azul e nenhum texto "NG MASK_xxx" sobre a imagem;
-- enquanto nenhum segmento ACESO foi reconhecido, segmentos APAGADOS não são
-  pintados. Isso evita abrir o F3 com o H1 inteiro vermelho antes de a placa
-  realmente acender.
+- enquanto nenhum segmento ACESO foi reconhecido, segmentos APAGADOS/divergentes
+  não são pintados. Isso evita abrir o F3 com o H1 inteiro vermelho/amarelo antes
+  de a placa realmente acender.
 
 A geometria das máscaras não depende de existir uma análise produtiva naquele
 exato instante. Ela vem diretamente do Projeto Display ativo. A classificação
 usa somente análises do CHECK lógico atual e possui fallbacks para o cache de
 overlay e para a última sonda ao vivo, evitando a máscara desaparecer quando
 algum gate limpa temporariamente ``_display_auto_last_analysis``.
+
+Para destacar defeito não inferimos novamente ACESO/APAGADO. Usamos diretamente
+``matched=False`` da mesma análise que alimentou as classificações. Isso é
+importante quando foto capturada e ``mask_states`` possuem alguma inconsistência:
+a divergência visual continua aparecendo em amarelo forte sem inverter ou ocultar
+o defeito na preview.
 """
 
 from copy import deepcopy
@@ -37,9 +44,12 @@ from src.platform.display_project_repository import (
 from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
-# Mantém o segmento real visível, mas com cor suficiente para leitura rápida.
+# Máscaras normais permanecem translúcidas para mostrar o segmento real.
 F3_PREVIEW_CLEAR_ALPHA = 0.22
 F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 2
+# Divergência precisa saltar aos olhos do operador sem introduzir outra cor.
+F3_PREVIEW_ALERT_ALPHA = 0.58
+F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 6
 
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
@@ -49,7 +59,7 @@ F3_PREVIEW_CLEAR_COLORS = {
 
 F3_PREVIEW_CLEAR_LEGEND = (
     "VERDE: ACESO  •  VERMELHO: APAGADO  •  "
-    "AMARELO: POUCA LUZ / DIVERGÊNCIA"
+    "AMARELO FORTE: POUCA LUZ / DIVERGÊNCIA"
 )
 
 
@@ -174,17 +184,30 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
     return result
 
 
+def _analysis_matches_current(
+    analysis: dict | None,
+    *,
+    project_name: str,
+    check_id: str,
+) -> bool:
+    return bool(
+        isinstance(analysis, dict)
+        and str(analysis.get("project_name") or "") == str(project_name or "")
+        and str(analysis.get("check_id") or "") == str(check_id or "")
+    )
+
+
 def _classifications_from_analysis(
     analysis: dict | None,
     *,
     project_name: str,
     check_id: str,
 ) -> dict[str, str]:
-    if not isinstance(analysis, dict):
-        return {}
-    if str(analysis.get("project_name") or "") != str(project_name or ""):
-        return {}
-    if str(analysis.get("check_id") or "") != str(check_id or ""):
+    if not _analysis_matches_current(
+        analysis,
+        project_name=project_name,
+        check_id=check_id,
+    ):
         return {}
 
     result = {}
@@ -198,6 +221,77 @@ def _classifications_from_analysis(
     return result
 
 
+def _failed_mask_ids_from_analysis(
+    analysis: dict | None,
+    *,
+    project_name: str,
+    check_id: str,
+) -> set[str]:
+    """Retorna divergências explícitas da mesma análise usada para a preview."""
+    if not _analysis_matches_current(
+        analysis,
+        project_name=project_name,
+        check_id=check_id,
+    ):
+        return set()
+
+    return {
+        str(item.get("mask_id") or "")
+        for item in (analysis.get("mask_results") or [])
+        if isinstance(item, dict)
+        and str(item.get("mask_id") or "")
+        and item.get("matched") is False
+    }
+
+
+def _mask_snapshot_for_current_check(
+    window,
+    *,
+    project_name: str,
+    check_id: str,
+    base: dict | None = None,
+) -> tuple[dict[str, str], set[str]]:
+    """Lê classificação e falhas sempre da mesma análise do CHECK atual."""
+    app = overlay_module._app_from_window(window)
+    if app is not None:
+        for attr in (
+            "_display_auto_last_analysis",
+            "_display_f3_overlay_analysis_cache",
+            "_display_f3_live_probe_last_analysis",
+        ):
+            analysis = getattr(app, attr, None)
+            classifications = _classifications_from_analysis(
+                analysis,
+                project_name=project_name,
+                check_id=check_id,
+            )
+            if classifications:
+                return (
+                    classifications,
+                    _failed_mask_ids_from_analysis(
+                        analysis,
+                        project_name=project_name,
+                        check_id=check_id,
+                    ),
+                )
+
+    classifications = {
+        str(key): str(value).strip().lower()
+        for key, value in dict((base or {}).get("classifications") or {}).items()
+    }
+    failed = {
+        str(mask_id)
+        for mask_id in ((base or {}).get("failed_mask_ids") or ())
+        if str(mask_id)
+    }
+    failed.update(
+        str(mask_id)
+        for mask_id in dict((base or {}).get("failed_masks") or {}).keys()
+        if str(mask_id)
+    )
+    return classifications, failed
+
+
 def _classifications_for_current_check(
     window,
     *,
@@ -205,32 +299,14 @@ def _classifications_for_current_check(
     check_id: str,
     base: dict | None = None,
 ) -> dict[str, str]:
-    """Obtém a leitura atual sem deixar gates transitórios apagarem o overlay."""
-    classifications = {
-        str(key): str(value).strip().lower()
-        for key, value in dict((base or {}).get("classifications") or {}).items()
-    }
-    if classifications:
-        return classifications
-
-    app = overlay_module._app_from_window(window)
-    if app is None:
-        return {}
-
-    for attr in (
-        "_display_auto_last_analysis",
-        "_display_f3_overlay_analysis_cache",
-        "_display_f3_live_probe_last_analysis",
-    ):
-        analysis = getattr(app, attr, None)
-        classifications = _classifications_from_analysis(
-            analysis,
-            project_name=project_name,
-            check_id=check_id,
-        )
-        if classifications:
-            return classifications
-    return {}
+    """Compatibilidade: retorna apenas a classificação do snapshot atual."""
+    classifications, _failed = _mask_snapshot_for_current_check(
+        window,
+        project_name=project_name,
+        check_id=check_id,
+        base=base,
+    )
+    return classifications
 
 
 def _contexto_preview_claro(original):
@@ -246,13 +322,14 @@ def _contexto_preview_claro(original):
         result["masks"] = project_context["masks"]
         result["expected_states"] = dict(project_context["expected_states"])
 
-        classifications = _classifications_for_current_check(
+        classifications, failed_mask_ids = _mask_snapshot_for_current_check(
             window,
             project_name=str(project_context.get("project_name") or ""),
             check_id=str(project_context.get("check_id") or ""),
             base=result,
         )
         result["classifications"] = classifications
+        result["failed_mask_ids"] = tuple(sorted(failed_mask_ids))
         result["has_any_on"] = any(
             str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
             for state in classifications.values()
@@ -283,8 +360,35 @@ def _draw_mask(tint, mask: dict, sx: float, sy: float, color):
     return ("polygon", polygon)
 
 
+def _draw_contour(result, geometry, color, thickness: int) -> None:
+    if geometry[0] == "circle":
+        _kind, center, axes = geometry
+        cv2.ellipse(
+            result,
+            center,
+            axes,
+            0,
+            0,
+            360,
+            color,
+            int(thickness),
+            cv2.LINE_AA,
+        )
+        return
+
+    _kind, polygon = geometry
+    cv2.polylines(
+        result,
+        [polygon],
+        True,
+        color,
+        int(thickness),
+        cv2.LINE_AA,
+    )
+
+
 def renderizar_preview_claro_display_f3(frame, context):
-    """Render final do F3 sem sobreposição de paletas concorrentes."""
+    """Render final: máscara normal suave e divergência amarela muito evidente."""
     if frame is None or getattr(frame, "size", 0) == 0:
         return frame
     if not isinstance(context, dict):
@@ -313,6 +417,17 @@ def renderizar_preview_claro_display_f3(frame, context):
         str(key): str(value).strip().lower()
         for key, value in dict(context.get("expected_states") or {}).items()
     }
+    failed_mask_ids = {
+        str(mask_id)
+        for mask_id in (context.get("failed_mask_ids") or ())
+        if str(mask_id)
+    }
+    failed_mask_ids.update(
+        str(mask_id)
+        for mask_id in dict(context.get("failed_masks") or {}).keys()
+        if str(mask_id)
+    )
+
     has_any_on = bool(
         context.get("has_any_on")
         or any(
@@ -322,8 +437,10 @@ def renderizar_preview_claro_display_f3(frame, context):
     )
 
     result = frame.copy()
-    tint = result.copy()
-    geometries = []
+    normal_tint = result.copy()
+    alert_tint = result.copy()
+    normal_geometries = []
+    alert_geometries = []
 
     for mask in masks:
         if not isinstance(mask, dict):
@@ -334,50 +451,87 @@ def renderizar_preview_claro_display_f3(frame, context):
             expected_states.get(mask_id),
             has_any_on=has_any_on,
         )
+
+        # matched=False é a evidência direta de divergência. Só ativamos o
+        # destaque após a placa mostrar ao menos um segmento realmente aceso.
+        # Assim a partida do F3 não vira um painel inteiro amarelo/vermelho.
+        confirmed_failure = bool(mask_id in failed_mask_ids and has_any_on)
+        if confirmed_failure:
+            presentation = "alert"
+
         if presentation is None:
             continue
 
         color = F3_PREVIEW_CLEAR_COLORS[presentation]
-        geometry = _draw_mask(tint, mask, sx, sy, color)
-        if geometry is not None:
-            geometries.append((geometry, color))
-
-    if not geometries:
-        return result
-
-    cv2.addWeighted(
-        tint,
-        F3_PREVIEW_CLEAR_ALPHA,
-        result,
-        1.0 - F3_PREVIEW_CLEAR_ALPHA,
-        0.0,
-        dst=result,
-    )
-
-    for geometry, color in geometries:
-        if geometry[0] == "circle":
-            _kind, center, axes = geometry
-            cv2.ellipse(
-                result,
-                center,
-                axes,
-                0,
-                0,
-                360,
-                color,
-                F3_PREVIEW_CLEAR_CONTOUR_THICKNESS,
-                cv2.LINE_AA,
-            )
+        if presentation == "alert":
+            geometry = _draw_mask(alert_tint, mask, sx, sy, color)
+            if geometry is not None:
+                alert_geometries.append((geometry, color))
         else:
-            _kind, polygon = geometry
-            cv2.polylines(
-                result,
-                [polygon],
-                True,
-                color,
-                F3_PREVIEW_CLEAR_CONTOUR_THICKNESS,
-                cv2.LINE_AA,
+            geometry = _draw_mask(normal_tint, mask, sx, sy, color)
+            if geometry is not None:
+                normal_geometries.append((geometry, color))
+
+    if normal_geometries:
+        cv2.addWeighted(
+            normal_tint,
+            F3_PREVIEW_CLEAR_ALPHA,
+            result,
+            1.0 - F3_PREVIEW_CLEAR_ALPHA,
+            0.0,
+            dst=result,
+        )
+
+    if alert_geometries:
+        # O blend é separado para que somente a máscara defeituosa receba a
+        # opacidade forte. O restante da câmera continua fácil de inspecionar.
+        alert_tint = result.copy()
+        for mask in masks:
+            if not isinstance(mask, dict):
+                continue
+            mask_id = str(mask.get("id") or "")
+            classified = classifications.get(mask_id)
+            expected = expected_states.get(mask_id)
+            presentation = estado_visual_mascara_f3(
+                classified,
+                expected,
+                has_any_on=has_any_on,
             )
+            if mask_id in failed_mask_ids and has_any_on:
+                presentation = "alert"
+            if presentation != "alert":
+                continue
+            _draw_mask(
+                alert_tint,
+                mask,
+                sx,
+                sy,
+                F3_PREVIEW_CLEAR_COLORS["alert"],
+            )
+        cv2.addWeighted(
+            alert_tint,
+            F3_PREVIEW_ALERT_ALPHA,
+            result,
+            1.0 - F3_PREVIEW_ALERT_ALPHA,
+            0.0,
+            dst=result,
+        )
+
+    for geometry, color in normal_geometries:
+        _draw_contour(
+            result,
+            geometry,
+            color,
+            F3_PREVIEW_CLEAR_CONTOUR_THICKNESS,
+        )
+
+    for geometry, color in alert_geometries:
+        _draw_contour(
+            result,
+            geometry,
+            color,
+            F3_PREVIEW_ALERT_CONTOUR_THICKNESS,
+        )
 
     return result
 
