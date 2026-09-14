@@ -14,6 +14,12 @@ if sys.platform.startswith("linux"):
 from src.platform.raspberry_pi3_production_app import (  # noqa: E402
     RaspberryPi3ProductionApp,
 )
+from src.platform.display_reference_roi_runtime_fix import (  # noqa: E402
+    instalar_correcao_referencias_mascaras_f3,
+)
+
+
+instalar_correcao_referencias_mascaras_f3()
 
 
 def main() -> None:
