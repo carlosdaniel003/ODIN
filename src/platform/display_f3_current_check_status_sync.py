@@ -215,3 +215,21 @@ def instalar_sincronia_status_check_atual_display_f3() -> None:
     )
 
     instalar_desambiguacao_roi_analise_visual_display_f3()
+
+    # Autoridade final do handoff físico entre placas. O builder operacional pode
+    # ser substituído pelas camadas de gabarito/fast path; por isso o rearme é
+    # reaplicado aqui, já sobre a composição final, impedindo que a segunda placa
+    # fique visualmente em H1 enquanto o latch da placa anterior continua ativo.
+    from src.platform.display_f3_cycle_rearm_release_fix import (
+        instalar_rearme_fisico_final_display_f3,
+    )
+
+    instalar_rearme_fisico_final_display_f3()
+
+    # Nomenclatura produtiva: a ação manual é SEGREGAR PLACA. Os identificadores
+    # internos antigos são mantidos apenas para compatibilidade com o runtime.
+    from src.platform.display_f3_segregate_action import (
+        instalar_acao_segregar_placa_display_f3,
+    )
+
+    instalar_acao_segregar_placa_display_f3()
