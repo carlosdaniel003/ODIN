@@ -6,6 +6,7 @@ import unittest
 from src.platform.display_check_sequence_runtime import DisplayCheckSequenceRuntime
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
+from src.platform.display_result_feedback import obter_feedback_espera_display_f3
 
 
 CHECKS = [
@@ -86,6 +87,8 @@ class DisplayF3CheckSequenceRuntimeTests(unittest.TestCase):
         self.assertEqual((1, 0, 1), (snapshot["total"], snapshot["ok"], snapshot["ng"]))
         self.assertEqual("H1", snapshot["current_check"]["name"])
         self.assertEqual((), snapshot["completed_ids"])
+        self.assertIsNone(snapshot["last_result"])
+        self.assertIsNone(obter_feedback_espera_display_f3(snapshot))
 
     def test_check_reprovado_contabiliza_ng_e_reinicia(self):
         self.runtime.registrar_resultado_check(True)
@@ -95,6 +98,11 @@ class DisplayF3CheckSequenceRuntimeTests(unittest.TestCase):
         snapshot = evento["snapshot"]
         self.assertEqual((1, 0, 1), (snapshot["total"], snapshot["ok"], snapshot["ng"]))
         self.assertEqual("H1", snapshot["current_check"]["name"])
+        self.assertEqual("NG", snapshot["last_result"])
+        self.assertEqual(
+            ("NG", "Última placa: NG • aguardando H1 da próxima placa"),
+            obter_feedback_espera_display_f3(snapshot),
+        )
 
     def test_contadores_de_sessao_sao_preservados_ao_reconfigurar_checks(self):
         for _ in range(4):
@@ -153,6 +161,8 @@ class DisplayF3CheckSequenceRuntimeTests(unittest.TestCase):
         snapshot = app.display_check_runtime.snapshot()
         self.assertEqual((1, 0, 1), (snapshot["total"], snapshot["ok"], snapshot["ng"]))
         self.assertEqual("H1", snapshot["current_check"]["name"])
+        self.assertIsNone(snapshot["last_result"])
+        self.assertIsNone(obter_feedback_espera_display_f3(snapshot))
         self.assertEqual(antes_f2, (app.operacao_total, app.operacao_ok, app.operacao_ng))
         self.assertEqual(1, len(app.display_f3_window.results))
 
