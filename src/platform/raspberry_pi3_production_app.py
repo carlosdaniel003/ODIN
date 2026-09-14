@@ -256,7 +256,6 @@ class RaspberryPi3ProductionApp(
         instalar_guard_transicao_check_display_f3()
         instalar_roi_referencias_display_f3()
         instalar_desempenho_referencias_mascaras_display_f3()
-        instalar_referencias_leves_display_f3()
         instalar_overlay_imediato_display_f3()
         instalar_correcao_estado_fisico_display_f3()
         instalar_reconciliacao_optica_estado_fisico_display_f3()
@@ -269,9 +268,12 @@ class RaspberryPi3ProductionApp(
         instalar_gabarito_exato_checks_display_f3()
         instalar_gate_rapido_check_esperado_display_f3()
         # O gate rapido instala as sondas e wrappers historicos do F3. A
-        # conformidade estrita precisa vir POR ULTIMO para que nenhum desses
-        # wrappers restaure o analisador fotografico/generico como autoridade.
+        # conformidade estrita precisa vir por ultimo entre as autoridades.
         instalar_conformidade_estrita_mascaras_display_f3()
+        # A simplificacao de desempenho vem depois de TODAS as autoridades para
+        # trocar somente o custo da regiao visual: uma uniao das mascaras ja
+        # desenhadas, sem alterar OK/NG nem o gabarito funcional do CHECK.
+        instalar_referencias_leves_display_f3()
         super().__init__(root)
         iniciar_debug_periodico_camera_windows(self)
 
