@@ -41,6 +41,10 @@ instalar_preview_claro_display_f3()
 def main() -> None:
     root = tk.Tk()
     RaspberryPi3ProductionApp(root)
+    # Alguns instaladores históricos do F3 são executados durante __init__ e
+    # podem substituir renderizadores globais. Reafirmamos somente o renderer
+    # visual final, sem criar novo timer, callback de câmera ou análise.
+    instalar_preview_claro_display_f3()
     root.mainloop()
 
 
