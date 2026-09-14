@@ -86,11 +86,16 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         self.assertGreaterEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.20)
         self.assertLessEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.30)
         self.assertGreaterEqual(clarity.F3_PREVIEW_CLEAR_CONTOUR_THICKNESS, 2)
+        self.assertGreater(clarity.F3_PREVIEW_ALERT_ALPHA, clarity.F3_PREVIEW_CLEAR_ALPHA)
+        self.assertGreater(
+            clarity.F3_PREVIEW_ALERT_CONTOUR_THICKNESS,
+            clarity.F3_PREVIEW_CLEAR_CONTOUR_THICKNESS,
+        )
         self.assertNotIn("AZUL", clarity.F3_PREVIEW_CLEAR_LEGEND)
         self.assertNotIn("CINZA", clarity.F3_PREVIEW_CLEAR_LEGEND)
         self.assertIn("VERDE: ACESO", clarity.F3_PREVIEW_CLEAR_LEGEND)
         self.assertIn("VERMELHO: APAGADO", clarity.F3_PREVIEW_CLEAR_LEGEND)
-        self.assertIn("AMARELO: POUCA LUZ / DIVERGÊNCIA", clarity.F3_PREVIEW_CLEAR_LEGEND)
+        self.assertIn("AMARELO FORTE", clarity.F3_PREVIEW_CLEAR_LEGEND)
 
     def test_renderer_realmente_altera_pixels_quando_mascara_tem_classificacao(self):
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
@@ -116,6 +121,71 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
 
         self.assertGreater(int(rendered.sum()), 0)
         self.assertTrue(np.any(rendered[50, 50] != frame[50, 50]))
+
+    def test_mascara_divergente_recebe_destaque_amarelo_muito_mais_forte(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        mask = {
+            "id": "MASK_026",
+            "type": "segment",
+            "cx": 50,
+            "cy": 50,
+            "width": 30,
+            "height": 12,
+            "angle": 0.0,
+        }
+        normal = clarity.renderizar_preview_claro_display_f3(
+            frame,
+            {
+                "resolution": (100, 100),
+                "masks": (mask,),
+                "classifications": {"MASK_026": "on"},
+                "expected_states": {"MASK_026": "on"},
+                "failed_mask_ids": (),
+                "has_any_on": True,
+            },
+        )
+        failed = clarity.renderizar_preview_claro_display_f3(
+            frame,
+            {
+                "resolution": (100, 100),
+                "masks": (mask,),
+                "classifications": {"MASK_026": "off"},
+                "expected_states": {"MASK_026": "on"},
+                "failed_mask_ids": ("MASK_026",),
+                "has_any_on": True,
+            },
+        )
+
+        self.assertGreater(int(failed.sum()), int(normal.sum()))
+        center = failed[50, 50]
+        self.assertGreater(int(center[1]), int(center[0]))
+        self.assertGreater(int(center[2]), int(center[0]))
+
+    def test_falha_nao_e_superdestacada_antes_de_existir_segmento_aceso(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        rendered = clarity.renderizar_preview_claro_display_f3(
+            frame,
+            {
+                "resolution": (100, 100),
+                "masks": (
+                    {
+                        "id": "MASK_001",
+                        "type": "segment",
+                        "cx": 50,
+                        "cy": 50,
+                        "width": 30,
+                        "height": 12,
+                        "angle": 0.0,
+                    },
+                ),
+                "classifications": {"MASK_001": "off"},
+                "expected_states": {"MASK_001": "on"},
+                "failed_mask_ids": ("MASK_001",),
+                "has_any_on": False,
+            },
+        )
+
+        self.assertEqual(0, int(rendered.sum()))
 
     def test_fallback_de_classificacao_aceita_somente_o_check_atual(self):
         right = clarity._classifications_from_analysis(
@@ -144,6 +214,32 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
 
         self.assertEqual({"MASK_001": "on", "MASK_002": "off"}, right)
         self.assertEqual({}, wrong)
+
+    def test_falha_explicitamente_vem_de_matched_false_do_check_atual(self):
+        analysis = {
+            "project_name": "P1",
+            "check_id": "CHECK_002",
+            "mask_results": [
+                {"mask_id": "MASK_025", "classified": "on", "matched": True},
+                {"mask_id": "MASK_026", "classified": "off", "matched": False},
+            ],
+        }
+        self.assertEqual(
+            {"MASK_026"},
+            clarity._failed_mask_ids_from_analysis(
+                analysis,
+                project_name="P1",
+                check_id="CHECK_002",
+            ),
+        )
+        self.assertEqual(
+            set(),
+            clarity._failed_mask_ids_from_analysis(
+                analysis,
+                project_name="P1",
+                check_id="CHECK_001",
+            ),
+        )
 
     def test_renderer_final_e_reaplicavel_sem_duplicar_contexto(self):
         source = inspect.getsource(clarity._aplicar_render_final)
