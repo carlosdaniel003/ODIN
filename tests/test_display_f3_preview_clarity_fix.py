@@ -81,7 +81,9 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         colors = clarity.F3_PREVIEW_CLEAR_COLORS
         self.assertEqual({"on", "off", "alert"}, set(colors))
         self.assertEqual(colors["alert"], (21, 204, 250))
-        self.assertLessEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.10)
+        self.assertGreaterEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.20)
+        self.assertLessEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.30)
+        self.assertEqual(2, clarity.F3_PREVIEW_CLEAR_CONTOUR_THICKNESS)
         self.assertNotIn("AZUL", clarity.F3_PREVIEW_CLEAR_LEGEND)
         self.assertNotIn("CINZA", clarity.F3_PREVIEW_CLEAR_LEGEND)
         self.assertIn("VERDE: ACESO", clarity.F3_PREVIEW_CLEAR_LEGEND)
