@@ -12,6 +12,7 @@ import src.platform.display_reference_roi as roi
 
 class _Repository:
     def __init__(self):
+        self.calls = 0
         self.project = {
             "name": "PROJETO A",
             "master_resolution": {"width": 120, "height": 80},
@@ -34,11 +35,13 @@ class _Repository:
         }
 
     def carregar_projeto(self, _name):
+        self.calls += 1
         return deepcopy(self.project)
 
 
 class DisplayReferenceMaskRoiTests(unittest.TestCase):
     def setUp(self):
+        roi._PROJECT_MASK_CACHE.clear()
         roi._UNION_CACHE.clear()
         self.repository = _Repository()
         self.metadata = roi._decorate_metadata(
@@ -56,6 +59,14 @@ class DisplayReferenceMaskRoiTests(unittest.TestCase):
         self.assertEqual(2, self.metadata["mask_region_count"])
         self.assertEqual("project_mask_union", self.metadata["comparison_mode"])
         self.assertEqual("MÁSCARAS DO PROJETO", roi.descricao_roi_referencia(self.metadata))
+
+    def test_contexto_de_mascaras_do_projeto_e_cacheado(self):
+        roi._decorate_metadata(
+            self.repository,
+            "PROJETO A",
+            {"image_path": "outra.jpg", "threshold": 0.72},
+        )
+        self.assertEqual(1, self.repository.calls)
 
     def test_uniao_contem_exatamente_as_regioes_das_mascaras(self):
         union = roi._union_mask(self.metadata, 120, 80)
