@@ -154,7 +154,13 @@ class DisplayCheckSequenceRuntime:
         concluidos = tuple(self._completed_ids)
         self.total += 1
         self.ng += 1
-        self.last_result = "NG"
+
+        # O descarte continua sendo contabilizado como NG, mas não deve alimentar
+        # a memória visual de "última placa analisada". O operador acabou de
+        # descartar justamente a placa corrente; depois do card PLACA DESCARTADA
+        # o F3 deve seguir direto para o rearmamento físico, sem exibir de novo
+        # "PLACA JÁ ANALISADA / COLOQUE OUTRA PLACA".
+        self.last_result = None
         self.reiniciar_placa()
         return {
             "event": self.EVENT_PLATE_DISCARDED,
