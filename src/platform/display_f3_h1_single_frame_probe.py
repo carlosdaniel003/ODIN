@@ -10,23 +10,21 @@ from src.platform.display_f3_exact_check_template import F3_EXACT_TEMPLATE_SOURC
 from src.platform.display_project_repository import DISPLAY_CHECK_STATE_ON
 
 
+# Mantido apenas para compatibilidade com imports históricos. A sonda produtiva
+# não usa mais a regra "somente segmentos esperados ACESOS" para aprovar H1/BLUE.
 F3_POSITIVE_PROBE_MODE_ON_MASKS = "expected_on_exact_template"
+F3_POSITIVE_PROBE_MODE_FULL_MASKS = "full_check_mask_conformity"
 
 
 def frames_necessarios_sonda_positiva_f3(app, context: dict | None) -> int:
-    """H1 e BLUE são capturados no primeiro frame positivo confiável.
+    """H1 exige estabilidade; BLUE continua rápido por ser transitório.
 
-    Esta regra vale somente para a sonda positiva. Ela nunca gera NG. Demais
-    CHECKS estáveis mantêm dois frames para evitar avanço por leitura isolada.
+    O falso positivo real AUX->H1 mostrou que um único frame não é margem segura
+    para o CHECK de referência. H1 e CHECKS estáveis usam dois frames positivos
+    consecutivos. BLUE/BT continua em um frame porque é fisicamente transitório.
     """
     if not isinstance(context, dict):
         return 2
-
-    try:
-        if app._display_auto_is_reference_gate(context):
-            return 1
-    except Exception:
-        pass
 
     try:
         if app._display_auto_is_transient_check(context):
@@ -58,20 +56,17 @@ def avaliar_sonda_positiva_f3(
     context: dict | None,
     analysis: dict | None,
 ) -> dict:
-    """Define a autoridade positiva sem transformar diferença de foto em defeito.
+    """A sonda positiva só confirma quando o CHECK inteiro está conforme.
 
-    O gabarito exato é excelente para provar rapidamente que os segmentos que
-    deveriam estar ACESOS apareceram. Ele não é, porém, um classificador de
-    ACESO/APAGADO: uma região APAGADA ficar mais clara/escura que na fotografia
-    de referência não significa que o segmento mudou de estado.
+    Antes, H1/BLUE podiam ser aprovados apenas porque TODAS as máscaras esperadas
+    ACESAS estavam acesas, ignorando máscaras que deveriam estar APAGADAS. Isso é
+    inseguro quando outro estado é um superconjunto do H1. No caso real AUX,
+    todos os 7 segmentos ACESOS do H1 também estavam acesos, mas vários segmentos
+    que H1 esperava APAGADOS estavam ACESOS. O antigo gate aprovava mesmo assim.
 
-    Para H1 e CHECK transitório (BLUE), quando a análise veio especificamente do
-    gabarito exato, a captura positiva exige que TODAS as máscaras esperadas
-    ACESAS estejam conformes. As máscaras esperadas APAGADAS continuam no debug
-    como diagnóstico fotométrico, mas não bloqueiam essa confirmação positiva.
-
-    Qualquer análise semântica normal continua exigindo ``approved=True``; logo
-    um verdadeiro ACESO onde deveria estar APAGADO não é ignorado pelo runtime.
+    Agora a sonda preserva a análise completa: ``approved=True`` somente quando
+    todas as máscaras configuradas ACESO/APAGADO do CHECK coincidem. O contador de
+    segmentos ACESOS permanece apenas como telemetria de debug.
     """
     if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
         return {
@@ -80,6 +75,7 @@ def avaliar_sonda_positiva_f3(
             "on_total": 0,
             "on_matched": 0,
             "off_template_mismatches": 0,
+            "full_mask_conformity": False,
         }
 
     original_approved = analysis.get("approved") is True
@@ -107,30 +103,22 @@ def avaliar_sonda_positiva_f3(
         and not bool(item.get("matched"))
     )
 
-    use_on_only_positive_gate = bool(
-        exact_probe
-        and fast_context
-        and on_results
-    )
-    approved = (
-        on_matched == len(on_results)
-        if use_on_only_positive_gate
-        else original_approved
+    mode = (
+        F3_POSITIVE_PROBE_MODE_FULL_MASKS
+        if exact_probe and fast_context
+        else "full_analysis"
     )
 
     return {
-        "approved": bool(approved),
-        "mode": (
-            F3_POSITIVE_PROBE_MODE_ON_MASKS
-            if use_on_only_positive_gate
-            else "full_analysis"
-        ),
+        "approved": bool(original_approved),
+        "mode": mode,
         "on_total": len(on_results),
         "on_matched": int(on_matched),
         "off_template_mismatches": int(off_template_mismatches),
         "exact_probe": bool(exact_probe),
         "fast_context": bool(fast_context),
         "original_approved": bool(original_approved),
+        "full_mask_conformity": bool(original_approved),
     }
 
 
@@ -139,7 +127,7 @@ def atualizar_estabilidade_sonda_positiva_f3(
     context: dict | None,
     analysis: dict | None,
 ) -> dict:
-    """Debounce da sonda positiva com semântica própria para H1/BLUE."""
+    """Debounce da sonda positiva sem relaxar a decisão completa do CHECK."""
     signature = None
     if isinstance(context, dict):
         signature = (
@@ -150,15 +138,15 @@ def atualizar_estabilidade_sonda_positiva_f3(
     evidence = avaliar_sonda_positiva_f3(app, context, analysis)
     approved = bool(evidence.get("approved"))
 
-    # Mantém a telemetria legível no DEBUG AO VIVO. Para a sonda exata rápida,
-    # ``approved`` passa a significar somente confirmação positiva do estado;
-    # preservamos explicitamente o resultado fotográfico de todas as máscaras.
     if isinstance(analysis, dict):
+        # Nunca sobrescrevemos analysis['approved'] nem analysis['reason'] aqui.
+        # Esses dois campos pertencem ao analisador completo foto+mask_states.
         analysis["exact_all_masks_approved"] = bool(
             evidence.get("original_approved")
         )
         analysis["positive_probe_approved"] = approved
         analysis["positive_probe_mode"] = str(evidence.get("mode") or "")
+        analysis["positive_probe_requires_full_mask_conformity"] = True
         analysis["positive_on_mask_count"] = int(evidence.get("on_total", 0) or 0)
         analysis["positive_on_matched_count"] = int(
             evidence.get("on_matched", 0) or 0
@@ -166,18 +154,11 @@ def atualizar_estabilidade_sonda_positiva_f3(
         analysis["off_template_mismatch_count"] = int(
             evidence.get("off_template_mismatches", 0) or 0
         )
-        if str(evidence.get("mode") or "") == F3_POSITIVE_PROBE_MODE_ON_MASKS:
-            analysis["approved"] = approved
-            if approved:
-                analysis["reason"] = (
-                    "sonda_positiva_segmentos_acesos_conformes_"
-                    f"{evidence.get('on_matched', 0)}_de_{evidence.get('on_total', 0)}"
-                )
-            else:
-                analysis["reason"] = (
-                    "sonda_positiva_aguardando_segmentos_acesos_"
-                    f"{evidence.get('on_matched', 0)}_de_{evidence.get('on_total', 0)}"
-                )
+        analysis["positive_probe_reason"] = (
+            "check_completo_conforme"
+            if approved
+            else "check_completo_nao_conforme"
+        )
 
     previous_signature = getattr(app, "_display_f3_live_probe_signature", None)
     frames = int(getattr(app, "_display_f3_live_probe_ok_frames", 0) or 0)
@@ -194,6 +175,7 @@ def atualizar_estabilidade_sonda_positiva_f3(
             "mode": evidence.get("mode"),
             "on_total": evidence.get("on_total", 0),
             "on_matched": evidence.get("on_matched", 0),
+            "off_template_mismatches": evidence.get("off_template_mismatches", 0),
         }
 
     frames = frames + 1 if previous_signature == signature else 1
@@ -207,16 +189,12 @@ def atualizar_estabilidade_sonda_positiva_f3(
         "mode": evidence.get("mode"),
         "on_total": evidence.get("on_total", 0),
         "on_matched": evidence.get("on_matched", 0),
+        "off_template_mismatches": evidence.get("off_template_mismatches", 0),
     }
 
 
 def restaurar_analisador_semantico_runtime_f3() -> None:
-    """NG volta a usar aprendizado ACESO/APAGADO/POUCA LUZ, não diferença de foto.
-
-    A foto exata continua instalada como referência física e como sonda positiva
-    invisível. Já a decisão oficial de máscara precisa vir do classificador
-    aprendido, pois só ele possui estados semânticos reais e POUCA LUZ.
-    """
+    """Restaura o analisador semântico nos aliases históricos do runtime."""
     runtime_module.DisplayAutomaticCheckAnalyzer = LearnedDisplayAutomaticCheckAnalyzer
     live_runtime_module.DisplayAutomaticCheckAnalyzer = LearnedDisplayAutomaticCheckAnalyzer
 
