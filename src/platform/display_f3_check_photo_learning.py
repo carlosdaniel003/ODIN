@@ -13,7 +13,8 @@ estado deve parecer fisicamente:
 Esta camada transforma esse conjunto no aprendizado produtivo final do F3. A
 mesma máscara do frame ao vivo é comparada com a mesma máscara da foto daquele
 CHECK. O bloco legado ``REFERÊNCIAS / APRENDIZADO`` (amostras manuais globais de
-ACESO/APAGADO/POUCA LUZ) não é consultado por esta autoridade.
+ACESO/APAGADO/POUCA LUZ) não é consultado por esta autoridade e deixa de ser
+exibido na configuração do Projeto Display.
 
 A classe deriva do gabarito exato já existente, preservando a comparação por
 pixels/energia dentro da máscara e os contratos históricos de H1/BLUE. O único
@@ -238,6 +239,56 @@ def _install_runtime_aliases() -> None:
         pass
 
 
+def _install_legacy_reference_ui_retirement() -> None:
+    """Remove da UI o bloco manual REFERÊNCIAS/APRENDIZADO agora redundante."""
+    try:
+        import src.platform.display_project_config as config_module
+    except Exception:
+        return
+
+    cls = config_module.DisplayProjectConfigWindow
+    if bool(getattr(cls, "_display_f3_legacy_reference_ui_retired", False)):
+        return
+
+    original_init = cls.__init__
+
+    def init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+
+        # A extensão histórica cria um box e guarda o botão. Destruímos o box
+        # inteiro depois da composição final da janela, sem procurar widgets por
+        # texto e sem alterar os demais painéis do Projeto Display.
+        button = getattr(self, "reference_button", None)
+        panel = getattr(button, "master", None) if button is not None else None
+        if panel is not None:
+            try:
+                panel.destroy()
+            except Exception:
+                pass
+
+        self.reference_button = None
+        self.reference_summary = None
+        legacy_window = getattr(self, "reference_window", None)
+        if legacy_window is not None:
+            try:
+                if bool(getattr(legacy_window, "visible", False)):
+                    legacy_window.close()
+            except Exception:
+                pass
+        self.reference_window = None
+        self._display_f3_legacy_reference_learning_retired = True
+
+    def open_retired_references(self) -> None:
+        # Mantido apenas para compatibilidade com chamadas antigas. Não abre a
+        # janela nem consulta o store legado.
+        self.reference_window = None
+        return None
+
+    cls.__init__ = init
+    cls.open_display_references = open_retired_references
+    cls._display_f3_legacy_reference_ui_retired = True
+
+
 _INSTALLED = False
 
 
@@ -249,6 +300,7 @@ def instalar_aprendizado_foto_check_display_f3() -> None:
     # reatribuem fora de seus guards; assim esta função pode sempre recuperar a
     # autoridade final sem criar outro loop de câmera.
     _install_runtime_aliases()
+    _install_legacy_reference_ui_retirement()
 
     if _INSTALLED:
         return
