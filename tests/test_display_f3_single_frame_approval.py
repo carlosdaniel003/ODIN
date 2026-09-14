@@ -9,6 +9,12 @@ import src.platform.display_f3_single_frame_approval as module
 from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 
 
+class _App:
+    @staticmethod
+    def _display_auto_is_transient_check(context):
+        return str((context or {}).get("check_name") or "").upper() == "BLUE"
+
+
 class DisplayF3SingleFrameApprovalTests(unittest.TestCase):
     def setUp(self):
         self.original_ok_frames = DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES
@@ -23,24 +29,34 @@ class DisplayF3SingleFrameApprovalTests(unittest.TestCase):
         trace_module._probe_required_frames = self.original_trace_function
         module._INSTALLED = self.original_installed
 
-    def test_todo_check_atual_ou_futuro_exige_um_frame_para_ok(self):
+    def test_h1_e_checks_estaveis_exigem_dois_frames(self):
         contexts = [
             {"current_index": 0, "check_name": "H1"},
-            {"current_index": 1, "check_name": "BLUE"},
             {"current_index": 2, "check_name": "USB"},
             {"current_index": 3, "check_name": "AUX"},
             {"current_index": 4, "check_name": "CHECK_FUTURO_5"},
-            {"current_index": 99, "check_name": "QUALQUER_OUTRO"},
         ]
         for context in contexts:
             with self.subTest(context=context):
-                self.assertEqual(1, module.frames_necessarios_aprovacao_f3(None, context))
+                self.assertEqual(
+                    2,
+                    module.frames_necessarios_aprovacao_f3(_App(), context),
+                )
 
-    def test_instalador_unifica_runtime_produtivo_e_sonda_em_um_frame(self):
-        DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES = 2
+    def test_blue_transitorio_continua_em_um_frame(self):
+        self.assertEqual(
+            1,
+            module.frames_necessarios_aprovacao_f3(
+                _App(),
+                {"current_index": 1, "check_name": "BLUE"},
+            ),
+        )
+
+    def test_instalador_unifica_runtime_e_sonda_sem_reduzir_h1_para_um_frame(self):
+        DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES = 1
         module.instalar_aprovacao_um_frame_display_f3()
 
-        self.assertEqual(1, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES)
+        self.assertEqual(2, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES)
         self.assertIs(
             module.frames_necessarios_aprovacao_f3,
             probe_module.frames_necessarios_sonda_positiva_f3,
