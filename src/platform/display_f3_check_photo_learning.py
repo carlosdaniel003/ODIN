@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+"""Autoridade final do F3 baseada no próprio CHECK configurado.
+
+Cada CHECK já possui tudo o que o analisador precisa para saber como aquele
+estado deve parecer fisicamente:
+
+* uma foto capturada em ``REFERÊNCIA VISUAL / PRESENÇA``;
+* as máscaras persistidas do Projeto Display;
+* ``mask_states`` dizendo, para cada máscara, se naquele CHECK ela é ACESA,
+  APAGADA ou IGNORADA.
+
+Esta camada transforma esse conjunto no aprendizado produtivo final do F3. A
+mesma máscara do frame ao vivo é comparada com a mesma máscara da foto daquele
+CHECK. O bloco legado ``REFERÊNCIAS / APRENDIZADO`` (amostras manuais globais de
+ACESO/APAGADO/POUCA LUZ) não é consultado por esta autoridade.
+
+A classe deriva do gabarito exato já existente, preservando a comparação por
+pixels/energia dentro da máscara e os contratos históricos de H1/BLUE. O único
+acréscimo de runtime é um cache da foto preparada do CHECK, evitando reler e
+rotacionar o JPEG a cada frame no Raspberry Pi.
+
+Nada deste módulo altera o F2.
+"""
+
+from copy import deepcopy
+from pathlib import Path
+
+import src.platform.display_auto_check_runtime as runtime_module
+import src.platform.display_f3_live_runtime_fix as live_runtime_module
+from src.platform.display_f3_exact_check_template import (
+    F3_EXACT_TEMPLATE_SOURCE,
+    F3ExactCheckTemplateAnalyzer,
+    _read_reference_full,
+    _resize_visual_frame,
+)
+from src.platform.display_project_repository import normalizar_resolucao_display
+from src.platform.display_visual_rotation import preparar_check_visual_display
+
+
+F3_CHECK_PHOTO_LEARNING_AUTHORITY = "f3_current_check_photo_mask_states"
+F3_CHECK_PHOTO_LEARNING_SOURCE = "captured_check_photo_and_mask_states"
+
+
+def _file_signature(path_value) -> tuple[str, int, int]:
+    path = Path(str(path_value or ""))
+    try:
+        stat = path.stat()
+        return str(path), int(stat.st_mtime_ns), int(stat.st_size)
+    except OSError:
+        return str(path), 0, 0
+
+
+def _mask_signature(masks: list[dict]) -> tuple:
+    values = []
+    for mask in masks or ():
+        if not isinstance(mask, dict):
+            continue
+        values.append(
+            (
+                str(mask.get("id") or ""),
+                str(mask.get("type") or ""),
+                repr(
+                    {
+                        key: mask.get(key)
+                        for key in (
+                            "cx",
+                            "cy",
+                            "radius",
+                            "x",
+                            "y",
+                            "width",
+                            "height",
+                            "angle",
+                            "points",
+                        )
+                        if key in mask
+                    }
+                ),
+            )
+        )
+    return tuple(values)
+
+
+class F3CheckPhotoLearningAnalyzer(F3ExactCheckTemplateAnalyzer):
+    """Aprende o estado esperado diretamente da foto e ``mask_states`` do CHECK."""
+
+    def __init__(self, repository) -> None:
+        super().__init__(repository)
+        self._check_template_cache_key = None
+        self._check_template_cache = None
+
+    def invalidate_learning_cache(self) -> None:
+        self._check_template_cache_key = None
+        self._check_template_cache = None
+
+    def _reference_visual_context(
+        self,
+        project_name: str,
+        check_id: str,
+        project: dict,
+        masks: list[dict],
+        visual_rotation: int,
+    ):
+        metadata = self.presence_store.get(project_name, check_id)
+        if not isinstance(metadata, dict):
+            return None, {}, None
+
+        master_resolution = normalizar_resolucao_display(
+            project.get("master_resolution")
+        )
+        if master_resolution is None:
+            return None, {}, metadata
+
+        cache_key = (
+            str(project_name),
+            str(check_id),
+            int(visual_rotation or 0) % 360,
+            tuple(master_resolution),
+            str(project.get("updated_at") or ""),
+            _file_signature(metadata.get("image_path")),
+            _mask_signature(masks),
+        )
+        if cache_key == self._check_template_cache_key:
+            cached = self._check_template_cache
+            if isinstance(cached, tuple) and len(cached) == 3:
+                frame, mask_by_id, cached_metadata = cached
+                return frame, dict(mask_by_id), deepcopy(cached_metadata)
+
+        reference = _read_reference_full(metadata)
+        if reference is None:
+            return None, {}, metadata
+
+        frame, resolution, visual_masks = preparar_check_visual_display(
+            reference,
+            master_resolution,
+            masks,
+            visual_rotation,
+        )
+        frame = _resize_visual_frame(frame, resolution)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return None, {}, metadata
+
+        mask_by_id = {
+            str(mask.get("id")): mask
+            for mask in visual_masks
+            if isinstance(mask, dict) and mask.get("id") is not None
+        }
+        self._check_template_cache_key = cache_key
+        self._check_template_cache = (
+            frame,
+            dict(mask_by_id),
+            deepcopy(metadata),
+        )
+        return frame, mask_by_id, metadata
+
+    def analyze(
+        self,
+        frame,
+        project_name: str,
+        check_id: str,
+        visual_rotation: int = 0,
+    ) -> dict:
+        analysis = super().analyze(
+            frame=frame,
+            project_name=project_name,
+            check_id=check_id,
+            visual_rotation=visual_rotation,
+        )
+        if not isinstance(analysis, dict):
+            return analysis
+
+        # Mantém o source exato para compatibilidade com a sonda rápida H1/BLUE.
+        # Os novos campos explicitam de onde vem o aprendizado produtivo.
+        analysis["reference_authority"] = F3_EXACT_TEMPLATE_SOURCE
+        analysis["learning_authority"] = F3_CHECK_PHOTO_LEARNING_AUTHORITY
+        analysis["learning_source"] = F3_CHECK_PHOTO_LEARNING_SOURCE
+        analysis["uses_current_check_photo"] = True
+        analysis["uses_project_masks"] = True
+        analysis["uses_mask_states"] = True
+        analysis["legacy_reference_learning_used"] = False
+        analysis["cross_check_learning_used"] = False
+        analysis["manual_reference_store_used"] = False
+
+        results = [
+            item
+            for item in (analysis.get("mask_results") or ())
+            if isinstance(item, dict)
+        ]
+        for item in results:
+            item["learning_source"] = F3_CHECK_PHOTO_LEARNING_SOURCE
+            item["expected_state_source"] = "check.mask_states"
+            item["same_physical_mask_template"] = True
+
+        analysis["learning_sample_count"] = len(results)
+        if bool(analysis.get("ready")):
+            analysis["reason"] = (
+                "check_conforme_foto_e_estados_configurados"
+                if analysis.get("approved") is True
+                else "check_diverge_foto_ou_estados_configurados"
+            )
+        return analysis
+
+
+def _install_runtime_aliases() -> None:
+    """Fecha todos os aliases históricos no mesmo analisador do CHECK atual."""
+    runtime_module.DisplayAutomaticCheckAnalyzer = F3CheckPhotoLearningAnalyzer
+    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3CheckPhotoLearningAnalyzer
+
+    # A sonda rápida de H1/BLUE importa classes por valor. Se esses aliases não
+    # forem atualizados, o caminho rápido poderia continuar usando o aprendizado
+    # cruzado antigo enquanto o runtime normal já usa a foto do CHECK atual.
+    try:
+        import src.platform.display_f3_live_diagnostic_trace as trace_module
+
+        trace_module.F3ExactCheckTemplateAnalyzer = F3CheckPhotoLearningAnalyzer
+        trace_module._display_f3_check_photo_learning_authority = True
+    except Exception:
+        pass
+
+    try:
+        import src.platform.display_f3_h1_single_frame_probe as probe_module
+
+        probe_module.LearnedDisplayAutomaticCheckAnalyzer = F3CheckPhotoLearningAnalyzer
+        probe_module._display_f3_check_photo_learning_authority = True
+    except Exception:
+        pass
+
+    # DEBUG TÉCNICO deve descrever a mesma autoridade usada em produção. Os dois
+    # nomes históricos continuam disponíveis apenas para compatibilidade da UI.
+    try:
+        import src.platform.display_f3_manual_snapshot_debug as debug_module
+
+        debug_module.F3ExactCheckTemplateAnalyzer = F3CheckPhotoLearningAnalyzer
+        debug_module.F3SameMaskReferenceAnalyzer = F3CheckPhotoLearningAnalyzer
+        debug_module._display_f3_check_photo_learning_authority = True
+    except Exception:
+        pass
+
+
+_INSTALLED = False
+
+
+def instalar_aprendizado_foto_check_display_f3() -> None:
+    """Instala a foto + máscaras + estados do CHECK como autoridade final do F3."""
+    global _INSTALLED
+
+    # Reaplica os aliases em toda chamada. Algumas camadas históricas também os
+    # reatribuem fora de seus guards; assim esta função pode sempre recuperar a
+    # autoridade final sem criar outro loop de câmera.
+    _install_runtime_aliases()
+
+    if _INSTALLED:
+        return
+    _INSTALLED = True
