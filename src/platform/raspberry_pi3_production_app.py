@@ -33,6 +33,9 @@ from src.platform.display_awake_runtime import (
 from src.platform.display_check_presence_reference import (
     instalar_referencia_presenca_check_display,
 )
+from src.platform.display_f3_check_photo_learning import (
+    instalar_aprendizado_foto_check_display_f3,
+)
 from src.platform.display_f3_check_transition_guard import (
     instalar_guard_transicao_check_display_f3,
 )
@@ -256,10 +259,11 @@ class RaspberryPi3ProductionApp(
         instalar_politica_fisica_e_aprendizado_display_f3()
         instalar_gabarito_exato_checks_display_f3()
         instalar_gate_rapido_check_esperado_display_f3()
-        # O gate rapido instala as sondas e wrappers historicos do F3. A
-        # conformidade estrita precisa vir POR ULTIMO para que nenhum desses
-        # wrappers restaure o analisador fotografico/generico como autoridade.
+        # Camadas históricas ainda instalam guards, overlay e telemetria usados
+        # pelo F3. Depois delas, a autoridade produtiva final volta explicitamente
+        # para a própria foto do CHECK + máscaras + estados ACESO/APAGADO.
         instalar_conformidade_estrita_mascaras_display_f3()
+        instalar_aprendizado_foto_check_display_f3()
         super().__init__(root)
         iniciar_debug_periodico_camera_windows(self)
 
