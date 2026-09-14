@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-"""Rotação apenas visual das referências de presença do Display F3.
+"""Preview rotacionada das referências físicas do Display F3.
 
-As imagens persistidas continuam no referencial original da câmera porque o
-classificador físico opera nesse domínio. Preview e seleção de ROI seguem a
-rotação da tela principal e convertem o retângulo de volta antes de persistir.
+As imagens persistidas continuam no referencial original da câmera. Na UI,
+foto e máscaras do Projeto Display são convertidas juntas para a orientação
+visual atual e as mesmas máscaras já desenhadas em "Seleção, ajuste e máscara"
+são sobrepostas às miniaturas de presença/referência.
+
+Esta camada não altera captura, classificação, loop produtivo ou F2.
 """
 
+from copy import deepcopy
 from pathlib import Path
 
 import cv2
@@ -15,8 +19,10 @@ import tkinter as tk
 import src.platform.display_check_presence_reference as check_module
 import src.platform.display_reference_roi as roi_module
 import src.platform.display_visual_reference_status as visual_module
+from src.platform.display_project_repository import normalizar_resolucao_display
 from src.platform.display_visual_rotation import (
     obter_rotacao_visual_do_frame_provider,
+    preparar_check_visual_display,
     preparar_frame_visual_display,
 )
 from src.ui.main_window_parts.image.rotacao_visual_principal import (
@@ -28,7 +34,7 @@ F3_REFERENCE_ROI_COLOR = roi_module.DISPLAY_REFERENCE_ROI_COLOR
 
 
 def transformar_roi_referencia_visual_f3(roi, rotacao: int) -> dict | None:
-    """Converte um ROI normalizado para a orientação visual solicitada."""
+    """Compatibilidade histórica para metadados antigos com ROI retangular."""
     normalized = roi_module.normalizar_roi_referencia(roi)
     if normalized is None:
         return None
@@ -91,33 +97,110 @@ def preparar_preview_referencia_visual_f3(image, rotacao: int):
     )
 
 
-def _draw_roi_on_canvas(
-    canvas,
-    image_visual,
-    roi_visual,
+def _metadata_com_mascaras_do_projeto(
+    repository,
+    project_name: str,
+    metadata: dict | None,
+) -> dict:
+    """Garante que o renderer final receba as máscaras mesmo sem wrappers prévios."""
+    result = deepcopy(metadata) if isinstance(metadata, dict) else {}
+    try:
+        project = repository.carregar_projeto(project_name)
+    except Exception:
+        project = None
+    if not isinstance(project, dict):
+        return result
+
+    resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    masks = [
+        deepcopy(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict) and mask.get("id") is not None
+    ]
+    if resolution is not None:
+        result["_display_master_resolution"] = tuple(resolution)
+    result["_display_mask_regions"] = masks
+    result["mask_region_count"] = len(masks)
+    result["comparison_mode"] = roi_module.DISPLAY_REFERENCE_MASK_COMPARE_MODE
+    return result
+
+
+def _fit_preview(image, target_width: int, target_height: int):
+    if image is None or getattr(image, "size", 0) == 0:
+        return image
+    height, width = image.shape[:2]
+    if width <= 0 or height <= 0:
+        return image
+    scale = min(
+        max(1, int(target_width)) / float(width),
+        max(1, int(target_height)) / float(height),
+    )
+    final_width = max(1, int(round(width * scale)))
+    final_height = max(1, int(round(height * scale)))
+    interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    return cv2.resize(
+        image,
+        (final_width, final_height),
+        interpolation=interpolation,
+    )
+
+
+def preparar_preview_referencia_com_mascaras_f3(
     *,
+    image_raw,
+    metadata: dict | None,
+    repository,
+    project_name: str,
+    rotacao: int,
     target_width: int,
     target_height: int,
-    center_x: float,
-    center_y: float,
-) -> None:
-    if canvas is None or roi_visual is None:
-        return
-    rect = roi_module._canvas_roi_rect(
-        image_visual,
-        roi_visual,
-        target_width,
-        target_height,
-        center_x,
-        center_y,
+):
+    """Retorna miniatura já rotacionada e com cada ROI/máscara visível.
+
+    A imagem é reduzida *antes* de desenhar o contorno. Isso é intencional:
+    desenhar uma linha de 2 px em 1920x1080 e depois reduzi-la para ~170 px
+    fazia o contorno desaparecer por subpixel na preview.
+    """
+    if image_raw is None or getattr(image_raw, "size", 0) == 0:
+        return image_raw, 0
+
+    enriched = _metadata_com_mascaras_do_projeto(
+        repository,
+        project_name,
+        metadata,
     )
-    if rect is None:
-        return
-    canvas.create_rectangle(
-        *rect,
-        outline=F3_REFERENCE_ROI_COLOR,
-        width=2,
+    masks = list(enriched.get("_display_mask_regions", []) or [])
+    resolution = normalizar_resolucao_display(
+        enriched.get("_display_master_resolution")
     )
+    angle = normalizar_rotacao_visual(rotacao)
+
+    if resolution is not None and masks:
+        image_visual, visual_resolution, visual_masks = preparar_check_visual_display(
+            image_raw,
+            resolution,
+            masks,
+            angle,
+        )
+        visual_metadata = deepcopy(enriched)
+        visual_metadata["_display_master_resolution"] = tuple(visual_resolution)
+        visual_metadata["_display_mask_regions"] = visual_masks
+        visual_metadata["mask_region_count"] = len(visual_masks)
+    else:
+        image_visual = preparar_preview_referencia_visual_f3(image_raw, angle)
+        visual_metadata = enriched
+        visual_masks = []
+
+    preview = _fit_preview(image_visual, target_width, target_height)
+    if preview is None or getattr(preview, "size", 0) == 0:
+        return preview, len(visual_masks)
+
+    if visual_masks:
+        preview = roi_module._decorate_reference_image(
+            preview,
+            visual_metadata,
+        )
+    return preview, len(visual_masks)
 
 
 def _install_project_reference_preview() -> None:
@@ -152,7 +235,7 @@ def _install_project_reference_preview() -> None:
                 )
                 status.configure(text="SEM REFERÊNCIA", fg=self.MUTED)
                 if roi_label is not None:
-                    roi_label.configure(text="IMAGEM TODA", fg="#94A3B8")
+                    roi_label.configure(text="MÁSCARAS DO PROJETO", fg="#94A3B8")
                 continue
 
             path = Path(str(metadata.get("image_path") or ""))
@@ -168,82 +251,39 @@ def _install_project_reference_preview() -> None:
                 status.configure(text="ARQUIVO AUSENTE", fg="#FCA5A5")
                 continue
 
-            image_visual = preparar_preview_referencia_visual_f3(image_raw, angle)
-            photo = visual_module._photo_from_image(image_visual, 170, 78)
+            preview, mask_count = preparar_preview_referencia_com_mascaras_f3(
+                image_raw=image_raw,
+                metadata=metadata,
+                repository=self.repository,
+                project_name=project_name,
+                rotacao=angle,
+                target_width=170,
+                target_height=78,
+            )
+            photo = visual_module._photo_from_image(preview, 170, 78)
             if photo is not None:
                 self._project_presence_photos[kind] = photo
                 canvas.create_image(87, 41, image=photo, anchor=tk.CENTER)
 
-            roi_raw = roi_module.normalizar_roi_referencia(metadata.get("roi"))
-            roi_visual = transformar_roi_referencia_visual_f3(roi_raw, angle)
-            _draw_roi_on_canvas(
-                canvas,
-                image_visual,
-                roi_visual,
-                target_width=170,
-                target_height=78,
-                center_x=87,
-                center_y=41,
-            )
             if roi_label is not None:
                 roi_label.configure(
-                    text=roi_module.descricao_roi_referencia(metadata),
-                    fg=F3_REFERENCE_ROI_COLOR if roi_raw is not None else "#94A3B8",
+                    text=f"MÁSCARAS DO PROJETO • {mask_count}",
+                    fg=F3_REFERENCE_ROI_COLOR if mask_count else "#94A3B8",
                 )
             status.configure(
                 text=(
-                    f"ATIVA • {int(metadata.get('width', 0))}x"
+                    f"ATIVA • ROI {mask_count} máscara(s) • "
+                    f"{int(metadata.get('width', 0))}x"
                     f"{int(metadata.get('height', 0))} • VISUAL {angle}°"
                 ),
-                fg="#86EFAC",
+                fg="#86EFAC" if mask_count else "#FDE68A",
             )
 
+    # O seletor retangular deixou de ter autoridade. A UI atual não oferece esse
+    # botão; manter o método como no-op evita que atalhos antigos reabram o recorte.
     def select_roi(self, kind: str) -> None:
-        store = getattr(self, "_project_presence_store", None)
-        project_name = self._selected_name()
-        if store is None or not project_name:
-            return
-        metadata = store.get(project_name, kind)
-        if metadata is None:
-            visual_module.messagebox.showwarning(
-                "Sem referência",
-                "Capture primeiro esta foto de presença da placa.",
-                parent=self.window,
-            )
-            return
-        path = Path(str(metadata.get("image_path") or ""))
-        image_raw = cv2.imread(str(path), cv2.IMREAD_COLOR) if path.exists() else None
-        if image_raw is None:
-            visual_module.messagebox.showwarning(
-                "Sem imagem de referência",
-                "A imagem de referência não foi encontrada.",
-                parent=self.window,
-            )
-            return
-
-        angle = _rotation(self)
-        image_visual = preparar_preview_referencia_visual_f3(image_raw, angle)
-        roi_visual = transformar_roi_referencia_visual_f3(metadata.get("roi"), angle)
-
-        def apply(visual_roi):
-            raw_roi = restaurar_roi_referencia_original_f3(visual_roi, angle)
-            store.set_roi(project_name, kind, raw_roi)
-            self._update_project_presence_detail()
-            self._notify_change()
-            self.status.configure(
-                text=(
-                    f"Área analisada de '"
-                    f"{visual_module.DISPLAY_PROJECT_REFERENCE_LABELS[kind]}' atualizada."
-                )
-            )
-
-        roi_module.DisplayReferenceRoiDialog(
-            self.window,
-            image_visual,
-            roi_visual,
-            apply,
-            f"Área analisada • {visual_module.DISPLAY_PROJECT_REFERENCE_LABELS[kind]}",
-        )
+        del self, kind
+        return None
 
     cls._update_project_presence_detail = update_detail
     cls.select_project_presence_reference_roi = select_roi
@@ -280,7 +320,7 @@ def _install_check_reference_preview() -> None:
             )
             label = getattr(self, "reference_roi_status", None)
             if label is not None:
-                label.configure(text="IMAGEM TODA", fg="#94A3B8")
+                label.configure(text="MÁSCARAS DO PROJETO", fg="#94A3B8")
             return
 
         path = Path(str(metadata.get("image_path") or ""))
@@ -300,28 +340,25 @@ def _install_check_reference_preview() -> None:
             return
 
         angle = _rotation(self)
-        image_visual = preparar_preview_referencia_visual_f3(image_raw, angle)
-        photo = self._photo_from_image(image_visual, 326, 88)
+        preview, mask_count = preparar_preview_referencia_com_mascaras_f3(
+            image_raw=image_raw,
+            metadata=metadata,
+            repository=self.repository,
+            project_name=self.project_name,
+            rotacao=angle,
+            target_width=326,
+            target_height=88,
+        )
+        photo = self._photo_from_image(preview, 326, 88)
         if photo is not None:
             self._presence_photo = photo
             canvas.create_image(165, 46, image=photo, anchor=tk.CENTER)
 
-        roi_raw = roi_module.normalizar_roi_referencia(metadata.get("roi"))
-        roi_visual = transformar_roi_referencia_visual_f3(roi_raw, angle)
-        _draw_roi_on_canvas(
-            canvas,
-            image_visual,
-            roi_visual,
-            target_width=326,
-            target_height=88,
-            center_x=165,
-            center_y=46,
-        )
         label = getattr(self, "reference_roi_status", None)
         if label is not None:
             label.configure(
-                text=roi_module.descricao_roi_referencia(metadata),
-                fg=F3_REFERENCE_ROI_COLOR if roi_raw is not None else "#94A3B8",
+                text=f"MÁSCARAS DO PROJETO • {mask_count}",
+                fg=F3_REFERENCE_ROI_COLOR if mask_count else "#94A3B8",
             )
         threshold = float(
             metadata.get(
@@ -331,54 +368,17 @@ def _install_check_reference_preview() -> None:
         )
         status.configure(
             text=(
-                f"Referência ativa • mínimo {threshold * 100:.0f}% • "
+                f"Referência ativa • ROI: {mask_count} máscara(s) • "
+                f"mínimo {threshold * 100:.0f}% • "
                 f"{int(metadata.get('width', 0))}x{int(metadata.get('height', 0))} • "
                 f"VISUAL {angle}°"
             ),
-            fg="#86EFAC",
+            fg="#86EFAC" if mask_count else "#FDE68A",
         )
 
     def select_roi(self) -> None:
-        store = getattr(self, "_presence_store", None)
-        check_id = self._selected_id()
-        if store is None or not check_id:
-            return
-        metadata = store.get(self.project_name, check_id)
-        if metadata is None:
-            check_module.messagebox.showwarning(
-                "Sem referência",
-                "Capture primeiro a foto deste CHECK.",
-                parent=self.window,
-            )
-            return
-        path = Path(str(metadata.get("image_path") or ""))
-        image_raw = cv2.imread(str(path), cv2.IMREAD_COLOR) if path.exists() else None
-        if image_raw is None:
-            check_module.messagebox.showwarning(
-                "Sem imagem de referência",
-                "A imagem de referência não foi encontrada.",
-                parent=self.window,
-            )
-            return
-
-        angle = _rotation(self)
-        image_visual = preparar_preview_referencia_visual_f3(image_raw, angle)
-        roi_visual = transformar_roi_referencia_visual_f3(metadata.get("roi"), angle)
-
-        def apply(visual_roi):
-            raw_roi = restaurar_roi_referencia_original_f3(visual_roi, angle)
-            store.set_roi(self.project_name, check_id, raw_roi)
-            self._update_presence_detail()
-            self._notify_change()
-            self.status.configure(text="Área da referência visual atualizada.")
-
-        roi_module.DisplayReferenceRoiDialog(
-            self.window,
-            image_visual,
-            roi_visual,
-            apply,
-            f"Área analisada • {check_id}",
-        )
+        del self
+        return None
 
     cls._update_presence_detail = update_detail
     cls.select_presence_reference_roi = select_roi
