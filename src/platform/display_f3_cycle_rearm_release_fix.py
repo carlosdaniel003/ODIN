@@ -186,6 +186,7 @@ def aplicar_rearme_fisico_dedicado_f3(
         app._display_f3_waiting_new_board_after_empty = False
         app._display_f3_new_board_frames = 0
         _reset_auto_after_physical_transition(app)
+        state["cycle_new_board_confirmed"] = True
         return state
 
     app._display_f3_rearm_empty_frames = 0
@@ -208,16 +209,18 @@ def _obter_matcher_operacional(app):
 
 
 def _instalar_wrapper_operacional_rearme_f3() -> None:
-    if bool(
-        getattr(
-            operational_module,
-            "_display_f3_dedicated_cycle_rearm_release_installed",
-            False,
-        )
-    ):
-        return
+    """Mantém o rearme como camada externa mesmo após outros builders F3.
 
+    O instalador histórico guardava apenas um booleano global. Se uma camada
+    posterior substituísse ``_build_operational_state`` (como o gabarito exato),
+    o booleano continuava True e o rearme nunca era reinstalado. O resultado era
+    exatamente um ciclo visualmente em H1, porém ainda bloqueado internamente pelo
+    latch de rearme da placa anterior.
+    """
     base_build = operational_module._build_operational_state
+    if bool(getattr(base_build, "_odin_f3_dedicated_cycle_rearm_release", False)):
+        operational_module._display_f3_dedicated_cycle_rearm_release_installed = True
+        return
 
     def build(self, frame, project_name: str, context: dict | None):
         was_waiting_empty = bool(
@@ -225,7 +228,7 @@ def _instalar_wrapper_operacional_rearme_f3() -> None:
         )
         state = base_build(self, frame, project_name, context)
 
-        # O gate anterior pode ter reconhecido EMPTY sozinho. Nesse caso apenas
+        # Um gate interno pode ter reconhecido EMPTY sozinho. Nesse caso apenas
         # finalizamos o reset do ciclo e passamos a aguardar a nova placa.
         if was_waiting_empty and not bool(
             getattr(self, "_display_f3_waiting_empty_rearm", False)
@@ -242,6 +245,9 @@ def _instalar_wrapper_operacional_rearme_f3() -> None:
 
         matcher = _obter_matcher_operacional(self)
         if matcher is None:
+            state = dict(state or {})
+            state["allow_auto"] = False
+            state["cycle_rearm_waiting"] = True
             return state
 
         return aplicar_rearme_fisico_dedicado_f3(
@@ -252,6 +258,8 @@ def _instalar_wrapper_operacional_rearme_f3() -> None:
             state,
         )
 
+    build._odin_f3_dedicated_cycle_rearm_release = True
+    build._odin_f3_dedicated_cycle_rearm_base = base_build
     operational_module._build_operational_state = build
     operational_module._display_f3_dedicated_cycle_rearm_release_installed = True
 
@@ -283,6 +291,12 @@ def _instalar_patch_no_instalador_principal() -> None:
     # instalador principal já ter sido executado.
     if bool(getattr(operational_module, "_display_f3_cycle_rearm_gate_installed", False)):
         _instalar_wrapper_operacional_rearme_f3()
+
+
+def instalar_rearme_fisico_final_display_f3() -> None:
+    """Reaplica o handoff EMPTY -> nova placa sobre o builder F3 atualmente ativo."""
+    _instalar_patch_no_instalador_principal()
+    _instalar_wrapper_operacional_rearme_f3()
 
 
 _instalar_patch_no_instalador_principal()
