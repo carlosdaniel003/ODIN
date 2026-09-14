@@ -57,6 +57,9 @@ from src.platform.display_f3_operational_status import (
 from src.platform.display_f3_optical_power_reconciliation import (
     instalar_reconciliacao_optica_estado_fisico_display_f3,
 )
+from src.platform.display_f3_overlay_immediate import (
+    instalar_overlay_imediato_display_f3,
+)
 from src.platform.display_f3_physical_learning_policy import (
     instalar_politica_fisica_e_aprendizado_display_f3,
 )
@@ -68,6 +71,9 @@ from src.platform.display_f3_reference_authority_bridge import (
 )
 from src.platform.display_f3_reference_authority_fix import (
     instalar_autoridade_referencias_display_f3,
+)
+from src.platform.display_f3_reference_lightweight import (
+    instalar_referencias_leves_display_f3,
 )
 from src.platform.display_f3_same_mask_reference_fix import (
     instalar_referencias_por_mesma_mascara_display_f3,
@@ -250,6 +256,8 @@ class RaspberryPi3ProductionApp(
         instalar_guard_transicao_check_display_f3()
         instalar_roi_referencias_display_f3()
         instalar_desempenho_referencias_mascaras_display_f3()
+        instalar_referencias_leves_display_f3()
+        instalar_overlay_imediato_display_f3()
         instalar_correcao_estado_fisico_display_f3()
         instalar_reconciliacao_optica_estado_fisico_display_f3()
         instalar_runtime_ao_vivo_display_f3()
