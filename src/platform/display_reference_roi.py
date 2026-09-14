@@ -35,6 +35,7 @@ DISPLAY_REFERENCE_MASK_PREVIEW_BGR = (248, 189, 56)
 DISPLAY_REFERENCE_MASK_PREVIEW_ALPHA = 0.12
 DISPLAY_REFERENCE_COMPARE_WIDTH = 360
 
+_PROJECT_MASK_CACHE: dict[tuple, tuple] = {}
 _UNION_CACHE: dict[tuple, np.ndarray] = {}
 
 
@@ -93,22 +94,6 @@ class DisplayReferenceRoiDialog:
         self.window = None
 
 
-def _project_mask_context(repository, project_name: str):
-    try:
-        project = repository.carregar_projeto(project_name)
-    except Exception:
-        project = None
-    if not isinstance(project, dict):
-        return None, []
-    resolution = normalizar_resolucao_display(project.get("master_resolution"))
-    masks = [
-        deepcopy(mask)
-        for mask in (project.get("masks", []) or [])
-        if isinstance(mask, dict) and mask.get("id") is not None
-    ]
-    return resolution, masks
-
-
 def _mask_signature(masks: list[dict]) -> str:
     try:
         return json.dumps(masks, sort_keys=True, separators=(",", ":"), default=str)
@@ -116,15 +101,53 @@ def _mask_signature(masks: list[dict]) -> str:
         return repr(masks)
 
 
+def _repository_signature(repository) -> tuple[int, int]:
+    try:
+        stat = Path(repository.config_file).stat()
+        return int(stat.st_mtime_ns), int(stat.st_size)
+    except Exception:
+        return 0, 0
+
+
+def _project_mask_context(repository, project_name: str):
+    key = (
+        id(repository),
+        str(project_name or ""),
+        _repository_signature(repository),
+    )
+    cached = _PROJECT_MASK_CACHE.get(key)
+    if cached is not None:
+        resolution, masks, signature = cached
+        return resolution, list(masks), signature
+
+    try:
+        project = repository.carregar_projeto(project_name)
+    except Exception:
+        project = None
+    if not isinstance(project, dict):
+        return None, [], ""
+    resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    masks = tuple(
+        deepcopy(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict) and mask.get("id") is not None
+    )
+    signature = _mask_signature(list(masks))
+    if len(_PROJECT_MASK_CACHE) > 8:
+        _PROJECT_MASK_CACHE.clear()
+    _PROJECT_MASK_CACHE[key] = (resolution, masks, signature)
+    return resolution, list(masks), signature
+
+
 def _decorate_metadata(repository, project_name: str, metadata: dict | None):
     if not isinstance(metadata, dict):
         return metadata
-    resolution, masks = _project_mask_context(repository, project_name)
+    resolution, masks, signature = _project_mask_context(repository, project_name)
     result = deepcopy(metadata)
     result.pop("roi", None)
     result["_display_master_resolution"] = tuple(resolution) if resolution else None
     result["_display_mask_regions"] = masks
-    result["_display_mask_signature"] = _mask_signature(masks)
+    result["_display_mask_signature"] = signature
     result["mask_region_count"] = len(masks)
     result["comparison_mode"] = DISPLAY_REFERENCE_MASK_COMPARE_MODE
     return result
