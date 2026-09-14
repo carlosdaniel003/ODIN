@@ -10,6 +10,7 @@ from src.platform.display_project_repository import normalizar_resolucao_display
 
 
 _PROJECT_CACHE = {}
+F3_VISUAL_REFERENCE_REFRESH_SECONDS = 0.45
 
 
 def _signature(repository):
@@ -71,6 +72,7 @@ def limpar_cache_projeto_f3() -> None:
 
 
 def instalar_referencias_leves_display_f3() -> None:
+    perf.F3_MASK_REFERENCE_REFRESH_SECONDS = F3_VISUAL_REFERENCE_REFRESH_SECONDS
     roi._project_mask_context = _project_context
     roi._metadata_masks = perf._metadata_masks_no_copy
     roi._masked_ssim = _similarity
