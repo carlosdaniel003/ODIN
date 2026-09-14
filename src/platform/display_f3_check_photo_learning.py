@@ -302,6 +302,21 @@ def instalar_aprendizado_foto_check_display_f3() -> None:
     _install_runtime_aliases()
     _install_legacy_reference_ui_retirement()
 
+    # Este instalador é o último do bootstrap F3. Fechamos aqui, e não em uma
+    # camada intermediária, o handoff físico entre placas e a leitura do debug.
+    # Assim H1 pode estar 28/28 conforme sem furar o rearme da placa anterior.
+    from src.platform.display_f3_final_rearm_guard import (
+        instalar_guard_rearme_terminal_final_display_f3,
+    )
+
+    instalar_guard_rearme_terminal_final_display_f3()
+
+    from src.platform.display_f3_debug_clarity_fix import (
+        instalar_clareza_debug_tecnico_display_f3,
+    )
+
+    instalar_clareza_debug_tecnico_display_f3()
+
     if _INSTALLED:
         return
     _INSTALLED = True
