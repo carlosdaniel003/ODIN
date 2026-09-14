@@ -45,9 +45,6 @@ from src.platform.display_f3_fast_expected_gate import (
 from src.platform.display_f3_live_runtime_fix import (
     instalar_runtime_ao_vivo_display_f3,
 )
-from src.platform.display_f3_mask_reference_performance import (
-    instalar_desempenho_referencias_mascaras_display_f3,
-)
 from src.platform.display_f3_mask_status import (
     instalar_status_mascaras_display_f3,
 )
@@ -56,9 +53,6 @@ from src.platform.display_f3_operational_status import (
 )
 from src.platform.display_f3_optical_power_reconciliation import (
     instalar_reconciliacao_optica_estado_fisico_display_f3,
-)
-from src.platform.display_f3_overlay_immediate import (
-    instalar_overlay_imediato_display_f3,
 )
 from src.platform.display_f3_physical_learning_policy import (
     instalar_politica_fisica_e_aprendizado_display_f3,
@@ -71,9 +65,6 @@ from src.platform.display_f3_reference_authority_bridge import (
 )
 from src.platform.display_f3_reference_authority_fix import (
     instalar_autoridade_referencias_display_f3,
-)
-from src.platform.display_f3_reference_lightweight import (
-    instalar_referencias_leves_display_f3,
 )
 from src.platform.display_f3_same_mask_reference_fix import (
     instalar_referencias_por_mesma_mascara_display_f3,
@@ -255,8 +246,6 @@ class RaspberryPi3ProductionApp(
         instalar_status_operacional_display_f3()
         instalar_guard_transicao_check_display_f3()
         instalar_roi_referencias_display_f3()
-        instalar_desempenho_referencias_mascaras_display_f3()
-        instalar_overlay_imediato_display_f3()
         instalar_correcao_estado_fisico_display_f3()
         instalar_reconciliacao_optica_estado_fisico_display_f3()
         instalar_runtime_ao_vivo_display_f3()
@@ -268,12 +257,9 @@ class RaspberryPi3ProductionApp(
         instalar_gabarito_exato_checks_display_f3()
         instalar_gate_rapido_check_esperado_display_f3()
         # O gate rapido instala as sondas e wrappers historicos do F3. A
-        # conformidade estrita precisa vir por ultimo entre as autoridades.
+        # conformidade estrita precisa vir POR ULTIMO para que nenhum desses
+        # wrappers restaure o analisador fotografico/generico como autoridade.
         instalar_conformidade_estrita_mascaras_display_f3()
-        # A simplificacao de desempenho vem depois de TODAS as autoridades para
-        # trocar somente o custo da regiao visual: uma uniao das mascaras ja
-        # desenhadas, sem alterar OK/NG nem o gabarito funcional do CHECK.
-        instalar_referencias_leves_display_f3()
         super().__init__(root)
         iniciar_debug_periodico_camera_windows(self)
 

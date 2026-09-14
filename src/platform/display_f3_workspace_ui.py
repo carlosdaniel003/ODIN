@@ -14,6 +14,7 @@ from src.platform.display_check_editor import (
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
 from src.platform.display_project_config import DisplayProjectConfigWindow
 from src.platform.display_reference_learning import DisplayReferenceConfigWindow
+from src.platform.display_reference_roi import DisplayReferenceRoiDialog
 
 
 F3_DESKTOP_MIN_WIDTH = 900
@@ -483,6 +484,16 @@ def instalar_workspace_telas_display_f3() -> None:
 
     DisplayReferenceConfigWindow.__init__ = reference_init
 
+    # ROI das referências físicas / CHECK permanece modal, mas maximizada uma vez.
+    original_roi_init = DisplayReferenceRoiDialog.__init__
+
+    def roi_init(self, *args, **kwargs):
+        original_roi_init(self, *args, **kwargs)
+        reservar_area_inferior_workspace_f3(getattr(self, "window", None))
+        agendar_maximizacao_workspace_f3(self)
+
+    DisplayReferenceRoiDialog.__init__ = roi_init
+
     _instalar_subclasses_finais()
 
     for cls in (
@@ -491,6 +502,7 @@ def instalar_workspace_telas_display_f3() -> None:
         DisplayCheckMaskEditorWindow,
         DisplayMaskEditorWindow,
         DisplayReferenceConfigWindow,
+        DisplayReferenceRoiDialog,
     ):
         cls._display_f3_workspace_ui_installed = True
 
