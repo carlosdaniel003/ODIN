@@ -36,6 +36,9 @@ from src.platform.display_f3_mask_visibility_ui import (  # noqa: E402
 from src.platform.display_f3_power_authority import (  # noqa: E402
     instalar_autoridade_energia_final_display_f3,
 )
+from src.platform.display_f3_power_authority_v2 import (  # noqa: E402
+    instalar_autoridade_energia_unificada_display_f3,
+)
 from src.platform.display_f3_power_evidence_compat import (  # noqa: E402
     instalar_evidencia_energia_mesma_mascara_display_f3,
 )
@@ -61,6 +64,10 @@ def main() -> None:
     instalar_guias_mascaras_inicio_display_f3()
     instalar_evidencia_energia_mesma_mascara_display_f3()
     instalar_autoridade_energia_final_display_f3()
+    # Autoridade literal mais externa do F3: a análise bruta do CHECK atual prova
+    # energia; OFF↔ON em BGR/S/V/pixels é somente proteção secundária. Isso também
+    # fecha o DEBUG por CHECK com proveniência explícita da foto usada.
+    instalar_autoridade_energia_unificada_display_f3()
     root.mainloop()
 
 
