@@ -45,6 +45,9 @@ from src.platform.display_f3_power_debug_compat_v2 import (  # noqa: E402
 from src.platform.display_f3_power_evidence_compat import (  # noqa: E402
     instalar_evidencia_energia_mesma_mascara_display_f3,
 )
+from src.platform.display_f3_power_visual_coherence import (  # noqa: E402
+    instalar_coerencia_visual_energia_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
@@ -74,6 +77,10 @@ def main() -> None:
     # Consumidores históricos do DEBUG/guards recebem a mesma semântica de energia
     # e deixam de publicar uma segunda verdade baseada somente em brilho.
     instalar_compatibilidade_energia_unificada_debug_f3()
+    # Última camada de apresentação: sem energia confirmada não existe defeito de
+    # segmento. A preview fica somente com guias neutras e a ANÁLISE VISUAL mostra
+    # PLACA DESLIGADA/ENERGIA NÃO CONFIRMADA, preservando o match global só no debug.
+    instalar_coerencia_visual_energia_display_f3()
     root.mainloop()
 
 
