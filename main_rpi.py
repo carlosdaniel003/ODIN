@@ -36,6 +36,9 @@ from src.platform.display_f3_mask_visibility_ui import (  # noqa: E402
 from src.platform.display_f3_power_authority import (  # noqa: E402
     instalar_autoridade_energia_final_display_f3,
 )
+from src.platform.display_f3_power_evidence_compat import (  # noqa: E402
+    instalar_evidencia_energia_mesma_mascara_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
@@ -56,6 +59,7 @@ def main() -> None:
     # extras de câmera.
     instalar_preview_claro_display_f3()
     instalar_guias_mascaras_inicio_display_f3()
+    instalar_evidencia_energia_mesma_mascara_display_f3()
     instalar_autoridade_energia_final_display_f3()
     root.mainloop()
 
