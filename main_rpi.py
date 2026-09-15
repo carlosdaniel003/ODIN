@@ -54,6 +54,9 @@ from src.platform.display_f3_presence_relative_empty_fix import (  # noqa: E402
 from src.platform.display_f3_presence_stability_fix import (  # noqa: E402
     instalar_estabilidade_presenca_placa_display_f3,
 )
+from src.platform.display_f3_rearm_live_refresh_fix import (  # noqa: E402
+    instalar_correcao_rearme_status_live_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
@@ -94,6 +97,10 @@ def main() -> None:
     # ser confundida com ausência da placa. Usa a melhor cena ocupada contra EMPTY
     # e segura poucos frames ambíguos para evitar piscar o status no startup.
     instalar_estabilidade_presenca_placa_display_f3()
+    # Fecha o handoff terminal: o detector de rearme reutiliza a mesma autoridade
+    # relativa de EMPTY e as duas linhas de status continuam atualizando enquanto
+    # o pipeline produtivo está bloqueado após OK/NG/SEGREGAR.
+    instalar_correcao_rearme_status_live_display_f3()
     root.mainloop()
 
 
