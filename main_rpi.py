@@ -57,6 +57,9 @@ from src.platform.display_f3_presence_stability_fix import (  # noqa: E402
 from src.platform.display_f3_rearm_live_refresh_fix import (  # noqa: E402
     instalar_correcao_rearme_status_live_display_f3,
 )
+from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
+    instalar_consistencia_status_live_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
@@ -101,6 +104,10 @@ def main() -> None:
     # relativa de EMPTY e as duas linhas de status continuam atualizando enquanto
     # o pipeline produtivo está bloqueado após OK/NG/SEGREGAR.
     instalar_correcao_rearme_status_live_display_f3()
+    # Refresh visual literalmente mais externo. Se um gate retornar antes do
+    # pipeline histórico de status, a UI reaproveita o estado/energia já calculados
+    # no mesmo frame e não permanece em placeholders antigos.
+    instalar_consistencia_status_live_display_f3()
     root.mainloop()
 
 
