@@ -33,6 +33,9 @@ from src.platform.display_f3_mask_visibility_ui import (  # noqa: E402
     instalar_guias_mascaras_inicio_display_f3,
     instalar_numeros_editor_mascaras_display_f3,
 )
+from src.platform.display_f3_power_authority import (  # noqa: E402
+    instalar_autoridade_energia_final_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
@@ -48,11 +51,12 @@ def main() -> None:
     root = tk.Tk()
     RaspberryPi3ProductionApp(root)
     # Alguns instaladores históricos do F3 são executados durante __init__ e
-    # podem substituir renderizadores globais. Reafirmamos somente o renderer
-    # visual final e a guia inicial, sem criar novo timer, callback de câmera ou
-    # análise.
+    # podem substituir renderizadores/globals. Reafirmamos somente as autoridades
+    # finais depois que toda a composição terminou, sem criar timers ou leituras
+    # extras de câmera.
     instalar_preview_claro_display_f3()
     instalar_guias_mascaras_inicio_display_f3()
+    instalar_autoridade_energia_final_display_f3()
     root.mainloop()
 
 
