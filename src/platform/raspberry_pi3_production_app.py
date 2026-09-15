@@ -66,6 +66,9 @@ from src.platform.display_f3_physical_state_fix import (
 from src.platform.display_f3_power_authority import (
     instalar_autoridade_energia_final_display_f3,
 )
+from src.platform.display_f3_power_evidence_compat import (
+    instalar_evidencia_energia_mesma_mascara_display_f3,
+)
 from src.platform.display_f3_reference_authority_bridge import (
     instalar_ponte_autoridade_referencias_display_f3,
 )
@@ -267,6 +270,9 @@ class RaspberryPi3ProductionApp(
         # para a própria foto do CHECK + máscaras + estados ACESO/APAGADO.
         instalar_conformidade_estrita_mascaras_display_f3()
         instalar_aprendizado_foto_check_display_f3()
+        # Substitui também a API histórica usada pelo DEBUG/guards, eliminando as
+        # distâncias antigas quase empatadas entre OFF e CHECK.
+        instalar_evidencia_energia_mesma_mascara_display_f3()
         # Última autoridade operacional: quadro inteiro decide somente presença;
         # energia vem da mesma máscara OFF<->ON. Sem energia confirmada não há
         # OK, NG nem avanço, embora overlay/debug continuem lendo o mesmo frame.
