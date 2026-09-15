@@ -48,6 +48,9 @@ from src.platform.display_f3_power_evidence_compat import (  # noqa: E402
 from src.platform.display_f3_power_visual_coherence import (  # noqa: E402
     instalar_coerencia_visual_energia_display_f3,
 )
+from src.platform.display_f3_presence_relative_empty_fix import (  # noqa: E402
+    instalar_presenca_relativa_suporte_vazio_display_f3,
+)
 
 
 instalar_correcao_referencias_mascaras_f3()
@@ -81,6 +84,10 @@ def main() -> None:
     # segmento. A preview fica somente com guias neutras e a ANÁLISE VISUAL mostra
     # PLACA DESLIGADA/ENERGIA NÃO CONFIRMADA, preservando o match global só no debug.
     instalar_coerencia_visual_energia_display_f3()
+    # Autoridade final de presença: se o classificador absoluto ficar UNKNOWN,
+    # mas EMPTY vencer todas as cenas com placa por separação relativa forte,
+    # mostramos PLACA FORA DO SUPORTE e mantemos o gate produtivo bloqueado.
+    instalar_presenca_relativa_suporte_vazio_display_f3()
     root.mainloop()
 
 
