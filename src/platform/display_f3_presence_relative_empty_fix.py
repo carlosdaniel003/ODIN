@@ -1,22 +1,30 @@
 from __future__ import annotations
 
-"""Reconhece suporte vazio no F3 quando a referência absoluta cai abaixo do limiar.
+"""Reconcilia presença física do F3 por separação relativa EMPTY x PLACA.
 
-O classificador físico continua preferindo a confirmação absoluta das referências.
-Esta camada trata somente o caso em que ele retorna UNKNOWN, mas a foto de
-PLACA FORA DO SUPORTE é a melhor referência por uma separação relativa forte
-contra TODAS as referências que contêm placa (OFF + CHECKS).
+A classificação global de H1/BLUE/USB/AUX/OFF pode ficar ambígua porque todas
+essas referências contêm a mesma placa ocupando o suporte. Essa ambiguidade não
+pode virar ambiguidade de PRESENÇA.
 
-Motivação observada em produção:
-- EMPTY = 0.5867, abaixo do threshold absoluto 0.72;
-- melhor referência com placa = H1 0.4130;
-- margem = 0.1737;
-- a análise visual relativa já identificava corretamente PLACA FORA DO SUPORTE,
-  enquanto a autoridade operacional permanecia em IDENTIFICANDO.
+Esta camada responde primeiro à pergunta física mais simples:
 
-A correção não altera OK/NG, sequência de CHECKS, debounce do CHECK, câmera nem F2.
-Ela também não transforma ausência de placa em "display desligado": sem placa,
-energia não é avaliada e o gate produtivo permanece bloqueado.
+    o suporte está VAZIO ou existe uma PLACA ocupando o suporte?
+
+Para isso, quando necessário, compara a referência EMPTY contra a melhor cena que
+contém placa (OFF + qualquer CHECK). Só depois a autoridade de energia decide se
+a placa presente está DESLIGADA ou LIGADA. A identidade do CHECK continua sendo
+responsabilidade das máscaras do CHECK lógico atual.
+
+Casos reais que motivaram a correção:
+
+1) placa retirada durante BLUE:
+   EMPTY=0.5867 e melhor cena com placa=0.4130 -> suporte vazio;
+2) programa reiniciado com placa desligada já no suporte:
+   melhor cena com placa=H1 0.8089, OFF=0.7879 e EMPTY=0.4089 -> placa presente,
+   mesmo com H1/BLUE separados por apenas 0.0087 e o classificador global ficando
+   UNKNOWN por ambiguidade entre referências que TODAS contêm placa.
+
+Não altera OK/NG, sequência de CHECKS, câmera, timers, debounce de CHECK nem F2.
 """
 
 from copy import deepcopy
@@ -29,14 +37,21 @@ import src.platform.display_f3_runtime_contract_fix as contract_module
 
 
 F3_RELATIVE_EMPTY_PRESENCE_SOURCE = "f3_relative_empty_presence_authority"
+F3_RELATIVE_BOARD_PRESENCE_SOURCE = "f3_relative_board_presence_authority"
+F3_RELATIVE_PRESENCE_SOURCE = "f3_relative_scene_presence_authority"
 
-# Mantemos a mesma filosofia conservadora já usada pelo diagnóstico visual:
-# o fallback só existe quando a melhor referência é EMPTY, há score mínimo e
-# separação clara em relação à melhor cena que contém placa.
-F3_RELATIVE_EMPTY_MIN_SCORE = 0.40
-F3_RELATIVE_EMPTY_MIN_MARGIN = 0.12
-F3_RELATIVE_EMPTY_MIN_RATIO = 1.50
-F3_RELATIVE_EMPTY_STRONG_MARGIN = 0.16
+# O fallback relativo é deliberadamente conservador e simétrico: tanto EMPTY
+# quanto PLACA precisam de score mínimo + separação clara da hipótese oposta.
+F3_RELATIVE_PRESENCE_MIN_SCORE = 0.40
+F3_RELATIVE_PRESENCE_MIN_MARGIN = 0.12
+F3_RELATIVE_PRESENCE_MIN_RATIO = 1.50
+F3_RELATIVE_PRESENCE_STRONG_MARGIN = 0.16
+
+# Aliases mantidos para compatibilidade com testes/imports anteriores.
+F3_RELATIVE_EMPTY_MIN_SCORE = F3_RELATIVE_PRESENCE_MIN_SCORE
+F3_RELATIVE_EMPTY_MIN_MARGIN = F3_RELATIVE_PRESENCE_MIN_MARGIN
+F3_RELATIVE_EMPTY_MIN_RATIO = F3_RELATIVE_PRESENCE_MIN_RATIO
+F3_RELATIVE_EMPTY_STRONG_MARGIN = F3_RELATIVE_PRESENCE_STRONG_MARGIN
 
 
 def _safe_float(value, default=None):
@@ -59,8 +74,22 @@ def _occupied_scores(reference_scores: dict) -> list[tuple[str, float]]:
     return rows
 
 
-def avaliar_suporte_vazio_relativo_f3(state: dict | None) -> dict:
-    """Confirma EMPTY por separação relativa apenas quando o físico ficou UNKNOWN."""
+def _separation_confirmed(winner_score: float, loser_score: float) -> tuple[bool, float, float]:
+    margin = float(winner_score - loser_score)
+    ratio = float(winner_score / max(loser_score, 1e-6))
+    confirmed = bool(
+        winner_score >= F3_RELATIVE_PRESENCE_MIN_SCORE
+        and margin >= F3_RELATIVE_PRESENCE_MIN_MARGIN
+        and (
+            ratio >= F3_RELATIVE_PRESENCE_MIN_RATIO
+            or margin >= F3_RELATIVE_PRESENCE_STRONG_MARGIN
+        )
+    )
+    return confirmed, margin, ratio
+
+
+def avaliar_presenca_relativa_f3(state: dict | None) -> dict:
+    """Decide somente VAZIO x OCUPADO; nunca decide qual CHECK está ativo."""
     data = state if isinstance(state, dict) else {}
     kind = str(data.get("kind") or "unknown").strip().lower()
     scores = (
@@ -75,76 +104,153 @@ def avaliar_suporte_vazio_relativo_f3(state: dict | None) -> dict:
 
     result = {
         "available": bool(empty_score is not None and best_score is not None),
-        "source": F3_RELATIVE_EMPTY_PRESENCE_SOURCE,
+        "source": F3_RELATIVE_PRESENCE_SOURCE,
         "empty_confirmed": False,
         "presence_confirmed": False,
         "board_present": False,
-        "decision_mode": "relative_empty_not_confirmed",
+        "decision_mode": "relative_presence_not_confirmed",
         "physical_kind_before": kind,
         "empty_score": empty_score,
         "best_board_reference": best_key,
         "best_board_score": best_score,
-        "minimum_empty_score": F3_RELATIVE_EMPTY_MIN_SCORE,
-        "minimum_margin": F3_RELATIVE_EMPTY_MIN_MARGIN,
-        "minimum_ratio": F3_RELATIVE_EMPTY_MIN_RATIO,
-        "strong_margin": F3_RELATIVE_EMPTY_STRONG_MARGIN,
+        "minimum_score": F3_RELATIVE_PRESENCE_MIN_SCORE,
+        "minimum_margin": F3_RELATIVE_PRESENCE_MIN_MARGIN,
+        "minimum_ratio": F3_RELATIVE_PRESENCE_MIN_RATIO,
+        "strong_margin": F3_RELATIVE_PRESENCE_STRONG_MARGIN,
     }
 
-    # Se a autoridade física absoluta já confirmou EMPTY, apenas tornamos essa
-    # proveniência explícita para status/debug.
+    # Um estado físico já explícito continua tendo prioridade. Aqui apenas
+    # transformamos sua semântica em PRESENÇA, sem reaproveitar o nome do CHECK.
     if kind == "empty":
         result.update(
             {
                 "available": True,
+                "source": F3_RELATIVE_EMPTY_PRESENCE_SOURCE,
                 "empty_confirmed": True,
                 "presence_confirmed": True,
+                "board_present": False,
                 "decision_mode": "absolute_empty_reference",
                 "reason": "suporte_vazio_confirmado_pela_referencia_absoluta",
             }
         )
         return result
 
-    # Nunca substituímos um OFF/CHECK/POWERED explícito por inferência relativa.
-    if kind != "unknown":
-        result["reason"] = "estado_fisico_explicito_nao_sobrescrito"
+    if kind in {"off", "check", "powered"}:
+        result.update(
+            {
+                "available": True,
+                "source": F3_RELATIVE_BOARD_PRESENCE_SOURCE,
+                "empty_confirmed": False,
+                "presence_confirmed": True,
+                "board_present": True,
+                "decision_mode": "absolute_board_scene_reference",
+                "reason": "placa_confirmada_por_estado_fisico_explicito",
+            }
+        )
+        return result
+
+    if kind not in {"unknown", "unavailable"}:
+        result["reason"] = "estado_fisico_nao_elegivel_para_fallback_relativo"
         return result
 
     if empty_score is None or best_score is None:
         result["reason"] = "scores_de_presenca_incompletos"
         return result
 
-    margin = float(empty_score - best_score)
-    ratio = float(empty_score / max(best_score, 1e-6))
-    result["empty_over_best_board_margin"] = round(margin, 4)
-    result["empty_over_best_board_ratio"] = round(ratio, 4)
-
-    score_ok = empty_score >= F3_RELATIVE_EMPTY_MIN_SCORE
-    separation_ok = bool(
-        margin >= F3_RELATIVE_EMPTY_MIN_MARGIN
-        and (
-            ratio >= F3_RELATIVE_EMPTY_MIN_RATIO
-            or margin >= F3_RELATIVE_EMPTY_STRONG_MARGIN
-        )
+    board_confirmed, board_margin, board_ratio = _separation_confirmed(
+        best_score,
+        empty_score,
     )
-    confirmed = bool(score_ok and separation_ok)
+    empty_confirmed, empty_margin, empty_ratio = _separation_confirmed(
+        empty_score,
+        best_score,
+    )
 
     result.update(
         {
-            "empty_confirmed": confirmed,
-            "presence_confirmed": confirmed,
-            "decision_mode": (
-                "relative_empty_strong_separation"
-                if confirmed
-                else "relative_empty_insufficient_separation"
-            ),
-            "reason": (
-                "suporte_vazio_confirmado_por_separacao_relativa"
-                if confirmed
-                else "separacao_relativa_insuficiente_para_confirmar_suporte_vazio"
-            ),
+            "board_over_empty_margin": round(board_margin, 4),
+            "board_over_empty_ratio": round(board_ratio, 4),
+            "empty_over_best_board_margin": round(empty_margin, 4),
+            "empty_over_best_board_ratio": round(empty_ratio, 4),
+        }
+    )
+
+    if board_confirmed:
+        result.update(
+            {
+                "source": F3_RELATIVE_BOARD_PRESENCE_SOURCE,
+                "presence_confirmed": True,
+                "board_present": True,
+                "empty_confirmed": False,
+                "decision_mode": "relative_board_strong_separation",
+                "reason": "placa_confirmada_por_separacao_relativa_do_suporte_vazio",
+            }
+        )
+        return result
+
+    if empty_confirmed:
+        result.update(
+            {
+                "source": F3_RELATIVE_EMPTY_PRESENCE_SOURCE,
+                "presence_confirmed": True,
+                "board_present": False,
+                "empty_confirmed": True,
+                "decision_mode": "relative_empty_strong_separation",
+                "reason": "suporte_vazio_confirmado_por_separacao_relativa",
+            }
+        )
+        return result
+
+    result.update(
+        {
+            "decision_mode": "relative_presence_insufficient_separation",
+            "reason": "separacao_relativa_insuficiente_para_confirmar_presenca",
         }
     )
     return result
+
+
+def avaliar_suporte_vazio_relativo_f3(state: dict | None) -> dict:
+    """API histórica: mantém foco em EMPTY, usando a autoridade simétrica nova."""
+    result = avaliar_presenca_relativa_f3(state)
+    kind = str((state or {}).get("kind") or "unknown").strip().lower() if isinstance(state, dict) else "unknown"
+    if kind in {"off", "check", "powered"}:
+        result["empty_confirmed"] = False
+        result["reason"] = "estado_fisico_explicito_nao_sobrescrito"
+    return result
+
+
+def resolver_presenca_global_relativa_f3(
+    state: dict | None,
+    legacy_presence: dict | None = None,
+) -> dict:
+    """Produz a única resposta de presença consumida pela autoridade de energia."""
+    base = deepcopy(legacy_presence) if isinstance(legacy_presence, dict) else {}
+    evidence = avaliar_presenca_relativa_f3(state)
+    base["relative_presence_diagnostic"] = deepcopy(evidence)
+
+    if not bool(evidence.get("presence_confirmed")):
+        return base
+
+    base.update(
+        {
+            "available": True,
+            "board_present": bool(evidence.get("board_present")),
+            "empty_confirmed": bool(evidence.get("empty_confirmed")),
+            "presence_confirmed": True,
+            "source": str(evidence.get("source") or F3_RELATIVE_PRESENCE_SOURCE),
+            "reason": str(evidence.get("reason") or ""),
+            "decision_mode": str(evidence.get("decision_mode") or ""),
+            "empty_score": evidence.get("empty_score"),
+            "best_board_reference": evidence.get("best_board_reference"),
+            "best_board_score": evidence.get("best_board_score"),
+            "board_over_empty_margin": evidence.get("board_over_empty_margin"),
+            "board_over_empty_ratio": evidence.get("board_over_empty_ratio"),
+            "empty_over_best_board_margin": evidence.get("empty_over_best_board_margin"),
+            "empty_over_best_board_ratio": evidence.get("empty_over_best_board_ratio"),
+        }
+    )
+    return base
 
 
 def _merge_presence(result: dict, evidence: dict) -> dict:
@@ -153,26 +259,24 @@ def _merge_presence(result: dict, evidence: dict) -> dict:
         if isinstance(result.get("board_presence_evidence"), dict)
         else {}
     )
-    presence["relative_empty_diagnostic"] = deepcopy(evidence)
-    if bool(evidence.get("empty_confirmed")):
+    presence["relative_presence_diagnostic"] = deepcopy(evidence)
+    if bool(evidence.get("presence_confirmed")):
         presence.update(
             {
                 "available": True,
-                "board_present": False,
-                "empty_confirmed": True,
+                "board_present": bool(evidence.get("board_present")),
+                "empty_confirmed": bool(evidence.get("empty_confirmed")),
                 "presence_confirmed": True,
-                "source": F3_RELATIVE_EMPTY_PRESENCE_SOURCE,
+                "source": str(evidence.get("source") or ""),
                 "reason": str(evidence.get("reason") or ""),
                 "decision_mode": str(evidence.get("decision_mode") or ""),
                 "empty_score": evidence.get("empty_score"),
                 "best_board_reference": evidence.get("best_board_reference"),
                 "best_board_score": evidence.get("best_board_score"),
-                "empty_over_best_board_margin": evidence.get(
-                    "empty_over_best_board_margin"
-                ),
-                "empty_over_best_board_ratio": evidence.get(
-                    "empty_over_best_board_ratio"
-                ),
+                "board_over_empty_margin": evidence.get("board_over_empty_margin"),
+                "board_over_empty_ratio": evidence.get("board_over_empty_ratio"),
+                "empty_over_best_board_margin": evidence.get("empty_over_best_board_margin"),
+                "empty_over_best_board_ratio": evidence.get("empty_over_best_board_ratio"),
             }
         )
     return presence
@@ -280,32 +384,46 @@ def _patch_debug_summary(base: str, snapshot: dict) -> str:
     presence = status.get("presence")
     presence = presence if isinstance(presence, dict) else {}
 
-    if not bool(presence.get("empty_confirmed")):
+    if not bool(presence.get("presence_confirmed")):
         return base
 
+    board_present = bool(presence.get("board_present"))
+    empty_confirmed = bool(presence.get("empty_confirmed"))
     lines = str(base).splitlines()
     patched: list[str] = []
     inserted = False
+
+    if board_present:
+        margin = _safe_float(presence.get("board_over_empty_margin"))
+    else:
+        margin = _safe_float(presence.get("empty_over_best_board_margin"))
+    margin_text = "--" if margin is None else f"{margin * 100.0:.1f} p.p."
+
     for line in lines:
         if line.startswith("ESTADO DA PLACA:"):
-            patched.append("ESTADO DA PLACA: FORA DO SUPORTE • CONFIRMADA")
+            if empty_confirmed:
+                patched.append("ESTADO DA PLACA: FORA DO SUPORTE • CONFIRMADA")
+            elif board_present:
+                patched.append("ESTADO DA PLACA: PRESENTE • CONFIRMADA")
+            else:
+                patched.append(line)
+
             if not inserted:
-                margin = _safe_float(presence.get("empty_over_best_board_margin"))
-                margin_text = "--" if margin is None else f"{margin * 100.0:.1f} p.p."
                 patched.append(
                     "PRESENÇA: "
-                    f"EMPTY={_pct(presence.get('empty_score'))} • "
                     f"melhor_com_placa={presence.get('best_board_reference', '--')} "
                     f"{_pct(presence.get('best_board_score'))} • "
+                    f"EMPTY={_pct(presence.get('empty_score'))} • "
                     f"margem={margin_text} • "
                     f"modo={presence.get('decision_mode', '--')}"
                 )
                 inserted = True
             continue
-        if line.startswith("ENERGIA DO DISPLAY:"):
+
+        if empty_confirmed and line.startswith("ENERGIA DO DISPLAY:"):
             patched.append("ENERGIA DO DISPLAY: NÃO APLICÁVEL • SUPORTE VAZIO")
             continue
-        if line.startswith("MOTIVO:"):
+        if empty_confirmed and line.startswith("MOTIVO:"):
             patched.append("MOTIVO: suporte vazio confirmado; gate produtivo bloqueado")
             continue
         patched.append(line)
@@ -316,10 +434,22 @@ _INSTALLED = False
 
 
 def instalar_presenca_relativa_suporte_vazio_display_f3() -> None:
-    """Instala a última autoridade de presença, depois da energia unificada."""
+    """Instala autoridade simétrica de presença depois da energia unificada."""
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # A energia deve receber uma resposta de presença baseada em VAZIO x PLACA,
+    # e não na disputa entre H1/BLUE/USB/AUX. A função v2 resolve este nome em
+    # tempo de execução, portanto o patch é suficiente sem criar novo loop.
+    previous_presence = power_module._presence_from_global_scores
+
+    def presence(state: dict | None) -> dict:
+        legacy = previous_presence(state)
+        return resolver_presenca_global_relativa_f3(state, legacy)
+
+    power_module._presence_from_global_scores = presence
+    power_module._display_f3_relative_scene_presence_installed = True
 
     previous_authority = power_module.aplicar_autoridade_energia_ao_estado_f3
 
@@ -328,7 +458,7 @@ def instalar_presenca_relativa_suporte_vazio_display_f3() -> None:
         if not isinstance(result, dict):
             return result
 
-        evidence = avaliar_suporte_vazio_relativo_f3(result)
+        evidence = avaliar_presenca_relativa_f3(result)
         result = deepcopy(result)
         result["board_presence_evidence"] = _merge_presence(result, evidence)
         if not bool(evidence.get("empty_confirmed")):
