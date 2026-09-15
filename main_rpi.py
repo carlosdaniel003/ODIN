@@ -39,6 +39,9 @@ from src.platform.display_f3_power_authority import (  # noqa: E402
 from src.platform.display_f3_power_authority_v2 import (  # noqa: E402
     instalar_autoridade_energia_unificada_display_f3,
 )
+from src.platform.display_f3_power_debug_compat_v2 import (  # noqa: E402
+    instalar_compatibilidade_energia_unificada_debug_f3,
+)
 from src.platform.display_f3_power_evidence_compat import (  # noqa: E402
     instalar_evidencia_energia_mesma_mascara_display_f3,
 )
@@ -68,6 +71,9 @@ def main() -> None:
     # energia; OFF↔ON em BGR/S/V/pixels é somente proteção secundária. Isso também
     # fecha o DEBUG por CHECK com proveniência explícita da foto usada.
     instalar_autoridade_energia_unificada_display_f3()
+    # Consumidores históricos do DEBUG/guards recebem a mesma semântica de energia
+    # e deixam de publicar uma segunda verdade baseada somente em brilho.
+    instalar_compatibilidade_energia_unificada_debug_f3()
     root.mainloop()
 
 
