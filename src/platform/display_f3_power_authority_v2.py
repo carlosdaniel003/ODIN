@@ -1,0 +1,683 @@
+from __future__ import annotations
+
+"""Autoridade final v2 de energia do Display F3.
+
+Resolve duas inconsistências observadas em produção:
+
+1. o gate de energia antigo reduzia cada máscara a brilho/V e pixels quentes;
+   em displays claros/saturados OFF e ON podiam ficar praticamente idênticos;
+2. o DEBUG TÉCNICO podia comparar vários CHECKs reutilizando analisadores/cache e
+   mostrar resultados incompatíveis para o mesmo frame.
+
+A autoridade fica única e hierárquica:
+
+    PRESENÇA GLOBAL -> ENERGIA PELAS MÁSCARAS -> CHECK -> CONFORMIDADE
+
+A energia primária vem da análise bruta do CHECK lógico atual. Uma máscara que o
+CHECK espera ACESA só vota POWERED quando a própria autoridade de máscara a
+classifica ON com confiança suficiente. OFF<->ON da mesma máscara continua como
+proteção secundária, porém usando a comparação completa BGR/S/V/pixel já usada
+pelo gabarito exato, nunca apenas brilho.
+
+Nenhuma análise bruta gera OK/NG sozinha. Ela somente pode abrir o gate de
+energia. O pipeline produtivo continua sendo o único responsável por aprovar,
+reprovar ou avançar CHECK.
+
+Módulo exclusivo do F3. Não cria timer, não lê uma segunda câmera e não altera F2.
+"""
+
+from copy import deepcopy
+import hashlib
+from pathlib import Path
+
+import src.platform.display_f3_debug_clarity_fix as debug_clarity_module
+import src.platform.display_f3_manual_snapshot_debug as manual_debug_module
+import src.platform.display_f3_operational_status as operational_module
+import src.platform.display_f3_physical_learning_policy as physical_policy_module
+import src.platform.display_f3_power_authority as power_module
+import src.platform.display_f3_runtime_contract_fix as contract_module
+from src.platform.display_auto_check_analyzer import display_mask_to_analysis_selection
+from src.platform.display_auto_check_policy import DISPLAY_AUTO_MIN_CONFIDENCE
+from src.platform.display_check_presence_reference import DisplayCheckPresenceReferenceStore
+from src.platform.display_f3_check_photo_learning import F3CheckPhotoLearningAnalyzer
+from src.platform.display_f3_exact_check_template import (
+    F3_EXACT_MASK_AMBIGUOUS_BAND,
+    comparar_mascara_com_gabarito_f3,
+    _resize_visual_frame,
+)
+from src.platform.display_project_repository import DISPLAY_CHECK_STATE_ON, normalizar_resolucao_display
+from src.platform.display_visual_rotation import preparar_check_visual_display
+
+
+F3_UNIFIED_POWER_SOURCE = "f3_unified_current_check_mask_power_authority"
+F3_POWER_PRIMARY_SOURCE = "current_check_raw_mask_analysis"
+F3_POWER_SECONDARY_SOURCE = "same_mask_full_pixel_bgr_s_v_guard"
+
+
+def _valid_image(frame) -> bool:
+    return frame is not None and getattr(frame, "size", 0) > 0
+
+
+def _safe_float(value, default=0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _frame_token(app, frame):
+    try:
+        return app._display_auto_frame_token(frame)
+    except Exception:
+        return ("object", id(frame))
+
+
+def _analysis_matches_context(analysis: dict | None, project_name: str, check_id: str) -> bool:
+    return bool(
+        isinstance(analysis, dict)
+        and str(analysis.get("project_name") or "") == str(project_name or "")
+        and str(analysis.get("check_id") or "") == str(check_id or "")
+    )
+
+
+def _run_raw_current_check_analysis(app, frame, project_name: str, context: dict) -> dict | None:
+    repository = getattr(app, "display_project_repository", None)
+    if repository is None or not _valid_image(frame):
+        return None
+
+    check_id = str(context.get("check_id") or "")
+    signature = (str(project_name or ""), check_id, _frame_token(app, frame))
+    if getattr(app, "_display_f3_unified_raw_cache_signature", None) == signature:
+        cached = getattr(app, "_display_f3_unified_raw_analysis", None)
+        if _analysis_matches_context(cached, project_name, check_id):
+            return deepcopy(cached)
+
+    analyzer = getattr(app, "_display_f3_unified_power_analyzer", None)
+    if analyzer is None or getattr(analyzer, "repository", None) is not repository:
+        analyzer = F3CheckPhotoLearningAnalyzer(repository)
+        app._display_f3_unified_power_analyzer = analyzer
+
+    try:
+        rotation = int(app._obter_rotacao_visual_display_f3()) % 360
+    except Exception:
+        rotation = 0
+
+    try:
+        analysis = analyzer.analyze(
+            frame=frame,
+            project_name=str(project_name or ""),
+            check_id=check_id,
+            visual_rotation=rotation,
+        )
+    except Exception:
+        return None
+    if not isinstance(analysis, dict):
+        return None
+
+    analysis = deepcopy(analysis)
+    analysis["decision_authority"] = False
+    analysis["raw_diagnostic_only"] = True
+    analysis["energy_evidence_authority"] = True
+    analysis["energy_evidence_source"] = F3_POWER_PRIMARY_SOURCE
+    app._display_f3_unified_raw_cache_signature = signature
+    app._display_f3_unified_raw_analysis = deepcopy(analysis)
+    return analysis
+
+
+def _secondary_full_pixel_details(app, frame, project_name: str, context: dict) -> dict[str, dict]:
+    """Compara LIVE com OFF e ON usando a métrica BGR/S/V/pixel existente.
+
+    Não cria threshold novo: usa a banda ambígua já adotada pelo gabarito exato.
+    O resultado é proteção/veto quando há uma preferência óptica inequívoca; em
+    empate, a autoridade primária das máscaras permanece válida.
+    """
+    references = power_module._reference_context(app, frame, project_name, context)
+    if not isinstance(references, dict) or not references.get("available"):
+        return {}
+
+    repository = getattr(app, "display_project_repository", None)
+    project = repository.carregar_projeto(project_name) if repository is not None else None
+    if not isinstance(project, dict):
+        return {}
+    resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    if resolution is None:
+        return {}
+
+    masks = [item for item in (project.get("masks") or []) if isinstance(item, dict)]
+    live_visual, live_resolution, live_masks = preparar_check_visual_display(
+        frame,
+        resolution,
+        masks,
+        int(references.get("rotation", 0) or 0),
+    )
+    live_visual = _resize_visual_frame(live_visual, live_resolution)
+    if not _valid_image(live_visual):
+        return {}
+
+    live_by_id = {
+        str(mask.get("id") or ""): mask
+        for mask in live_masks
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    }
+    details: dict[str, dict] = {}
+    for mask_id in references.get("expected_on_ids") or ():
+        visual_mask = live_by_id.get(mask_id) or references.get("masks", {}).get(mask_id)
+        if not isinstance(visual_mask, dict):
+            continue
+        try:
+            selection = display_mask_to_analysis_selection(visual_mask)
+        except (TypeError, ValueError):
+            continue
+
+        live_on = comparar_mascara_com_gabarito_f3(
+            live_visual,
+            references.get("on_frame"),
+            selection,
+        )
+        live_off = comparar_mascara_com_gabarito_f3(
+            live_visual,
+            references.get("off_frame"),
+            selection,
+        )
+        off_on = comparar_mascara_com_gabarito_f3(
+            references.get("off_frame"),
+            references.get("on_frame"),
+            selection,
+        )
+        if not all(isinstance(item, dict) for item in (live_on, live_off, off_on)):
+            continue
+
+        similarity_on = _safe_float(live_on.get("similarity"))
+        similarity_off = _safe_float(live_off.get("similarity"))
+        reference_similarity = _safe_float(off_on.get("similarity"))
+        reference_separation = max(0.0, 1.0 - reference_similarity)
+        delta = similarity_on - similarity_off
+
+        # Se a própria referência OFF e ON não se separa pelo menos pela banda
+        # ambígua do matcher exato, ela não pode vetar a análise primária.
+        discriminative = reference_separation >= F3_EXACT_MASK_AMBIGUOUS_BAND
+        winner = "tie"
+        if discriminative and delta >= F3_EXACT_MASK_AMBIGUOUS_BAND:
+            winner = "powered"
+        elif discriminative and delta <= -F3_EXACT_MASK_AMBIGUOUS_BAND:
+            winner = "off"
+
+        details[str(mask_id)] = {
+            "mask_id": str(mask_id),
+            "winner": winner,
+            "similarity_on": round(similarity_on, 4),
+            "similarity_off": round(similarity_off, 4),
+            "delta_on_minus_off": round(delta, 4),
+            "reference_similarity_off_on": round(reference_similarity, 4),
+            "reference_separation": round(reference_separation, 4),
+            "reference_discriminative": bool(discriminative),
+            "source": F3_POWER_SECONDARY_SOURCE,
+        }
+    return details
+
+
+def resumir_energia_por_analise_bruta_f3(
+    analysis: dict | None,
+    secondary_by_mask: dict[str, dict] | None = None,
+) -> dict:
+    """Transforma a leitura bruta do CHECK em uma única evidência de energia."""
+    data = analysis if isinstance(analysis, dict) else {}
+    secondary_by_mask = secondary_by_mask if isinstance(secondary_by_mask, dict) else {}
+    rows = [item for item in (data.get("mask_results") or ()) if isinstance(item, dict)]
+    expected_on_rows = [
+        item for item in rows if str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+    ]
+
+    details = []
+    powered_votes = 0
+    off_votes = 0
+    uncertain_votes = 0
+    for item in expected_on_rows:
+        mask_id = str(item.get("mask_id") or "")
+        confidence = _safe_float(item.get("confidence"))
+        confident = confidence >= DISPLAY_AUTO_MIN_CONFIDENCE
+        matched = bool(item.get("matched"))
+        classified = str(item.get("classified") or "")
+        secondary = secondary_by_mask.get(mask_id)
+        secondary_winner = str((secondary or {}).get("winner") or "tie")
+
+        primary_winner = "tie"
+        if confident and matched and classified == DISPLAY_CHECK_STATE_ON:
+            primary_winner = "powered"
+        elif confident and not matched and classified != DISPLAY_CHECK_STATE_ON:
+            primary_winner = "off"
+
+        # Proteção secundária: somente uma preferência inequívoca pode vetar o
+        # primário. Empate/indisponível nunca impede um ON que o matcher completo
+        # já confirmou com confiança.
+        final_winner = primary_winner
+        if primary_winner == "powered" and secondary_winner == "off":
+            final_winner = "tie"
+        elif primary_winner == "off" and secondary_winner == "powered":
+            final_winner = "tie"
+        elif primary_winner == "tie" and secondary_winner in {"powered", "off"}:
+            final_winner = secondary_winner
+
+        if final_winner == "powered":
+            powered_votes += 1
+        elif final_winner == "off":
+            off_votes += 1
+        else:
+            uncertain_votes += 1
+
+        details.append(
+            {
+                "mask_id": mask_id,
+                "expected": DISPLAY_CHECK_STATE_ON,
+                "classified": classified,
+                "matched": matched,
+                "confidence": round(confidence, 4),
+                "primary_winner": primary_winner,
+                "secondary_winner": secondary_winner,
+                "winner": final_winner,
+                "template_similarity": item.get("template_similarity"),
+                "secondary": deepcopy(secondary) if isinstance(secondary, dict) else None,
+            }
+        )
+
+    expected = len(expected_on_rows)
+    powered_confirmed = bool(powered_votes >= 1)
+    off_confirmed = bool(expected > 0 and off_votes == expected and len(details) == expected)
+    if powered_confirmed:
+        energy_state = power_module.F3_POWER_STATE_POWERED
+    elif off_confirmed:
+        energy_state = power_module.F3_POWER_STATE_OFF
+    else:
+        energy_state = power_module.F3_POWER_STATE_UNCONFIRMED
+
+    return {
+        "available": bool(data.get("ready") and expected > 0),
+        "source": F3_UNIFIED_POWER_SOURCE,
+        "primary_authority": F3_POWER_PRIMARY_SOURCE,
+        "secondary_guard": F3_POWER_SECONDARY_SOURCE,
+        "legacy_power_evidence_used": False,
+        "energy_state": energy_state,
+        "powered_confirmed": powered_confirmed,
+        "off_confirmed": off_confirmed,
+        "all_expected_on_off": off_confirmed,
+        "expected_on_mask_count": expected,
+        "powered_votes": int(powered_votes),
+        "off_votes": int(off_votes),
+        "tie_votes": int(uncertain_votes),
+        "valid_votes": int(powered_votes + off_votes),
+        "raw_analysis_ready": bool(data.get("ready")),
+        "raw_analysis_approved": data.get("approved"),
+        "raw_analysis_matched_mask_count": int(data.get("matched_mask_count", 0) or 0),
+        "raw_analysis_active_mask_count": int(data.get("active_mask_count", 0) or 0),
+        "details": details,
+    }
+
+
+def avaliar_evidencia_energia_unificada_display_f3(
+    app,
+    frame,
+    project_name: str,
+    context: dict | None,
+) -> dict:
+    if not isinstance(context, dict) or not _valid_image(frame):
+        return {
+            "available": False,
+            "source": F3_UNIFIED_POWER_SOURCE,
+            "energy_state": power_module.F3_POWER_STATE_UNCONFIRMED,
+            "powered_confirmed": False,
+            "off_confirmed": False,
+            "reason": "frame_ou_contexto_ausente",
+        }
+
+    check_id = str(context.get("check_id") or "")
+    cache_key = (str(project_name or ""), check_id, _frame_token(app, frame))
+    cached = getattr(app, "_display_f3_unified_power_cache", None)
+    if isinstance(cached, dict) and cached.get("key") == cache_key:
+        return deepcopy(cached.get("value"))
+
+    raw = _run_raw_current_check_analysis(app, frame, project_name, context)
+    secondary = _secondary_full_pixel_details(app, frame, project_name, context)
+    evidence = resumir_energia_por_analise_bruta_f3(raw, secondary)
+    evidence["project_name"] = str(project_name or "")
+    evidence["check_id"] = check_id
+    evidence["same_mask_comparison"] = True
+    evidence["same_visual_rotation"] = True
+    try:
+        evidence["visual_rotation"] = int(app._obter_rotacao_visual_display_f3()) % 360
+    except Exception:
+        evidence["visual_rotation"] = 0
+
+    app._display_f3_unified_power_cache = {"key": cache_key, "value": deepcopy(evidence)}
+    return deepcopy(evidence)
+
+
+def _clear_legacy_energy_keys(state: dict) -> None:
+    for key in (
+        "powered_mask_evidence",
+        "power_mask_evidence_v2",
+        "power_mask_evidence_v1",
+        "current_check_power_mask_evidence",
+    ):
+        state.pop(key, None)
+
+
+def aplicar_autoridade_energia_unificada_ao_estado_f3(
+    app,
+    state: dict | None,
+    frame,
+    project_name: str,
+    context: dict | None,
+) -> dict:
+    """Única verdade operacional de energia do F3."""
+    result = deepcopy(state) if isinstance(state, dict) else {}
+    _clear_legacy_energy_keys(result)
+    result[contract_module.F3_MASK_LIVE_KEY] = True
+
+    if power_module._rearm_active(app):
+        result["allow_auto"] = False
+        result[contract_module.F3_DECISION_ALLOWED_KEY] = False
+        result["power_gate_blocked"] = True
+        result["power_gate_reason"] = "aguardando_rearme_fisico"
+        result["power_authority_source"] = F3_UNIFIED_POWER_SOURCE
+        return result
+
+    presence = power_module._presence_from_global_scores(result)
+    result["board_presence_evidence"] = presence
+    if not bool(presence.get("board_present")):
+        if str(result.get("kind") or "").strip().lower() != "empty":
+            result.update(
+                {
+                    "kind": "unknown",
+                    "text": "IDENTIFICANDO PRESENÇA DA PLACA...",
+                    "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["unknown"],
+                    "physical_state_key": "presence:unknown",
+                }
+            )
+        result["allow_auto"] = False
+        result[contract_module.F3_DECISION_ALLOWED_KEY] = False
+        result["power_gate_blocked"] = True
+        result["power_gate_reason"] = "placa_nao_confirmada_no_suporte"
+        result["power_authority_source"] = F3_UNIFIED_POWER_SOURCE
+        app._display_f3_power_authority_status = {
+            "source": F3_UNIFIED_POWER_SOURCE,
+            "board_present": False,
+            "presence": deepcopy(presence),
+            "energy": None,
+            "decision_allowed": False,
+            "reason": result["power_gate_reason"],
+        }
+        return result
+
+    evidence = avaliar_evidencia_energia_unificada_display_f3(
+        app,
+        frame,
+        project_name,
+        context,
+    )
+    result["power_evidence"] = evidence
+    result["power_authority_source"] = F3_UNIFIED_POWER_SOURCE
+    check_id = str((context or {}).get("check_id") or "")
+    check_name = str((context or {}).get("check_name") or check_id or "CHECK").strip().upper()
+
+    if bool(evidence.get("powered_confirmed")):
+        result.update(
+            {
+                "kind": "powered",
+                "text": f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}",
+                "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["check"],
+                "allow_auto": True,
+                "physical_state_key": "check:powered_by_current_mask_analysis",
+                "expected_check_id": check_id,
+                "physical_matches_expected_check": False,
+                "powered_board_confirmed": True,
+                "power_gate_blocked": False,
+                "power_gate_reason": "segmento_aceso_confirmado_pela_analise_bruta",
+                contract_module.F3_DECISION_ALLOWED_KEY: True,
+                contract_module.F3_MASK_LIVE_KEY: True,
+            }
+        )
+        decision_allowed = True
+    else:
+        is_off = bool(evidence.get("off_confirmed"))
+        result.update(
+            {
+                "kind": "off" if is_off else "unknown",
+                "text": (
+                    "PLACA NO SUPORTE • DESLIGADA • AGUARDANDO DISPLAY LIGADO"
+                    if is_off
+                    else "PLACA NO SUPORTE • ENERGIA DO DISPLAY NÃO CONFIRMADA"
+                ),
+                "color": operational_module.F3_OPERATIONAL_STATUS_COLORS[
+                    "off" if is_off else "unknown"
+                ],
+                "allow_auto": False,
+                "physical_state_key": "off" if is_off else "power:unconfirmed",
+                "powered_board_confirmed": False,
+                "power_gate_blocked": True,
+                "power_gate_reason": (
+                    "todos_segmentos_esperados_acesos_estao_apagados"
+                    if is_off
+                    else "nenhum_segmento_aceso_confirmou_energia"
+                ),
+                contract_module.F3_DECISION_ALLOWED_KEY: False,
+                contract_module.F3_MASK_LIVE_KEY: True,
+            }
+        )
+        decision_allowed = False
+
+    app._display_f3_power_authority_status = {
+        "source": F3_UNIFIED_POWER_SOURCE,
+        "board_present": True,
+        "presence": deepcopy(presence),
+        "energy": deepcopy(evidence),
+        "decision_allowed": bool(decision_allowed),
+        "reason": str(result.get("power_gate_reason") or ""),
+    }
+    return result
+
+
+def _reference_sha256_24(metadata: dict | None) -> str:
+    if not isinstance(metadata, dict):
+        return "--"
+    path = Path(str(metadata.get("image_path") or ""))
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:24]
+    except OSError:
+        return "--"
+
+
+def _cache_key_digest(analyzer) -> tuple[str, str]:
+    key = getattr(analyzer, "_check_template_cache_key", None)
+    if not isinstance(key, tuple):
+        return "--", "--"
+    check_id = str(key[1]) if len(key) > 1 else "--"
+    digest = hashlib.sha256(repr(key).encode("utf-8", errors="replace")).hexdigest()[:16]
+    return check_id, digest
+
+
+def _reference_provenance(repository, project_name: str, check_id: str, analyzer) -> dict:
+    store = DisplayCheckPresenceReferenceStore(repository)
+    metadata = store.get(project_name, check_id)
+    check = repository.carregar_check(project_name, check_id)
+    loaded_id = str((check or {}).get("id") or "") if isinstance(check, dict) else ""
+    cache_check_id, cache_digest = _cache_key_digest(analyzer)
+    return {
+        "check_id_requested": str(check_id),
+        "check_id_loaded": loaded_id,
+        "reference_image": str((metadata or {}).get("image_path") or "--"),
+        "reference_sha256_24": _reference_sha256_24(metadata),
+        "cache_key_check_id": cache_check_id,
+        "cache_key_digest_16": cache_digest,
+        "fresh_analyzer_per_check": True,
+        "canonical_analyzer": "F3CheckPhotoLearningAnalyzer",
+    }
+
+
+def _debug_energy_from_analysis(analysis: dict | None) -> dict:
+    result = resumir_energia_por_analise_bruta_f3(analysis, {})
+    result["diagnostic_only"] = True
+    result["decision_authority"] = False
+    # Campos históricos esperados pelo formatador.
+    for item in result.get("details") or ():
+        item["distance_off"] = None
+        item["distance_check"] = None
+        item["reference_span"] = None
+        item["separation"] = None
+    return result
+
+
+def _run_check_analyses_with_provenance(
+    repository,
+    matcher,
+    frame,
+    project_name: str,
+    checks: list[dict],
+    rotation: int,
+) -> list[dict]:
+    """Cada CHECK recebe um analisador novo, evitando qualquer bleed de cache."""
+    rows = []
+    for check in checks:
+        check_id = str(check.get("id") or "")
+        if not check_id:
+            continue
+        analyzer = F3CheckPhotoLearningAnalyzer(repository)
+        try:
+            analysis = analyzer.analyze(
+                frame=frame,
+                project_name=project_name,
+                check_id=check_id,
+                visual_rotation=int(rotation or 0),
+            )
+        except Exception as exc:
+            analysis = {
+                "ready": False,
+                "approved": None,
+                "reason": f"debug_analysis_error:{type(exc).__name__}:{exc}",
+                "project_name": str(project_name),
+                "check_id": check_id,
+                "check_name": str(check.get("name") or check_id),
+                "mask_results": [],
+            }
+        provenance = _reference_provenance(repository, project_name, check_id, analyzer)
+        analysis = deepcopy(analysis)
+        analysis["reference_provenance"] = provenance
+        analysis["debug_fresh_analyzer_per_check"] = True
+        analysis["debug_canonical_authority"] = F3_POWER_PRIMARY_SOURCE
+
+        rows.append(
+            {
+                "check_id": check_id,
+                "check_name": str(check.get("name") or check_id),
+                "exact_template": deepcopy(analysis),
+                "check_photo_learning": deepcopy(analysis),
+                "power_mask_evidence": _debug_energy_from_analysis(analysis),
+                "reference_provenance": provenance,
+                "single_canonical_analysis": True,
+            }
+        )
+    return rows
+
+
+def _install_debug_check_provenance() -> None:
+    manual_debug_module._run_check_analyses = _run_check_analyses_with_provenance
+
+    if bool(getattr(manual_debug_module, "_display_f3_reference_provenance_formatter_installed", False)):
+        return
+    previous_append = manual_debug_module._append_analysis_summary
+
+    def append(lines: list[str], title: str, analysis: dict | None) -> None:
+        previous_append(lines, title, analysis)
+        data = analysis if isinstance(analysis, dict) else {}
+        provenance = data.get("reference_provenance")
+        if not isinstance(provenance, dict):
+            return
+        if "GABARITO EXATO" in str(title).upper():
+            lines.append("[PROVENIÊNCIA DA REFERÊNCIA DO CHECK]")
+            lines.append(
+                " | ".join(
+                    (
+                        f"check_id_requested={provenance.get('check_id_requested', '--')}",
+                        f"check_id_loaded={provenance.get('check_id_loaded', '--')}",
+                        f"cache_check_id={provenance.get('cache_key_check_id', '--')}",
+                        f"cache_digest={provenance.get('cache_key_digest_16', '--')}",
+                    )
+                )
+            )
+            lines.append(f"reference_image={provenance.get('reference_image', '--')}")
+            lines.append(f"reference_sha256_24={provenance.get('reference_sha256_24', '--')}")
+            lines.append("fresh_analyzer_per_check=SIM | cache_compartilhado_entre_checks=NÃO")
+
+    manual_debug_module._append_analysis_summary = append
+    manual_debug_module._display_f3_reference_provenance_formatter_installed = True
+
+
+def _install_debug_power_summary_v2() -> None:
+    previous_report = power_module._report_summary_power
+
+    def report(snapshot: dict) -> str:
+        base = previous_report(snapshot)
+        lines = str(base).splitlines()
+        insert_at = 7 if len(lines) >= 7 else len(lines)
+        lines[insert_at:insert_at] = [
+            f"FONTE ÚNICA DE ENERGIA: {F3_POWER_PRIMARY_SOURCE}",
+            f"PROTEÇÃO OFF↔ON: {F3_POWER_SECONDARY_SOURCE}",
+        ]
+        return "\n".join(lines)
+
+    power_module._report_summary_power = report
+    debug_clarity_module._report_summary_block = report
+
+
+def _install_raw_overlay_reuse() -> None:
+    if bool(getattr(power_module, "_display_f3_unified_raw_overlay_reuse_installed", False)):
+        return
+    previous_raw = power_module._raw_analysis_for_overlay
+
+    def raw(app, frame, context: dict):
+        project_name = str((context or {}).get("project_name") or "")
+        check_id = str((context or {}).get("check_id") or "")
+        signature = (project_name, check_id, _frame_token(app, frame))
+        cached = getattr(app, "_display_f3_unified_raw_analysis", None)
+        if (
+            getattr(app, "_display_f3_unified_raw_cache_signature", None) == signature
+            and _analysis_matches_context(cached, project_name, check_id)
+        ):
+            analysis = deepcopy(cached)
+            analysis["decision_authority"] = False
+            analysis["raw_diagnostic_only"] = True
+            analysis["blocked_by_power_gate"] = True
+            app._display_auto_last_analysis = deepcopy(analysis)
+            app._display_f3_power_blocked_raw_analysis = deepcopy(analysis)
+            return analysis
+        return previous_raw(app, frame, context)
+
+    power_module._raw_analysis_for_overlay = raw
+    power_module._display_f3_unified_raw_overlay_reuse_installed = True
+
+
+_INSTALLED = False
+
+
+def instalar_autoridade_energia_unificada_display_f3() -> None:
+    """Fecha a autoridade F3 depois de todas as camadas históricas."""
+    global _INSTALLED
+    if _INSTALLED:
+        return
+
+    # Os builders/process wrappers já instalados por display_f3_power_authority
+    # resolvem estes nomes no módulo em tempo de execução. Trocá-los aqui mantém
+    # a ordem de wrappers e substitui somente a fonte final de verdade.
+    power_module.avaliar_evidencia_energia_relativa_display_f3 = (
+        avaliar_evidencia_energia_unificada_display_f3
+    )
+    power_module.aplicar_autoridade_energia_ao_estado_f3 = (
+        aplicar_autoridade_energia_unificada_ao_estado_f3
+    )
+    power_module.F3_POWER_AUTHORITY_SOURCE = F3_UNIFIED_POWER_SOURCE
+
+    _install_raw_overlay_reuse()
+    _install_debug_check_provenance()
+    _install_debug_power_summary_v2()
+
+    power_module._display_f3_unified_power_authority_installed = True
+    _INSTALLED = True
