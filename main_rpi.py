@@ -20,6 +20,9 @@ from src.platform.f2_object_tracking_settings_placeholder import (  # noqa: E402
 from src.platform.f2_board_presence_mask_preview_native import (  # noqa: E402
     instalar_renderer_nativo_mascaras_previews_presenca_f2,
 )
+from src.platform.f2_board_shape_editor import (  # noqa: E402
+    instalar_editor_contorno_placa_f2,
+)
 from src.platform.display_reference_roi_runtime_fix import (  # noqa: E402
     instalar_correcao_referencias_mascaras_f3,
 )
@@ -69,6 +72,7 @@ from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
 
 
 instalar_opcao_rastreamento_automatico_f2()
+instalar_editor_contorno_placa_f2()
 instalar_correcao_referencias_mascaras_f3()
 instalar_correcao_confianca_mascaras_display_f3()
 instalar_zoom_foto_check_display_f3()
@@ -83,8 +87,8 @@ def main() -> None:
     RaspberryPi3ProductionApp(root)
     # Renderer F2 instalado somente depois que a aplicação inteira terminou de
     # inicializar. Ele substitui diretamente o render_settings do controller de
-    # presença: as fotos ligada/desligada já nascem com as ROIs amarelas, igual ao
-    # preview do gerenciador "Carregar LEDs". Sem timers e sem busca tardia de widgets.
+    # presença: ligada/desligada recebem as ROIs dos LEDs e o contorno compartilhado
+    # da placa, sem timers e sem alterar os arquivos de referência.
     instalar_renderer_nativo_mascaras_previews_presenca_f2()
     # Alguns instaladores históricos do F3 são executados durante __init__ e
     # podem substituir renderizadores/globals. Reafirmamos somente as autoridades
