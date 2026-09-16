@@ -20,6 +20,9 @@ from src.platform.f2_board_presence_mask_preview_native import (  # noqa: E402
 from src.platform.f2_board_shape_editor import (  # noqa: E402
     instalar_editor_contorno_placa_f2,
 )
+from src.platform.f2_board_shape_confirm_fix import (  # noqa: E402
+    instalar_correcao_confirmacao_contorno_placa_f2,
+)
 from src.platform.f2_board_shape_editor_main_canvas_isolation import (  # noqa: E402
     instalar_isolamento_imagem_principal_editor_placa_f2,
 )
@@ -81,6 +84,7 @@ from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
 
 
 instalar_editor_contorno_placa_f2()
+instalar_correcao_confirmacao_contorno_placa_f2()
 instalar_isolamento_imagem_principal_editor_placa_f2()
 instalar_lupa_precisao_contorno_placa_f2()
 instalar_overlay_visual_rastreamento_f2()
