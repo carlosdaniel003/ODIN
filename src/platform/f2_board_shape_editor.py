@@ -187,6 +187,18 @@ def _copiar_lista_leds(leds):
     return resultado
 
 
+def _contexto_editor_placa_ativo(app) -> dict | None:
+    """O contexto dedicado, e não ``modo_atual``, é a autoridade do editor F2.
+
+    No jig Linux existem callbacks/timers de câmera e composição de mixins capazes
+    de alterar ``modo_atual`` enquanto a janela fullscreen permanece aberta. O
+    botão OK não pode deixar de salvar o contorno só porque esse estado global
+    mudou durante a edição.
+    """
+    contexto = getattr(app, "_f2_board_shape_edit_context", None)
+    return contexto if isinstance(contexto, dict) else None
+
+
 def _snapshot_contexto_app(app) -> dict:
     return {
         "imagem_original": getattr(app, "imagem_original", None),
@@ -273,7 +285,7 @@ def abrir_editor_contorno_placa_f2(controller, slot: str, settings_window) -> No
     if slot not in F2_BOARD_SHAPE_ALLOWED_SLOTS:
         return
     app = controller.app
-    if getattr(app, "_f2_board_shape_edit_context", None) is not None:
+    if _contexto_editor_placa_ativo(app) is not None:
         return
     if bool(getattr(app, "_selecao_tela_cheia_esta_aberta", lambda: False)()):
         messagebox.showwarning(
@@ -352,8 +364,8 @@ def abrir_editor_contorno_placa_f2(controller, slot: str, settings_window) -> No
 
 
 def _salvar_e_fechar_editor_placa(app) -> None:
-    contexto = getattr(app, "_f2_board_shape_edit_context", None)
-    if not isinstance(contexto, dict):
+    contexto = _contexto_editor_placa_ativo(app)
+    if contexto is None:
         return
 
     controller = contexto.get("controller")
@@ -388,6 +400,27 @@ def _salvar_e_fechar_editor_placa(app) -> None:
             altura,
         )
         escrever_configuracao(repository, configuracao)
+
+        # Confirma no próprio arquivo que o que estava no editor foi realmente
+        # persistido. Antes, uma confirmação podia fechar normalmente e a tela de
+        # Configurações voltar sem contorno, sem deixar claro se a falha foi no
+        # callback ou no armazenamento.
+        configuracao_salva = repository.carregar_configuracao_existente_sem_alerta()
+        shape_salvo = obter_contorno_placa_projeto(configuracao_salva, projeto)
+        quantidade_salva = len(shape_salvo.get("rois", []))
+        if quantidade_salva != len(dados_rois):
+            raise RuntimeError(
+                "O contorno foi confirmado no editor, mas a persistência não pôde "
+                f"ser verificada ({len(dados_rois)} forma(s) no editor / "
+                f"{quantidade_salva} forma(s) no arquivo)."
+            )
+
+        app._f2_board_shape_last_save = {
+            "project": projeto,
+            "editor_count": len(dados_rois),
+            "stored_count": quantidade_salva,
+            "config_file": str(getattr(repository, "config_file", "")),
+        }
     except Exception as exc:
         messagebox.showerror(
             "Falha ao salvar desenho da placa",
@@ -413,8 +446,16 @@ def _salvar_e_fechar_editor_placa(app) -> None:
                 settings_window.grab_set()
             except Exception:
                 pass
-        except Exception:
-            pass
+        except Exception as exc:
+            try:
+                messagebox.showwarning(
+                    "Contorno salvo",
+                    "O contorno foi salvo no projeto, mas a prévia das Configurações "
+                    f"não conseguiu ser redesenhada agora: {exc}",
+                    parent=settings_window,
+                )
+            except Exception:
+                pass
 
     atualizar = getattr(getattr(app, "view", None), "atualizar_status", None)
     if callable(atualizar):
@@ -445,7 +486,11 @@ def instalar_editor_contorno_placa_f2() -> None:
     previous = current
 
     def confirmar_selecao_tela_cheia_com_contorno(self):
-        if str(getattr(self, "modo_atual", "")) == F2_BOARD_SHAPE_EDIT_MODE:
+        # A existência do contexto dedicado é a autoridade. Não dependemos de
+        # ``modo_atual`` porque esse é um estado global compartilhado pela câmera,
+        # pelo editor e por outros mixins e pode mudar enquanto o fullscreen está
+        # aberto, especialmente no jig Linux.
+        if _contexto_editor_placa_ativo(self) is not None:
             if bool(getattr(self, "_selecao_tela_cheia_fechando", False)):
                 return
             self._selecao_tela_cheia_fechando = True
