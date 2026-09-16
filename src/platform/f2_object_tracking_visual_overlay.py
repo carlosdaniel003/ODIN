@@ -2,10 +2,15 @@ from __future__ import annotations
 
 """Overlay visual do rastreamento automático na câmera ao vivo da Produção F2.
 
-A inspeção continua recebendo o frame alinhado produzido por ``F2ObjectTrackingMixin``.
-Somente a publicação da preview é interceptada: a câmera ao vivo continua mostrando o
-frame bruto e o contorno da placa + ROIs são transformados para acompanhar a posição
-real detectada. Quando o tracking está desligado, esta camada não faz nada.
+Contrato visual desta camada:
+- tracking DESLIGADO: não altera a Produção F2 existente;
+- tracking LIGADO, sem lock: frame bruto, sem máscaras fixas e sem retângulo legado;
+- tracking LIGADO, com lock: mostra somente o contorno salvo da placa e as ROIs
+  transformadas para a posição física encontrada no frame bruto;
+- análise automática + tracking: a análise continua no frame alinhado/canônico e
+  as cores ACESO/APAGADO/POUCA LUZ são aplicadas somente às ROIs rastreadas.
+
+Nenhuma transformação visual é gravada nas referências nem nas ROIs do projeto.
 """
 
 import cv2
@@ -13,14 +18,26 @@ import numpy as np
 
 from src.core.roi_geometry import TIPO_ROI_SEGMENTO, normalizar_tipo_roi, pontos_segmento
 from src.models.led_selection import LedSelection
+from src.platform.f2_board_presence_references import (
+    F2_BOARD_PRESENCE_EMPTY,
+    F2_BOARD_PRESENCE_UNAVAILABLE,
+    F2_BOARD_REF_BOARD_OFF,
+    F2_BOARD_REF_BOARD_ON,
+)
 from src.platform.f2_board_shape_editor import carregar_contorno_placa_leds
 from src.platform.f2_object_tracking import F2ObjectTrackingMixin
+from src.platform.segment_display_operation_window import renderizar_overlay_rois_f2
 
 
 F2_TRACKING_BOARD_OUTLINE_BGR = (238, 211, 34)  # ciano no BGR
 F2_TRACKING_BOARD_SHADOW_BGR = (15, 23, 42)
 F2_TRACKING_BOARD_OUTLINE_THICKNESS = 3
 F2_TRACKING_BOARD_SHADOW_THICKNESS = 7
+F2_TRACKING_LED_OUTLINE_BGR = (248, 189, 56)
+F2_TRACKING_LED_SHADOW_BGR = (15, 23, 42)
+F2_TRACKING_LED_OUTLINE_THICKNESS = 2
+F2_TRACKING_LED_SHADOW_THICKNESS = 4
+F2_TRACKING_ONLY_LEGEND = "CIANO: CONTORNO DA PLACA  •  AZUL: MÁSCARAS RASTREADAS"
 
 _PATCH_INSTALADO = False
 
@@ -143,7 +160,7 @@ def transformar_rois_para_frame_atual_f2(
 
 
 def desenhar_contorno_rastreado_f2(frame, board_shape) -> object:
-    """Desenha somente o contorno físico da placa em uma cópia da preview."""
+    """Desenha somente o contorno físico salvo da placa em uma cópia da preview."""
     if frame is None or getattr(frame, "size", 0) == 0:
         return frame
     result = frame.copy()
@@ -199,6 +216,63 @@ def desenhar_contorno_rastreado_f2(frame, board_shape) -> object:
     return result
 
 
+def desenhar_mascaras_rastreadas_neutras_f2(frame, leds) -> object:
+    """Desenha somente as ROIs móveis quando tracking está ativo sem auto análise."""
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return frame
+    result = frame.copy()
+    for led in tuple(leds or ()):
+        tipo = normalizar_tipo_roi(getattr(led, "tipo_roi", None))
+        try:
+            if tipo == TIPO_ROI_SEGMENTO:
+                points = np.rint(np.asarray(pontos_segmento(led))).astype(np.int32)
+                if len(points) < 3:
+                    continue
+                polygon = points.reshape((-1, 1, 2))
+                cv2.polylines(
+                    result,
+                    [polygon],
+                    True,
+                    F2_TRACKING_LED_SHADOW_BGR,
+                    F2_TRACKING_LED_SHADOW_THICKNESS,
+                    cv2.LINE_AA,
+                )
+                cv2.polylines(
+                    result,
+                    [polygon],
+                    True,
+                    F2_TRACKING_LED_OUTLINE_BGR,
+                    F2_TRACKING_LED_OUTLINE_THICKNESS,
+                    cv2.LINE_AA,
+                )
+                continue
+
+            center = (
+                int(getattr(led, "centro_x", 0)),
+                int(getattr(led, "centro_y", 0)),
+            )
+            radius = max(2, int(getattr(led, "raio", 2) or 2))
+            cv2.circle(
+                result,
+                center,
+                radius,
+                F2_TRACKING_LED_SHADOW_BGR,
+                F2_TRACKING_LED_SHADOW_THICKNESS,
+                cv2.LINE_AA,
+            )
+            cv2.circle(
+                result,
+                center,
+                radius,
+                F2_TRACKING_LED_OUTLINE_BGR,
+                F2_TRACKING_LED_OUTLINE_THICKNESS,
+                cv2.LINE_AA,
+            )
+        except Exception:
+            continue
+    return result
+
+
 def _carregar_geometria_visual(app):
     tracker = getattr(app, "_f2_object_tracker", None)
     controller = getattr(app, "_f2_board_presence_refs", None)
@@ -241,7 +315,7 @@ def _carregar_geometria_visual(app):
 
 
 def preparar_preview_rastreamento_f2(app, raw_frame):
-    """Retorna (frame_decorado, leds_transformados) ou None se não houver lock."""
+    """Retorna (frame_com_contorno, leds_transformados) ou None sem lock válido."""
     if raw_frame is None or getattr(raw_frame, "size", 0) == 0:
         return None
     if not bool(getattr(app, "_f2_tracking_enabled", lambda: False)()):
@@ -295,8 +369,83 @@ def preparar_preview_rastreamento_f2(app, raw_frame):
     return decorated, tracked_leds
 
 
+def _classificar_presenca_tracking_f2(app, raw_frame) -> str:
+    controller = getattr(app, "_f2_board_presence_refs", None)
+    if controller is None:
+        return F2_BOARD_PRESENCE_UNAVAILABLE
+    try:
+        presence, _scores = controller.classify(raw_frame)
+        return str(presence or "unknown")
+    except Exception:
+        return "unknown"
+
+
+def _publicar_status_placa_tracking_f2(app, raw_frame, presence: str | None = None) -> str:
+    """Reutiliza o mesmo STATUS DA PLACA do auto, sem ligar análise automática."""
+    window = getattr(app, "operacao_window", None)
+    setter = getattr(window, "set_board_presence_status", None)
+    if not callable(setter):
+        return "unknown"
+
+    # Quando a análise automática está ativa ela continua sendo a autoridade do
+    # status produtivo, inclusive JÁ ANALISADA/OK/NG. O tracking não sobrescreve.
+    auto_enabled = bool(getattr(app, "_f2_auto_enabled", lambda: False)())
+    if auto_enabled:
+        return str(presence or "auto")
+
+    physical_presence = str(
+        presence if presence is not None else _classificar_presenca_tracking_f2(app, raw_frame)
+    )
+    tracking_status = getattr(app, "_f2_object_tracking_last_status", {})
+    locked = isinstance(tracking_status, dict) and bool(tracking_status.get("locked"))
+
+    if physical_presence == F2_BOARD_PRESENCE_EMPTY:
+        visual_status = "empty_support"
+    elif physical_presence == F2_BOARD_PRESENCE_UNAVAILABLE:
+        visual_status = "unavailable"
+    elif locked:
+        reference = str(tracking_status.get("reference") or "")
+        if reference == F2_BOARD_REF_BOARD_ON:
+            visual_status = "board_on"
+        elif reference == F2_BOARD_REF_BOARD_OFF:
+            visual_status = "board_off"
+        else:
+            visual_status = "unknown"
+    else:
+        visual_status = "unknown"
+
+    try:
+        setter(visual_status, enabled=True)
+    except Exception:
+        pass
+    return visual_status
+
+
+def _configurar_legenda_tracking_f2(app) -> None:
+    if bool(getattr(app, "_f2_auto_enabled", lambda: False)()):
+        return
+    label = getattr(getattr(app, "operacao_window", None), "preview_legend", None)
+    if label is None:
+        return
+    try:
+        label.configure(text=F2_TRACKING_ONLY_LEGEND)
+    except Exception:
+        pass
+
+
+def _limpar_status_tracking_se_desligado(app) -> None:
+    if bool(getattr(app, "_f2_auto_enabled", lambda: False)()):
+        return
+    setter = getattr(getattr(app, "operacao_window", None), "set_board_presence_status", None)
+    if callable(setter):
+        try:
+            setter(None, enabled=False)
+        except Exception:
+            pass
+
+
 def instalar_overlay_visual_rastreamento_f2() -> None:
-    """Faz a preview mostrar frame bruto + geometria móvel sem tocar na análise."""
+    """Publica somente geometria móvel no tracking; desligado preserva o F2 atual."""
     global _PATCH_INSTALADO
     if _PATCH_INSTALADO:
         return
@@ -308,10 +457,10 @@ def instalar_overlay_visual_rastreamento_f2() -> None:
     previous = current
 
     def atualizar_preview_com_geometria_rastreada(self):
-        if (
-            not bool(getattr(self, "_f2_tracking_enabled", lambda: False)())
-            or getattr(self, "camera_frame_atual", None) is None
-        ):
+        tracking_enabled = bool(getattr(self, "_f2_tracking_enabled", lambda: False)())
+        if not tracking_enabled or getattr(self, "camera_frame_atual", None) is None:
+            if not tracking_enabled:
+                _limpar_status_tracking_se_desligado(self)
             return previous(self)
 
         window = getattr(self, "operacao_window", None)
@@ -320,16 +469,54 @@ def instalar_overlay_visual_rastreamento_f2() -> None:
             return previous(self)
 
         raw_frame = self.camera_frame_atual
+        _configurar_legenda_tracking_f2(self)
 
-        def update_preview_tracking_visual(frame, leds=()):
+        def update_preview_tracking_visual(_frame, _leds=()):
+            # A classificação de presença serve apenas à apresentação. EMPTY tem
+            # prioridade para nunca deixar uma geometria antiga/falsa sobre suporte vazio.
+            presence = _classificar_presenca_tracking_f2(self, raw_frame)
+            _publicar_status_placa_tracking_f2(self, raw_frame, presence)
+
+            tracking_status = getattr(self, "_f2_object_tracking_last_status", {})
+            locked = isinstance(tracking_status, dict) and bool(tracking_status.get("locked"))
+            if not locked or presence == F2_BOARD_PRESENCE_EMPTY:
+                self._f2_object_tracking_visual_last = {
+                    "locked": False,
+                    "board_shapes": 0,
+                    "led_masks": 0,
+                    "presence": presence,
+                }
+                # Contrato principal: tracking ativo SEM lock nunca mostra as
+                # máscaras canônicas fixas nem o retângulo pontilhado legado.
+                return original_update(raw_frame, leds=())
+
             try:
                 visual = preparar_preview_rastreamento_f2(self, raw_frame)
             except Exception:
                 visual = None
             if visual is None:
-                return original_update(frame, leds)
+                return original_update(raw_frame, leds=())
+
             decorated, tracked_leds = visual
-            return original_update(decorated, tracked_leds)
+            auto_enabled = bool(getattr(self, "_f2_auto_enabled", lambda: False)())
+            states = dict(getattr(self, "_f2_auto_last_states", {}) or {})
+            if auto_enabled and states:
+                # Reaproveita exatamente a semântica de cores do F2 automático,
+                # mas sobre ROIs já transformadas para acompanhar a placa real.
+                decorated = renderizar_overlay_rois_f2(
+                    decorated,
+                    tracked_leds,
+                    states,
+                )
+            else:
+                decorated = desenhar_mascaras_rastreadas_neutras_f2(
+                    decorated,
+                    tracked_leds,
+                )
+
+            # leds=() é intencional. A janela base não deve redesenhar ROIs fixas
+            # nem gerar o retângulo pontilhado calculado pelos limites das máscaras.
+            return original_update(decorated, leds=())
 
         # Intercepta apenas a publicação visual desta iteração. O frame alinhado
         # continua dentro de camera_frame_atual enquanto presença/LEDs são julgados.
