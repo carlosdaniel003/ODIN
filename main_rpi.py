@@ -20,6 +20,9 @@ from src.platform.f2_board_presence_mask_preview_native import (  # noqa: E402
 from src.platform.f2_board_shape_editor import (  # noqa: E402
     instalar_editor_contorno_placa_f2,
 )
+from src.platform.f2_object_tracking_visual_overlay import (  # noqa: E402
+    instalar_overlay_visual_rastreamento_f2,
+)
 from src.platform.display_reference_roi_runtime_fix import (  # noqa: E402
     instalar_correcao_referencias_mascaras_f3,
 )
@@ -69,6 +72,7 @@ from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
 
 
 instalar_editor_contorno_placa_f2()
+instalar_overlay_visual_rastreamento_f2()
 instalar_correcao_referencias_mascaras_f3()
 instalar_correcao_confianca_mascaras_display_f3()
 instalar_zoom_foto_check_display_f3()
