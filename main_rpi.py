@@ -29,6 +29,9 @@ from src.platform.f2_board_shape_editor_main_canvas_isolation import (  # noqa: 
 from src.platform.f2_board_shape_precision_magnifier import (  # noqa: E402
     instalar_lupa_precisao_contorno_placa_f2,
 )
+from src.platform.f2_board_shape_runtime_authority import (  # noqa: E402
+    instalar_autoridade_final_editor_contorno_f2,
+)
 from src.platform.f2_object_tracking_visual_overlay import (  # noqa: E402
     instalar_overlay_visual_rastreamento_f2,
 )
@@ -106,6 +109,9 @@ def main() -> None:
     # presença: ligada/desligada recebem as ROIs dos LEDs e o contorno compartilhado
     # da placa, sem timers e sem alterar os arquivos de referência.
     instalar_renderer_nativo_mascaras_previews_presenca_f2()
+    # Autoridade do editor F2 realmente por último: no Linux garante SALVAR,
+    # persistência não-vazia e status do contorno acima dos cards de presença.
+    instalar_autoridade_final_editor_contorno_f2()
     # Alguns instaladores históricos do F3 são executados durante __init__ e
     # podem substituir renderizadores/globals. Reafirmamos somente as autoridades
     # finais depois que toda a composição terminou, sem criar timers ou leituras
