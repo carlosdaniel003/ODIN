@@ -127,7 +127,7 @@ def main() -> None:
     # Autoridade final de presença: ambiguidade entre H1/BLUE/USB/AUX/OFF não pode
     # ser confundida com ausência da placa. Usa a melhor cena ocupada contra EMPTY
     # e segura poucos frames ambíguos para evitar piscar o status no startup.
-    instalar_estabilidade_presenca_placa_f3()
+    instalar_estabilidade_presenca_placa_display_f3()
     # Fecha o handoff terminal: o detector de rearme reutiliza a mesma autoridade
     # relativa de EMPTY e as duas linhas de status continuam atualizando enquanto
     # o pipeline produtivo está bloqueado após OK/NG/SEGREGAR.
