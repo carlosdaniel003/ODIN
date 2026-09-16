@@ -5,6 +5,7 @@ import unittest
 
 from src.platform.f2_board_shape_editor import (
     F2_BOARD_SHAPE_KEY,
+    _contexto_editor_placa_ativo,
     definir_contorno_placa_projeto,
     obter_contorno_placa_projeto,
 )
@@ -66,6 +67,35 @@ class F2BoardShapeEditorTests(unittest.TestCase):
         self.assertNotIn(
             module.F2_BOARD_REF_EMPTY if hasattr(module, "F2_BOARD_REF_EMPTY") else "empty_support",
             module.F2_BOARD_SHAPE_ALLOWED_SLOTS,
+        )
+
+    def test_board_editor_context_is_authoritative_even_if_global_mode_changes(self):
+        class App:
+            modo_atual = "ocioso"
+            _f2_board_shape_edit_context = {
+                "project": "P",
+                "width": 640,
+                "height": 480,
+            }
+
+        self.assertIsNotNone(_contexto_editor_placa_ativo(App()))
+
+    def test_save_path_reads_back_persisted_shape_before_closing_editor(self):
+        import src.platform.f2_board_shape_editor as module
+
+        source = inspect.getsource(module._salvar_e_fechar_editor_placa)
+        self.assertIn("configuracao_salva", source)
+        self.assertIn("quantidade_salva", source)
+        self.assertIn("_f2_board_shape_last_save", source)
+
+    def test_confirm_hook_uses_board_context_not_only_modo_atual(self):
+        import src.platform.f2_board_shape_editor as module
+
+        source = inspect.getsource(module.instalar_editor_contorno_placa_f2)
+        self.assertIn("_contexto_editor_placa_ativo(self)", source)
+        self.assertNotIn(
+            'str(getattr(self, "modo_atual", "")) == F2_BOARD_SHAPE_EDIT_MODE',
+            source,
         )
 
 
