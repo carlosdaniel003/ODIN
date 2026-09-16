@@ -17,11 +17,8 @@ from src.platform.raspberry_pi3_production_app import (  # noqa: E402
 from src.platform.f2_object_tracking_settings_placeholder import (  # noqa: E402
     instalar_opcao_rastreamento_automatico_f2,
 )
-from src.platform.f2_board_presence_mask_preview import (  # noqa: E402
-    instalar_mascaras_previews_presenca_f2,
-)
-from src.platform.f2_board_presence_mask_preview_late_fix import (  # noqa: E402
-    instalar_reaplicacao_tardia_mascaras_previews_f2,
+from src.platform.f2_board_presence_mask_preview_native import (  # noqa: E402
+    instalar_renderer_nativo_mascaras_previews_presenca_f2,
 )
 from src.platform.display_reference_roi_runtime_fix import (  # noqa: E402
     instalar_correcao_referencias_mascaras_f3,
@@ -72,8 +69,6 @@ from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
 
 
 instalar_opcao_rastreamento_automatico_f2()
-instalar_mascaras_previews_presenca_f2()
-instalar_reaplicacao_tardia_mascaras_previews_f2()
 instalar_correcao_referencias_mascaras_f3()
 instalar_correcao_confianca_mascaras_display_f3()
 instalar_zoom_foto_check_display_f3()
@@ -86,11 +81,11 @@ instalar_numeros_editor_mascaras_display_f3()
 def main() -> None:
     root = tk.Tk()
     RaspberryPi3ProductionApp(root)
-    # Reafirma as camadas visuais F2 depois que toda a composição de mixins e
-    # instaladores terminou. O late-fix reaplica as máscaras após o Tk concluir
-    # reconstruções tardias da janela de Configurações.
-    instalar_mascaras_previews_presenca_f2()
-    instalar_reaplicacao_tardia_mascaras_previews_f2()
+    # Renderer F2 instalado somente depois que a aplicação inteira terminou de
+    # inicializar. Ele substitui diretamente o render_settings do controller de
+    # presença: as fotos ligada/desligada já nascem com as ROIs amarelas, igual ao
+    # preview do gerenciador "Carregar LEDs". Sem timers e sem busca tardia de widgets.
+    instalar_renderer_nativo_mascaras_previews_presenca_f2()
     # Alguns instaladores históricos do F3 são executados durante __init__ e
     # podem substituir renderizadores/globals. Reafirmamos somente as autoridades
     # finais depois que toda a composição terminou, sem criar timers ou leituras
