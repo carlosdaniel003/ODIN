@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-"""Correção de runtime para o rastreamento automático da placa no F2.
+"""Correções de robustez do rastreamento automático da placa no F2.
 
-O rastreador original usa ORB + RANSAC. Em placas reais, especialmente quando a
-PCB tem pouca textura útil depois de excluir os LEDs, o ORB pode não produzir
-correspondências suficientes. Nesse caso a Produção F2 continuava exibindo as
-ROIs canônicas fixas porque nunca existia um ``tracking_locked`` verdadeiro.
+O rastreador base usa ORB + RANSAC e o fallback usa ECC. Esta camada mantém o
+fluxo opt-in, mas corrige dois pontos observados no jig real:
 
-Esta camada mantém ORB como primeira autoridade e acrescenta um fallback ECC
-(Euclidean: X/Y + rotação) usando as mesmas referências ligada/desligada e a
-mesma máscara física da placa. Também publica um status explícito na câmera ao
-vivo para diferenciar TRAVADO de PROCURANDO, sem alterar o comportamento quando
-o recurso está desativado.
+1. rotação em torno do centro da placa não pode ser validada pelo ``tx/ty`` bruto
+   da matriz afim, porque uma rotação de 180 graus pode produzir grandes termos
+   de translação mesmo com a placa fisicamente no mesmo lugar;
+2. uma falha isolada de correspondência não deve fazer contorno e máscaras
+   piscarem. O último lock confiável é mantido por uma janela curta enquanto o
+   ORB/ECC tenta recuperar a placa.
+
+Quando o recurso está desativado, nada deste módulo participa da Produção F2.
 """
 
 import math
@@ -29,8 +30,13 @@ from src.platform.f2_object_tracking import (
     F2BoardObjectTracker,
     F2ObjectTrackingMixin,
     F2TrackingResult,
-    F2_TRACKING_MAX_ROTATION_DEG,
-    F2_TRACKING_MAX_TRANSLATION_FRACTION,
+    F2_TRACKING_MAX_SCALE,
+    F2_TRACKING_MIN_INLIER_RATIO,
+    F2_TRACKING_MIN_INLIERS,
+    F2_TRACKING_MIN_MATCHES,
+    F2_TRACKING_MIN_SCALE,
+    F2_TRACKING_RANSAC_THRESHOLD_PX,
+    F2_TRACKING_RATIO_TEST,
     F2_TRACKING_SMOOTH_ALPHA,
     construir_mascara_rastreamento_f2,
 )
@@ -43,6 +49,17 @@ F2_ECC_GAUSS_SIZE = 5
 F2_ECC_MIN_SCORE = 0.58
 F2_ECC_RETRY_INTERVAL_S = 0.12
 
+# O deslocamento é medido na posição física estimada da placa, e não nos termos
+# tx/ty da matriz. Isso permite grandes rotações sem confundi-las com translação.
+F2_TRACKING_WIDE_ROTATION_DEG = 180.0
+F2_TRACKING_WIDE_TRANSLATION_FRACTION = 0.60
+
+# Histerese curta para evitar piscar o overlay quando 1-3 ciclos perdem features.
+# Depois desse limite o lock cai normalmente, portanto suporte vazio não fica
+# indefinidamente com uma caixa antiga desenhada.
+F2_TRACKING_LOSS_GRACE_S = 0.48
+F2_TRACKING_MAX_CONSECUTIVE_MISSES = 3
+
 _PATCH_INSTALADO = False
 
 
@@ -53,6 +70,151 @@ def _limpar_estado_ecc(tracker) -> None:
     tracker._f2_ecc_last_score = 0.0
     tracker._f2_ecc_last_compute_s = 0.0
     tracker._f2_tracking_last_method = ""
+    tracker._f2_tracking_last_good_s = 0.0
+    tracker._f2_tracking_miss_count = 0
+    tracker._f2_tracking_last_good_result = None
+
+
+def _anchor_referencia(tracker, slot: str | None = None) -> tuple[float, float]:
+    """Retorna um ponto estável da placa no sistema de coordenadas da referência."""
+    try:
+        if slot and slot in getattr(tracker, "references", {}):
+            keypoints, _descriptors = tracker.references[slot]
+            points = np.asarray([kp.pt for kp in keypoints], dtype=np.float32)
+            if len(points) >= 4:
+                anchor = np.median(points, axis=0)
+                return float(anchor[0]), float(anchor[1])
+    except Exception:
+        pass
+    return float(getattr(tracker, "width", 0) or 0) / 2.0, float(
+        getattr(tracker, "height", 0) or 0
+    ) / 2.0
+
+
+def _pose_matriz_rastreamento(tracker, matrix, slot: str | None = None):
+    """Extrai escala/rotação e deslocamento físico da placa.
+
+    A matriz do ODIN é CURRENT->REFERÊNCIA. Para medir quanto a placa realmente
+    saiu do lugar, invertemos a matriz e projetamos um ponto âncora da referência
+    para o frame atual. Assim uma rotação de 180° no próprio centro gera X/Y
+    próximos de zero em vez de tx≈largura e ty≈altura.
+    """
+    affine = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+    a = float(affine[0, 0])
+    b = float(affine[0, 1])
+    scale = math.sqrt(max(1e-12, a * a + b * b))
+    rotation_deg = math.degrees(math.atan2(float(affine[1, 0]), a))
+
+    anchor_x, anchor_y = _anchor_referencia(tracker, slot)
+    inverse = cv2.invertAffineTransform(affine)
+    current_anchor = inverse @ np.asarray(
+        [anchor_x, anchor_y, 1.0],
+        dtype=np.float32,
+    )
+    dx = float(current_anchor[0] - anchor_x)
+    dy = float(current_anchor[1] - anchor_y)
+    return scale, rotation_deg, dx, dy
+
+
+def _angulo_delta(a: float, b: float) -> float:
+    return abs(((float(a) - float(b) + 180.0) % 360.0) - 180.0)
+
+
+def _candidate_robusto(self, current_gray, current_kp, current_desc, slot: str):
+    """ORB/RANSAC com validação da pose física e rotação completa."""
+    ref_kp, ref_desc = self.references[slot]
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+    try:
+        pairs = matcher.knnMatch(ref_desc, current_desc, k=2)
+    except Exception:
+        return None
+
+    good = []
+    for pair in pairs:
+        if len(pair) < 2:
+            continue
+        first, second = pair[0], pair[1]
+        if first.distance < float(F2_TRACKING_RATIO_TEST) * second.distance:
+            good.append(first)
+    if len(good) < int(F2_TRACKING_MIN_MATCHES):
+        return None
+
+    current_points = np.float32(
+        [current_kp[m.trainIdx].pt for m in good]
+    ).reshape(-1, 1, 2)
+    reference_points = np.float32(
+        [ref_kp[m.queryIdx].pt for m in good]
+    ).reshape(-1, 1, 2)
+    matrix, inlier_mask = cv2.estimateAffinePartial2D(
+        current_points,
+        reference_points,
+        method=cv2.RANSAC,
+        ransacReprojThreshold=float(F2_TRACKING_RANSAC_THRESHOLD_PX),
+        maxIters=2500,
+        confidence=0.995,
+        refineIters=12,
+    )
+    if matrix is None or inlier_mask is None:
+        return None
+
+    inliers = int(np.count_nonzero(inlier_mask))
+    ratio = float(inliers / max(1, len(good)))
+    if inliers < int(F2_TRACKING_MIN_INLIERS) or ratio < float(
+        F2_TRACKING_MIN_INLIER_RATIO
+    ):
+        return None
+
+    try:
+        scale, rotation_deg, dx, dy = _pose_matriz_rastreamento(
+            self,
+            matrix,
+            slot,
+        )
+    except Exception:
+        return None
+
+    if not (float(F2_TRACKING_MIN_SCALE) <= scale <= float(F2_TRACKING_MAX_SCALE)):
+        return None
+    if abs(rotation_deg) > float(F2_TRACKING_WIDE_ROTATION_DEG):
+        return None
+    if abs(dx) > float(self.width) * float(F2_TRACKING_WIDE_TRANSLATION_FRACTION):
+        return None
+    if abs(dy) > float(self.height) * float(F2_TRACKING_WIDE_TRANSLATION_FRACTION):
+        return None
+
+    # Favorece continuidade entre dois candidatos igualmente bons (ligada/off),
+    # sem impedir uma rotação grande quando ela realmente tem muitos inliers.
+    score = float(inliers) + ratio * 10.0
+    previous = getattr(self, "last_matrix", None)
+    if previous is not None:
+        try:
+            _ps, prev_rotation, prev_dx, prev_dy = _pose_matriz_rastreamento(
+                self,
+                previous,
+                slot,
+            )
+            jump = math.hypot(dx - prev_dx, dy - prev_dy)
+            angle_jump = _angulo_delta(rotation_deg, prev_rotation)
+            continuity = max(0.0, 1.0 - jump / 90.0) * max(
+                0.0,
+                1.0 - angle_jump / 70.0,
+            )
+            score += continuity * 5.0
+        except Exception:
+            pass
+
+    return {
+        "slot": slot,
+        "matrix": np.asarray(matrix, dtype=np.float32),
+        "matches": len(good),
+        "inliers": inliers,
+        "ratio": ratio,
+        "dx": dx,
+        "dy": dy,
+        "rotation_deg": rotation_deg,
+        "scale": scale,
+        "score": score,
+    }
 
 
 def _preparar_imagem_ecc(tracker, image):
@@ -132,24 +294,22 @@ def _matriz_ecc_para_current_to_reference(warp_ref_to_current_small):
         return None
 
 
-def _validar_matriz_ecc(tracker, matrix) -> bool:
+def _validar_matriz_ecc(tracker, matrix, slot: str | None = None) -> bool:
     if matrix is None:
         return False
     try:
-        affine = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
-        a = float(affine[0, 0])
-        b = float(affine[0, 1])
-        rotation_deg = math.degrees(math.atan2(float(affine[1, 0]), a))
-        scale = math.sqrt(max(1e-12, a * a + b * b))
-        dx = float(affine[0, 2])
-        dy = float(affine[1, 2])
+        scale, rotation_deg, dx, dy = _pose_matriz_rastreamento(
+            tracker,
+            matrix,
+            slot,
+        )
         if not (0.96 <= scale <= 1.04):
             return False
-        if abs(rotation_deg) > float(F2_TRACKING_MAX_ROTATION_DEG):
+        if abs(rotation_deg) > float(F2_TRACKING_WIDE_ROTATION_DEG):
             return False
-        if abs(dx) > int(tracker.width) * float(F2_TRACKING_MAX_TRANSLATION_FRACTION):
+        if abs(dx) > int(tracker.width) * float(F2_TRACKING_WIDE_TRANSLATION_FRACTION):
             return False
-        if abs(dy) > int(tracker.height) * float(F2_TRACKING_MAX_TRANSLATION_FRACTION):
+        if abs(dy) > int(tracker.height) * float(F2_TRACKING_WIDE_TRANSLATION_FRACTION):
             return False
         return True
     except Exception:
@@ -247,7 +407,11 @@ def _tentar_ecc(tracker, frame, previous_matrix=None):
 
         score = float(score)
         matrix = _matriz_ecc_para_current_to_reference(warp_ref_to_current)
-        if score < float(F2_ECC_MIN_SCORE) or not _validar_matriz_ecc(tracker, matrix):
+        if score < float(F2_ECC_MIN_SCORE) or not _validar_matriz_ecc(
+            tracker,
+            matrix,
+            str(slot),
+        ):
             continue
         candidates.append((score, str(slot), matrix))
 
@@ -275,10 +439,11 @@ def _tentar_ecc(tracker, frame, previous_matrix=None):
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_REFLECT101,
     )
-    a = float(matrix[0, 0])
-    b = float(matrix[0, 1])
-    scale = math.sqrt(max(1e-12, a * a + b * b))
-    rotation_deg = math.degrees(math.atan2(float(matrix[1, 0]), a))
+    scale, rotation_deg, dx, dy = _pose_matriz_rastreamento(
+        tracker,
+        matrix,
+        slot,
+    )
     return F2TrackingResult(
         True,
         aligned,
@@ -286,12 +451,81 @@ def _tentar_ecc(tracker, frame, previous_matrix=None):
         matches=0,
         inliers=0,
         inlier_ratio=0.0,
-        dx=float(matrix[0, 2]),
-        dy=float(matrix[1, 2]),
+        dx=float(dx),
+        dy=float(dy),
         rotation_deg=float(rotation_deg),
         scale=float(scale),
         reason="locked_ecc",
     ), matrix, float(score)
+
+
+def _registrar_lock_confiavel(tracker, result) -> None:
+    tracker._f2_tracking_last_good_s = time.monotonic()
+    tracker._f2_tracking_miss_count = 0
+    tracker._f2_tracking_last_good_result = result
+
+
+def _tentar_grace_lock(
+    tracker,
+    frame,
+    frame_id,
+    previous_matrix,
+    previous_result,
+):
+    if previous_matrix is None:
+        return None
+    last_good = getattr(tracker, "_f2_tracking_last_good_result", None)
+    if not bool(getattr(last_good, "locked", False)):
+        last_good = previous_result
+    if not bool(getattr(last_good, "locked", False)):
+        return None
+
+    misses = int(getattr(tracker, "_f2_tracking_miss_count", 0) or 0) + 1
+    tracker._f2_tracking_miss_count = misses
+    age = time.monotonic() - float(
+        getattr(tracker, "_f2_tracking_last_good_s", 0.0) or 0.0
+    )
+    if (
+        misses > int(F2_TRACKING_MAX_CONSECUTIVE_MISSES)
+        or age > float(F2_TRACKING_LOSS_GRACE_S)
+    ):
+        return None
+
+    try:
+        matrix = np.asarray(previous_matrix, dtype=np.float32).reshape(2, 3).copy()
+        aligned = cv2.warpAffine(
+            frame,
+            matrix,
+            (int(tracker.width), int(tracker.height)),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT101,
+        )
+        slot = str(getattr(last_good, "reference", "") or "")
+        scale, rotation_deg, dx, dy = _pose_matriz_rastreamento(
+            tracker,
+            matrix,
+            slot or None,
+        )
+        result = F2TrackingResult(
+            True,
+            aligned,
+            reference=slot,
+            matches=int(getattr(last_good, "matches", 0) or 0),
+            inliers=int(getattr(last_good, "inliers", 0) or 0),
+            inlier_ratio=float(getattr(last_good, "inlier_ratio", 0.0) or 0.0),
+            dx=float(dx),
+            dy=float(dy),
+            rotation_deg=float(rotation_deg),
+            scale=float(scale),
+            reason="grace_lock",
+        )
+        tracker.last_matrix = matrix
+        tracker.last_result = result
+        tracker.last_frame_id = frame_id
+        tracker._f2_tracking_last_method = "HOLD"
+        return result
+    except Exception:
+        return None
 
 
 def _texto_motivo(reason: str) -> str:
@@ -316,7 +550,7 @@ def instalar_correcao_runtime_rastreamento_f2() -> None:
     if _PATCH_INSTALADO:
         return
 
-    # 1) Reset também limpa o estado auxiliar do fallback.
+    # 1) Reset também limpa estado ECC e a histerese de lock.
     reset_atual = F2BoardObjectTracker.reset
     if not bool(getattr(reset_atual, "_odin_f2_ecc_reset", False)):
         reset_anterior = reset_atual
@@ -328,7 +562,14 @@ def instalar_correcao_runtime_rastreamento_f2() -> None:
         reset_com_ecc._odin_f2_ecc_reset = True
         F2BoardObjectTracker.reset = reset_com_ecc
 
-    # 2) ORB continua sendo configurado primeiro; ECC garante uma segunda via.
+    # 2) Substitui somente a seleção geométrica do candidato ORB. A aquisição de
+    # features, RANSAC e o restante do pipeline continuam no rastreador base.
+    candidate_atual = F2BoardObjectTracker._candidate
+    if not bool(getattr(candidate_atual, "_odin_f2_wide_pose", False)):
+        _candidate_robusto._odin_f2_wide_pose = True
+        F2BoardObjectTracker._candidate = _candidate_robusto
+
+    # 3) ORB continua sendo configurado primeiro; ECC garante uma segunda via.
     configure_atual = F2BoardObjectTracker.configure
     if not bool(getattr(configure_atual, "_odin_f2_ecc_configure", False)):
         configure_anterior = configure_atual
@@ -351,13 +592,15 @@ def instalar_correcao_runtime_rastreamento_f2() -> None:
         configure_com_ecc._odin_f2_ecc_configure = True
         F2BoardObjectTracker.configure = configure_com_ecc
 
-    # 3) Só cai no ECC quando ORB/RANSAC não conseguiu travar o objeto.
+    # 4) ECC entra quando ORB/RANSAC perde o objeto. Se ambos falharem por poucos
+    # ciclos, mantém a última transformação boa para evitar o pisca-pisca visual.
     align_atual = F2BoardObjectTracker.align
     if not bool(getattr(align_atual, "_odin_f2_ecc_align", False)):
         align_anterior = align_atual
 
         def align_com_ecc(self, frame, frame_id=None):
             previous_matrix = None
+            previous_result = getattr(self, "last_result", None)
             if getattr(self, "last_matrix", None) is not None:
                 try:
                     previous_matrix = self.last_matrix.copy()
@@ -366,28 +609,42 @@ def instalar_correcao_runtime_rastreamento_f2() -> None:
 
             result = align_anterior(self, frame, frame_id=frame_id)
             if bool(getattr(result, "locked", False)):
-                if str(getattr(result, "reason", "")) != "cached_transform":
+                reason = str(getattr(result, "reason", ""))
+                if reason != "cached_transform":
                     self._f2_tracking_last_method = "ORB"
+                    _registrar_lock_confiavel(self, result)
                 return result
 
             fallback = _tentar_ecc(self, frame, previous_matrix=previous_matrix)
-            if fallback is None:
-                self._f2_tracking_last_method = ""
-                return result
+            if fallback is not None:
+                ecc_result, matrix, score = fallback
+                self.last_matrix = matrix
+                self.last_compute_s = time.monotonic()
+                self.last_result = ecc_result
+                self.last_frame_id = frame_id
+                self._f2_tracking_last_method = "ECC"
+                self._f2_ecc_last_score = float(score)
+                _registrar_lock_confiavel(self, ecc_result)
+                return ecc_result
 
-            ecc_result, matrix, score = fallback
-            self.last_matrix = matrix
-            self.last_compute_s = time.monotonic()
-            self.last_result = ecc_result
-            self.last_frame_id = frame_id
-            self._f2_tracking_last_method = "ECC"
-            self._f2_ecc_last_score = float(score)
-            return ecc_result
+            grace = _tentar_grace_lock(
+                self,
+                frame,
+                frame_id,
+                previous_matrix,
+                previous_result,
+            )
+            if grace is not None:
+                return grace
+
+            self._f2_tracking_last_method = ""
+            self._f2_tracking_last_good_result = None
+            return result
 
         align_com_ecc._odin_f2_ecc_align = True
         F2BoardObjectTracker.align = align_com_ecc
 
-    # 4) Status da própria câmera: deixa explícito se a geometria está seguindo.
+    # 5) Status da própria câmera deixa explícito se a geometria está seguindo.
     preview_atual = F2ObjectTrackingMixin._atualizar_preview_operacao
     if not bool(getattr(preview_atual, "_odin_f2_tracking_status", False)):
         preview_anterior = preview_atual
@@ -415,7 +672,7 @@ def instalar_correcao_runtime_rastreamento_f2() -> None:
                 try:
                     setter(
                         f"RASTREAMENTO ATIVO • TRAVADO ({method}) • X {dx:+.1f}  Y {dy:+.1f}  R {rotation:+.1f}°",
-                        "#86EFAC",
+                        "#86EFAC" if method != "HOLD" else "#FBBF24",
                     )
                 except Exception:
                     pass
