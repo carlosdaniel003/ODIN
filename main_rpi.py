@@ -82,6 +82,9 @@ instalar_numeros_editor_mascaras_display_f3()
 def main() -> None:
     root = tk.Tk()
     RaspberryPi3ProductionApp(root)
+    # Reafirma a camada visual das previews F2 depois que toda a composição de
+    # mixins/instaladores terminou. É idempotente e não altera o runtime produtivo.
+    instalar_mascaras_previews_presenca_f2()
     # Alguns instaladores históricos do F3 são executados durante __init__ e
     # podem substituir renderizadores/globals. Reafirmamos somente as autoridades
     # finais depois que toda a composição terminou, sem criar timers ou leituras
