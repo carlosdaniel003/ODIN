@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-"""Renderer nativo das máscaras nas referências de presença do F2.
+"""Renderer nativo das máscaras e do contorno da placa nas referências F2.
 
-Esta camada substitui diretamente ``F2BoardPresenceReferenceController.render_settings``
-depois que a aplicação inteira terminou de inicializar. Assim a própria criação das
-previews de ``Placa fixa ligada`` e ``Placa fixa desligada`` já recebe a imagem com
-as ROIs do projeto desenhadas em memória. Não há busca posterior de widgets, não há
-reaplicação por timer e nenhum arquivo de referência é modificado.
+As previews de ``Placa fixa ligada`` e ``Placa fixa desligada`` nascem com as
+ROIs do projeto desenhadas em memória, igual ao preview de ``Carregar LEDs``.
+Além disso, ambas compartilham um único contorno físico da placa, editável pela
+mesma tela fullscreen de seleção de ROIs do ODIN.
+
+Nenhum arquivo de referência é modificado em disco.
 """
 
 import tkinter as tk
@@ -28,16 +29,25 @@ from src.platform.f2_board_presence_references import (
     _SLOT_UI,
     normalizar_referencias_presenca,
 )
+from src.platform.f2_board_shape_editor import (
+    abrir_editor_contorno_placa_f2,
+    carregar_contorno_placa_leds,
+)
 from src.platform.reference_capture import (
     _criar_photo_preview,
     _encontrar_corpo_referencias,
 )
 
 
-F2_PRESENCE_MASK_COLOR_BGR = (21, 204, 250)  # #FACC15, igual ao preview do projeto
+F2_PRESENCE_MASK_COLOR_BGR = (21, 204, 250)  # amarelo #FACC15
 F2_PRESENCE_MASK_SHADOW_BGR = (2, 6, 23)
 F2_PRESENCE_MASK_SHADOW_THICKNESS = 8
 F2_PRESENCE_MASK_THICKNESS = 4
+
+F2_BOARD_SHAPE_COLOR_BGR = (248, 189, 56)  # ciano #38BDF8
+F2_BOARD_SHAPE_SHADOW_BGR = (2, 6, 23)
+F2_BOARD_SHAPE_SHADOW_THICKNESS = 9
+F2_BOARD_SHAPE_THICKNESS = 5
 
 _PATCH_INSTALADO = False
 
@@ -57,7 +67,6 @@ def _carregar_rois_do_projeto(controller, projeto: str):
         except Exception:
             pass
 
-    # Fallback somente para projetos antigos já carregados no runtime.
     for nome in ("leds_fixos_configurados", "operacao_leds_preview"):
         itens = getattr(controller.app, nome, None)
         if itens:
@@ -87,8 +96,15 @@ def _adaptar_roi_para_referencia(led, largura: int, altura: int):
     return led
 
 
-def desenhar_rois_na_referencia_f2(imagem, leds):
-    """Retorna cópia BGR com as ROIs amarelas; nunca altera a referência original."""
+def _desenhar_rois_com_cor(
+    imagem,
+    rois,
+    *,
+    cor,
+    sombra,
+    espessura: int,
+    espessura_sombra: int,
+):
     if imagem is None or getattr(imagem, "size", 0) == 0:
         return imagem, 0
 
@@ -96,51 +112,51 @@ def desenhar_rois_na_referencia_f2(imagem, leds):
     altura, largura = saida.shape[:2]
     desenhadas = 0
 
-    for led_original in tuple(leds or ()):
+    for roi_original in tuple(rois or ()):
         try:
-            led = _adaptar_roi_para_referencia(led_original, largura, altura)
-            tipo = normalizar_tipo_roi(getattr(led, "tipo_roi", None))
+            roi = _adaptar_roi_para_referencia(roi_original, largura, altura)
+            tipo = normalizar_tipo_roi(getattr(roi, "tipo_roi", None))
 
             if tipo == TIPO_ROI_SEGMENTO:
-                pontos = np.rint(pontos_segmento(led)).astype(np.int32)
+                pontos = np.rint(pontos_segmento(roi)).astype(np.int32)
                 if len(pontos) < 3:
                     continue
                 cv2.polylines(
                     saida,
                     [pontos],
                     True,
-                    F2_PRESENCE_MASK_SHADOW_BGR,
-                    F2_PRESENCE_MASK_SHADOW_THICKNESS,
+                    sombra,
+                    int(espessura_sombra),
                     cv2.LINE_AA,
                 )
                 cv2.polylines(
                     saida,
                     [pontos],
                     True,
-                    F2_PRESENCE_MASK_COLOR_BGR,
-                    F2_PRESENCE_MASK_THICKNESS,
+                    cor,
+                    int(espessura),
                     cv2.LINE_AA,
                 )
             else:
                 centro = (
-                    int(getattr(led, "centro_x", 0)),
-                    int(getattr(led, "centro_y", 0)),
+                    int(getattr(roi, "centro_x", 0)),
+                    int(getattr(roi, "centro_y", 0)),
                 )
-                raio = max(2, int(getattr(led, "raio", 2) or 2))
+                raio = max(2, int(getattr(roi, "raio", 2) or 2))
                 cv2.circle(
                     saida,
                     centro,
                     raio,
-                    F2_PRESENCE_MASK_SHADOW_BGR,
-                    F2_PRESENCE_MASK_SHADOW_THICKNESS,
+                    sombra,
+                    int(espessura_sombra),
                     cv2.LINE_AA,
                 )
                 cv2.circle(
                     saida,
                     centro,
                     raio,
-                    F2_PRESENCE_MASK_COLOR_BGR,
-                    F2_PRESENCE_MASK_THICKNESS,
+                    cor,
+                    int(espessura),
                     cv2.LINE_AA,
                 )
             desenhadas += 1
@@ -150,8 +166,31 @@ def desenhar_rois_na_referencia_f2(imagem, leds):
     return saida, desenhadas
 
 
+def desenhar_rois_na_referencia_f2(imagem, leds):
+    """Retorna cópia BGR com as ROIs amarelas dos LEDs."""
+    return _desenhar_rois_com_cor(
+        imagem,
+        leds,
+        cor=F2_PRESENCE_MASK_COLOR_BGR,
+        sombra=F2_PRESENCE_MASK_SHADOW_BGR,
+        espessura=F2_PRESENCE_MASK_THICKNESS,
+        espessura_sombra=F2_PRESENCE_MASK_SHADOW_THICKNESS,
+    )
+
+
+def desenhar_contorno_placa_na_referencia_f2(imagem, contorno):
+    """Retorna cópia BGR com o contorno físico da placa em ciano."""
+    return _desenhar_rois_com_cor(
+        imagem,
+        contorno,
+        cor=F2_BOARD_SHAPE_COLOR_BGR,
+        sombra=F2_BOARD_SHAPE_SHADOW_BGR,
+        espessura=F2_BOARD_SHAPE_THICKNESS,
+        espessura_sombra=F2_BOARD_SHAPE_SHADOW_THICKNESS,
+    )
+
+
 def _render_settings_com_mascaras(self, window) -> None:
-    """Cópia deliberada do renderer oficial, com overlay nativo nas duas fotos da placa."""
     if window is None:
         return
     body = _encontrar_corpo_referencias(window)
@@ -192,18 +231,30 @@ def _render_settings_com_mascaras(self, window) -> None:
         text=(
             f"Projeto ativo: {projeto or 'SEM PROJETO'} • {resolution_text}. "
             "Salve três imagens completas da câmera: placa ligada, placa desligada e suporte vazio. "
-            "Estas imagens pertencem somente a este projeto LED e são usadas para decidir presença/retirada da placa."
+            "O desenho da placa é único por projeto e é compartilhado entre as fotos ligada e desligada."
         ),
         font=("Segoe UI", 8),
         fg=view.COR_TEXTO_2,
         bg=view.COR_CARD_2,
-        wraplength=690,
+        wraplength=780,
         justify=tk.LEFT,
         anchor="w",
     ).pack(fill=tk.X, pady=(0, 9))
 
     entries = self._entries(projeto) if projeto else normalizar_referencias_presenca({})
     leds = _carregar_rois_do_projeto(self, projeto) if projeto else []
+
+    contorno = []
+    if projeto and resolution is not None:
+        try:
+            contorno = carregar_contorno_placa_leds(
+                self,
+                projeto,
+                int(resolution[0]),
+                int(resolution[1]),
+            )
+        except Exception:
+            contorno = []
 
     grid = tk.Frame(container, bg=view.COR_CARD_2)
     grid.pack(fill=tk.X)
@@ -212,6 +263,7 @@ def _render_settings_com_mascaras(self, window) -> None:
 
     photos = []
     overlay_counts = {}
+    board_shape_counts = {}
 
     for column, slot in enumerate(F2_BOARD_REF_SLOTS):
         ui = _SLOT_UI[slot]
@@ -244,9 +296,15 @@ def _render_settings_com_mascaras(self, window) -> None:
         image = cv2.imread(str(entry.get("image_path") or "")) if entry else None
         image_preview = image
         desenhadas = 0
+        formas_desenhadas = 0
         if slot in {F2_BOARD_REF_BOARD_ON, F2_BOARD_REF_BOARD_OFF}:
-            image_preview, desenhadas = desenhar_rois_na_referencia_f2(image, leds)
+            image_preview, desenhadas = desenhar_rois_na_referencia_f2(image_preview, leds)
+            image_preview, formas_desenhadas = desenhar_contorno_placa_na_referencia_f2(
+                image_preview,
+                contorno,
+            )
         overlay_counts[slot] = desenhadas
+        board_shape_counts[slot] = formas_desenhadas
 
         photo = _criar_photo_preview(image_preview, largura_max=180, altura_max=104)
         if photo is not None:
@@ -312,9 +370,36 @@ def _render_settings_com_mascaras(self, window) -> None:
                 pady=3,
             ).pack(fill=tk.X, pady=(3, 0))
 
+        if slot in {F2_BOARD_REF_BOARD_ON, F2_BOARD_REF_BOARD_OFF}:
+            draw_state = (
+                tk.NORMAL
+                if projeto and resolution is not None and bool(entry)
+                else tk.DISABLED
+            )
+            tk.Button(
+                actions,
+                text="Desenhar placa",
+                state=draw_state,
+                command=lambda s=slot, w=window: abrir_editor_contorno_placa_f2(
+                    self,
+                    s,
+                    w,
+                ),
+                font=("Segoe UI", 7, "bold"),
+                bg="#0F2B3A",
+                fg="#7DD3FC",
+                disabledforeground=view.COR_TEXTO_3,
+                relief=tk.FLAT,
+                bd=0,
+                cursor="hand2",
+                padx=5,
+                pady=4,
+            ).pack(fill=tk.X, pady=(3, 0))
+
     window._odin_f2_board_presence_preview_tk = photos
     window._odin_f2_board_presence_preview_roi_count = len(leds)
     window._odin_f2_board_presence_preview_overlay_counts = overlay_counts
+    window._odin_f2_board_presence_preview_shape_counts = board_shape_counts
 
     ready = self._ensure_classifier()
     tk.Label(
@@ -329,6 +414,20 @@ def _render_settings_com_mascaras(self, window) -> None:
         bg=view.COR_CARD_2,
         anchor="w",
     ).pack(fill=tk.X, pady=(8, 0))
+
+    tk.Label(
+        container,
+        text=(
+            f"Contorno da placa: {len(contorno)} forma(s) compartilhada(s) • "
+            "amarelo = ROIs dos LEDs • ciano = placa"
+            if contorno
+            else "Contorno da placa: ainda não desenhado • use 'Desenhar placa' em ligada ou desligada"
+        ),
+        font=("Segoe UI", 7),
+        fg="#7DD3FC" if contorno else view.COR_TEXTO_3,
+        bg=view.COR_CARD_2,
+        anchor="w",
+    ).pack(fill=tk.X, pady=(3, 0))
 
     try:
         window.update_idletasks()
