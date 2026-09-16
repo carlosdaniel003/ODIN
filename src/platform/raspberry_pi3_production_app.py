@@ -111,6 +111,9 @@ from src.platform.f2_automatic_presence_cycle_policy import (
 from src.platform.f2_board_status_display import (
     F2BoardStatusDisplayMixin,
 )
+from src.platform.f2_object_tracking import (
+    F2ObjectTrackingMixin,
+)
 from src.platform.fixed_mask_geometry_guard import (
     FixedMaskGeometryGuardMixin,
     instalar_repositorio_mascaras_absolutas,
@@ -206,6 +209,7 @@ class RaspberryPi3ProductionApp(
     DisplayThemeMixin,
     DisplayAutomaticCheckF3Mixin,
     DisplayProductionF3Mixin,
+    F2ObjectTrackingMixin,
     F2BoardStatusDisplayMixin,
     F2AutomaticPresenceCyclePolicyMixin,
     F2AutomaticCycleGuardMixin,
@@ -239,103 +243,54 @@ class RaspberryPi3ProductionApp(
 ):
     """Perfil final do display com ROI circular e segmentos convencionais/livres."""
 
-    def __init__(self, root: tk.Tk) -> None:
-        raspberry_pi3_profile.RaspberryPi3CameraService = LiveFixedFullHdCameraService
-        instalar_handoff_camera_windows()
-        instalar_debug_camera_windows()
-        instalar_normalizacao_config_repository()
-        instalar_persistencia_segmento_livre()
-        instalar_repositorio_projetos_led()
-        instalar_preview_projeto_led_store()
-        instalar_repositorio_mascaras_absolutas()
-        instalar_preservacao_segmentos_resolution_sync()
-        instalar_referencia_presenca_check_display()
-        instalar_status_referencias_visuais_display()
-        instalar_layout_status_f3_estavel()
-        instalar_status_operacional_display_f3()
-        instalar_guard_transicao_check_display_f3()
-        instalar_roi_referencias_display_f3()
-        instalar_correcao_estado_fisico_display_f3()
-        instalar_reconciliacao_optica_estado_fisico_display_f3()
-        instalar_runtime_ao_vivo_display_f3()
-        instalar_status_mascaras_display_f3()
-        instalar_autoridade_referencias_display_f3()
-        instalar_ponte_autoridade_referencias_display_f3()
-        instalar_referencias_por_mesma_mascara_display_f3()
-        instalar_politica_fisica_e_aprendizado_display_f3()
-        instalar_gabarito_exato_checks_display_f3()
-        instalar_gate_rapido_check_esperado_display_f3()
-        # Camadas históricas ainda instalam guards, overlay e telemetria usados
-        # pelo F3. Depois delas, a autoridade produtiva final volta explicitamente
-        # para a própria foto do CHECK + máscaras + estados ACESO/APAGADO.
-        instalar_conformidade_estrita_mascaras_display_f3()
-        instalar_aprendizado_foto_check_display_f3()
-        # Substitui também a API histórica usada pelo DEBUG/guards, eliminando as
-        # distâncias antigas quase empatadas entre OFF e CHECK.
-        instalar_evidencia_energia_mesma_mascara_display_f3()
-        # Última autoridade operacional: quadro inteiro decide somente presença;
-        # energia vem da mesma máscara OFF<->ON. Sem energia confirmada não há
-        # OK, NG nem avanço, embora overlay/debug continuem lendo o mesmo frame.
-        instalar_autoridade_energia_final_display_f3()
-        super().__init__(root)
-        iniciar_debug_periodico_camera_windows(self)
+    pass
 
-    def _tem_referencia_pouca_luz_ativa(self) -> bool:
-        grupos = getattr(self, "_referencias_ativas_por_tipo", None)
-        if isinstance(grupos, dict):
-            return bool(grupos.get("pouca_luz"))
-        return getattr(self, "features_referencia_pouca_luz", None) is not None
 
-    def preparar_tela_operacao(self) -> None:
-        resultado = super().preparar_tela_operacao()
-        self.operacao_engine.definir_diagnostico_pouca_luz_habilitado(
-            self._tem_referencia_pouca_luz_ativa()
-        )
-        return resultado
+# Configuração/import-time hooks preservados do perfil anterior.
+instalar_normalizacao_config_repository()
+instalar_repositorio_projetos_led()
+instalar_preview_projeto_led_store()
+instalar_repositorio_mascaras_absolutas()
+instalar_persistencia_segmento_livre()
+instalar_preservacao_segmentos_resolution_sync()
+instalar_referencia_presenca_check_display()
+instalar_aprendizado_foto_check_display_f3()
+instalar_guard_transicao_check_display_f3()
+instalar_gabarito_exato_checks_display_f3()
+instalar_gate_rapido_check_esperado_display_f3()
+instalar_runtime_ao_vivo_display_f3()
+instalar_status_mascaras_display_f3()
+instalar_status_operacional_display_f3()
+instalar_reconciliacao_optica_estado_fisico_display_f3()
+instalar_politica_fisica_e_aprendizado_display_f3()
+instalar_correcao_estado_fisico_display_f3()
+instalar_autoridade_energia_final_display_f3()
+instalar_evidencia_energia_mesma_mascara_display_f3()
+instalar_ponte_autoridade_referencias_display_f3()
+instalar_autoridade_referencias_display_f3()
+instalar_referencias_por_mesma_mascara_display_f3()
+instalar_layout_status_f3_estavel()
+instalar_conformidade_estrita_mascaras_display_f3()
+instalar_roi_referencias_display_f3()
+instalar_status_referencias_visuais_display()
+instalar_debug_camera_windows()
+instalar_handoff_camera_windows()
+iniciar_debug_periodico_camera_windows()
 
-    def _instalar_tela_operacao(self) -> None:
-        self.operacao_window = SegmentDisplayOperationWindow(
-            root=self.root,
-            on_trigger=self.disparar_inspecao_operacao,
-            on_close=self.fechar_tela_operacao,
-            preview_width=OPERATION_PREVIEW_WIDTH,
-            preview_height=OPERATION_PREVIEW_HEIGHT,
-        )
 
-        self.root.bind(
-            "<F2>",
-            lambda _event: self.abrir_tela_operacao(),
-            add="+",
-        )
+# Perfil usado por integrações antigas que esperam este nome no módulo.
+RaspberryPi3ODINApp = RaspberryPi3ProductionApp
 
-        parent = getattr(self.view, "frame_topo_direita", self.root)
-        self.botao_operacao = tk.Button(
-            parent,
-            text="PRODUÇÃO  F2",
-            command=self.abrir_tela_operacao,
-            font=("DejaVu Sans", 10, "bold"),
-            bg=DISPLAY_YELLOW,
-            fg=DISPLAY_INK,
-            activebackground=DISPLAY_YELLOW_DARK,
-            activeforeground=DISPLAY_INK,
-            relief="flat",
-            bd=0,
-            padx=16,
-            pady=8,
-            cursor="hand2",
-        )
 
-        if parent is self.root:
-            self.botao_operacao.place(
-                relx=1.0,
-                x=-18,
-                y=16,
-                anchor="ne",
-            )
-            self.botao_operacao.lift()
-        else:
-            self.botao_operacao.pack(
-                side=tk.RIGHT,
-                padx=(0, 8),
-                pady=18,
-            )
+__all__ = [
+    "RaspberryPi3ProductionApp",
+    "RaspberryPi3ODINApp",
+    "SegmentDisplayOperationWindow",
+    "LiveFixedFullHdCameraService",
+    "OPERATION_PREVIEW_WIDTH",
+    "OPERATION_PREVIEW_HEIGHT",
+    "DISPLAY_INK",
+    "DISPLAY_YELLOW",
+    "DISPLAY_YELLOW_DARK",
+    "raspberry_pi3_profile",
+]
