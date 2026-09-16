@@ -14,6 +14,9 @@ if sys.platform.startswith("linux"):
 from src.platform.raspberry_pi3_production_app import (  # noqa: E402
     RaspberryPi3ProductionApp,
 )
+from src.platform.f2_object_tracking_settings_placeholder import (  # noqa: E402
+    instalar_opcao_rastreamento_automatico_f2,
+)
 from src.platform.display_reference_roi_runtime_fix import (  # noqa: E402
     instalar_correcao_referencias_mascaras_f3,
 )
@@ -62,6 +65,7 @@ from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
 )
 
 
+instalar_opcao_rastreamento_automatico_f2()
 instalar_correcao_referencias_mascaras_f3()
 instalar_correcao_confianca_mascaras_display_f3()
 instalar_zoom_foto_check_display_f3()
