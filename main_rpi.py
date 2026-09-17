@@ -44,6 +44,9 @@ from src.platform.f2_object_tracking_runtime_fix import (  # noqa: E402
 from src.platform.f2_object_tracking_multiview import (  # noqa: E402
     instalar_banco_multivista_rastreamento_f2,
 )
+from src.platform.f2_tracking_analysis_rois import (  # noqa: E402
+    instalar_analise_em_rois_rastreadas_f2,
+)
 from src.platform.f2_result_layout_centering import (  # noqa: E402
     instalar_layout_resultado_f2_centralizado,
 )
@@ -103,6 +106,7 @@ instalar_lupa_precisao_contorno_placa_f2()
 instalar_overlay_visual_rastreamento_f2()
 instalar_correcao_runtime_rastreamento_f2()
 instalar_banco_multivista_rastreamento_f2()
+instalar_analise_em_rois_rastreadas_f2()
 instalar_layout_resultado_f2_centralizado()
 instalar_correcao_referencias_mascaras_f3()
 instalar_correcao_confianca_mascaras_display_f3()
