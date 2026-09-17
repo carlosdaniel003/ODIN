@@ -9,6 +9,8 @@ resultado final continua sendo uma matriz CURRENT -> CANÔNICO e todo o restante
 do pipeline (contorno móvel, ROIs móveis e análise) permanece inalterado.
 """
 
+import time
+
 import cv2
 import numpy as np
 
@@ -17,9 +19,11 @@ from src.core.roi_geometry import bbox_roi
 from src.platform.f2_board_shape_editor import carregar_contorno_placa_leds
 from src.platform.f2_object_tracking import (
     F2BoardObjectTracker,
+    F2TrackingResult,
     F2_TRACKING_MIN_MATCHES,
     construir_mascara_rastreamento_f2,
 )
+from src.platform.f2_object_tracking_runtime_fix import _pose_matriz_rastreamento
 from src.platform.f2_object_tracking_visual_overlay import (
     transformar_rois_para_frame_atual_f2,
 )
@@ -44,6 +48,7 @@ def _limpar_estado_real(tracker) -> None:
     tracker._f2_real_orientation_signature = None
     tracker._f2_real_orientation_slots = set()
     tracker._f2_real_orientation_views = {}
+    tracker._f2_real_orientation_candidate_results = {}
 
 
 def _shape_stamp(controller, project: str) -> str | None:
@@ -159,6 +164,7 @@ def _carregar_referencias_reais(tracker, controller) -> bool:
     tracker._f2_real_orientation_signature = signature
     tracker._f2_real_orientation_slots = set()
     tracker._f2_real_orientation_views = {}
+    tracker._f2_real_orientation_candidate_results = {}
 
     shape = carregar_contorno_placa_leds(controller, project, width, height)
     if not shape:
@@ -252,6 +258,59 @@ def _carregar_referencias_reais(tracker, controller) -> bool:
     return loaded > 0
 
 
+def _resultado_pose_real_exata(tracker, frame, frame_id, result):
+    """Remove o blend antigo quando uma referência real foi a vencedora.
+
+    O smooth histórico é bom durante movimento contínuo, mas em uma reacquisição
+    cardinal pode misturar uma matriz antiga (ex.: 0°/HOLD) com a nova de 180°.
+    Para uma foto real calibrada usamos diretamente a matriz RANSAC daquele frame.
+    """
+    slot = str(getattr(result, "reference", "") or "")
+    if slot not in set(getattr(tracker, "_f2_real_orientation_slots", set()) or set()):
+        return result
+    candidates = dict(
+        getattr(tracker, "_f2_real_orientation_candidate_results", {}) or {}
+    )
+    candidate = candidates.get(slot)
+    if not isinstance(candidate, dict) or candidate.get("matrix") is None:
+        return result
+    try:
+        matrix = np.asarray(candidate["matrix"], dtype=np.float32).reshape(2, 3)
+        scale, rotation_deg, dx, dy = _pose_matriz_rastreamento(
+            tracker,
+            matrix,
+            slot,
+        )
+        aligned = cv2.warpAffine(
+            frame,
+            matrix,
+            (int(tracker.width), int(tracker.height)),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT101,
+        )
+        precise = F2TrackingResult(
+            True,
+            aligned,
+            reference=slot,
+            matches=int(candidate.get("matches", 0) or 0),
+            inliers=int(candidate.get("inliers", 0) or 0),
+            inlier_ratio=float(candidate.get("ratio", 0.0) or 0.0),
+            dx=float(dx),
+            dy=float(dy),
+            rotation_deg=float(rotation_deg),
+            scale=float(scale),
+            reason="locked_real_orientation",
+        )
+        tracker.last_matrix = matrix
+        tracker.last_compute_s = time.monotonic()
+        tracker.last_result = precise
+        tracker.last_frame_id = frame_id
+        tracker._f2_tracking_last_method = "ORB-REAL"
+        return precise
+    except Exception:
+        return result
+
+
 def instalar_banco_referencias_reais_orientacao_f2() -> None:
     """Instala as fotos reais como referências prioritárias do tracker F2."""
     global _PATCH_INSTALADO
@@ -310,6 +369,11 @@ def instalar_banco_referencias_reais_orientacao_f2() -> None:
                     F2_REAL_ORIENTATION_SCORE_BONUS
                 )
                 result["real_orientation"] = True
+                cache = getattr(self, "_f2_real_orientation_candidate_results", None)
+                if not isinstance(cache, dict):
+                    cache = {}
+                    self._f2_real_orientation_candidate_results = cache
+                cache[slot] = result
             return result
 
         candidate_com_prioridade_real._odin_f2_real_orientation_score = True
@@ -349,5 +413,22 @@ def instalar_banco_referencias_reais_orientacao_f2() -> None:
             multiview_candidate_anterior
         )
         multiview._candidato_vista = candidato_multivista_com_prioridade_real
+
+    # Camada externa à aquisição histórica: se o vencedor direto foi uma foto real,
+    # usa a matriz exata do RANSAC em vez de misturá-la com a pose antiga.
+    align_atual = F2BoardObjectTracker.align
+    if not bool(getattr(align_atual, "_odin_f2_real_orientation_exact_pose", False)):
+        align_anterior = align_atual
+
+        def align_com_pose_real_exata(self, frame, frame_id=None):
+            self._f2_real_orientation_candidate_results = {}
+            result = align_anterior(self, frame, frame_id=frame_id)
+            if bool(getattr(result, "locked", False)):
+                return _resultado_pose_real_exata(self, frame, frame_id, result)
+            return result
+
+        align_com_pose_real_exata._odin_f2_real_orientation_exact_pose = True
+        align_com_pose_real_exata._odin_f2_real_orientation_exact_pose_base = align_anterior
+        F2BoardObjectTracker.align = align_com_pose_real_exata
 
     _PATCH_INSTALADO = True
