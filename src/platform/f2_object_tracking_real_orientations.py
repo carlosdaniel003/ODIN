@@ -46,6 +46,7 @@ _PATCH_INSTALADO = False
 
 def _limpar_estado_real(tracker) -> None:
     tracker._f2_real_orientation_signature = None
+    tracker._f2_real_orientation_configured = False
     tracker._f2_real_orientation_slots = set()
     tracker._f2_real_orientation_views = {}
     tracker._f2_real_orientation_candidate_results = {}
@@ -142,11 +143,13 @@ def _carregar_referencias_reais(tracker, controller) -> bool:
     stamp = _shape_stamp(controller, project)
     signature = _assinatura(entries, stamp)
 
+    # configure() é consultado em todo ciclo de preview. Cacheamos inclusive o
+    # caso 0/3 para não reler imagens/contorno continuamente no Raspberry Pi 3.
     if (
         getattr(tracker, "_f2_real_orientation_signature", None) == signature
-        and bool(getattr(tracker, "_f2_real_orientation_slots", set()))
+        and bool(getattr(tracker, "_f2_real_orientation_configured", False))
     ):
-        return True
+        return bool(getattr(tracker, "_f2_real_orientation_slots", set()))
 
     # Remove somente dados reais de uma configuração anterior. Referências base e
     # vistas sintéticas continuam pertencendo aos módulos históricos.
@@ -162,6 +165,7 @@ def _carregar_referencias_reais(tracker, controller) -> bool:
             pass
 
     tracker._f2_real_orientation_signature = signature
+    tracker._f2_real_orientation_configured = True
     tracker._f2_real_orientation_slots = set()
     tracker._f2_real_orientation_views = {}
     tracker._f2_real_orientation_candidate_results = {}
