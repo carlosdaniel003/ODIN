@@ -6,7 +6,9 @@ from src.platform.f2_tracking_orientation_references import (
     F2_ORIENTATION_180,
 )
 from src.platform.f2_tracking_presence_status_bridge import (
+    F2_BOARD_STATUS_PRESENT,
     evidencia_presenca_orientacao_real_f2,
+    status_visual_presenca_angular_f2,
 )
 
 
@@ -21,15 +23,15 @@ class _FakeApp:
 
 
 class F2TrackingPresenceStatusBridgeTests(unittest.TestCase):
-    def test_referencia_real_vencedora_confirma_presenca(self):
+    def _app_orientacao_90(self, *, enabled=True):
         tracker = SimpleNamespace(
             _f2_tracking_last_method="ORB-REAL",
             _f2_real_orientation_slots={F2_ORIENTATION_90},
             _f2_real_orientation_candidate_results={},
             last_result=None,
         )
-        app = _FakeApp(
-            enabled=True,
+        return _FakeApp(
+            enabled=enabled,
             tracker=tracker,
             status={
                 "locked": True,
@@ -41,24 +43,39 @@ class F2TrackingPresenceStatusBridgeTests(unittest.TestCase):
             },
         )
 
+    def test_referencia_real_vencedora_confirma_presenca(self):
+        app = self._app_orientacao_90()
+
         evidence = evidencia_presenca_orientacao_real_f2(app)
         self.assertIsNotNone(evidence)
         self.assertEqual(evidence["slot"], F2_ORIENTATION_90)
         self.assertEqual(evidence["angle_deg"], 90.0)
 
+    def test_orientacao_real_sem_estado_eletrico_publica_placa_presente(self):
+        app = self._app_orientacao_90()
+        self.assertEqual(
+            status_visual_presenca_angular_f2(app, "unknown"),
+            F2_BOARD_STATUS_PRESENT,
+        )
+
+    def test_rotacao_preserva_ligada_quando_estado_ja_era_conhecido(self):
+        app = self._app_orientacao_90()
+        self.assertEqual(
+            status_visual_presenca_angular_f2(app, "board_on"),
+            "board_on",
+        )
+
+    def test_rotacao_preserva_desligada_quando_estado_ja_era_conhecido(self):
+        app = self._app_orientacao_90()
+        self.assertEqual(
+            status_visual_presenca_angular_f2(app, "board_off"),
+            "board_off",
+        )
+
     def test_tracking_desativado_nao_altera_presenca(self):
-        tracker = SimpleNamespace(
-            _f2_tracking_last_method="ORB-REAL",
-            _f2_real_orientation_slots={F2_ORIENTATION_90},
-            _f2_real_orientation_candidate_results={},
-            last_result=None,
-        )
-        app = _FakeApp(
-            enabled=False,
-            tracker=tracker,
-            status={"locked": True, "reference": F2_ORIENTATION_90},
-        )
+        app = self._app_orientacao_90(enabled=False)
         self.assertIsNone(evidencia_presenca_orientacao_real_f2(app))
+        self.assertIsNone(status_visual_presenca_angular_f2(app, "unknown"))
 
     def test_hold_nao_e_prova_de_presenca(self):
         tracker = SimpleNamespace(
@@ -77,6 +94,7 @@ class F2TrackingPresenceStatusBridgeTests(unittest.TestCase):
             },
         )
         self.assertIsNone(evidencia_presenca_orientacao_real_f2(app))
+        self.assertIsNone(status_visual_presenca_angular_f2(app, "board_on"))
 
     def test_candidato_real_valido_confirma_mesmo_se_outra_vista_venceu(self):
         tracker = SimpleNamespace(
