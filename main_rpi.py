@@ -59,6 +59,9 @@ from src.platform.f2_tracking_orientation_vertex_editor import (  # noqa: E402
 from src.platform.f2_tracking_orientation_vertex_transform_fix import (  # noqa: E402
     instalar_transformacao_base_editor_vertices_orientacao_f2,
 )
+from src.platform.f2_tracking_orientation_precision_roi_editor import (  # noqa: E402
+    instalar_precisao_rois_referencias_orientacao_f2,
+)
 from src.platform.f2_tracking_orientation_live_capture import (  # noqa: E402
     instalar_captura_guiada_referencias_orientacao_f2,
 )
@@ -137,6 +140,7 @@ instalar_correcao_rotacao_cardinal_rastreamento_f2()
 instalar_banco_referencias_reais_orientacao_f2()
 instalar_editor_vertices_referencias_orientacao_f2()
 instalar_transformacao_base_editor_vertices_orientacao_f2()
+instalar_precisao_rois_referencias_orientacao_f2()
 instalar_captura_guiada_referencias_orientacao_f2()
 instalar_presenca_por_referencias_angulares_f2()
 instalar_reaquisicao_durante_hold_f2()
