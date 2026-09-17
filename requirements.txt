@@ -1,3 +1,4 @@
 opencv-python; platform_system == "Windows"
 numpy
 gpiozero
+Pillow
