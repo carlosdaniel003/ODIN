@@ -156,21 +156,25 @@ class F2AutomaticPresenceCyclePolicyMixin:
         presence, _scores = self._f2_auto_presence(frame)
         self._f2_auto_last_presence = presence
 
-        if not self._f2_auto_result_hold_active():
-            was_waiting_removal = bool(self._f2_auto_cycle.waiting_removal)
-            removed = self._f2_auto_observe_removal(frame, presence)
-            if (
-                was_waiting_removal
-                and removed
-                and presence == F2_BOARD_PRESENCE_EMPTY
-            ):
-                # O vazio confirmado é a fronteira física entre duas placas.
-                # A partir daqui o resultado anterior não pertence mais à cena.
-                self._f2_auto_last_inspection_result = None
-                self._f2_auto_waiting_new_board_off = True
-                self._f2_auto_new_board_off_frames = 0
+        # O hold do resultado é apenas apresentação. A troca física da placa não
+        # pode ficar cega durante "PLACA JÁ ANALISADA / COLOQUE OUTRA PLACA".
+        # Caso o operador retire e já coloque a próxima placa antes do hold acabar,
+        # precisamos consumir a sequência VAZIO -> PRESENTE agora; o disparo em si
+        # continua bloqueado por _f2_auto_can_trigger() enquanto o hold estiver ativo.
+        was_waiting_removal = bool(self._f2_auto_cycle.waiting_removal)
+        removed = self._f2_auto_observe_removal(frame, presence)
+        if (
+            was_waiting_removal
+            and removed
+            and presence == F2_BOARD_PRESENCE_EMPTY
+        ):
+            # O vazio confirmado é a fronteira física entre duas placas.
+            # A partir daqui o resultado anterior não pertence mais à cena.
+            self._f2_auto_last_inspection_result = None
+            self._f2_auto_waiting_new_board_off = True
+            self._f2_auto_new_board_off_frames = 0
 
-            self._f2_auto_observe_new_board_present(presence)
+        self._f2_auto_observe_new_board_present(presence)
 
         self._f2_auto_publish_states(states, presence)
 
