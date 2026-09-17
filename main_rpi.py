@@ -53,6 +53,9 @@ from src.platform.f2_object_tracking_real_orientations import (  # noqa: E402
 from src.platform.f2_tracking_orientation_references import (  # noqa: E402
     instalar_ui_referencias_reais_orientacao_f2,
 )
+from src.platform.f2_tracking_orientation_vertex_editor import (  # noqa: E402
+    instalar_editor_vertices_referencias_orientacao_f2,
+)
 from src.platform.f2_tracking_orientation_live_capture import (  # noqa: E402
     instalar_captura_guiada_referencias_orientacao_f2,
 )
@@ -129,6 +132,7 @@ instalar_correcao_runtime_rastreamento_f2()
 instalar_banco_multivista_rastreamento_f2()
 instalar_correcao_rotacao_cardinal_rastreamento_f2()
 instalar_banco_referencias_reais_orientacao_f2()
+instalar_editor_vertices_referencias_orientacao_f2()
 instalar_captura_guiada_referencias_orientacao_f2()
 instalar_presenca_por_referencias_angulares_f2()
 instalar_reaquisicao_durante_hold_f2()
