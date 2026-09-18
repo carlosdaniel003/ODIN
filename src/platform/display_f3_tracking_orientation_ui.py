@@ -1265,11 +1265,28 @@ def _build_tracking_config_class(base_cls):
                 master=root,
                 value=self._f3_tracking_store.enabled(),
             )
+
+            # Qualquer alteração normal do Projeto Display (máscaras, CHECKS,
+            # referências, resolução) invalida o banco ORB do F3. Assim o runtime
+            # pode permanecer totalmente cacheado entre frames sem ficar lendo
+            # configuração do disco no Raspberry.
+            external_on_change = on_change
+
+            def on_change_with_tracking_reset():
+                app = self._f3_tracking_app
+                if app is not None:
+                    try:
+                        reset_tracking_runtime(app)
+                    except Exception:
+                        pass
+                if callable(external_on_change):
+                    external_on_change()
+
             super().__init__(
                 root=root,
                 repository=repository,
                 frame_provider=frame_provider,
-                on_change=on_change,
+                on_change=on_change_with_tracking_reset,
                 on_close=on_close,
                 *args,
                 **kwargs,
