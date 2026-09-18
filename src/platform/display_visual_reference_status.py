@@ -976,14 +976,16 @@ class DisplayProjectConfigPresenceWindow(
             except Exception:
                 original_board = board_points
                 original_masks = masks
-            if store.save_geometry(
+            saved = store.save_geometry(
                 project_name,
                 DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
                 original_board,
                 original_masks,
-            ):
+            )
+            if saved:
                 self._update_project_presence_detail()
                 self._notify_change()
+            return bool(saved)
 
         from src.platform.display_f3_reference_geometry_editor import (
             F3ReferenceGeometryEditor,
