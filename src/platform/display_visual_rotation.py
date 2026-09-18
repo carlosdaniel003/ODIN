@@ -277,21 +277,45 @@ def instalar_rotacao_visual_editor_mascaras_display() -> None:
         project = self.repository.carregar_projeto(name)
         if project is None:
             return
-        try:
-            frame = self.frame_provider()
-        except Exception:
-            frame = None
+        # O editor de máscaras usa uma FOTO ESTÁTICA por projeto. Depois da
+        # primeira gravação, mover fisicamente a placa não desloca o fundo e não
+        # induz o operador a "corrigir" máscaras que já estavam calibradas.
+        from src.platform.display_f3_mask_editor_reference import (
+            DisplayMaskEditorReferenceStore,
+        )
+        from src.platform.display_f3_object_tracking import (
+            F3TrackingConfigStore,
+            canonical_board_points,
+        )
+
+        reference_store = DisplayMaskEditorReferenceStore(self.repository)
+        tracking_store = F3TrackingConfigStore(self.repository)
+        frame_reference = reference_store.load_frame(name)
+        if frame_reference is None or getattr(frame_reference, "size", 0) == 0:
+            try:
+                live_frame = self.frame_provider()
+            except Exception:
+                live_frame = None
+            if live_frame is not None and getattr(live_frame, "size", 0) > 0:
+                frame_reference = live_frame.copy()
 
         visual_rotation = obter_rotacao_visual_do_frame_provider(
             self.frame_provider
         )
         frame_visual, resolution_visual, masks_visual = (
             preparar_check_visual_display(
-                frame,
+                frame_reference,
                 resolution,
                 project.get("masks", []),
                 visual_rotation,
             )
+        )
+        board_original = canonical_board_points(project, tracking_store)
+        board_visual = preparar_pontos_visuais_display(
+            board_original,
+            resolution[0],
+            resolution[1],
+            visual_rotation,
         )
 
         def save_masks(masks: list[dict]) -> None:
@@ -310,11 +334,33 @@ def instalar_rotacao_visual_editor_mascaras_display() -> None:
                 resolution,
                 masks_original,
             ):
+                if frame_reference is not None and getattr(frame_reference, "size", 0) > 0:
+                    reference_store.save_frame(
+                        name,
+                        frame_reference,
+                        resolution,
+                    )
                 self.refresh(name)
                 self.status.configure(
-                    text=f"{len(masks_original)} máscara(s) salvas em {name}."
+                    text=(
+                        f"{len(masks_original)} máscara(s) salvas em {name} • "
+                        "fundo estático preservado."
+                    )
                 )
                 self._notify_change()
+
+        def save_board(board_points) -> None:
+            board_original_saved = restaurar_pontos_originais_display(
+                board_points,
+                resolution[0],
+                resolution[1],
+                visual_rotation,
+            )
+            if len(board_original_saved) >= 3:
+                tracking_store.save_board_points(
+                    name,
+                    board_original_saved,
+                )
 
         self.mask_editor = config_module.DisplayMaskEditorWindow(
             root=self.root,
@@ -322,6 +368,8 @@ def instalar_rotacao_visual_editor_mascaras_display() -> None:
             masks=masks_visual,
             frame=frame_visual,
             on_save=save_masks,
+            board_points=board_visual,
+            on_save_board=save_board,
         )
         try:
             self.mask_editor.visual_rotation = visual_rotation
