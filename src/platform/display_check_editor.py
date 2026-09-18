@@ -240,6 +240,36 @@ class DisplayCheckManagerWindow:
             lambda _event: (detail_canvas.yview_scroll(1, "units"), "break")[-1],
             add="+",
         )
+
+        def detail_contains_widget(widget) -> bool:
+            current = widget
+            while current is not None:
+                if current is right_shell:
+                    return True
+                current = getattr(current, "master", None)
+            return False
+
+        def scroll_detail_from_window(event) -> str | None:
+            try:
+                widget = self.window.winfo_containing(
+                    int(event.x_root),
+                    int(event.y_root),
+                )
+            except Exception:
+                widget = None
+            if not detail_contains_widget(widget):
+                return None
+            num = getattr(event, "num", None)
+            delta = int(getattr(event, "delta", 0) or 0)
+            if num == 4 or delta > 0:
+                detail_canvas.yview_scroll(-2, "units")
+            elif num == 5 or delta < 0:
+                detail_canvas.yview_scroll(2, "units")
+            return "break"
+
+        self.window.bind("<MouseWheel>", scroll_detail_from_window, add="+")
+        self.window.bind("<Button-4>", scroll_detail_from_window, add="+")
+        self.window.bind("<Button-5>", scroll_detail_from_window, add="+")
         self._check_detail_shell = right_shell
         self._check_detail_canvas = detail_canvas
         self._check_detail_content = right
