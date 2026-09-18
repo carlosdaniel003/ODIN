@@ -85,10 +85,19 @@ def _check_store_get(self, project_name: str, check_id: str):
         value = None
     if not isinstance(value, dict):
         return None
+    metadata = deepcopy(value)
+    try:
+        check = self.repository.carregar_check(project_name, check_id)
+    except Exception:
+        check = None
+    if isinstance(check, dict):
+        overrides = check.get("mask_overrides_reference")
+        if isinstance(overrides, dict) and overrides:
+            metadata["mask_overrides_reference"] = deepcopy(overrides)
     return roi_module._decorate_metadata(
         self.repository,
         project_name,
-        deepcopy(value),
+        metadata,
     )
 
 
