@@ -38,6 +38,20 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 "f2_object_tracking_enabled",
             )
 
+    def test_tracking_sidecar_reuses_normalized_cache_until_file_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            store.set_enabled(True)
+            first = store._load_shared()
+            second = store._load_shared()
+            self.assertIs(first, second)
+            self.assertTrue(second[tracking.F3_TRACKING_SETTING_KEY])
+
+            store.set_enabled(False)
+            third = store._load_shared()
+            self.assertIsNot(second, third)
+            self.assertFalse(third[tracking.F3_TRACKING_SETTING_KEY])
+
     def test_f3_tracking_modules_do_not_import_f2_runtime(self):
         for module in (tracking, tracking_ui):
             tree = ast.parse(inspect.getsource(module))
