@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.platform.display_project_config import DisplayProjectConfigWindow
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 
 
 F3_CONFIG_MIN_WIDTH = 760
@@ -9,42 +10,21 @@ F3_CONFIG_MIN_WRAP = 280
 
 
 def maximizar_janela_configuracao_display_f3(window) -> str:
-    """Maximiza a configuração F3 com fallback Windows/Linux/Tk genérico."""
+    """Abre grande sem ultrapassar a área útil nem esconder ações inferiores."""
     try:
         window.resizable(True, True)
-    except Exception:
-        pass
-    try:
         window.minsize(F3_CONFIG_MIN_WIDTH, F3_CONFIG_MIN_HEIGHT)
     except Exception:
         pass
-    try:
-        window.update_idletasks()
-    except Exception:
-        pass
-
-    # Windows/Tk: estado maximizado nativo mantém barra de título e controles.
-    try:
-        window.state("zoomed")
-        return "state_zoomed"
-    except Exception:
-        pass
-
-    # X11/Linux: alguns window managers expõem o zoom como atributo Tk.
-    try:
-        window.attributes("-zoomed", True)
-        return "attribute_zoomed"
-    except Exception:
-        pass
-
-    # Fallback neutro: ocupa a área de tela disponível sem tamanho fixo 820x680.
-    try:
-        width = max(F3_CONFIG_MIN_WIDTH, int(window.winfo_screenwidth()))
-        height = max(F3_CONFIG_MIN_HEIGHT, int(window.winfo_screenheight()))
-        window.geometry(f"{width}x{height}+0+0")
-        return "screen_geometry"
-    except Exception:
-        return "unavailable"
+    fit_f3_toplevel(
+        window,
+        getattr(window, "master", None),
+        width_ratio=0.94,
+        height_ratio=0.86,
+        min_width=F3_CONFIG_MIN_WIDTH,
+        min_height=F3_CONFIG_MIN_HEIGHT,
+    )
+    return "safe_workspace_geometry"
 
 
 def tornar_layout_configuracao_responsivo_display_f3(owner) -> None:
