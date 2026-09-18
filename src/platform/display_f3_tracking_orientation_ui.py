@@ -1881,20 +1881,36 @@ def _build_tracking_config_class(base_cls):
                                 slot,
                                 entry,
                             )
-                            decorated = draw_reference_geometry(
-                                image,
-                                board,
-                                masks,
-                                alpha=0.38,
-                            )
-                            h, w = decorated.shape[:2]
+                            # Reduza a FOTO antes de desenhar a geometria. Quando
+                            # desenhávamos em 1920x1080 e só depois reduzíamos para
+                            # ~184 px, linhas de 2/3 px desapareciam por subpixel.
+                            h, w = image.shape[:2]
                             scale = min(184.0 / max(1, w), 106.0 / max(1, h))
                             tw = max(1, int(round(w * scale)))
                             th = max(1, int(round(h * scale)))
                             thumbnail = cv2.resize(
-                                decorated,
+                                image,
                                 (tw, th),
                                 interpolation=cv2.INTER_AREA,
+                            )
+                            preview_matrix = np.asarray(
+                                [[scale, 0.0, 0.0], [0.0, scale, 0.0]],
+                                dtype=np.float32,
+                            )
+                            board_preview = transform_points(
+                                board,
+                                preview_matrix,
+                            )
+                            masks_preview = [
+                                _transform_reference_mask(mask, preview_matrix)
+                                for mask in tuple(masks or ())
+                                if isinstance(mask, dict)
+                            ]
+                            thumbnail = draw_reference_geometry(
+                                thumbnail,
+                                board_preview,
+                                masks_preview,
+                                alpha=0.78,
                             )
                             self._f3_tracking_preview_cache[key] = thumbnail
 
