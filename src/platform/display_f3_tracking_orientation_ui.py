@@ -8,6 +8,7 @@ F3TrackingConfigStore e as máscaras/checks já existentes do Projeto Display.
 """
 
 import math
+import threading
 import tkinter as tk
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -1260,17 +1261,27 @@ def _build_tracking_config_class(base_cls):
             self._f3_tracking_app = getattr(frame_provider, "__self__", None)
             self._f3_tracking_panel = None
             self._f3_tracking_cards = None
-            self._f3_tracking_photos = []
+            self._f3_tracking_photos: dict[str, object] = {}
+            self._f3_tracking_preview_canvases: dict[str, tk.Canvas] = {}
+            self._f3_tracking_preview_generation = 0
+            self._f3_tracking_preview_cache: dict[tuple, object] = {}
             self._f3_tracking_enabled_var = tk.BooleanVar(
                 master=root,
                 value=self._f3_tracking_store.enabled(),
             )
+
+            # Ao abrir configurações, suspendemos somente o ORB/RANSAC pesado do
+            # F3. A câmera continua viva para captura de referências, mas nenhuma
+            # decisão automática roda enquanto a janela está aberta.
+            if self._f3_tracking_app is not None:
+                self._f3_tracking_app._display_f3_tracking_config_open = True
 
             # Qualquer alteração normal do Projeto Display (máscaras, CHECKS,
             # referências, resolução) invalida o banco ORB do F3. Assim o runtime
             # pode permanecer totalmente cacheado entre frames sem ficar lendo
             # configuração do disco no Raspberry.
             external_on_change = on_change
+            external_on_close = on_close
 
             def on_change_with_tracking_reset():
                 app = self._f3_tracking_app
@@ -1282,15 +1293,28 @@ def _build_tracking_config_class(base_cls):
                 if callable(external_on_change):
                     external_on_change()
 
-            super().__init__(
-                root=root,
-                repository=repository,
-                frame_provider=frame_provider,
-                on_change=on_change_with_tracking_reset,
-                on_close=on_close,
-                *args,
-                **kwargs,
-            )
+            def on_close_with_tracking_resume():
+                app = self._f3_tracking_app
+                if app is not None:
+                    app._display_f3_tracking_config_open = False
+                self._f3_tracking_preview_generation += 1
+                if callable(external_on_close):
+                    external_on_close()
+
+            try:
+                super().__init__(
+                    root=root,
+                    repository=repository,
+                    frame_provider=frame_provider,
+                    on_change=on_change_with_tracking_reset,
+                    on_close=on_close_with_tracking_resume,
+                    *args,
+                    **kwargs,
+                )
+            except Exception:
+                if self._f3_tracking_app is not None:
+                    self._f3_tracking_app._display_f3_tracking_config_open = False
+                raise
             self._install_f3_tracking_panel()
             self._render_f3_tracking_panel()
 
@@ -1390,12 +1414,15 @@ def _build_tracking_config_class(base_cls):
             cards = self._f3_tracking_cards
             if cards is None:
                 return
+            self._f3_tracking_preview_generation += 1
+            generation = int(self._f3_tracking_preview_generation)
             for child in tuple(cards.winfo_children()):
                 try:
                     child.destroy()
                 except Exception:
                     pass
-            self._f3_tracking_photos = []
+            self._f3_tracking_photos.clear()
+            self._f3_tracking_preview_canvases.clear()
 
             project_name = self._selected_name()
             project = self.repository.carregar_projeto(project_name)
@@ -1447,27 +1474,15 @@ def _build_tracking_config_class(base_cls):
                     highlightthickness=0,
                 )
                 preview.pack(fill=tk.X, padx=7, pady=(0, 4))
-                image = cv2.imread(
-                    str(entry.get("image_path") or ""),
-                    cv2.IMREAD_COLOR,
-                ) if entry else None
-                if _valid_frame(image):
-                    board, masks = reference_geometry(
-                        project,
-                        self._f3_tracking_store,
-                        slot,
-                        entry,
+                self._f3_tracking_preview_canvases[slot] = preview
+                if entry and str(entry.get("image_path") or "").strip():
+                    preview.create_text(
+                        95,
+                        56,
+                        text="CARREGANDO PREVIEW...",
+                        fill="#64748B",
+                        font=("Segoe UI", 7, "bold"),
                     )
-                    decorated = draw_reference_geometry(
-                        image,
-                        board,
-                        masks,
-                        alpha=0.38,
-                    )
-                    photo = photo_from_bgr(decorated, 184, 106)
-                    if photo is not None:
-                        self._f3_tracking_photos.append(photo)
-                        preview.create_image(95, 56, image=photo, anchor="center")
                 else:
                     preview.create_text(
                         95,
@@ -1530,6 +1545,141 @@ def _build_tracking_config_class(base_cls):
                     )
                     remove.pack(fill=tk.X, pady=(3, 0))
                     remove.configure(state=tk.NORMAL if enabled else tk.DISABLED)
+
+            # A janela já está pronta e responsiva neste ponto. As imagens são
+            # decodificadas e desenhadas fora da thread Tk, uma por vez.
+            self._schedule_f3_tracking_previews(
+                generation,
+                project_name,
+                deepcopy(project),
+                deepcopy(entries),
+            )
+
+        @staticmethod
+        def _f3_tracking_preview_key(project_name: str, project: dict, slot: str, entry: dict) -> tuple:
+            path = Path(str(entry.get("image_path") or ""))
+            try:
+                stat = path.stat()
+                file_stamp = (int(stat.st_mtime_ns), int(stat.st_size))
+            except OSError:
+                file_stamp = (0, 0)
+            return (
+                str(project_name or ""),
+                str(slot),
+                str(path),
+                file_stamp,
+                str(entry.get("updated_at") or ""),
+                str(project.get("updated_at") or ""),
+            )
+
+        def _schedule_f3_tracking_previews(
+            self,
+            generation: int,
+            project_name: str,
+            project: dict,
+            entries: dict,
+        ) -> None:
+            jobs = []
+            for slot in F3_ORIENTATION_SLOTS:
+                entry = entries.get(slot, {}) if isinstance(entries, dict) else {}
+                path = str((entry or {}).get("image_path") or "").strip()
+                if not path:
+                    continue
+                key = self._f3_tracking_preview_key(
+                    project_name,
+                    project,
+                    slot,
+                    entry,
+                )
+                jobs.append((slot, deepcopy(entry), key))
+
+            if not jobs:
+                return
+
+            def worker() -> None:
+                worker_store = F3TrackingConfigStore(self.repository)
+                for slot, entry, key in jobs:
+                    if generation != self._f3_tracking_preview_generation:
+                        return
+
+                    thumbnail = self._f3_tracking_preview_cache.get(key)
+                    if thumbnail is None:
+                        image = cv2.imread(
+                            str(entry.get("image_path") or ""),
+                            cv2.IMREAD_COLOR,
+                        )
+                        if _valid_frame(image):
+                            board, masks = reference_geometry(
+                                project,
+                                worker_store,
+                                slot,
+                                entry,
+                            )
+                            decorated = draw_reference_geometry(
+                                image,
+                                board,
+                                masks,
+                                alpha=0.38,
+                            )
+                            h, w = decorated.shape[:2]
+                            scale = min(184.0 / max(1, w), 106.0 / max(1, h))
+                            tw = max(1, int(round(w * scale)))
+                            th = max(1, int(round(h * scale)))
+                            thumbnail = cv2.resize(
+                                decorated,
+                                (tw, th),
+                                interpolation=cv2.INTER_AREA,
+                            )
+                            self._f3_tracking_preview_cache[key] = thumbnail
+
+                    try:
+                        self.window.after(
+                            0,
+                            lambda s=slot, k=key, t=thumbnail, g=generation:
+                                self._apply_f3_tracking_preview(g, s, k, t),
+                        )
+                    except Exception:
+                        return
+
+            threading.Thread(
+                target=worker,
+                name="odin-f3-config-preview",
+                daemon=True,
+            ).start()
+
+        def _apply_f3_tracking_preview(
+            self,
+            generation: int,
+            slot: str,
+            key: tuple,
+            thumbnail,
+        ) -> None:
+            if generation != self._f3_tracking_preview_generation:
+                return
+            canvas = self._f3_tracking_preview_canvases.get(slot)
+            if canvas is None:
+                return
+            try:
+                if not bool(canvas.winfo_exists()):
+                    return
+            except Exception:
+                return
+
+            canvas.delete("all")
+            if not _valid_frame(thumbnail):
+                canvas.create_text(
+                    95,
+                    56,
+                    text="ARQUIVO AUSENTE",
+                    fill="#FCA5A5",
+                    font=("Segoe UI", 7, "bold"),
+                )
+                return
+            photo = photo_from_bgr(thumbnail, 184, 106)
+            if photo is None:
+                return
+            self._f3_tracking_photos[slot] = photo
+            canvas.create_image(95, 56, image=photo, anchor="center")
 
         def _capture_f3_orientation(self, slot: str) -> None:
             if not bool(self._f3_tracking_enabled_var.get()):
