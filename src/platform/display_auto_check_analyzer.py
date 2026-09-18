@@ -309,6 +309,19 @@ class DisplayAutomaticCheckAnalyzer:
             return self._not_ready("resolucao_mestra_ausente")
 
         masks = list(project.get("masks", []) or [])
+        overrides = (
+            check.get("mask_overrides_reference", {})
+            if isinstance(check.get("mask_overrides_reference"), dict)
+            else {}
+        )
+        if overrides:
+            masks = [
+                deepcopy(overrides.get(str(mask.get("id"))))
+                if isinstance(overrides.get(str(mask.get("id"))), dict)
+                else mask
+                for mask in masks
+                if isinstance(mask, dict)
+            ]
         states = (
             check.get("mask_states", {})
             if isinstance(check.get("mask_states"), dict)
