@@ -1173,7 +1173,13 @@ def tracking_enabled(app) -> bool:
     runtime = get_tracking_runtime(app)
     if runtime is None:
         return False
-    return bool(getattr(app, "_display_f3_object_tracking_enabled", runtime.store.enabled()))
+    # Não consulte o JSON a cada frame do F3. O valor é carregado uma vez ao
+    # construir o runtime e atualizado imediatamente pelo checkbox da UI.
+    if hasattr(app, "_display_f3_object_tracking_enabled"):
+        return bool(getattr(app, "_display_f3_object_tracking_enabled"))
+    enabled = bool(runtime.store.enabled())
+    app._display_f3_object_tracking_enabled = enabled
+    return enabled
 
 
 def set_tracking_enabled(app, enabled: bool) -> bool:
@@ -1267,12 +1273,20 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
         process_with_tracking_guard._odin_f3_object_tracking_guard_base = process_previous
         DisplayAutomaticCheckF3Mixin._process_display_auto_check = process_with_tracking_guard
 
-    preview_current = DisplayProductionF3Mixin._atualizar_preview_display_f3
+    # O wrapper precisa ficar na camada MAIS EXTERNA do loop F3. O mixin
+    # automático chama super()._atualizar_preview_display_f3() e somente depois
+    # executa _process_display_auto_check(); se alinhássemos apenas a classe base,
+    # o frame bruto seria restaurado antes da análise dos CHECKS. Envolvendo o
+    # DisplayAutomaticCheckF3Mixin, preview, presença, referências, máscaras e
+    # análise automática enxergam o MESMO frame canônico durante todo o ciclo.
+    preview_current = DisplayAutomaticCheckF3Mixin._atualizar_preview_display_f3
     if not bool(getattr(preview_current, "_odin_f3_object_tracking_runtime", False)):
         preview_previous = preview_current
 
         def preview_with_tracking(self):
             if not tracking_enabled(self):
+                # Contrato opt-in: desligado, o F3 percorre literalmente a cadeia
+                # anterior, sem cópia, warp, bloqueio ou alteração de estado.
                 return preview_previous(self)
 
             raw = getattr(self, "camera_frame_atual", None)
@@ -1282,6 +1296,8 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
             aligned, result = align_frame_for_f3(self, raw)
             locked = bool(result is not None and result.locked)
             if not locked:
+                # O preview ao vivo continua visível no frame bruto enquanto o
+                # guard de _process_display_auto_check impede decisão produtiva.
                 return preview_previous(self)
 
             self.camera_frame_atual = aligned
@@ -1299,7 +1315,7 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
 
         preview_with_tracking._odin_f3_object_tracking_runtime = True
         preview_with_tracking._odin_f3_object_tracking_runtime_base = preview_previous
-        DisplayProductionF3Mixin._atualizar_preview_display_f3 = preview_with_tracking
+        DisplayAutomaticCheckF3Mixin._atualizar_preview_display_f3 = preview_with_tracking
 
     open_current = DisplayProductionF3Mixin._ativar_tela_producao_display_f3
     if not bool(getattr(open_current, "_odin_f3_object_tracking_reset", False)):
