@@ -165,15 +165,85 @@ class DisplayCheckManagerWindow:
         self._button(actions, "↑", lambda: self.move_selected(-1)).pack(side=tk.LEFT, padx=(10, 3))
         self._button(actions, "↓", lambda: self.move_selected(1)).pack(side=tk.LEFT, padx=3)
 
-        right = tk.Frame(
+        # O detalhe do CHECK pode crescer bastante (preview da referência,
+        # captura da câmera, ações e status). Ele precisa de rolagem própria para
+        # que os botões inferiores nunca fiquem abaixo da área útil da tela.
+        right_shell = tk.Frame(
             body,
             bg=self.PANEL,
             highlightbackground=self.BORDER,
             highlightthickness=1,
-            width=390,
+            width=410,
         )
-        right.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(12, 0))
-        right.pack_propagate(False)
+        right_shell.pack(side=tk.RIGHT, fill=tk.BOTH, padx=(12, 0))
+        right_shell.pack_propagate(False)
+
+        detail_scrollbar = tk.Scrollbar(
+            right_shell,
+            orient=tk.VERTICAL,
+        )
+        detail_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        detail_canvas = tk.Canvas(
+            right_shell,
+            bg=self.PANEL,
+            bd=0,
+            highlightthickness=0,
+            yscrollcommand=detail_scrollbar.set,
+        )
+        detail_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        detail_scrollbar.configure(command=detail_canvas.yview)
+
+        right = tk.Frame(detail_canvas, bg=self.PANEL)
+        detail_window = detail_canvas.create_window(
+            (0, 0),
+            window=right,
+            anchor=tk.NW,
+        )
+
+        def sync_detail_scrollregion(_event=None) -> None:
+            try:
+                detail_canvas.configure(scrollregion=detail_canvas.bbox("all"))
+            except Exception:
+                pass
+
+        def fit_detail_width(event) -> None:
+            try:
+                detail_canvas.itemconfigure(
+                    detail_window,
+                    width=max(1, int(event.width)),
+                )
+                sync_detail_scrollregion()
+            except Exception:
+                pass
+
+        right.bind("<Configure>", sync_detail_scrollregion, add="+")
+        detail_canvas.bind("<Configure>", fit_detail_width, add="+")
+        detail_canvas.bind(
+            "<MouseWheel>",
+            lambda event: (
+                detail_canvas.yview_scroll(
+                    -1 if int(getattr(event, "delta", 0) or 0) > 0 else 1,
+                    "units",
+                ),
+                "break",
+            )[-1],
+            add="+",
+        )
+        detail_canvas.bind(
+            "<Button-4>",
+            lambda _event: (detail_canvas.yview_scroll(-1, "units"), "break")[-1],
+            add="+",
+        )
+        detail_canvas.bind(
+            "<Button-5>",
+            lambda _event: (detail_canvas.yview_scroll(1, "units"), "break")[-1],
+            add="+",
+        )
+        self._check_detail_shell = right_shell
+        self._check_detail_canvas = detail_canvas
+        self._check_detail_content = right
+        self._check_detail_window_id = detail_window
 
         self.check_title = tk.Label(
             right,
