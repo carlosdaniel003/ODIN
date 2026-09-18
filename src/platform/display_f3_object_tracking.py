@@ -1241,6 +1241,16 @@ def _install_orientation_project_view(app, reference: str):
     original_loader = getattr(repository, "carregar_projeto", None)
     if not callable(original_loader):
         return lambda: None
+    repository_dict = getattr(repository, "__dict__", {})
+    had_instance_loader = (
+        isinstance(repository_dict, dict)
+        and "carregar_projeto" in repository_dict
+    )
+    previous_instance_loader = (
+        repository_dict.get("carregar_projeto")
+        if had_instance_loader
+        else None
+    )
 
     active_name = normalizar_nome_projeto_display(repository.obter_projeto_ativo())
     base_project = original_loader(active_name)
@@ -1280,9 +1290,16 @@ def _install_orientation_project_view(app, reference: str):
 
     def restore() -> None:
         try:
-            repository.carregar_projeto = original_loader
+            if had_instance_loader:
+                repository.carregar_projeto = previous_instance_loader
+            else:
+                delattr(repository, "carregar_projeto")
         except Exception:
-            pass
+            # Fallback seguro para objetos/repositórios que não permitem delattr.
+            try:
+                repository.carregar_projeto = original_loader
+            except Exception:
+                pass
 
     return restore
 
