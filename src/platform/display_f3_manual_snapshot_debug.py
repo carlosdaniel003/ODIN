@@ -15,6 +15,8 @@ import json
 import tkinter as tk
 
 import cv2
+
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 import numpy as np
 
 import src.platform.display_f3_exact_check_template as exact_module
@@ -946,7 +948,14 @@ def _open_snapshot_debug(window):
     window._display_f3_snapshot_debug_window = top
     top.title("ODIN • DISPLAY F3 • DEBUG DO FRAME ANALISADO")
     top.configure(bg=DEBUG_BG)
-    top.geometry("1080x700")
+    fit_f3_toplevel(
+        top,
+        window.root,
+        preferred_width=1080,
+        preferred_height=700,
+        min_width=760,
+        min_height=520,
+    )
     top.minsize(780, 500)
 
     shell = tk.Frame(top, bg=DEBUG_BG)
