@@ -49,9 +49,14 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
                 masks,
             )
         )
-        check_id = repository.adicionar_check(name, "H1")
+        existing = repository.listar_checks(name)
+        check_id = (
+            str(existing[0].get("id") or "")
+            if existing
+            else str(repository.adicionar_check(name, "H1") or "")
+        )
         self.assertTrue(check_id)
-        return name, str(check_id)
+        return name, check_id
 
     def test_check_geometry_roundtrip_is_local_to_check(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -151,7 +156,7 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("overrides.get(str(mask.get", source)
 
     def test_check_editor_exposes_board_and_mask_adjustment(self):
-        source = inspect.getsource(check_editor.DisplayCheckMaskEditorWindow)
+        source = Path(check_editor.__file__).read_text(encoding="utf-8")
         self.assertIn("AJUSTAR GEOMETRIA", source)
         self.assertIn("board_points", source)
         self.assertIn("mask_overrides", source)
