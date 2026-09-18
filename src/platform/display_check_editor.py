@@ -10,7 +10,10 @@ from tkinter import messagebox, simpledialog
 import cv2
 
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
-from src.platform.display_mask_geometry import pontos_mascara_display
+from src.platform.display_mask_geometry import (
+    instalar_suporte_segmento_mascara_display,
+    pontos_mascara_display,
+)
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
@@ -1038,7 +1041,7 @@ class DisplayCheckMaskEditorWindow:
     def _translate_mask_geometry(self, mask: dict, dx: float, dy: float) -> dict:
         result = deepcopy(mask)
         kind = str(result.get("type") or "").lower()
-        if kind == "circle":
+        if kind in {"circle", "segment"}:
             result["cx"] = int(round(float(result.get("cx", 0)) + dx))
             result["cy"] = int(round(float(result.get("cy", 0)) + dy))
         elif kind == "rectangle":
@@ -1530,3 +1533,9 @@ class DisplayCheckMaskEditorWindow:
             self.window.destroy()
         except Exception:
             pass
+
+# display_mask_geometry é importado no topo deste módulo para helpers. Na primeira
+# importação ele ainda encontra este arquivo parcialmente inicializado; reafirmar
+# aqui garante que segmentos do Projeto Display sejam clicáveis/desenhados também
+# no editor de CHECK e no novo modo de ajuste de geometria.
+instalar_suporte_segmento_mascara_display()
