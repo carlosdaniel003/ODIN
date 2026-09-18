@@ -196,6 +196,41 @@ def _checks_padrao(mask_ids) -> list[dict]:
     ]
 
 
+def normalizar_pontos_geometria_check(valor, minimo: int = 3) -> list[list[float]]:
+    if not isinstance(valor, (list, tuple)):
+        return []
+    pontos = []
+    for item in valor:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        try:
+            x = float(item[0])
+            y = float(item[1])
+        except (TypeError, ValueError):
+            continue
+        pontos.append([x, y])
+    return pontos if len(pontos) >= int(minimo) else []
+
+
+def normalizar_overrides_mascaras_check(valor, mascaras) -> dict[str, dict]:
+    base = normalizar_mascaras_display(mascaras)
+    ids = {str(mask["id"]) for mask in base}
+    origem = valor if isinstance(valor, dict) else {}
+    resultado = {}
+    for mask_id in ids:
+        raw = origem.get(mask_id)
+        if not isinstance(raw, dict):
+            continue
+        normalized = normalizar_mascara_display(
+            {**raw, "id": mask_id},
+            1,
+        )
+        if normalized is not None:
+            normalized["id"] = mask_id
+            resultado[mask_id] = normalized
+    return resultado
+
+
 def normalizar_checks_display(
     checks,
     mascaras,
@@ -219,13 +254,24 @@ def normalizar_checks_display(
             identificador = _proximo_id_check(ids_usados)
         ids_usados.add(identificador)
         estados = check.get("mask_states", check.get("estados_mascaras", {}))
-        resultado.append(
-            {
-                "id": identificador,
-                "name": nome,
-                "mask_states": normalizar_estados_check_display(estados, mask_ids),
-            }
+        item = {
+            "id": identificador,
+            "name": nome,
+            "mask_states": normalizar_estados_check_display(estados, mask_ids),
+        }
+        board_points = normalizar_pontos_geometria_check(
+            check.get("board_points_reference"),
+            minimo=3,
         )
+        overrides = normalizar_overrides_mascaras_check(
+            check.get("mask_overrides_reference"),
+            masks,
+        )
+        if board_points:
+            item["board_points_reference"] = board_points
+        if overrides:
+            item["mask_overrides_reference"] = overrides
+        resultado.append(item)
     return resultado
 
 
@@ -587,6 +633,50 @@ class DisplayProjectRepository:
             return False
         checks[indice], checks[destino] = checks[destino], checks[indice]
         projeto["checks"] = normalizar_checks_display(checks, projeto.get("masks", []))
+        self._atualizar_timestamp(projeto)
+        self._escrever(dados)
+        return True
+
+    def salvar_geometria_check(
+        self,
+        nome_projeto: str,
+        check_id: str,
+        board_points,
+        mask_overrides,
+    ) -> bool:
+        projeto_nome = normalizar_nome_projeto_display(nome_projeto)
+        identificador = str(check_id or "").strip().upper()
+        dados = self._carregar()
+        projeto = dados["projects"].get(projeto_nome)
+        if projeto is None or not identificador:
+            return False
+
+        board = normalizar_pontos_geometria_check(board_points, minimo=3)
+        overrides = normalizar_overrides_mascaras_check(
+            mask_overrides,
+            projeto.get("masks", []),
+        )
+        encontrado = False
+        for check in projeto.get("checks", []):
+            if str(check.get("id", "")).upper() != identificador:
+                continue
+            if board:
+                check["board_points_reference"] = board
+            else:
+                check.pop("board_points_reference", None)
+            if overrides:
+                check["mask_overrides_reference"] = overrides
+            else:
+                check.pop("mask_overrides_reference", None)
+            encontrado = True
+            break
+        if not encontrado:
+            return False
+
+        projeto["checks"] = normalizar_checks_display(
+            projeto.get("checks", []),
+            projeto.get("masks", []),
+        )
         self._atualizar_timestamp(projeto)
         self._escrever(dados)
         return True
