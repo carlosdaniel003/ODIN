@@ -8,6 +8,7 @@ F3TrackingConfigStore e as máscaras/checks já existentes do Projeto Display.
 """
 
 import math
+import queue
 import threading
 import tkinter as tk
 from copy import deepcopy
@@ -1265,6 +1266,8 @@ def _build_tracking_config_class(base_cls):
             self._f3_tracking_preview_canvases: dict[str, tk.Canvas] = {}
             self._f3_tracking_preview_generation = 0
             self._f3_tracking_preview_cache: dict[tuple, object] = {}
+            self._f3_tracking_preview_results = queue.Queue()
+            self._f3_tracking_preview_poll_after = None
             self._f3_tracking_enabled_var = tk.BooleanVar(
                 master=root,
                 value=self._f3_tracking_store.enabled(),
@@ -1298,6 +1301,13 @@ def _build_tracking_config_class(base_cls):
                 if app is not None:
                     app._display_f3_tracking_config_open = False
                 self._f3_tracking_preview_generation += 1
+                poll_after = self._f3_tracking_preview_poll_after
+                self._f3_tracking_preview_poll_after = None
+                if poll_after is not None:
+                    try:
+                        self.window.after_cancel(poll_after)
+                    except Exception:
+                        pass
                 if callable(external_on_close):
                     external_on_close()
 
@@ -1632,20 +1642,56 @@ def _build_tracking_config_class(base_cls):
                             )
                             self._f3_tracking_preview_cache[key] = thumbnail
 
-                    try:
-                        self.window.after(
-                            0,
-                            lambda s=slot, k=key, t=thumbnail, g=generation:
-                                self._apply_f3_tracking_preview(g, s, k, t),
-                        )
-                    except Exception:
-                        return
+                    self._f3_tracking_preview_results.put(
+                        (generation, slot, key, thumbnail)
+                    )
+                self._f3_tracking_preview_results.put(
+                    (generation, None, None, None)
+                )
 
             threading.Thread(
                 target=worker,
                 name="odin-f3-config-preview",
                 daemon=True,
             ).start()
+            self._schedule_f3_tracking_preview_poll()
+
+        def _schedule_f3_tracking_preview_poll(self) -> None:
+            if self._f3_tracking_preview_poll_after is not None:
+                return
+            try:
+                self._f3_tracking_preview_poll_after = self.window.after(
+                    24,
+                    self._poll_f3_tracking_preview_results,
+                )
+            except Exception:
+                self._f3_tracking_preview_poll_after = None
+
+        def _poll_f3_tracking_preview_results(self) -> None:
+            self._f3_tracking_preview_poll_after = None
+            done_current_generation = False
+            while True:
+                try:
+                    generation, slot, key, thumbnail = (
+                        self._f3_tracking_preview_results.get_nowait()
+                    )
+                except queue.Empty:
+                    break
+
+                if generation != self._f3_tracking_preview_generation:
+                    continue
+                if slot is None:
+                    done_current_generation = True
+                    continue
+                self._apply_f3_tracking_preview(
+                    generation,
+                    slot,
+                    key,
+                    thumbnail,
+                )
+
+            if not done_current_generation:
+                self._schedule_f3_tracking_preview_poll()
 
         def _apply_f3_tracking_preview(
             self,
