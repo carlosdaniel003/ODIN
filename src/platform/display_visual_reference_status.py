@@ -21,10 +21,13 @@ from src.platform.display_check_presence_reference import (
 )
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 from src.platform.display_project_repository import (
+    DISPLAY_CHECK_STATE_IGNORE,
     DisplayProjectRepository,
+    normalizar_mascaras_display,
     normalizar_nome_projeto_display,
     normalizar_resolucao_display,
 )
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 
 
 DISPLAY_PROJECT_PRESENCE_SCHEMA_VERSION = 1
@@ -162,13 +165,38 @@ class DisplayProjectPresenceReferenceStore:
                     )
                 except (TypeError, ValueError):
                     threshold = DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD
-                normalized_refs[kind] = {
+                normalized = {
                     "image_path": image_path,
                     "threshold": max(0.10, min(0.99, threshold)),
                     "width": int(value.get("width", 0) or 0),
                     "height": int(value.get("height", 0) or 0),
                     "captured_at": str(value.get("captured_at") or ""),
                 }
+                board = []
+                for point in value.get("board_points_reference", []) or []:
+                    if not isinstance(point, (list, tuple)) or len(point) < 2:
+                        continue
+                    try:
+                        board.append([float(point[0]), float(point[1])])
+                    except (TypeError, ValueError):
+                        pass
+                if len(board) >= 3:
+                    normalized["board_points_reference"] = board
+
+                raw_overrides = value.get("mask_overrides_reference", {})
+                overrides = {}
+                if isinstance(raw_overrides, dict):
+                    for mask_id, raw_mask in raw_overrides.items():
+                        if not isinstance(raw_mask, dict):
+                            continue
+                        items = normalizar_mascaras_display(
+                            [{**deepcopy(raw_mask), "id": str(mask_id)}]
+                        )
+                        if items:
+                            overrides[str(mask_id)] = items[0]
+                if overrides:
+                    normalized["mask_overrides_reference"] = overrides
+                normalized_refs[kind] = normalized
             if normalized_refs:
                 projects[project_name] = normalized_refs
         return {
@@ -229,6 +257,8 @@ class DisplayProjectPresenceReferenceStore:
         if not ok:
             return None
 
+        data = self._load()
+        previous = data["projects"].get(project, {}).get(ref_kind, {})
         metadata = {
             "image_path": str(path),
             "threshold": DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD,
@@ -236,10 +266,63 @@ class DisplayProjectPresenceReferenceStore:
             "height": int(resolution[1]),
             "captured_at": datetime.now(timezone.utc).isoformat(),
         }
-        data = self._load()
+        if isinstance(previous, dict):
+            for key in ("board_points_reference", "mask_overrides_reference"):
+                if previous.get(key):
+                    metadata[key] = deepcopy(previous[key])
         data["projects"].setdefault(project, {})[ref_kind] = metadata
         self._write(data)
         return deepcopy(metadata)
+
+    def save_geometry(
+        self,
+        project_name: str,
+        kind: str,
+        board_points,
+        masks,
+    ) -> bool:
+        project = normalizar_nome_projeto_display(project_name)
+        ref_kind = str(kind or "").strip().lower()
+        if ref_kind != DISPLAY_PROJECT_REFERENCE_BOARD_OFF:
+            return False
+        data = self._load()
+        metadata = data["projects"].get(project, {}).get(ref_kind)
+        if not isinstance(metadata, dict):
+            return False
+
+        board = []
+        for point in (board_points or []):
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                board.append([float(point[0]), float(point[1])])
+            except (TypeError, ValueError):
+                pass
+
+        overrides = {}
+        for raw in (masks or []):
+            if not isinstance(raw, dict):
+                continue
+            mask_id = str(raw.get("id") or "")
+            if not mask_id:
+                continue
+            normalized = normalizar_mascaras_display(
+                [{**deepcopy(raw), "id": mask_id}]
+            )
+            if normalized:
+                overrides[mask_id] = normalized[0]
+
+        if len(board) >= 3:
+            metadata["board_points_reference"] = board
+        else:
+            metadata.pop("board_points_reference", None)
+        if overrides:
+            metadata["mask_overrides_reference"] = overrides
+        else:
+            metadata.pop("mask_overrides_reference", None)
+        data["projects"].setdefault(project, {})[ref_kind] = metadata
+        self._write(data)
+        return True
 
     def remove(self, project_name: str, kind: str) -> bool:
         project = normalizar_nome_projeto_display(project_name)
@@ -634,14 +717,14 @@ class DisplayProjectConfigPresenceWindow(
         self._project_presence_store = DisplayProjectPresenceReferenceStore(
             self.repository
         )
-        try:
-            width = 820
-            height = min(860, max(760, int(self.root.winfo_screenheight()) - 50))
-            x = self.root.winfo_rootx() + max(0, (self.root.winfo_width() - width) // 2)
-            y = max(0, (int(self.root.winfo_screenheight()) - height) // 2)
-            self.window.geometry(f"{width}x{height}+{x}+{y}")
-        except Exception:
-            pass
+        fit_f3_toplevel(
+            self.window,
+            self.root,
+            preferred_width=820,
+            preferred_height=820,
+            min_width=760,
+            min_height=620,
+        )
         self._install_project_presence_panel()
         self._update_project_presence_detail()
 
@@ -722,6 +805,12 @@ class DisplayProjectConfigPresenceWindow(
                 lambda k=kind: self.remove_project_presence_reference(k),
                 danger=True,
             ).pack(side=tk.LEFT)
+            if kind == DISPLAY_PROJECT_REFERENCE_BOARD_OFF:
+                self._button(
+                    slot,
+                    "Desenhar placa / máscaras",
+                    self.edit_board_off_geometry,
+                ).pack(fill=tk.X, padx=6, pady=(0, 6))
             self._project_presence_canvases[kind] = canvas
             self._project_presence_status[kind] = status
 
@@ -776,6 +865,153 @@ class DisplayProjectConfigPresenceWindow(
                 ),
                 fg="#86EFAC",
             )
+
+    def edit_board_off_geometry(self) -> None:
+        store = self._project_presence_store
+        project_name = self._selected_name()
+        if store is None or not project_name:
+            return
+        metadata = store.get(
+            project_name,
+            DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+        )
+        if not isinstance(metadata, dict):
+            messagebox.showwarning(
+                "Referência necessária",
+                "Capture primeiro a PLACA DESLIGADA NO SUPORTE.",
+                parent=self.window,
+            )
+            return
+        project = self.repository.carregar_projeto(project_name)
+        resolution = normalizar_resolucao_display(
+            (project or {}).get("master_resolution")
+        )
+        if project is None or resolution is None:
+            return
+        path = Path(str(metadata.get("image_path") or ""))
+        image = cv2.imread(str(path), cv2.IMREAD_COLOR) if path.exists() else None
+        if not _valid_frame(image):
+            messagebox.showwarning(
+                "Imagem indisponível",
+                "A foto da placa desligada não pôde ser carregada.",
+                parent=self.window,
+            )
+            return
+
+        try:
+            from src.platform.display_f3_object_tracking import (
+                F3TrackingConfigStore,
+                canonical_board_points,
+            )
+            board_default = canonical_board_points(
+                project,
+                F3TrackingConfigStore(self.repository),
+            )
+        except Exception:
+            board_default = []
+
+        board = metadata.get("board_points_reference") or board_default
+        overrides = metadata.get("mask_overrides_reference", {})
+        angle = 0
+        try:
+            from src.platform.display_visual_rotation import (
+                obter_rotacao_visual_do_frame_provider,
+                preparar_frame_visual_display,
+                preparar_mascara_visual_display,
+                preparar_pontos_visuais_display,
+                restaurar_mascara_original_display,
+                restaurar_pontos_originais_display,
+            )
+            angle = obter_rotacao_visual_do_frame_provider(self.frame_provider)
+            visual_image = preparar_frame_visual_display(image, angle)
+            visual_resolution = (
+                (resolution[1], resolution[0])
+                if int(angle) in (90, 270)
+                else resolution
+            )
+            visual_masks = [
+                preparar_mascara_visual_display(
+                    (overrides or {}).get(str(mask.get("id") or ""), mask),
+                    resolution[0],
+                    resolution[1],
+                    angle,
+                )
+                for mask in project.get("masks", [])
+                if isinstance(mask, dict)
+            ]
+            visual_board = preparar_pontos_visuais_display(
+                board,
+                resolution[0],
+                resolution[1],
+                angle,
+            )
+        except Exception:
+            visual_image = image
+            visual_resolution = resolution
+            visual_masks = list(project.get("masks", []) or [])
+            visual_board = board
+
+        def save_geometry(board_points, masks) -> None:
+            try:
+                from src.platform.display_visual_rotation import (
+                    restaurar_mascara_original_display,
+                    restaurar_pontos_originais_display,
+                )
+                original_board = restaurar_pontos_originais_display(
+                    board_points,
+                    resolution[0],
+                    resolution[1],
+                    angle,
+                )
+                original_masks = [
+                    restaurar_mascara_original_display(
+                        mask,
+                        resolution[0],
+                        resolution[1],
+                        angle,
+                    )
+                    for mask in (masks or [])
+                    if isinstance(mask, dict)
+                ]
+            except Exception:
+                original_board = board_points
+                original_masks = masks
+            if store.save_geometry(
+                project_name,
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                original_board,
+                original_masks,
+            ):
+                self._update_project_presence_detail()
+                self._notify_change()
+
+        import src.platform.display_check_editor as check_editor_module
+        dummy_states = {
+            str(mask.get("id") or ""): DISPLAY_CHECK_STATE_IGNORE
+            for mask in visual_masks
+            if isinstance(mask, dict)
+        }
+        check_editor_module.DisplayCheckMaskEditorWindow(
+            root=self.root,
+            project_name=project_name,
+            check={
+                "name": "PLACA DESLIGADA NO SUPORTE",
+                "mask_states": dummy_states,
+            },
+            master_resolution=visual_resolution,
+            masks=visual_masks,
+            frame=visual_image,
+            on_save=None,
+            board_points=visual_board,
+            mask_overrides={
+                str(mask.get("id") or ""): mask
+                for mask in visual_masks
+                if isinstance(mask, dict)
+            },
+            on_save_geometry=save_geometry,
+            geometry_only=True,
+            geometry_title="PLACA DESLIGADA NO SUPORTE • GEOMETRIA",
+        )
 
     def capture_project_presence_reference(self, kind: str) -> None:
         store = self._project_presence_store
