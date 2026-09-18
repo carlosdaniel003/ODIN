@@ -1179,44 +1179,171 @@ class F3OrientationGeometryEditor:
                 return tuple(points[index])
         return None
 
-    def _draw_magnifier(self) -> None:
+    def _magnifier_target(self):
+        target = self.selected
         center = self._selected_center()
-        if center is None or self._last_decorated is None:
+        radius = None
+        title = "CURSOR"
+
+        if isinstance(target, tuple) and target and center is not None:
+            if target[0] == "board_vertex":
+                title = f"PLACA • PONTO {int(target[1]) + 1}"
+            elif target[0] == "mask_vertex":
+                title = (
+                    f"{str(target[1])} • PONTO {int(target[2]) + 1}"
+                )
+            elif target[0] == "mask":
+                mask = self._mask_by_id(str(target[1]))
+                title = str(target[1])
+                if (
+                    mask is not None
+                    and str(mask.get("type") or "").lower() == "circle"
+                ):
+                    radius = max(1.0, float(mask.get("radius", 1)))
+                    title = f"CÍRCULO {str(target[1])}"
+            return center, radius, title
+
+        cursor = self._precision_cursor
+        if isinstance(cursor, tuple) and len(cursor) >= 2:
+            return (
+                (float(cursor[0]), float(cursor[1])),
+                None,
+                "CURSOR",
+            )
+        return None, None, ""
+
+    def _draw_magnifier(self) -> None:
+        center, radius, title = self._magnifier_target()
+        if center is None or not _valid_frame(self.image):
+            try:
+                self.canvas.delete("f3_tracking_magnifier")
+            except Exception:
+                pass
             return
+
         cx, cy = int(round(center[0])), int(round(center[1]))
-        half = 24
+        half = 22
+        if radius is not None:
+            half = max(half, min(48, int(math.ceil(radius * 1.45))))
         x1 = max(0, cx - half)
         y1 = max(0, cy - half)
         x2 = min(self.width, cx + half + 1)
         y2 = min(self.height, cy + half + 1)
         if x2 <= x1 or y2 <= y1:
             return
-        crop = self._last_decorated[y1:y2, x1:x2]
+
+        crop = self.image[y1:y2, x1:x2].copy()
         if not _valid_frame(crop):
             return
+        size = int(F3_EDITOR_MAGNIFIER_SIZE)
         zoom = cv2.resize(
             crop,
-            (F3_EDITOR_MAGNIFIER_SIZE, F3_EDITOR_MAGNIFIER_SIZE),
+            (size, size),
             interpolation=cv2.INTER_NEAREST,
         )
-        self._magnifier_photo = photo_from_bgr(
-            zoom,
-            F3_EDITOR_MAGNIFIER_SIZE,
-            F3_EDITOR_MAGNIFIER_SIZE,
-        )
+        scale_x = size / max(1.0, float(x2 - x1))
+        scale_y = size / max(1.0, float(y2 - y1))
+        zx = int(round((float(center[0]) - x1) * scale_x))
+        zy = int(round((float(center[1]) - y1) * scale_y))
+        zx = max(0, min(size - 1, zx))
+        zy = max(0, min(size - 1, zy))
+
+        if radius is not None:
+            zr = max(2, int(round(radius * (scale_x + scale_y) / 2.0)))
+            overlay = zoom.copy()
+            cv2.circle(
+                overlay,
+                (zx, zy),
+                zr,
+                (250, 204, 21),
+                3,
+                cv2.LINE_AA,
+            )
+            zoom = cv2.addWeighted(zoom, 0.45, overlay, 0.55, 0.0)
+            cv2.circle(
+                zoom,
+                (zx, zy),
+                4,
+                (248, 189, 56),
+                -1,
+                cv2.LINE_AA,
+            )
+            detail = (
+                f"PRECISÃO • {title} • X {center[0]:.1f} "
+                f"Y {center[1]:.1f} R {radius:.1f}"
+            )
+        else:
+            cv2.line(
+                zoom,
+                (0, zy),
+                (size - 1, zy),
+                (94, 234, 212),
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.line(
+                zoom,
+                (zx, 0),
+                (zx, size - 1),
+                (94, 234, 212),
+                1,
+                cv2.LINE_AA,
+            )
+            cv2.circle(
+                zoom,
+                (zx, zy),
+                6,
+                (0, 214, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            detail = (
+                f"PRECISÃO • {title} • X {center[0]:.1f} "
+                f"Y {center[1]:.1f}"
+            )
+
+        self._magnifier_photo = photo_from_bgr(zoom, size, size)
         if self._magnifier_photo is None:
             return
-        cw = int(self.canvas.winfo_width())
-        x = max(10, cw - F3_EDITOR_MAGNIFIER_SIZE - 22)
-        y = 18
+
+        cw = max(1, int(self.canvas.winfo_width()))
+        ch = max(1, int(self.canvas.winfo_height()))
+        x = max(14, cw - size - 24)
+        y = 42
+
+        # Se o cursor estiver exatamente sobre a lupa, mova-a para o outro lado
+        # para que o ponto de precisão nunca fique escondido.
+        cursor = self._precision_cursor
+        if isinstance(cursor, tuple) and len(cursor) >= 4:
+            canvas_x = float(cursor[2])
+            canvas_y = float(cursor[3])
+            if (
+                x - 18 <= canvas_x <= x + size + 18
+                and y - 34 <= canvas_y <= y + size + 20
+            ):
+                x = 18
+
+        if y + size + 36 > ch:
+            y = max(34, ch - size - 36)
+
+        self.canvas.delete("f3_tracking_magnifier")
         self.canvas.create_rectangle(
-            x - 6,
-            y - 6,
-            x + F3_EDITOR_MAGNIFIER_SIZE + 6,
-            y + F3_EDITOR_MAGNIFIER_SIZE + 26,
+            x - 8,
+            y - 28,
+            x + size + 8,
+            y + size + 8,
             fill="#020617",
             outline="#38BDF8",
             width=2,
+            tags=("f3_tracking_magnifier",),
+        )
+        self.canvas.create_text(
+            x,
+            y - 15,
+            text=detail,
+            fill="#E2E8F0",
+            font=("Segoe UI", 7, "bold"),
+            anchor="w",
             tags=("f3_tracking_magnifier",),
         )
         self.canvas.create_image(
@@ -1226,15 +1353,22 @@ class F3OrientationGeometryEditor:
             anchor="nw",
             tags=("f3_tracking_magnifier",),
         )
+        self.canvas.tag_raise("f3_tracking_magnifier")
+
+    def _draw_zoom_badge(self) -> None:
+        self.canvas.delete("f3_tracking_zoom_badge")
+        if float(self.view_zoom) <= 1.001:
+            return
         self.canvas.create_text(
-            x,
-            y + F3_EDITOR_MAGNIFIER_SIZE + 14,
-            text=f"PRECISÃO • X {center[0]:.1f} • Y {center[1]:.1f}",
+            14,
+            14,
+            text=f"ZOOM {float(self.view_zoom):.2f}x • Ctrl + roda",
             fill="#E2E8F0",
-            font=("Segoe UI", 7, "bold"),
-            anchor="w",
-            tags=("f3_tracking_magnifier",),
+            font=("Segoe UI", 8, "bold"),
+            anchor="nw",
+            tags=("f3_tracking_zoom_badge",),
         )
+        self.canvas.tag_raise("f3_tracking_zoom_badge")
 
     def render(self) -> None:
         self._render_after = None
@@ -1255,23 +1389,31 @@ class F3OrientationGeometryEditor:
             selected_mask_id=selected_id,
         )
         self._last_decorated = decorated
-        self._view_rect = self._viewport()
-        x1, y1, x2, y2 = self._view_rect
-        ix1, iy1 = int(math.floor(x1)), int(math.floor(y1))
-        ix2, iy2 = int(math.ceil(x2)), int(math.ceil(y2))
-        crop = decorated[iy1:iy2, ix1:ix2]
-        if not _valid_frame(crop):
-            return
+
         cw = max(120, int(self.canvas.winfo_width()))
         ch = max(120, int(self.canvas.winfo_height()))
-        resized = cv2.resize(crop, (cw, ch), interpolation=cv2.INTER_LINEAR)
-        self._photo = photo_from_bgr(resized, cw, ch)
+        scale, tx, ty = self._view_transform()
+        affine = np.asarray(
+            [[scale, 0.0, tx], [0.0, scale, ty]],
+            dtype=np.float32,
+        )
+        display = cv2.warpAffine(
+            decorated,
+            affine,
+            (cw, ch),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(2, 6, 23),
+        )
+        self._photo = photo_from_bgr(display, cw, ch)
         if self._photo is None:
             return
+
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
         self._draw_handles()
         self._draw_magnifier()
+        self._draw_zoom_badge()
         self.status.configure(
             text=(
                 f"Zoom {self.view_zoom * 100:.0f}% • "
