@@ -17,6 +17,9 @@ import src.platform.display_f3_exact_check_template as exact_template
 import src.platform.display_f3_same_mask_reference_fix as same_mask
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
 import src.platform.display_live_roi_overlay as live_overlay
+import src.platform.display_check_presence_reference as check_presence
+import src.platform.display_f3_reference_geometry_editor as reference_geometry_editor
+import src.platform.display_visual_reference_status as visual_reference_status
 from src.platform.display_project_repository import DisplayProjectRepository
 from src.platform.display_visual_reference_status import (
     DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
@@ -215,6 +218,34 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("REDESENHAR PLACA", source)
         self.assertIn("geometry_draw_board_points", source)
         self.assertIn("_finish_redraw_board_geometry", source)
+
+    def test_board_off_uses_geometry_only_rotation_style_editor(self):
+        source = inspect.getsource(
+            visual_reference_status.DisplayProjectConfigPresenceWindow.edit_board_off_geometry
+        )
+        self.assertIn("F3ReferenceGeometryEditor", source)
+        self.assertNotIn("DisplayCheckMaskEditorWindow", source)
+        self.assertNotIn("mask_states", source)
+
+        editor_source = inspect.getsource(
+            reference_geometry_editor.F3ReferenceGeometryEditor
+        )
+        self.assertIn("F3OrientationGeometryEditor", editor_source)
+        self.assertIn("REDESENHAR PLACA", editor_source)
+        self.assertNotIn("ACESO", editor_source)
+        self.assertNotIn("APAGADO", editor_source)
+        self.assertNotIn("IGNORAR", editor_source)
+
+    def test_check_manager_has_internal_scroll_for_lower_actions(self):
+        source = Path(check_editor.__file__).read_text(encoding="utf-8")
+        self.assertIn("_check_detail_canvas", source)
+        self.assertIn("detail_scrollbar", source)
+        self.assertIn("scrollregion", source)
+
+        presence_source = inspect.getsource(
+            check_presence.DisplayCheckManagerPresenceWindow._install_presence_panel
+        )
+        self.assertIn("CAPTURAR FOTO DA CÂMERA", presence_source)
 
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
