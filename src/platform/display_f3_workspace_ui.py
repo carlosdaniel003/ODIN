@@ -7,6 +7,7 @@ Tk disputem a geometria da mesma Toplevel durante a montagem e mantém um único
 pedido de maximização depois que os widgets já foram criados.
 """
 
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_check_editor import (
     DisplayCheckManagerWindow,
     DisplayCheckMaskEditorWindow,
@@ -42,44 +43,34 @@ def _screen_size(window) -> tuple[int, int]:
 
 
 def maximizar_janela_workspace_f3(window) -> str:
-    """Maximiza com barra de título sem forçar um flush síncrono do Tk."""
+    """Usa workspace grande, mas preserva barra de título e faixa inferior."""
     try:
         window.resizable(True, True)
     except Exception:
         pass
-
     screen_width, screen_height = _screen_size(window)
-    usable_height_hint = max(480, screen_height - F3_FALLBACK_SYSTEM_RESERVED_PX)
     try:
         window.minsize(
-            min(F3_DESKTOP_MIN_WIDTH, max(640, screen_width)),
-            min(F3_DESKTOP_MIN_HEIGHT, usable_height_hint),
+            min(F3_DESKTOP_MIN_WIDTH, max(640, screen_width - 64)),
+            min(
+                F3_DESKTOP_MIN_HEIGHT,
+                max(480, screen_height - F3_FALLBACK_SYSTEM_RESERVED_PX - 48),
+            ),
         )
     except Exception:
         pass
-
-    # update_idletasks() não é usado aqui. Em uma janela ainda sendo montada ele
-    # reentra no layout/paint do Tk e pode expor frames parcialmente renderizados.
-    try:
-        window.state("zoomed")
-        return "state_zoomed"
-    except Exception:
-        pass
-    try:
-        window.attributes("-zoomed", True)
-        return "attribute_zoomed"
-    except Exception:
-        pass
-
-    # Último fallback: nunca usa a altura física inteira da tela. A geometria
-    # antiga ia até screenheight e podia deixar a última ação atrás da taskbar.
-    try:
-        width = max(640, screen_width)
-        height = max(480, screen_height - F3_FALLBACK_SYSTEM_RESERVED_PX)
-        window.geometry(f"{width}x{height}+0+0")
-        return "screen_geometry_safe"
-    except Exception:
-        return "unavailable"
+    fit_f3_toplevel(
+        window,
+        getattr(window, "master", None),
+        width_ratio=0.96,
+        height_ratio=0.88,
+        min_width=min(F3_DESKTOP_MIN_WIDTH, max(640, screen_width - 64)),
+        min_height=min(
+            F3_DESKTOP_MIN_HEIGHT,
+            max(480, screen_height - F3_FALLBACK_SYSTEM_RESERVED_PX - 48),
+        ),
+    )
+    return "safe_workspace_geometry"
 
 
 def _pad_pair(value) -> tuple[int, int]:
