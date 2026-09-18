@@ -132,6 +132,12 @@ from src.platform.display_f3_rearm_live_refresh_fix import (  # noqa: E402
 from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
     instalar_consistencia_status_live_display_f3,
 )
+from src.platform.display_f3_object_tracking import (  # noqa: E402
+    instalar_runtime_rastreamento_objetos_display_f3,
+)
+from src.platform.display_f3_tracking_orientation_ui import (  # noqa: E402
+    instalar_ui_rastreamento_objetos_display_f3,
+)
 
 
 instalar_editor_contorno_placa_f2()
@@ -212,6 +218,12 @@ def main() -> None:
     # pipeline histórico de status, a UI reaproveita o estado/energia já calculados
     # no mesmo frame e não permanece em placeholders antigos.
     instalar_consistencia_status_live_display_f3()
+    # Rastreamento do Display F3 é instalado literalmente por último. Ele possui
+    # flag, armazenamento, referências angulares, editor e tracker próprios.
+    # Desligado, delega integralmente para o F3 atual; o F2 não é consultado nem
+    # modificado por estas duas camadas.
+    instalar_runtime_rastreamento_objetos_display_f3()
+    instalar_ui_rastreamento_objetos_display_f3()
     root.mainloop()
 
 
