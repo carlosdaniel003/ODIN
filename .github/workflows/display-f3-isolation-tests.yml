@@ -87,7 +87,8 @@ jobs:
             tests/test_display_f3_physical_learning_policy.py \
             tests/test_display_f3_exact_check_template.py \
             tests/test_display_f3_object_tracking_isolation.py \
-            tests/test_display_f3_tracking_ui_contract.py
+            tests/test_display_f3_tracking_ui_contract.py \
+            tests/test_display_f3_geometry_adjustments.py
 
       - name: Run ROI geometry parity tests
         run: |
@@ -103,6 +104,7 @@ jobs:
           python -m unittest \
             tests.test_display_f3_object_tracking_isolation \
             tests.test_display_f3_tracking_ui_contract \
+            tests.test_display_f3_geometry_adjustments \
             -v
 
       - name: Run F3 isolation and runtime tests
