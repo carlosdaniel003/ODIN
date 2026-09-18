@@ -78,7 +78,7 @@ class DisplayCheckManagerWindow:
         self.window = tk.Toplevel(root)
         self.window.title(f"ODIN • CHECKS • {self.project_name}")
         self.window.configure(bg=self.BG)
-        self.window.resizable(False, False)
+        self.window.resizable(True, True)
         self.window.transient(root)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
 
