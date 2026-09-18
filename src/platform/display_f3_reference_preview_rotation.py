@@ -24,6 +24,7 @@ from src.platform.display_visual_rotation import (
     obter_rotacao_visual_do_frame_provider,
     preparar_check_visual_display,
     preparar_frame_visual_display,
+    preparar_pontos_visuais_display,
 )
 from src.ui.main_window_parts.image.rotacao_visual_principal import (
     normalizar_rotacao_visual,
@@ -112,15 +113,29 @@ def _metadata_com_mascaras_do_projeto(
         return result
 
     resolution = normalizar_resolucao_display(project.get("master_resolution"))
-    masks = [
-        deepcopy(mask)
-        for mask in (project.get("masks", []) or [])
-        if isinstance(mask, dict) and mask.get("id") is not None
-    ]
+    overrides = (
+        result.get("mask_overrides_reference", {})
+        if isinstance(result.get("mask_overrides_reference"), dict)
+        else {}
+    )
+    masks = []
+    for mask in (project.get("masks", []) or []):
+        if not isinstance(mask, dict) or mask.get("id") is None:
+            continue
+        mask_id = str(mask.get("id"))
+        override = overrides.get(mask_id)
+        masks.append(
+            deepcopy(override)
+            if isinstance(override, dict)
+            else deepcopy(mask)
+        )
     if resolution is not None:
         result["_display_master_resolution"] = tuple(resolution)
     result["_display_mask_regions"] = masks
     result["mask_region_count"] = len(masks)
+    board = result.get("board_points_reference", [])
+    if isinstance(board, (list, tuple)) and len(board) >= 3:
+        result["_display_board_points_reference"] = deepcopy(board)
     result["comparison_mode"] = roi_module.DISPLAY_REFERENCE_MASK_COMPARE_MODE
     return result
 
@@ -175,6 +190,8 @@ def preparar_preview_referencia_com_mascaras_f3(
     )
     angle = normalizar_rotacao_visual(rotacao)
 
+    board_original = enriched.get("_display_board_points_reference", [])
+    visual_board = []
     if resolution is not None and masks:
         image_visual, visual_resolution, visual_masks = preparar_check_visual_display(
             image_raw,
@@ -186,10 +203,22 @@ def preparar_preview_referencia_com_mascaras_f3(
         visual_metadata["_display_master_resolution"] = tuple(visual_resolution)
         visual_metadata["_display_mask_regions"] = visual_masks
         visual_metadata["mask_region_count"] = len(visual_masks)
+        if isinstance(board_original, (list, tuple)) and len(board_original) >= 3:
+            visual_board = preparar_pontos_visuais_display(
+                board_original,
+                int(resolution[0]),
+                int(resolution[1]),
+                angle,
+            )
     else:
         image_visual = preparar_preview_referencia_visual_f3(image_raw, angle)
         visual_metadata = enriched
         visual_masks = []
+        visual_resolution = (
+            (image_visual.shape[1], image_visual.shape[0])
+            if image_visual is not None
+            else (1, 1)
+        )
 
     preview = _fit_preview(image_visual, target_width, target_height)
     if preview is None or getattr(preview, "size", 0) == 0:
@@ -200,6 +229,33 @@ def preparar_preview_referencia_com_mascaras_f3(
             preview,
             visual_metadata,
         )
+
+    # O contorno da placa é desenhado DEPOIS da redução da miniatura para não
+    # desaparecer por subpixel, exatamente como os slots 90/180/270.
+    if visual_board and preview is not None and getattr(preview, "size", 0):
+        try:
+            source_w = max(1.0, float(visual_resolution[0]))
+            source_h = max(1.0, float(visual_resolution[1]))
+            ph, pw = preview.shape[:2]
+            sx = pw / source_w
+            sy = ph / source_h
+            polygon = [
+                [int(round(float(point[0]) * sx)), int(round(float(point[1]) * sy))]
+                for point in visual_board
+                if isinstance(point, (list, tuple)) and len(point) >= 2
+            ]
+            if len(polygon) >= 3:
+                import numpy as np
+                cv2.polylines(
+                    preview,
+                    [np.asarray(polygon, dtype=np.int32)],
+                    True,
+                    (255, 214, 56),
+                    2,
+                    cv2.LINE_AA,
+                )
+        except Exception:
+            pass
     return preview, len(visual_masks)
 
 
@@ -309,6 +365,24 @@ def _install_check_reference_preview() -> None:
             return
 
         metadata = store.get(self.project_name, check_id)
+        if metadata is not None:
+            metadata = deepcopy(metadata)
+            try:
+                check = self.repository.carregar_check(
+                    self.project_name,
+                    check_id,
+                )
+            except Exception:
+                check = None
+            if isinstance(check, dict):
+                if check.get("board_points_reference"):
+                    metadata["board_points_reference"] = deepcopy(
+                        check.get("board_points_reference")
+                    )
+                if isinstance(check.get("mask_overrides_reference"), dict):
+                    metadata["mask_overrides_reference"] = deepcopy(
+                        check.get("mask_overrides_reference")
+                    )
         if metadata is None:
             status.configure(text="Nenhuma referência visual anexada.", fg=self.MUTED)
             canvas.create_text(
