@@ -25,6 +25,7 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
+    mascaras_geometria_check_display,
     normalizar_resolucao_display,
 )
 from src.platform.display_visual_reference_status import (
@@ -455,7 +456,7 @@ class F3ExactCheckTemplateAnalyzer:
         if master_resolution is None:
             return self._not_ready("resolucao_mestra_ausente")
 
-        masks = list(project.get("masks", []) or [])
+        masks = mascaras_geometria_check_display(project, check)
         states = (
             check.get("mask_states", {})
             if isinstance(check.get("mask_states"), dict)
