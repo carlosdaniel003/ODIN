@@ -20,6 +20,7 @@ import src.platform.display_live_roi_overlay as live_overlay
 import src.platform.display_check_presence_reference as check_presence
 import src.platform.display_f3_reference_geometry_editor as reference_geometry_editor
 import src.platform.display_f3_mask_editor_reference as mask_editor_reference
+import src.platform.display_project_config as project_config
 import src.platform.display_visual_reference_status as visual_reference_status
 from src.platform.display_project_repository import DisplayProjectRepository
 from src.platform.display_visual_reference_status import (
@@ -272,22 +273,32 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             self.assertEqual((480, 640), loaded.shape[:2])
             self.assertGreater(int(loaded[120, 150].mean()), 200)
 
-    def test_mask_editor_draws_board_and_uses_saved_static_background(self):
-        source = Path(check_editor.__file__).parent / "display_mask_editor.py"
-        editor_source = source.read_text(encoding="utf-8")
-        self.assertIn("⬡ Desenhar placa", editor_source)
-        self.assertIn("board_points", editor_source)
-        self.assertIn("_draw_board", editor_source)
-        self.assertIn("FUNDO ESTÁTICO DA CALIBRAÇÃO", editor_source)
+    def test_mask_settings_show_preview_capture_remove_and_shared_draw_editor(self):
+        config_source = Path(project_config.__file__).read_text(encoding="utf-8")
+        self.assertIn("mask_reference_preview", config_source)
+        self.assertIn("Tirar foto com a câmera", config_source)
+        self.assertIn("Remover foto", config_source)
+        self.assertIn("Desenhar placa e máscaras", config_source)
+        self.assertIn("capture_masks_reference_photo", config_source)
+        self.assertIn("remove_masks_reference_photo", config_source)
+        self.assertIn("draw_masks_geometry", config_source)
+        self.assertIn("F3ReferenceGeometryEditor", config_source)
+        self.assertIn("allow_mask_creation=True", config_source)
+        self.assertIn("canonical_board_points", config_source)
+
+        shared_editor = inspect.getsource(
+            reference_geometry_editor.F3ReferenceGeometryEditor
+        )
+        self.assertIn("+ SEGMENTO", shared_editor)
+        self.assertIn("+ CÍRCULO", shared_editor)
+        self.assertIn("+ POR PONTOS", shared_editor)
+        self.assertIn("REDESENHAR PLACA", shared_editor)
 
         rotation_source = inspect.getsource(
             visual_rotation.instalar_rotacao_visual_editor_mascaras_display
         )
-        self.assertIn("DisplayMaskEditorReferenceStore", rotation_source)
-        self.assertIn("reference_store.load_frame(name)", rotation_source)
-        self.assertIn("reference_store.save_frame", rotation_source)
-        self.assertIn("canonical_board_points", rotation_source)
-        self.assertIn("on_save_board=save_board", rotation_source)
+        self.assertIn("self.draw_masks_geometry()", rotation_source)
+        self.assertNotIn("DisplayMaskEditorWindow(", rotation_source)
 
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
