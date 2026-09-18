@@ -683,12 +683,14 @@ def install_display_reference_learning() -> None:
             primary=True,
         )
         self.reference_button.pack(anchor="w", padx=12, pady=(0, 9))
-        try:
-            geometry = self.window.geometry()
-            if "x" in geometry:
-                self.window.geometry("820x770")
-        except Exception:
-            pass
+        fit_f3_toplevel(
+            self.window,
+            getattr(self, "root", None),
+            preferred_width=900,
+            preferred_height=760,
+            min_width=760,
+            min_height=560,
+        )
         update_reference_summary(self)
 
     def load(self):
