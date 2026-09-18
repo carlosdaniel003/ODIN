@@ -266,6 +266,8 @@ def aplicar_workspace_checks_display_f3(owner) -> None:
     left = getattr(list_frame, "master", None)
     body = getattr(left, "master", None)
     right = getattr(check_title, "master", None)
+    right_shell = getattr(owner, "_check_detail_shell", None) or right
+    right_canvas = getattr(owner, "_check_detail_canvas", None)
 
     if body is not None:
         try:
@@ -279,10 +281,14 @@ def aplicar_workspace_checks_display_f3(owner) -> None:
             left.pack_propagate(False)
         except Exception:
             pass
-    if right is not None:
+    if right_shell is not None:
         try:
-            right.pack_configure(side="right", fill="both", expand=True, padx=0)
-            right.pack_propagate(True)
+            right_shell.pack_configure(
+                side="right",
+                fill="both",
+                expand=True,
+                padx=0,
+            )
         except Exception:
             pass
 
@@ -290,12 +296,19 @@ def aplicar_workspace_checks_display_f3(owner) -> None:
             status = getattr(owner, "status", None)
             if status is not None:
                 try:
-                    status.configure(wraplength=max(360, int(event.width) - 54))
+                    status.configure(wraplength=max(280, int(event.width) - 54))
+                except Exception:
+                    pass
+            canvas = getattr(owner, "_check_detail_canvas", None)
+            if canvas is not None:
+                try:
+                    canvas.configure(scrollregion=canvas.bbox("all"))
                 except Exception:
                     pass
 
         try:
-            right.bind("<Configure>", fit_detail, add="+")
+            target = right_canvas if right_canvas is not None else right_shell
+            target.bind("<Configure>", fit_detail, add="+")
         except Exception:
             pass
 
