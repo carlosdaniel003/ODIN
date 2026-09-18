@@ -91,6 +91,62 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 self.assertTrue(np.all(rotated[:, 1] >= 0.0))
                 self.assertTrue(np.all(rotated[:, 1] < 480.0))
 
+    def test_orientation_mask_override_returns_to_canonical_coordinates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            project = {
+                "name": "DISPLAY TESTE",
+                "master_resolution": {"width": 640, "height": 480},
+                "masks": [
+                    {
+                        "id": "MASK_001",
+                        "type": "circle",
+                        "cx": 100,
+                        "cy": 100,
+                        "radius": 10,
+                    }
+                ],
+                "checks": [],
+            }
+            self.assertTrue(
+                store.save_orientation(
+                    "DISPLAY TESTE",
+                    tracking.F3_ORIENTATION_90,
+                    {
+                        "image_path": str(Path(directory) / "orientation_90.png"),
+                        "width": 640,
+                        "height": 480,
+                        "canonical_to_reference": [
+                            [1.0, 0.0, 50.0],
+                            [0.0, 1.0, 20.0],
+                        ],
+                        "calibrated": True,
+                        "mask_overrides_reference": {
+                            "MASK_001": {
+                                "id": "MASK_001",
+                                "type": "circle",
+                                "cx": 155.0,
+                                "cy": 125.0,
+                                "radius": 12.0,
+                            }
+                        },
+                    },
+                )
+            )
+            runtime = SimpleNamespace(store=store)
+            corrected = tracking._canonical_masks_for_orientation(
+                runtime,
+                project,
+                tracking.F3_ORIENTATION_90,
+            )
+
+            self.assertIsNotNone(corrected)
+            self.assertEqual(1, len(corrected))
+            self.assertEqual("MASK_001", corrected[0]["id"])
+            self.assertAlmostEqual(105.0, float(corrected[0]["cx"]), places=3)
+            self.assertAlmostEqual(105.0, float(corrected[0]["cy"]), places=3)
+            self.assertAlmostEqual(12.0, float(corrected[0]["radius"]), places=3)
+
     def test_tracking_mask_excludes_display_segments(self):
         board = [[80, 80], [560, 80], [560, 400], [80, 400]]
         masks = [
