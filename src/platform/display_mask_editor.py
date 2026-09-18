@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import math
 import tkinter as tk
 from collections.abc import Callable
 from copy import deepcopy
@@ -51,6 +52,8 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
         masks,
         frame=None,
         on_save: Callable[[list[dict]], None] | None = None,
+        board_points=None,
+        on_save_board: Callable[[list[list[float]]], None] | None = None,
     ):
         res = normalizar_resolucao_display(master_resolution)
         if res is None:
@@ -58,6 +61,7 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
         self.root = root
         self.master_width, self.master_height = res
         self.on_save = on_save
+        self.on_save_board = on_save_board
         self.masks = [
             converter_mascara_legada_para_editor(m)
             for m in normalizar_mascaras_display(deepcopy(masks or []))
@@ -73,6 +77,22 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
                 if tuple(frame.shape[:2]) != (self.master_height, self.master_width)
                 else frame.copy()
             )
+
+        self.board_points = []
+        for point in (board_points or []):
+            if isinstance(point, (list, tuple)) and len(point) >= 2:
+                try:
+                    self.board_points.append(
+                        [float(point[0]), float(point[1])]
+                    )
+                except (TypeError, ValueError):
+                    pass
+        if len(self.board_points) < 3:
+            self.board_points = self._default_board_points()
+        self.board_draw_mode = False
+        self.board_draw_points: list[list[float]] = []
+        self.board_selected_index = None
+        self.board_drag_index = None
         self.tool = TOOL_SEGMENT
         self.selected_ids = set()
         self.mode = None
@@ -158,8 +178,8 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
         tk.Label(
             text,
             text=(
-                "Mesma geometria do Selecionar LEDs • Ctrl+scroll zoom • "
-                "botão do meio arrasta • setas movem 1 px"
+                "FUNDO ESTÁTICO DA CALIBRAÇÃO • máscaras + contorno da placa • "
+                "Ctrl+scroll zoom • botão do meio arrasta • setas movem 1 px"
             ),
             font=("DejaVu Sans", 8),
             fg="#AAB8C8",
@@ -191,7 +211,7 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
 
         tools = tk.Frame(bar, bg=self.PANEL)
         tools.pack(fill=tk.X, padx=18, pady=(3, 8))
-        for column in range(4):
+        for column in range(5):
             tools.grid_columnconfigure(column, weight=1, uniform="display_mask_tool")
 
         self.tool_buttons = {}
@@ -219,6 +239,26 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
             )
             self.tool_buttons[tool] = button
 
+        self.board_button = tk.Button(
+            tools,
+            text="⬡ Desenhar placa",
+            command=self.start_board_mode,
+            font=("DejaVu Sans", 8, "bold"),
+            relief="flat",
+            padx=10,
+            pady=6,
+            bg="#17314A",
+            fg="#7DD3FC",
+            activebackground="#1E4668",
+            activeforeground="#FFFFFF",
+        )
+        self.board_button.grid(
+            row=0,
+            column=4,
+            sticky="nsew",
+            padx=(2, 0),
+        )
+
     def _bind(self):
         bindings = (
             ("<Configure>", lambda _event: self.redraw()),
@@ -232,15 +272,15 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
             ("<ButtonRelease-2>", self._end_pan),
             ("<Delete>", self._delete_selected),
             ("<BackSpace>", self._delete_selected),
-            ("<Escape>", self._escape),
+            ("<Escape>", self._escape_editor),
             ("<Control-a>", self._select_all),
             ("<Control-A>", self._select_all),
-            ("<Left>", self._move_keyboard),
-            ("<Right>", self._move_keyboard),
-            ("<Up>", self._move_keyboard),
-            ("<Down>", self._move_keyboard),
-            ("<Return>", self._finish_freeform),
-            ("<KP_Enter>", self._finish_freeform),
+            ("<Left>", self._move_keyboard_with_board),
+            ("<Right>", self._move_keyboard_with_board),
+            ("<Up>", self._move_keyboard_with_board),
+            ("<Down>", self._move_keyboard_with_board),
+            ("<Return>", self._finish_active_shape),
+            ("<KP_Enter>", self._finish_active_shape),
         )
         for sequence, callback in bindings:
             self.canvas.bind(sequence, callback)
@@ -256,6 +296,210 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
             min_width=820,
             min_height=560,
         )
+
+    def _default_board_points(self):
+        if not self.masks:
+            return [
+                [0.0, 0.0],
+                [float(self.master_width - 1), 0.0],
+                [float(self.master_width - 1), float(self.master_height - 1)],
+                [0.0, float(self.master_height - 1)],
+            ]
+        boxes = [bbox_mascara_display(mask) for mask in self.masks]
+        x1 = min(box[0] for box in boxes)
+        y1 = min(box[1] for box in boxes)
+        x2 = max(box[2] for box in boxes)
+        y2 = max(box[3] for box in boxes)
+        pad_x = max(18.0, (x2 - x1) * 0.12)
+        pad_y = max(18.0, (y2 - y1) * 0.12)
+        return [
+            [max(0.0, x1 - pad_x), max(0.0, y1 - pad_y)],
+            [min(float(self.master_width - 1), x2 + pad_x), max(0.0, y1 - pad_y)],
+            [min(float(self.master_width - 1), x2 + pad_x), min(float(self.master_height - 1), y2 + pad_y)],
+            [max(0.0, x1 - pad_x), min(float(self.master_height - 1), y2 + pad_y)],
+        ]
+
+    def start_board_mode(self):
+        self.freeform = []
+        self.freeform_mouse = None
+        self.draft_segment = None
+        self.selected_ids = set()
+        self.board_draw_mode = True
+        self.board_draw_points = []
+        self.board_selected_index = None
+        self.board_drag_index = None
+        try:
+            self.board_button.configure(bg="#D6A900", fg="#111318")
+        except Exception:
+            pass
+        self.status.configure(
+            text=(
+                "DESENHAR PLACA • clique ponto a ponto no contorno • "
+                "Enter conclui • Esc cancela"
+            )
+        )
+        self.redraw()
+        self.canvas.focus_set()
+
+    def set_tool(self, tool):
+        self.board_draw_mode = False
+        self.board_draw_points = []
+        self.board_selected_index = None
+        self.board_drag_index = None
+        try:
+            self.board_button.configure(bg="#17314A", fg="#7DD3FC")
+        except Exception:
+            pass
+        return super().set_tool(tool)
+
+    def _nearest_board_vertex(self, canvas_x: float, canvas_y: float):
+        best = None
+        for index, point in enumerate(self.board_points):
+            x, y = self._to_canvas(point[0], point[1])
+            distance = math.hypot(float(canvas_x) - x, float(canvas_y) - y)
+            if distance <= 12.0 and (best is None or distance < best[0]):
+                best = (distance, index)
+        return None if best is None else int(best[1])
+
+    def _press(self, event):
+        point = self._to_master(event.x, event.y)
+        if point is None:
+            return "break"
+        if self.board_draw_mode:
+            self.board_draw_points.append([float(point[0]), float(point[1])])
+            self.redraw()
+            return "break"
+
+        board_index = self._nearest_board_vertex(event.x, event.y)
+        if board_index is not None:
+            self.board_selected_index = board_index
+            self.board_drag_index = board_index
+            self.selected_ids = set()
+            self.redraw()
+            return "break"
+        self.board_selected_index = None
+        self.board_drag_index = None
+        return super()._press(event)
+
+    def _drag(self, event):
+        if self.board_drag_index is not None:
+            point = self._to_master(event.x, event.y)
+            if point is not None and 0 <= self.board_drag_index < len(self.board_points):
+                self.board_points[self.board_drag_index] = [
+                    float(point[0]),
+                    float(point[1]),
+                ]
+                self.redraw()
+            return "break"
+        if self.board_draw_mode:
+            return "break"
+        return super()._drag(event)
+
+    def _release(self, event):
+        if self.board_drag_index is not None:
+            self.board_drag_index = None
+            return "break"
+        if self.board_draw_mode:
+            return "break"
+        return super()._release(event)
+
+    def _finish_active_shape(self, event=None):
+        if self.board_draw_mode:
+            if len(self.board_draw_points) < 3:
+                self.status.configure(
+                    text="DESENHAR PLACA • use pelo menos 3 pontos antes de concluir."
+                )
+                return "break"
+            self.board_points = deepcopy(self.board_draw_points)
+            self.board_draw_points = []
+            self.board_draw_mode = False
+            self.board_selected_index = None
+            try:
+                self.board_button.configure(bg="#17314A", fg="#7DD3FC")
+            except Exception:
+                pass
+            self.redraw()
+            return "break"
+        return super()._finish_freeform(event)
+
+    def _escape_editor(self, event=None):
+        if self.board_draw_mode:
+            self.board_draw_mode = False
+            self.board_draw_points = []
+            try:
+                self.board_button.configure(bg="#17314A", fg="#7DD3FC")
+            except Exception:
+                pass
+            self.redraw()
+            return "break"
+        if self.board_selected_index is not None:
+            self.board_selected_index = None
+            self.redraw()
+            return "break"
+        return super()._escape(event)
+
+    def _move_keyboard_with_board(self, event):
+        if self.board_selected_index is not None:
+            dx = {"Left": -1, "Right": 1}.get(getattr(event, "keysym", ""), 0)
+            dy = {"Up": -1, "Down": 1}.get(getattr(event, "keysym", ""), 0)
+            index = int(self.board_selected_index)
+            if 0 <= index < len(self.board_points):
+                self.board_points[index][0] = max(
+                    0.0,
+                    min(float(self.master_width - 1), self.board_points[index][0] + dx),
+                )
+                self.board_points[index][1] = max(
+                    0.0,
+                    min(float(self.master_height - 1), self.board_points[index][1] + dy),
+                )
+                self.redraw()
+            return "break"
+        return super()._move_keyboard(event)
+
+    def _draw_board(self):
+        if len(self.board_points) >= 3:
+            coords = []
+            for point in self.board_points:
+                coords.extend(self._to_canvas(point[0], point[1]))
+            self.canvas.create_polygon(
+                *coords,
+                fill="",
+                outline="#22D3EE",
+                width=2,
+            )
+            for index, point in enumerate(self.board_points):
+                x, y = self._to_canvas(point[0], point[1])
+                active = index == self.board_selected_index
+                self.canvas.create_oval(
+                    x - 5,
+                    y - 5,
+                    x + 5,
+                    y + 5,
+                    fill="#FBBF24" if active else "#38BDF8",
+                    outline="#020617",
+                    width=1,
+                )
+
+        if self.board_draw_mode and self.board_draw_points:
+            coords = []
+            for point in self.board_draw_points:
+                x, y = self._to_canvas(point[0], point[1])
+                coords.extend((x, y))
+                self.canvas.create_oval(
+                    x - 5,
+                    y - 5,
+                    x + 5,
+                    y + 5,
+                    fill="#FACC15",
+                    outline="#020617",
+                    width=1,
+                )
+            if len(coords) >= 4:
+                self.canvas.create_line(
+                    *coords,
+                    fill="#FACC15",
+                    width=2,
+                )
 
     def _background(self, viewport):
         if self.frame is None:
@@ -437,6 +681,7 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
                 fill="#0B1220",
                 outline="#1E293B",
             )
+        self._draw_board()
         for mask in self.masks:
             self._draw_mask(mask)
         if self.draft_segment:
@@ -446,18 +691,27 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
         self._draw_magnifier()
         self.status.configure(
             text=(
-                f"Projeto Display • {len(self.masks)} máscara(s) • "
-                f"{len(self.selected_ids)} selecionada(s) • "
+                f"Projeto Display • fundo estático • {len(self.board_points)} pontos da placa • "
+                f"{len(self.masks)} máscara(s) • {len(self.selected_ids)} selecionada(s) • "
                 f"Zoom {int(round(self.zoom_factor * 100))}%"
             )
         )
 
     def save(self):
+        if self.board_draw_mode:
+            if len(self.board_draw_points) < 3:
+                self.status.configure(
+                    text="Conclua o contorno da placa com pelo menos 3 pontos antes de salvar."
+                )
+                return
+            self._finish_active_shape()
         if self.freeform:
             self._finish_freeform()
         masks = normalizar_mascaras_display(deepcopy(self.masks))
         if self.on_save:
             self.on_save(masks)
+        if self.on_save_board:
+            self.on_save_board(deepcopy(self.board_points))
         self.close()
 
     def close(self):
