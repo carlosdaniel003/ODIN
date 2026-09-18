@@ -874,7 +874,15 @@ class F3DisplayObjectTracker:
         }
 
     def configure(self, project_name: str | None = None) -> bool:
-        name = normalizar_nome_projeto_display(project_name or self.repository.obter_projeto_ativo())
+        name = normalizar_nome_projeto_display(
+            project_name or self.repository.obter_projeto_ativo()
+        )
+        # O editor/configuração chama reset() sempre que qualquer dado do Projeto
+        # Display muda. Enquanto o projeto é o mesmo e o tracker continua pronto,
+        # não releia JSON, imagens nem calcule descritores em cada frame.
+        if self.ready and self.project == name and self.signature is not None:
+            return True
+
         project = self.repository.carregar_projeto(name)
         if project is None:
             self.reset()
