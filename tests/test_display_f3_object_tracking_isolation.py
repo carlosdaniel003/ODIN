@@ -178,6 +178,17 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertGreater(int(result[140, 140]), 0)
         self.assertEqual(0, int(result[20, 20]))
 
+    def test_tracking_keeps_operator_preview_on_raw_camera(self):
+        source = inspect.getsource(
+            tracking.instalar_runtime_rastreamento_objetos_display_f3
+        )
+        self.assertIn("_display_f3_tracking_raw_preview_frame", source)
+        self.assertIn("base_preview_with_raw_camera", source)
+        self.assertIn(
+            "DisplayProductionF3Mixin._atualizar_preview_display_f3",
+            source,
+        )
+
     def test_disabled_runtime_has_literal_legacy_bypass(self):
         source = inspect.getsource(
             tracking.instalar_runtime_rastreamento_objetos_display_f3
