@@ -1558,11 +1558,20 @@ def _build_tracking_config_class(base_cls):
 
             # A janela já está pronta e responsiva neste ponto. As imagens são
             # decodificadas e desenhadas fora da thread Tk, uma por vez.
+            # O worker não precisa da sequência de CHECKS nem de outros
+            # metadados do projeto. Copiar o projeto inteiro aqui era outro custo
+            # síncrono perceptível em projetos F3 grandes.
+            preview_project = {
+                "name": str(project.get("name") or ""),
+                "master_resolution": deepcopy(project.get("master_resolution")),
+                "masks": deepcopy(project.get("masks", [])),
+                "updated_at": str(project.get("updated_at") or ""),
+            }
             self._schedule_f3_tracking_previews(
                 generation,
                 project_name,
-                deepcopy(project),
-                deepcopy(entries),
+                preview_project,
+                entries,
             )
 
         @staticmethod
