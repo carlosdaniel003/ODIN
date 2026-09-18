@@ -19,6 +19,7 @@ import src.platform.display_f3_preview_clarity_fix as preview_clarity
 import src.platform.display_live_roi_overlay as live_overlay
 import src.platform.display_check_presence_reference as check_presence
 import src.platform.display_f3_reference_geometry_editor as reference_geometry_editor
+import src.platform.display_f3_mask_editor_reference as mask_editor_reference
 import src.platform.display_visual_reference_status as visual_reference_status
 from src.platform.display_project_repository import DisplayProjectRepository
 from src.platform.display_visual_reference_status import (
@@ -246,6 +247,47 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             check_presence.DisplayCheckManagerPresenceWindow._install_presence_panel
         )
         self.assertIn("CAPTURAR FOTO DA CÂMERA", presence_source)
+
+    def test_check_editor_keeps_save_action_in_fixed_footer(self):
+        source = Path(check_editor.__file__).read_text(encoding="utf-8")
+        self.assertIn("footer.pack(side=tk.BOTTOM", source)
+        self.assertIn('text="SALVAR GEOMETRIA" if self.geometry_only else "SALVAR CHECK"', source)
+        self.assertIn("footer_actions", source)
+
+    def test_mask_editor_persists_static_reference_frame(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = self._repository(directory)
+            project_name, _ = self._project(repository)
+            store = mask_editor_reference.DisplayMaskEditorReferenceStore(repository)
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            frame[100:140, 120:180] = 255
+            saved = store.save_frame(
+                project_name,
+                frame,
+                (640, 480),
+            )
+            self.assertIsNotNone(saved)
+            loaded = store.load_frame(project_name)
+            self.assertIsNotNone(loaded)
+            self.assertEqual((480, 640), loaded.shape[:2])
+            self.assertGreater(int(loaded[120, 150].mean()), 200)
+
+    def test_mask_editor_draws_board_and_uses_saved_static_background(self):
+        source = Path(check_editor.__file__).parent / "display_mask_editor.py"
+        editor_source = source.read_text(encoding="utf-8")
+        self.assertIn("⬡ Desenhar placa", editor_source)
+        self.assertIn("board_points", editor_source)
+        self.assertIn("_draw_board", editor_source)
+        self.assertIn("FUNDO ESTÁTICO DA CALIBRAÇÃO", editor_source)
+
+        rotation_source = inspect.getsource(
+            visual_rotation.instalar_rotacao_visual_editor_mascaras_display
+        )
+        self.assertIn("DisplayMaskEditorReferenceStore", rotation_source)
+        self.assertIn("reference_store.load_frame(name)", rotation_source)
+        self.assertIn("reference_store.save_frame", rotation_source)
+        self.assertIn("canonical_board_points", rotation_source)
+        self.assertIn("on_save_board=save_board", rotation_source)
 
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
