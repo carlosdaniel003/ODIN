@@ -12,6 +12,7 @@ import src.platform.display_check_editor as check_editor
 import src.platform.display_f3_tracking_orientation_ui as tracking_ui
 import src.platform.display_f3_workspace_ui as workspace
 import src.platform.display_visual_rotation as visual_rotation
+import src.platform.display_reference_roi_runtime_fix as reference_runtime_fix
 from src.platform.display_project_repository import DisplayProjectRepository
 from src.platform.display_visual_reference_status import (
     DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
@@ -184,6 +185,20 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("_presence_store", checks_source)
         self.assertIn('metadata.get("image_path")', checks_source)
         self.assertIn("self.frame_provider()", checks_source)
+
+    def test_runtime_reference_recapture_preserves_board_off_geometry(self):
+        source = inspect.getsource(reference_runtime_fix._project_store_capture)
+        self.assertIn('"board_points_reference"', source)
+        self.assertIn('"mask_overrides_reference"', source)
+        self.assertIn("previous", source)
+
+    def test_main_reasserts_final_reference_geometry_preview(self):
+        main_path = Path(check_editor.__file__).parents[2] / "main_rpi.py"
+        source = main_path.read_text(encoding="utf-8")
+        self.assertIn(
+            "instalar_rotacao_preview_referencias_display_f3()",
+            source,
+        )
 
     def test_workspace_does_not_use_real_fullscreen_or_native_zoom(self):
         source = inspect.getsource(workspace.maximizar_janela_workspace_f3)
