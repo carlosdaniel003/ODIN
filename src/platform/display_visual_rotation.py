@@ -393,6 +393,18 @@ def instalar_rotacao_visual_editor_check_display() -> None:
                 self._notify_change()
 
         board_original = check.get("board_points_reference", [])
+        if not board_original:
+            try:
+                from src.platform.display_f3_object_tracking import (
+                    F3TrackingConfigStore,
+                    canonical_board_points,
+                )
+                board_original = canonical_board_points(
+                    project,
+                    F3TrackingConfigStore(self.repository),
+                )
+            except Exception:
+                board_original = []
         board_visual = preparar_pontos_visuais_display(
             board_original,
             resolution[0],
