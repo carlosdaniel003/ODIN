@@ -985,32 +985,22 @@ class DisplayProjectConfigPresenceWindow(
                 self._update_project_presence_detail()
                 self._notify_change()
 
-        import src.platform.display_check_editor as check_editor_module
-        dummy_states = {
-            str(mask.get("id") or ""): DISPLAY_CHECK_STATE_IGNORE
-            for mask in visual_masks
-            if isinstance(mask, dict)
-        }
-        check_editor_module.DisplayCheckMaskEditorWindow(
-            root=self.root,
-            project_name=project_name,
-            check={
-                "name": "PLACA DESLIGADA NO SUPORTE",
-                "mask_states": dummy_states,
-            },
-            master_resolution=visual_resolution,
-            masks=visual_masks,
-            frame=visual_image,
-            on_save=None,
+        from src.platform.display_f3_reference_geometry_editor import (
+            F3ReferenceGeometryEditor,
+        )
+
+        F3ReferenceGeometryEditor(
+            parent=self.window,
+            image=visual_image,
+            width=int(visual_resolution[0]),
+            height=int(visual_resolution[1]),
             board_points=visual_board,
-            mask_overrides={
-                str(mask.get("id") or ""): mask
-                for mask in visual_masks
-                if isinstance(mask, dict)
-            },
-            on_save_geometry=save_geometry,
-            geometry_only=True,
-            geometry_title="PLACA DESLIGADA NO SUPORTE • GEOMETRIA",
+            masks=visual_masks,
+            on_save=save_geometry,
+            title="ODIN • F3 • Placa desligada no suporte",
+            header_title=(
+                "F3 • PLACA DESLIGADA NO SUPORTE • CONTORNO + MÁSCARAS"
+            ),
         )
 
     def capture_project_presence_reference(self, kind: str) -> None:
