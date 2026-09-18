@@ -20,6 +20,8 @@ from tkinter import messagebox
 
 import cv2
 
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
+
 import src.platform.display_check_presence_reference as check_module
 from src.platform.display_project_repository import normalizar_resolucao_display
 from src.platform.display_visual_rotation import preparar_check_visual_display
@@ -324,22 +326,14 @@ class DisplayCheckReferenceZoomWindow:
         )
 
     def _maximize(self) -> None:
-        try:
-            self.window.state("zoomed")
-            return
-        except Exception:
-            pass
-        try:
-            self.window.attributes("-zoomed", True)
-            return
-        except Exception:
-            pass
-        try:
-            width = self.window.winfo_screenwidth()
-            height = self.window.winfo_screenheight()
-            self.window.geometry(f"{width}x{height}+0+0")
-        except Exception:
-            self.window.geometry("1280x720")
+        fit_f3_toplevel(
+            self.window,
+            self.window.master,
+            width_ratio=0.96,
+            height_ratio=0.88,
+            min_width=720,
+            min_height=480,
+        )
 
     def _bind_events(self) -> None:
         self.window.bind("<Escape>", lambda _event: self.close())
