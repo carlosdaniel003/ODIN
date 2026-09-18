@@ -7,6 +7,7 @@ from copy import deepcopy
 
 import cv2
 
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_mask_geometry import (
     DISPLAY_MASK_F2_PARITY_TOOLS,
     TOOL_CIRCLE,
@@ -247,13 +248,14 @@ class DisplayMaskEditorWindow(DisplayMaskEditorInteractionMixin):
             self.canvas.bind(sequence, self._wheel, add="+")
 
     def _maximize(self):
-        try:
-            self.window.attributes("-fullscreen", True)
-        except Exception:
-            self.window.geometry(
-                f"{max(900, self.root.winfo_screenwidth())}x"
-                f"{max(650, self.root.winfo_screenheight())}+0+0"
-            )
+        fit_f3_toplevel(
+            self.window,
+            self.root,
+            width_ratio=0.96,
+            height_ratio=0.88,
+            min_width=820,
+            min_height=560,
+        )
 
     def _background(self, viewport):
         if self.frame is None:
