@@ -794,9 +794,38 @@ class DisplayCheckMaskEditorWindow:
                 pady=6,
                 cursor="hand2",
             ).pack(side=tk.LEFT, padx=3)
+        # CANCELAR/SALVAR não ficam na mesma faixa dos comandos de edição.
+        # Em telas menores essa linha horizontal era cortada depois de
+        # "Todos IGNORAR". O rodapé abaixo reserva esses controles sempre.
+        footer = tk.Frame(
+            self.window,
+            bg=self.PANEL,
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+        )
+        footer.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.status = tk.Label(
+            footer,
+            text="",
+            font=("DejaVu Sans", 9, "bold"),
+            fg=self.MUTED,
+            bg=self.PANEL,
+            anchor="w",
+        )
+        self.status.pack(
+            side=tk.LEFT,
+            fill=tk.X,
+            expand=True,
+            padx=(14, 8),
+            pady=8,
+        )
+
+        footer_actions = tk.Frame(footer, bg=self.PANEL)
+        footer_actions.pack(side=tk.RIGHT, padx=(8, 14), pady=7)
         tk.Button(
-            actions,
-            text="Cancelar",
+            footer_actions,
+            text="CANCELAR",
             command=self.close,
             font=("DejaVu Sans", 8, "bold"),
             bg="#334155",
@@ -804,12 +833,12 @@ class DisplayCheckMaskEditorWindow:
             activebackground="#475569",
             activeforeground="#FFFFFF",
             relief="flat",
-            padx=11,
-            pady=6,
+            padx=13,
+            pady=7,
             cursor="hand2",
-        ).pack(side=tk.LEFT, padx=3)
+        ).pack(side=tk.LEFT, padx=(0, 6))
         tk.Button(
-            actions,
+            footer_actions,
             text="SALVAR GEOMETRIA" if self.geometry_only else "SALVAR CHECK",
             command=self.save,
             font=("DejaVu Sans", 9, "bold"),
@@ -818,10 +847,10 @@ class DisplayCheckMaskEditorWindow:
             activebackground="#F5C518",
             activeforeground="#111318",
             relief="flat",
-            padx=15,
-            pady=6,
+            padx=18,
+            pady=7,
             cursor="hand2",
-        ).pack(side=tk.LEFT, padx=(8, 0))
+        ).pack(side=tk.LEFT)
 
         body = tk.Frame(self.window, bg=self.BG)
         body.pack(fill=tk.BOTH, expand=True)
@@ -895,16 +924,6 @@ class DisplayCheckMaskEditorWindow:
                 width=max(1, int(event.width)),
             ),
         )
-
-        self.status = tk.Label(
-            self.window,
-            text="",
-            font=("DejaVu Sans", 9, "bold"),
-            fg=self.MUTED,
-            bg=self.PANEL,
-            anchor="w",
-        )
-        self.status.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=(5, 8))
 
         self.canvas.bind("<Configure>", lambda _event: self.redraw())
         self.canvas.bind("<ButtonPress-1>", self._press_canvas)
