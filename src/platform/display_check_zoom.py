@@ -294,8 +294,27 @@ def instalar_zoom_check_display() -> None:
                     outline=self.BORDER,
                 )
 
+            if len(getattr(self, "board_points", [])) >= 3:
+                coords = []
+                for point in self.board_points:
+                    cx, cy = self._to_canvas(point[0], point[1])
+                    coords.extend((cx, cy))
+                self.canvas.create_polygon(
+                    *coords,
+                    fill="",
+                    outline="#22D3EE",
+                    width=2,
+                    tags=("f3_check_board",),
+                )
+
             for index, mask in enumerate(self.masks):
                 self._draw_mask(index, mask)
+
+            if bool(getattr(self, "geometry_mode", False)):
+                try:
+                    self._draw_geometry_handles()
+                except Exception:
+                    pass
 
             counts = {
                 state: sum(1 for value in self.states.values() if value == state)
@@ -305,16 +324,27 @@ def instalar_zoom_check_display() -> None:
                     DISPLAY_CHECK_STATE_IGNORE,
                 )
             }
-            self.status.configure(
-                text=(
-                    f"{self.check_name} • ACESO {counts[DISPLAY_CHECK_STATE_ON]} • "
-                    f"APAGADO {counts[DISPLAY_CHECK_STATE_OFF]} • "
-                    f"IGNORAR {counts[DISPLAY_CHECK_STATE_IGNORE]} • "
-                    f"ZOOM {int(round(self._check_zoom_factor * 100))}% • "
-                    "Ctrl+A aproxima • Ctrl+Shift+A afasta • Ctrl+roda ajusta • "
-                    "botão do meio arrasta"
+            if bool(getattr(self, "geometry_mode", False)):
+                self.status.configure(
+                    text=(
+                        f"GEOMETRIA • {len(getattr(self, 'board_points', []))} pontos da placa • "
+                        f"{len(self.masks)} máscaras • ZOOM "
+                        f"{int(round(self._check_zoom_factor * 100))}% • "
+                        "arraste pontos/máscaras • setas 1 px • Ctrl+Z desfaz • "
+                        "Ctrl+roda ajusta zoom"
+                    )
                 )
-            )
+            else:
+                self.status.configure(
+                    text=(
+                        f"{self.check_name} • ACESO {counts[DISPLAY_CHECK_STATE_ON]} • "
+                        f"APAGADO {counts[DISPLAY_CHECK_STATE_OFF]} • "
+                        f"IGNORAR {counts[DISPLAY_CHECK_STATE_IGNORE]} • "
+                        f"ZOOM {int(round(self._check_zoom_factor * 100))}% • "
+                        "Ctrl+A aproxima • Ctrl+Shift+A afasta • Ctrl+roda ajusta • "
+                        "botão do meio arrasta"
+                    )
+                )
 
     DisplayCheckMaskEditorComZoom.__name__ = "DisplayCheckMaskEditorWindow"
     DisplayCheckMaskEditorComZoom.__qualname__ = "DisplayCheckMaskEditorWindow"
