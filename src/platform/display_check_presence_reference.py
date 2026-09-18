@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 import src.platform.display_auto_check_runtime as display_auto_runtime_module
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 import src.platform.display_project_config as display_project_config_module
 from src.platform.display_auto_check_analyzer import DisplayAutomaticCheckAnalyzer
 from src.platform.display_auto_check_policy import (
@@ -409,10 +410,14 @@ class DisplayCheckManagerPresenceWindow(DisplayCheckManagerWindow):
         self.reference_status = None
         super().__init__(*args, **kwargs)
         self._presence_store = DisplayCheckPresenceReferenceStore(self.repository)
-        try:
-            self.window.geometry("860x720")
-        except Exception:
-            pass
+        fit_f3_toplevel(
+            self.window,
+            getattr(self, "root", None),
+            preferred_width=860,
+            preferred_height=720,
+            min_width=760,
+            min_height=560,
+        )
         self._install_presence_panel()
         self._update_presence_detail()
 
