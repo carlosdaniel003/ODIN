@@ -22,6 +22,7 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
+    mascaras_geometria_check_display,
     normalizar_resolucao_display,
 )
 from src.platform.display_visual_rotation import preparar_check_visual_display
@@ -300,10 +301,24 @@ class F3SameMaskReferenceAnalyzer:
         if master_resolution is None:
             return None, {}, True
 
+        try:
+            reference_check = self.repository.carregar_check(
+                project_name,
+                check_id,
+            )
+        except Exception:
+            reference_check = None
+        reference_masks = mascaras_geometria_check_display(
+            project,
+            reference_check,
+        )
+        if not reference_masks:
+            reference_masks = list(masks or [])
+
         visual_frame, _visual_resolution, visual_masks = preparar_check_visual_display(
             image,
             master_resolution,
-            masks,
+            reference_masks,
             visual_rotation,
         )
         if visual_frame is None or getattr(visual_frame, "size", 0) == 0:
@@ -518,7 +533,7 @@ class F3SameMaskReferenceAnalyzer:
         if master_resolution is None:
             return self._not_ready("resolucao_mestra_ausente")
 
-        masks = list(project.get("masks", []) or [])
+        masks = mascaras_geometria_check_display(project, check)
         states = (
             check.get("mask_states", {})
             if isinstance(check.get("mask_states"), dict)
