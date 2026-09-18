@@ -277,10 +277,36 @@ def instalar_rotacao_visual_editor_mascaras_display() -> None:
         project = self.repository.carregar_projeto(name)
         if project is None:
             return
-        try:
-            frame = self.frame_provider()
-        except Exception:
-            frame = None
+        # Para ajustar a geometria de um CHECK, a autoridade visual deve
+        # ser a FOTO CAPTURADA daquele CHECK quando ela existir. O frame ao vivo
+        # pode já estar em outra função e induzir o operador a deslocar máscaras
+        # contra uma cena diferente da referência persistida.
+        frame = None
+        presence_store = getattr(self, "_presence_store", None)
+        if presence_store is not None:
+            try:
+                metadata = presence_store.get(self.project_name, check_id)
+            except Exception:
+                metadata = None
+            if isinstance(metadata, dict):
+                try:
+                    from pathlib import Path
+                    import cv2
+                    reference_path = Path(
+                        str(metadata.get("image_path") or "")
+                    )
+                    if reference_path.exists():
+                        frame = cv2.imread(
+                            str(reference_path),
+                            cv2.IMREAD_COLOR,
+                        )
+                except Exception:
+                    frame = None
+        if frame is None or getattr(frame, "size", 0) == 0:
+            try:
+                frame = self.frame_provider()
+            except Exception:
+                frame = None
 
         visual_rotation = obter_rotacao_visual_do_frame_provider(
             self.frame_provider
