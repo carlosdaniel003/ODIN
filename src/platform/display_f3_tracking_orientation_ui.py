@@ -535,9 +535,12 @@ class F3OrientationGeometryEditor:
         self.draw_board_points: list[list[float]] = []
         self.redraw_board_committed = False
         self.view_zoom = 1.0
-        self.view_cx = self.width / 2.0 if self.width else 0.0
-        self.view_cy = self.height / 2.0 if self.height else 0.0
-        self._view_rect = (0.0, 0.0, float(self.width), float(self.height))
+        self.view_pan_x = 0.0
+        self.view_pan_y = 0.0
+        self._display_scale = 1.0
+        self._view_tx = 0.0
+        self._view_ty = 0.0
+        self._precision_cursor = None
         self._photo = None
         self._magnifier_photo = None
         self._render_after = None
@@ -568,9 +571,10 @@ class F3OrientationGeometryEditor:
         tk.Label(
             header,
             text=(
-                "Arraste pontos do contorno ciano ou das máscaras. Círculo: arraste para mover, "
-                "roda sobre ele altera o raio. Setas movem a seleção 1 px. Ctrl+Z desfaz até 5 ações. "
-                "Ctrl+roda controla o zoom. Roda sem seleção gira 1°; Shift+roda escala 1%."
+                "Arraste pontos do contorno ciano ou das máscaras. A lupa de precisão acompanha "
+                "o cursor/seleção. Círculo: arraste para mover e roda altera o raio. Setas movem 1 px. "
+                "Ctrl+Z desfaz até 5 ações. Ctrl+roda dá zoom ancorado no cursor. "
+                "Roda sem seleção gira 1°; Shift+roda escala 1%."
             ),
             font=("Segoe UI", 8),
             fg="#94A3B8",
@@ -592,6 +596,7 @@ class F3OrientationGeometryEditor:
         self.canvas.bind("<B1-Motion>", self._drag)
         self.canvas.bind("<ButtonRelease-1>", self._release)
         self.canvas.bind("<Motion>", self._motion)
+        self.canvas.bind("<Leave>", self._leave_canvas)
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.canvas.bind(sequence, self._wheel, add="+")
 
@@ -687,33 +692,38 @@ class F3OrientationGeometryEditor:
         self.status.configure(text=f"Desfeito • {len(self.history)} ação(ões) anteriores disponíveis.")
         return "break"
 
-    def _viewport(self):
-        zoom = max(1.0, min(5.0, float(self.view_zoom)))
-        visible_w = self.width / zoom
-        visible_h = self.height / zoom
-        cx = min(max(self.view_cx, visible_w / 2.0), self.width - visible_w / 2.0)
-        cy = min(max(self.view_cy, visible_h / 2.0), self.height - visible_h / 2.0)
-        self.view_cx, self.view_cy = cx, cy
-        x1 = max(0.0, cx - visible_w / 2.0)
-        y1 = max(0.0, cy - visible_h / 2.0)
-        x2 = min(float(self.width), x1 + visible_w)
-        y2 = min(float(self.height), y1 + visible_h)
-        return x1, y1, x2, y2
+    def _view_transform(self) -> tuple[float, float, float]:
+        cw = max(1.0, float(self.canvas.winfo_width()))
+        ch = max(1.0, float(self.canvas.winfo_height()))
+        width = max(1.0, float(self.width))
+        height = max(1.0, float(self.height))
+        fit = min(cw / width, ch / height)
+        zoom = min(
+            F3_EDITOR_ZOOM_MAX,
+            max(F3_EDITOR_ZOOM_MIN, float(self.view_zoom)),
+        )
+        if zoom <= 1.001:
+            self.view_pan_x = 0.0
+            self.view_pan_y = 0.0
+        scale = max(0.01, fit * zoom)
+        tx = cw / 2.0 + float(self.view_pan_x) - width * scale / 2.0
+        ty = ch / 2.0 + float(self.view_pan_y) - height * scale / 2.0
+        self._display_scale = scale
+        self._view_tx = tx
+        self._view_ty = ty
+        return scale, tx, ty
 
     def _image_to_canvas(self, x: float, y: float):
-        x1, y1, x2, y2 = self._view_rect
-        cw = max(1.0, float(self.canvas.winfo_width()))
-        ch = max(1.0, float(self.canvas.winfo_height()))
-        sx = cw / max(1e-6, x2 - x1)
-        sy = ch / max(1e-6, y2 - y1)
-        return (float(x) - x1) * sx, (float(y) - y1) * sy
+        scale = max(1e-6, float(self._display_scale))
+        return (
+            float(self._view_tx) + float(x) * scale,
+            float(self._view_ty) + float(y) * scale,
+        )
 
     def _canvas_to_image(self, x: float, y: float):
-        x1, y1, x2, y2 = self._view_rect
-        cw = max(1.0, float(self.canvas.winfo_width()))
-        ch = max(1.0, float(self.canvas.winfo_height()))
-        px = x1 + float(x) * (x2 - x1) / cw
-        py = y1 + float(y) * (y2 - y1) / ch
+        scale = max(1e-6, float(self._display_scale))
+        px = (float(x) - float(self._view_tx)) / scale
+        py = (float(y) - float(self._view_ty)) / scale
         return (
             min(max(px, 0.0), max(0.0, self.width - 1.0)),
             min(max(py, 0.0), max(0.0, self.height - 1.0)),
@@ -831,16 +841,52 @@ class F3OrientationGeometryEditor:
         self.drag_snapshot_pushed = False
 
     def _motion(self, event) -> None:
-        if self.drag_target is not None or self.draw_board_mode:
+        image_pos = self._canvas_to_image(event.x, event.y)
+        self._precision_cursor = (
+            float(image_pos[0]),
+            float(image_pos[1]),
+            float(event.x),
+            float(event.y),
+        )
+        if self.drag_target is not None:
+            self.schedule_render()
+            return
+        if self.draw_board_mode:
+            self.status.configure(
+                text=(
+                    f"REDESENHAR PLACA • X {image_pos[0]:.1f} Y {image_pos[1]:.1f} • "
+                    "clique para fixar o próximo ponto"
+                )
+            )
+            self.schedule_render()
             return
         board = self._nearest_board_vertex(float(event.x), float(event.y))
         if board is not None:
             self.status.configure(text=f"Ponto da placa {board + 1} • arraste para corrigir.")
+            self.schedule_render()
             return
-        image_pos = self._canvas_to_image(event.x, event.y)
+        mask_vertex = self._nearest_mask_vertex(float(event.x), float(event.y))
+        if mask_vertex is not None:
+            self.status.configure(
+                text=f"{mask_vertex[0]} • ponto {mask_vertex[1] + 1} • arraste para corrigir."
+            )
+            self.schedule_render()
+            return
         mask_id = self._mask_at(*image_pos)
         if mask_id:
-            self.status.configure(text=f"{mask_id} • clique/arraste para mover; círculo aceita roda para raio.")
+            self.status.configure(
+                text=f"{mask_id} • clique/arraste para mover; círculo aceita roda para raio."
+            )
+        else:
+            self.status.configure(
+                text=f"X {image_pos[0]:.1f} • Y {image_pos[1]:.1f} • Ctrl+roda = zoom"
+            )
+        self.schedule_render()
+
+    def _leave_canvas(self, _event=None) -> None:
+        if self.drag_target is None:
+            self._precision_cursor = None
+            self.schedule_render()
 
     @staticmethod
     def _wheel_direction(event) -> int:
@@ -855,13 +901,42 @@ class F3OrientationGeometryEditor:
         shift = bool(state & 0x0001)
         if ctrl:
             old = float(self.view_zoom)
-            factor = 1.16 if direction > 0 else 1.0 / 1.16
-            new = max(1.0, min(5.0, old * factor))
+            new = old * (
+                F3_EDITOR_ZOOM_STEP
+                if direction > 0
+                else 1.0 / F3_EDITOR_ZOOM_STEP
+            )
+            new = max(F3_EDITOR_ZOOM_MIN, min(F3_EDITOR_ZOOM_MAX, new))
             if abs(new - old) > 1e-6:
                 target = self._canvas_to_image(event.x, event.y)
+                cw = max(1.0, float(self.canvas.winfo_width()))
+                ch = max(1.0, float(self.canvas.winfo_height()))
+                fit = min(
+                    cw / max(1.0, float(self.width)),
+                    ch / max(1.0, float(self.height)),
+                )
+                new_scale = max(0.01, fit * new)
+                if new <= 1.001:
+                    self.view_pan_x = 0.0
+                    self.view_pan_y = 0.0
+                else:
+                    self.view_pan_x = (
+                        float(event.x)
+                        - cw / 2.0
+                        - (float(target[0]) - self.width / 2.0) * new_scale
+                    )
+                    self.view_pan_y = (
+                        float(event.y)
+                        - ch / 2.0
+                        - (float(target[1]) - self.height / 2.0) * new_scale
+                    )
                 self.view_zoom = new
-                self.view_cx = float(target[0])
-                self.view_cy = float(target[1])
+                self._precision_cursor = (
+                    float(target[0]),
+                    float(target[1]),
+                    float(event.x),
+                    float(event.y),
+                )
                 self.schedule_render()
             return "break"
 
