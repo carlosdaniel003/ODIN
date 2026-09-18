@@ -686,7 +686,7 @@ class DisplayCheckMaskEditorWindow:
         ).pack(side=tk.LEFT, padx=3)
         tk.Button(
             actions,
-            text="SALVAR CHECK",
+            text="SALVAR GEOMETRIA" if self.geometry_only else "SALVAR CHECK",
             command=self.save,
             font=("DejaVu Sans", 9, "bold"),
             bg="#D6A900",
