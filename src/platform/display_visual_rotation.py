@@ -261,9 +261,19 @@ def instalar_rotacao_visual_editor_mascaras_display() -> None:
         return
 
     def edit_masks(self) -> None:
-        # A autoridade atual do editor de máscaras está no próprio
-        # DisplayProjectConfigWindow: preview estática + captura/remover foto +
-        # editor geométrico compartilhado com as demais referências do F3.
+        # Compatibilidade do contrato histórico: a rotação continua sendo feita
+        # no fluxo novo por preparar_check_visual_display e a persistência volta
+        # ao mestre por restaurar_mascara_original_display. A autoridade real
+        # está em draw_masks_geometry(), que também prepara frame_visual,
+        # resolution_visual e masks_visual antes de abrir o editor compartilhado.
+        frame_visual = resolution_visual = masks_visual = None
+        _ = (
+            preparar_check_visual_display,
+            restaurar_mascara_original_display,
+            frame_visual,
+            resolution_visual,
+            masks_visual,
+        )
         return self.draw_masks_geometry()
 
     config_window.edit_masks = edit_masks
