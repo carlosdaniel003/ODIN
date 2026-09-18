@@ -1423,6 +1423,23 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
 
         def process_with_tracking_guard(self):
             if tracking_enabled(self):
+                # Configuração aberta: mantenha a câmera viva, mas não execute
+                # ORB nem decisão automática em segundo plano. Isso evita disputar
+                # CPU com a janela de Projeto Display no Raspberry.
+                if bool(getattr(self, "_display_f3_tracking_config_open", False)):
+                    try:
+                        self._display_auto_set_preview_status(
+                            "CONFIGURAÇÃO F3 ABERTA • análise automática pausada",
+                            "#94A3B8",
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        self._reset_display_auto_stability(transition=False)
+                    except Exception:
+                        pass
+                    return None
+
                 status = getattr(self, "_display_f3_object_tracking_last_status", {})
                 if not isinstance(status, dict) or not bool(status.get("locked")):
                     # Depois de OK/NG/SEGREGAR o F3 PRECISA continuar enxergando
@@ -1472,6 +1489,12 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
             if not tracking_enabled(self):
                 # Contrato opt-in: desligado, o F3 percorre literalmente a cadeia
                 # anterior, sem cópia, warp, bloqueio ou alteração de estado.
+                return preview_previous(self)
+
+            if bool(getattr(self, "_display_f3_tracking_config_open", False)):
+                # A câmera continua atualizando a janela F3 e alimentando o
+                # frame_provider das configurações, mas o rastreamento pesado
+                # fica suspenso até fechar a janela.
                 return preview_previous(self)
 
             raw = getattr(self, "camera_frame_atual", None)
