@@ -603,18 +603,43 @@ class DisplayProjectConfigWindow:
         project = self.repository.carregar_projeto(name)
         if project is None:
             return
-        try:
-            frame = self.frame_provider()
-        except Exception:
-            frame = None
+        from src.platform.display_f3_mask_editor_reference import (
+            DisplayMaskEditorReferenceStore,
+        )
+        from src.platform.display_f3_object_tracking import (
+            F3TrackingConfigStore,
+            canonical_board_points,
+        )
+
+        reference_store = DisplayMaskEditorReferenceStore(self.repository)
+        tracking_store = F3TrackingConfigStore(self.repository)
+        frame = reference_store.load_frame(name)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            try:
+                live_frame = self.frame_provider()
+            except Exception:
+                live_frame = None
+            if live_frame is not None and getattr(live_frame, "size", 0) > 0:
+                frame = live_frame.copy()
+
+        board_points = canonical_board_points(project, tracking_store)
 
         def save_masks(masks: list[dict]) -> None:
             if self.repository.salvar_configuracao_projeto(name, resolution, masks):
+                if frame is not None and getattr(frame, "size", 0) > 0:
+                    reference_store.save_frame(name, frame, resolution)
                 self.refresh(name)
                 self.status.configure(
-                    text=f"{len(masks)} máscara(s) salvas em {name}."
+                    text=(
+                        f"{len(masks)} máscara(s) salvas em {name} • "
+                        "fundo estático preservado."
+                    )
                 )
                 self._notify_change()
+
+        def save_board(points) -> None:
+            if len(points or []) >= 3:
+                tracking_store.save_board_points(name, points)
 
         self.mask_editor = DisplayMaskEditorWindow(
             root=self.root,
@@ -622,6 +647,8 @@ class DisplayProjectConfigWindow:
             masks=project.get("masks", []),
             frame=frame,
             on_save=save_masks,
+            board_points=board_points,
+            on_save_board=save_board,
         )
 
     def manage_checks(self) -> None:
