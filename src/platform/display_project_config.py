@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import tkinter as tk
+
+import cv2
 from collections.abc import Callable
 from tkinter import messagebox, simpledialog
 
@@ -37,6 +40,8 @@ class DisplayProjectConfigWindow:
         self.on_change = on_change
         self.on_close = on_close
         self.mask_editor: DisplayMaskEditorWindow | None = None
+        self.mask_geometry_editor = None
+        self._mask_preview_photo = None
         self.check_manager: DisplayCheckManagerWindow | None = None
         self._project_scroll_canvas: tk.Canvas | None = None
         self._project_scroll_content = None
@@ -244,10 +249,60 @@ class DisplayProjectConfigWindow:
             anchor="w",
         )
         self.mask_summary.pack(fill=tk.X, padx=12, pady=(0, 6))
+
+        preview_shell = tk.Frame(
+            masks_box,
+            bg="#020617",
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+        )
+        preview_shell.pack(fill=tk.X, padx=12, pady=(0, 7))
+        self.mask_reference_preview = tk.Canvas(
+            preview_shell,
+            width=360,
+            height=150,
+            bg="#020617",
+            highlightthickness=0,
+            bd=0,
+        )
+        self.mask_reference_preview.pack(fill=tk.X, expand=True)
+        self.mask_reference_preview.bind(
+            "<Configure>",
+            lambda _event: self._render_mask_reference_preview(),
+            add="+",
+        )
+
+        self.mask_reference_status = tk.Label(
+            masks_box,
+            text="Nenhuma foto de referência.",
+            font=("Segoe UI", 8),
+            fg=self.MUTED,
+            bg="#0F1B2C",
+            anchor="w",
+        )
+        self.mask_reference_status.pack(fill=tk.X, padx=12, pady=(0, 6))
+
+        photo_actions = tk.Frame(masks_box, bg="#0F1B2C")
+        photo_actions.pack(fill=tk.X, padx=12, pady=(0, 5))
+        self.capture_masks_photo_button = self._button(
+            photo_actions,
+            "Tirar foto com a câmera",
+            self.capture_masks_reference_photo,
+            primary=True,
+        )
+        self.capture_masks_photo_button.pack(side=tk.LEFT, padx=(0, 4))
+        self.remove_masks_photo_button = self._button(
+            photo_actions,
+            "Remover foto",
+            self.remove_masks_reference_photo,
+            danger=True,
+        )
+        self.remove_masks_photo_button.pack(side=tk.LEFT, padx=4)
+
         self.edit_masks_button = self._button(
             masks_box,
-            "Editar máscaras visualmente",
-            self.edit_masks,
+            "Desenhar placa e máscaras",
+            self.draw_masks_geometry,
             primary=True,
         )
         self.edit_masks_button.pack(anchor="w", padx=12, pady=(0, 9))
