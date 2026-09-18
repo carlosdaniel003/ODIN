@@ -57,6 +57,7 @@ jobs:
             src/platform/display_f3_exact_check_template.py \
             src/platform/display_f3_object_tracking.py \
             src/platform/display_f3_tracking_orientation_ui.py \
+            src/platform/display_f3_reference_geometry_editor.py \
             src/platform/freeform_segment_persistence.py \
             src/platform/segment_project_geometry_persistence.py \
             src/platform/raspberry_pi3_production_app.py \
