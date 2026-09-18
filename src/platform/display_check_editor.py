@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import math
 import tkinter as tk
 from collections.abc import Callable
 from copy import deepcopy
@@ -8,6 +9,8 @@ from tkinter import messagebox, simpledialog
 
 import cv2
 
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
+from src.platform.display_mask_geometry import pontos_mascara_display
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
@@ -79,14 +82,14 @@ class DisplayCheckManagerWindow:
         self.window.transient(root)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
 
-        width = 860
-        height = 610
-        try:
-            x = root.winfo_rootx() + max(0, (root.winfo_width() - width) // 2)
-            y = root.winfo_rooty() + max(0, (root.winfo_height() - height) // 2)
-        except Exception:
-            x = y = 0
-        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        fit_f3_toplevel(
+            self.window,
+            root,
+            preferred_width=860,
+            preferred_height=610,
+            min_width=760,
+            min_height=520,
+        )
 
         tk.Label(
             self.window,
@@ -467,6 +470,21 @@ class DisplayCheckManagerWindow:
                 self.refresh(check_id)
                 self._notify_change()
 
+        def save_geometry(board_points, edited_masks) -> None:
+            overrides = {
+                str(mask.get("id") or ""): deepcopy(mask)
+                for mask in (edited_masks or [])
+                if isinstance(mask, dict) and str(mask.get("id") or "")
+            }
+            if self.repository.salvar_geometria_check(
+                self.project_name,
+                check_id,
+                board_points,
+                overrides,
+            ):
+                self.refresh(check_id)
+                self._notify_change()
+
         self.check_editor = DisplayCheckMaskEditorWindow(
             root=self.root,
             project_name=self.project_name,
@@ -475,6 +493,9 @@ class DisplayCheckManagerWindow:
             masks=masks,
             frame=frame,
             on_save=save_states,
+            board_points=check.get("board_points_reference"),
+            mask_overrides=check.get("mask_overrides_reference"),
+            on_save_geometry=save_geometry,
         )
 
     def close(self) -> None:
@@ -508,6 +529,11 @@ class DisplayCheckMaskEditorWindow:
         masks,
         frame=None,
         on_save: Callable[[dict[str, str]], None] | None = None,
+        board_points=None,
+        mask_overrides=None,
+        on_save_geometry=None,
+        geometry_only: bool = False,
+        geometry_title: str | None = None,
     ) -> None:
         resolution = normalizar_resolucao_display(master_resolution)
         if resolution is None:
@@ -517,7 +543,22 @@ class DisplayCheckMaskEditorWindow:
         self.check = deepcopy(check)
         self.check_name = str(check.get("name", "CHECK"))
         self.master_width, self.master_height = resolution
-        self.masks = normalizar_mascaras_display(deepcopy(masks or []))
+        base_masks = normalizar_mascaras_display(deepcopy(masks or []))
+        overrides = mask_overrides if isinstance(mask_overrides, dict) else {}
+        self.masks = []
+        for mask in base_masks:
+            mask_id = str(mask.get("id") or "")
+            override = overrides.get(mask_id)
+            normalized_override = (
+                normalizar_mascaras_display(
+                    [{**deepcopy(override), "id": mask_id}]
+                )
+                if isinstance(override, dict)
+                else []
+            )
+            self.masks.append(
+                normalized_override[0] if normalized_override else deepcopy(mask)
+            )
         self.mask_ids = [str(mask["id"]) for mask in self.masks]
         self.states = normalizar_estados_check_display(
             check.get("mask_states", {}),
@@ -527,6 +568,25 @@ class DisplayCheckMaskEditorWindow:
         if frame is not None and getattr(frame, "size", 0) > 0:
             self.frame = frame.copy()
         self.on_save = on_save
+        self.on_save_geometry = on_save_geometry
+        self.geometry_only = bool(geometry_only)
+        self.geometry_title = str(geometry_title or "").strip()
+        self.geometry_mode = bool(geometry_only)
+        self.board_points = []
+        if isinstance(board_points, (list, tuple)):
+            for point in board_points:
+                if isinstance(point, (list, tuple)) and len(point) >= 2:
+                    try:
+                        self.board_points.append(
+                            [float(point[0]), float(point[1])]
+                        )
+                    except (TypeError, ValueError):
+                        pass
+        if len(self.board_points) < 3:
+            self.board_points = self._default_board_points()
+        self.geometry_selected = None
+        self.geometry_drag_last = None
+        self.geometry_history: list[dict] = []
         self._photo = None
         self._scale = 1.0
         self._offset_x = 0.0
@@ -549,7 +609,11 @@ class DisplayCheckMaskEditorWindow:
         texts.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=18, pady=9)
         tk.Label(
             texts,
-            text=f"CHECK • {self.check_name}",
+            text=(
+                self.geometry_title
+                if self.geometry_only and self.geometry_title
+                else f"CHECK • {self.check_name}"
+            ),
             font=("DejaVu Sans", 13, "bold"),
             fg=self.TEXT,
             bg=self.PANEL,
@@ -559,7 +623,11 @@ class DisplayCheckMaskEditorWindow:
             texts,
             text=(
                 f"{self.project_name} • {self.master_width}x{self.master_height} • "
-                "clique em uma máscara para alternar ACESO → APAGADO → IGNORAR"
+                + (
+                    "ajuste o contorno CIANO e as máscaras; arraste pontos ou máscaras"
+                    if self.geometry_only
+                    else "clique para alternar estado • AJUSTAR GEOMETRIA permite mover placa/máscaras"
+                )
             ),
             font=("DejaVu Sans", 8),
             fg=self.MUTED,
@@ -569,9 +637,28 @@ class DisplayCheckMaskEditorWindow:
 
         actions = tk.Frame(toolbar, bg=self.PANEL)
         actions.pack(side=tk.RIGHT, padx=(8, 18), pady=8)
-        tk.Button(
-            actions,
-            text="Todos IGNORAR",
+        if not self.geometry_only:
+            self.geometry_button = tk.Button(
+                actions,
+                text="AJUSTAR GEOMETRIA",
+                command=self.toggle_geometry_mode,
+                font=("DejaVu Sans", 8, "bold"),
+                bg="#0E7490",
+                fg="#FFFFFF",
+                activebackground="#0891B2",
+                activeforeground="#FFFFFF",
+                relief="flat",
+                padx=11,
+                pady=6,
+                cursor="hand2",
+            )
+            self.geometry_button.pack(side=tk.LEFT, padx=3)
+        else:
+            self.geometry_button = None
+        if not self.geometry_only:
+            tk.Button(
+                actions,
+                text="Todos IGNORAR",
             command=self.set_all_ignore,
             font=("DejaVu Sans", 8, "bold"),
             bg="#334155",
@@ -582,7 +669,7 @@ class DisplayCheckMaskEditorWindow:
             padx=11,
             pady=6,
             cursor="hand2",
-        ).pack(side=tk.LEFT, padx=3)
+            ).pack(side=tk.LEFT, padx=3)
         tk.Button(
             actions,
             text="Cancelar",
@@ -696,20 +783,32 @@ class DisplayCheckMaskEditorWindow:
         self.status.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=(5, 8))
 
         self.canvas.bind("<Configure>", lambda _event: self.redraw())
-        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<ButtonPress-1>", self._press_canvas)
+        self.canvas.bind("<B1-Motion>", self._drag_canvas)
+        self.canvas.bind("<ButtonRelease-1>", self._release_canvas)
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.canvas.bind(sequence, self._geometry_wheel, add="+")
         self.window.bind("<Escape>", lambda _event: self.close())
+        self.window.bind("<Control-z>", lambda _event: self.undo_geometry())
+        self.window.bind("<Control-Z>", lambda _event: self.undo_geometry())
+        self.window.bind("<Left>", lambda _event: self._move_geometry_keyboard(-1, 0))
+        self.window.bind("<Right>", lambda _event: self._move_geometry_keyboard(1, 0))
+        self.window.bind("<Up>", lambda _event: self._move_geometry_keyboard(0, -1))
+        self.window.bind("<Down>", lambda _event: self._move_geometry_keyboard(0, 1))
 
         self._maximize()
         self._refresh_segment_buttons()
         self.window.after(60, self.redraw)
 
     def _maximize(self) -> None:
-        try:
-            self.window.attributes("-fullscreen", True)
-        except Exception:
-            width = max(900, int(self.root.winfo_screenwidth()))
-            height = max(650, int(self.root.winfo_screenheight()))
-            self.window.geometry(f"{width}x{height}+0+0")
+        fit_f3_toplevel(
+            self.window,
+            self.root,
+            width_ratio=0.96,
+            height_ratio=0.88,
+            min_width=820,
+            min_height=560,
+        )
 
     @property
     def visible(self) -> bool:
@@ -770,6 +869,280 @@ class DisplayCheckMaskEditorWindow:
             return inside
         return False
 
+    def _default_board_points(self) -> list[list[float]]:
+        points = []
+        for mask in self.masks:
+            try:
+                points.extend(
+                    [[float(x), float(y)] for x, y in pontos_mascara_display(mask)]
+                )
+            except Exception:
+                if str(mask.get("type") or "") == "circle":
+                    cx = float(mask.get("cx", 0))
+                    cy = float(mask.get("cy", 0))
+                    r = max(1.0, float(mask.get("radius", 1)))
+                    points.extend([[cx-r, cy-r], [cx+r, cy+r]])
+        if not points:
+            return [
+                [0.0, 0.0],
+                [float(self.master_width - 1), 0.0],
+                [float(self.master_width - 1), float(self.master_height - 1)],
+                [0.0, float(self.master_height - 1)],
+            ]
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        pad = max(12.0, min(self.master_width, self.master_height) * 0.04)
+        x1 = max(0.0, min(xs) - pad)
+        y1 = max(0.0, min(ys) - pad)
+        x2 = min(float(self.master_width - 1), max(xs) + pad)
+        y2 = min(float(self.master_height - 1), max(ys) + pad)
+        return [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+
+    def _geometry_snapshot(self) -> dict:
+        return {
+            "board": deepcopy(self.board_points),
+            "masks": deepcopy(self.masks),
+            "selected": deepcopy(self.geometry_selected),
+        }
+
+    def _push_geometry_history(self) -> None:
+        self.geometry_history.append(self._geometry_snapshot())
+        self.geometry_history = self.geometry_history[-5:]
+
+    def undo_geometry(self) -> str:
+        if not self.geometry_history:
+            return "break"
+        state = self.geometry_history.pop()
+        self.board_points = deepcopy(state["board"])
+        self.masks = deepcopy(state["masks"])
+        self.geometry_selected = deepcopy(state.get("selected"))
+        self.redraw()
+        return "break"
+
+    def toggle_geometry_mode(self) -> None:
+        if self.geometry_only:
+            return
+        self.geometry_mode = not self.geometry_mode
+        self.geometry_selected = None
+        self.geometry_drag_last = None
+        if self.geometry_button is not None:
+            self.geometry_button.configure(
+                text="VOLTAR AOS ESTADOS" if self.geometry_mode else "AJUSTAR GEOMETRIA",
+                bg="#7C3AED" if self.geometry_mode else "#0E7490",
+            )
+        self._refresh_segment_buttons()
+        self.redraw()
+
+    def _nearest_board_vertex(self, canvas_x: float, canvas_y: float):
+        best = None
+        for index, point in enumerate(self.board_points):
+            x, y = self._to_canvas(point[0], point[1])
+            distance = math.hypot(float(canvas_x)-x, float(canvas_y)-y)
+            if distance <= 11.0 and (best is None or distance < best[0]):
+                best = (distance, index)
+        return None if best is None else best[1]
+
+    def _mask_points_for_geometry(self, mask: dict) -> list[list[float]]:
+        if str(mask.get("type") or "").lower() == "circle":
+            return []
+        try:
+            return [
+                [float(x), float(y)]
+                for x, y in pontos_mascara_display(mask)
+            ]
+        except Exception:
+            return []
+
+    def _nearest_mask_vertex(self, canvas_x: float, canvas_y: float):
+        best = None
+        for mask in self.masks:
+            if str(mask.get("type") or "").lower() == "circle":
+                continue
+            for index, point in enumerate(self._mask_points_for_geometry(mask)):
+                x, y = self._to_canvas(point[0], point[1])
+                distance = math.hypot(float(canvas_x)-x, float(canvas_y)-y)
+                if distance <= 10.0 and (best is None or distance < best[0]):
+                    best = (distance, str(mask.get("id") or ""), index)
+        return None if best is None else (best[1], best[2])
+
+    def _translate_mask_geometry(self, mask: dict, dx: float, dy: float) -> dict:
+        result = deepcopy(mask)
+        kind = str(result.get("type") or "").lower()
+        if kind == "circle":
+            result["cx"] = int(round(float(result.get("cx", 0)) + dx))
+            result["cy"] = int(round(float(result.get("cy", 0)) + dy))
+        elif kind == "rectangle":
+            result["x"] = int(round(float(result.get("x", 0)) + dx))
+            result["y"] = int(round(float(result.get("y", 0)) + dy))
+        else:
+            points = self._mask_points_for_geometry(result)
+            if points:
+                result = {
+                    "id": str(result.get("id") or ""),
+                    "type": "polygon",
+                    "points": [
+                        [int(round(x + dx)), int(round(y + dy))]
+                        for x, y in points
+                    ],
+                }
+        return result
+
+    def _press_canvas(self, event) -> str:
+        if not self.geometry_mode:
+            return self._on_click(event)
+        point = self._to_master(event.x, event.y)
+        if point is None:
+            return "break"
+        board_index = self._nearest_board_vertex(event.x, event.y)
+        if board_index is not None:
+            self.geometry_selected = ("board_vertex", int(board_index))
+        else:
+            vertex = self._nearest_mask_vertex(event.x, event.y)
+            if vertex is not None:
+                self.geometry_selected = ("mask_vertex", vertex[0], int(vertex[1]))
+            else:
+                index = self._find_mask(*point)
+                self.geometry_selected = (
+                    ("mask", str(self.masks[index].get("id") or ""))
+                    if index is not None
+                    else ("all",)
+                )
+        self.geometry_drag_last = point
+        self._push_geometry_history()
+        self.redraw()
+        return "break"
+
+    def _drag_canvas(self, event) -> str:
+        if not self.geometry_mode or self.geometry_drag_last is None:
+            return "break"
+        current = self._to_master(event.x, event.y)
+        if current is None:
+            return "break"
+        dx = float(current[0] - self.geometry_drag_last[0])
+        dy = float(current[1] - self.geometry_drag_last[1])
+        target = self.geometry_selected
+        if not isinstance(target, tuple) or not target:
+            return "break"
+        if target[0] == "board_vertex":
+            index = int(target[1])
+            if 0 <= index < len(self.board_points):
+                self.board_points[index] = [float(current[0]), float(current[1])]
+        elif target[0] == "mask":
+            mask_id = str(target[1])
+            for i, mask in enumerate(self.masks):
+                if str(mask.get("id") or "") == mask_id:
+                    self.masks[i] = self._translate_mask_geometry(mask, dx, dy)
+                    break
+        elif target[0] == "mask_vertex":
+            mask_id = str(target[1])
+            vertex_index = int(target[2])
+            for i, mask in enumerate(self.masks):
+                if str(mask.get("id") or "") != mask_id:
+                    continue
+                points = self._mask_points_for_geometry(mask)
+                if 0 <= vertex_index < len(points):
+                    points[vertex_index] = [float(current[0]), float(current[1])]
+                    self.masks[i] = {
+                        "id": mask_id,
+                        "type": "polygon",
+                        "points": [
+                            [int(round(x)), int(round(y))]
+                            for x, y in points
+                        ],
+                    }
+                break
+        elif target[0] == "all":
+            self.board_points = [
+                [float(x)+dx, float(y)+dy] for x, y in self.board_points
+            ]
+            self.masks = [
+                self._translate_mask_geometry(mask, dx, dy)
+                for mask in self.masks
+            ]
+        self.geometry_drag_last = current
+        self.redraw()
+        return "break"
+
+    def _release_canvas(self, _event=None) -> str:
+        self.geometry_drag_last = None
+        return "break"
+
+    def _geometry_wheel(self, event):
+        if not self.geometry_mode:
+            return None
+        state = int(getattr(event, "state", 0) or 0)
+        if state & 0x0004:
+            return None
+        point = self._to_master(event.x, event.y)
+        if point is None:
+            return None
+        index = self._find_mask(*point)
+        selected_id = (
+            str(self.geometry_selected[1])
+            if isinstance(self.geometry_selected, tuple)
+            and self.geometry_selected
+            and self.geometry_selected[0] == "mask"
+            else ""
+        )
+        mask = None
+        if index is not None:
+            mask = self.masks[index]
+        elif selected_id:
+            mask = next(
+                (m for m in self.masks if str(m.get("id") or "") == selected_id),
+                None,
+            )
+        if mask is None or str(mask.get("type") or "").lower() != "circle":
+            return None
+        delta = int(getattr(event, "delta", 0) or 0)
+        num = getattr(event, "num", None)
+        direction = 1 if delta > 0 or num == 4 else -1
+        self._push_geometry_history()
+        mask["radius"] = max(1, int(mask.get("radius", 1)) + direction)
+        self.geometry_selected = ("mask", str(mask.get("id") or ""))
+        self.redraw()
+        return "break"
+
+    def _move_geometry_keyboard(self, dx: int, dy: int) -> str:
+        if not self.geometry_mode:
+            return "break"
+        target = self.geometry_selected
+        if not isinstance(target, tuple) or not target:
+            return "break"
+        self._push_geometry_history()
+        if target[0] == "board_vertex":
+            i = int(target[1])
+            if 0 <= i < len(self.board_points):
+                self.board_points[i][0] += dx
+                self.board_points[i][1] += dy
+        elif target[0] == "mask":
+            mask_id = str(target[1])
+            for i, mask in enumerate(self.masks):
+                if str(mask.get("id") or "") == mask_id:
+                    self.masks[i] = self._translate_mask_geometry(mask, dx, dy)
+                    break
+        elif target[0] == "mask_vertex":
+            mask_id = str(target[1])
+            vertex_index = int(target[2])
+            for i, mask in enumerate(self.masks):
+                if str(mask.get("id") or "") != mask_id:
+                    continue
+                points = self._mask_points_for_geometry(mask)
+                if 0 <= vertex_index < len(points):
+                    points[vertex_index][0] += dx
+                    points[vertex_index][1] += dy
+                    self.masks[i] = {
+                        "id": mask_id,
+                        "type": "polygon",
+                        "points": [
+                            [int(round(x)), int(round(y))]
+                            for x, y in points
+                        ],
+                    }
+                break
+        self.redraw()
+        return "break"
+
     def _find_mask(self, x: int, y: int) -> int | None:
         for index in range(len(self.masks) - 1, -1, -1):
             if self._contains(self.masks[index], x, y):
@@ -795,6 +1168,15 @@ class DisplayCheckMaskEditorWindow:
         self._refresh_segment_buttons()
         self.redraw()
 
+    def _select_geometry_mask(self, index: int) -> None:
+        if index < 0 or index >= len(self.masks):
+            return
+        self.geometry_selected = (
+            "mask",
+            str(self.masks[index].get("id") or ""),
+        )
+        self.redraw()
+
     def set_all_ignore(self) -> None:
         for mask_id in self.mask_ids:
             self.states[mask_id] = DISPLAY_CHECK_STATE_IGNORE
@@ -812,11 +1194,22 @@ class DisplayCheckMaskEditorWindow:
             mask_id = str(mask["id"])
             state = self.states.get(mask_id, DISPLAY_CHECK_STATE_IGNORE)
             label = CHECK_STATE_LABELS.get(state, "IGNORAR")
-            color = CHECK_STATE_COLORS.get(state, self.MUTED)
+            color = (
+            "#FBBF24"
+            if self.geometry_mode
+            and isinstance(self.geometry_selected, tuple)
+            and len(self.geometry_selected) >= 2
+            and str(self.geometry_selected[1]) == mask_id
+            else CHECK_STATE_COLORS.get(state, self.MUTED)
+        )
             button = tk.Button(
                 self.segment_frame,
                 text=f"{nome_segmento_display(index)}    {label}",
-                command=lambda i=index: self.toggle_mask(i),
+                command=(
+                    (lambda i=index: self._select_geometry_mask(i))
+                    if self.geometry_mode
+                    else (lambda i=index: self.toggle_mask(i))
+                ),
                 font=("DejaVu Sans", 9, "bold"),
                 bg="#0F1B2C",
                 fg=color,
@@ -880,8 +1273,24 @@ class DisplayCheckMaskEditorWindow:
                 outline=self.BORDER,
             )
 
+        if len(self.board_points) >= 3:
+            coords = []
+            for x, y in self.board_points:
+                cx, cy = self._to_canvas(x, y)
+                coords.extend((cx, cy))
+            self.canvas.create_polygon(
+                *coords,
+                fill="",
+                outline="#22D3EE",
+                width=2,
+                tags=("f3_check_board",),
+            )
+
         for index, mask in enumerate(self.masks):
             self._draw_mask(index, mask)
+
+        if self.geometry_mode:
+            self._draw_geometry_handles()
 
         counts = {
             state: sum(1 for value in self.states.values() if value == state)
@@ -893,11 +1302,53 @@ class DisplayCheckMaskEditorWindow:
         }
         self.status.configure(
             text=(
-                f"{self.check_name} • ACESO {counts[DISPLAY_CHECK_STATE_ON]} • "
-                f"APAGADO {counts[DISPLAY_CHECK_STATE_OFF]} • "
-                f"IGNORAR {counts[DISPLAY_CHECK_STATE_IGNORE]}"
+                (
+                    f"GEOMETRIA • {len(self.board_points)} pontos da placa • "
+                    f"{len(self.masks)} máscaras • arraste pontos/máscaras • "
+                    f"setas 1 px • Ctrl+Z {len(self.geometry_history)}/5"
+                )
+                if self.geometry_mode
+                else (
+                    f"{self.check_name} • ACESO {counts[DISPLAY_CHECK_STATE_ON]} • "
+                    f"APAGADO {counts[DISPLAY_CHECK_STATE_OFF]} • "
+                    f"IGNORAR {counts[DISPLAY_CHECK_STATE_IGNORE]}"
+                )
             )
         )
+
+    def _draw_geometry_handles(self) -> None:
+        for index, point in enumerate(self.board_points):
+            x, y = self._to_canvas(point[0], point[1])
+            active = self.geometry_selected == ("board_vertex", index)
+            self.canvas.create_oval(
+                x-5, y-5, x+5, y+5,
+                fill="#FBBF24" if active else "#38BDF8",
+                outline="#020617",
+                width=1,
+            )
+        for mask in self.masks:
+            mask_id = str(mask.get("id") or "")
+            if str(mask.get("type") or "").lower() == "circle":
+                x, y = self._to_canvas(mask.get("cx", 0), mask.get("cy", 0))
+                active = self.geometry_selected == ("mask", mask_id)
+                self.canvas.create_oval(
+                    x-5, y-5, x+5, y+5,
+                    fill="#FBBF24" if active else "#7DD3FC",
+                    outline="#020617",
+                    width=1,
+                )
+            else:
+                for vertex_index, point in enumerate(self._mask_points_for_geometry(mask)):
+                    x, y = self._to_canvas(point[0], point[1])
+                    active = self.geometry_selected == (
+                        "mask_vertex", mask_id, vertex_index
+                    )
+                    self.canvas.create_rectangle(
+                        x-4, y-4, x+4, y+4,
+                        fill="#FBBF24" if active else "#67E8F9",
+                        outline="#020617",
+                        width=1,
+                    )
 
     def _draw_mask(self, index: int, mask: dict) -> None:
         mask_id = str(mask["id"])
@@ -954,8 +1405,13 @@ class DisplayCheckMaskEditorWindow:
 
     def save(self) -> None:
         states = normalizar_estados_check_display(self.states, self.mask_ids)
-        if self.on_save is not None:
+        if not self.geometry_only and self.on_save is not None:
             self.on_save(deepcopy(states))
+        if self.on_save_geometry is not None:
+            self.on_save_geometry(
+                deepcopy(self.board_points),
+                deepcopy(self.masks),
+            )
         self.close()
 
     def close(self) -> None:
