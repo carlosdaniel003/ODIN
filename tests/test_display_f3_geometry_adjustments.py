@@ -11,6 +11,7 @@ import src.platform.display_auto_check_analyzer as analyzer
 import src.platform.display_check_editor as check_editor
 import src.platform.display_f3_tracking_orientation_ui as tracking_ui
 import src.platform.display_f3_workspace_ui as workspace
+import src.platform.display_visual_rotation as visual_rotation
 from src.platform.display_project_repository import DisplayProjectRepository
 from src.platform.display_visual_reference_status import (
     DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
@@ -170,6 +171,19 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         draw_index = source.find("thumbnail = draw_reference_geometry")
         self.assertGreaterEqual(resize_index, 0)
         self.assertGreater(draw_index, resize_index)
+
+    def test_check_editor_prefers_saved_check_photo_without_affecting_mask_editor(self):
+        masks_source = inspect.getsource(
+            visual_rotation.instalar_rotacao_visual_editor_mascaras_display
+        )
+        checks_source = inspect.getsource(
+            visual_rotation.instalar_rotacao_visual_editor_check_display
+        )
+        self.assertNotIn("_presence_store", masks_source)
+        self.assertNotIn("check_id", masks_source)
+        self.assertIn("_presence_store", checks_source)
+        self.assertIn('metadata.get("image_path")', checks_source)
+        self.assertIn("self.frame_provider()", checks_source)
 
     def test_workspace_does_not_use_real_fullscreen_or_native_zoom(self):
         source = inspect.getsource(workspace.maximizar_janela_workspace_f3)
