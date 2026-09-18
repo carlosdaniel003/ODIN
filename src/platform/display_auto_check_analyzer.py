@@ -19,6 +19,7 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
+    mascaras_geometria_check_display,
     normalizar_resolucao_display,
 )
 from src.platform.display_reference_store import (
@@ -308,20 +309,7 @@ class DisplayAutomaticCheckAnalyzer:
         if master_resolution is None:
             return self._not_ready("resolucao_mestra_ausente")
 
-        masks = list(project.get("masks", []) or [])
-        overrides = (
-            check.get("mask_overrides_reference", {})
-            if isinstance(check.get("mask_overrides_reference"), dict)
-            else {}
-        )
-        if overrides:
-            masks = [
-                deepcopy(overrides.get(str(mask.get("id"))))
-                if isinstance(overrides.get(str(mask.get("id"))), dict)
-                else mask
-                for mask in masks
-                if isinstance(mask, dict)
-            ]
+        masks = mascaras_geometria_check_display(project, check)
         states = (
             check.get("mask_states", {})
             if isinstance(check.get("mask_states"), dict)
