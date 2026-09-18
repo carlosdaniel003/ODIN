@@ -145,6 +145,45 @@ def normalizar_mascaras_display(mascaras) -> list[dict]:
     return resultado
 
 
+def mascaras_geometria_check_display(
+    project: dict | None,
+    check: dict | None,
+) -> list[dict]:
+    """Resolve a geometria efetiva das máscaras para um CHECK.
+
+    As máscaras definidas em "Editar máscaras visualmente" continuam sendo a
+    base canônica do Projeto Display. Um CHECK pode guardar somente correções
+    locais por id; IDs sem correção continuam usando a máscara canônica.
+    """
+    if not isinstance(project, dict):
+        return []
+    base = [
+        deepcopy(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict)
+    ]
+    overrides = (
+        check.get("mask_overrides_reference", {})
+        if isinstance(check, dict)
+        and isinstance(check.get("mask_overrides_reference"), dict)
+        else {}
+    )
+    if not overrides:
+        return base
+
+    result = []
+    for mask in base:
+        mask_id = str(mask.get("id") or "")
+        override = overrides.get(mask_id)
+        if isinstance(override, dict):
+            item = deepcopy(override)
+            item["id"] = mask_id
+            result.append(item)
+        else:
+            result.append(mask)
+    return result
+
+
 def normalizar_estado_check_display(valor) -> str:
     texto = str(valor or "").strip().lower()
     aliases = {
