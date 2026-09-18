@@ -1182,6 +1182,111 @@ def tracking_enabled(app) -> bool:
     return enabled
 
 
+def _canonical_masks_for_orientation(
+    runtime: F3DisplayObjectTracker,
+    project: dict,
+    reference: str,
+) -> list[dict] | None:
+    """Converte os ajustes locais do slot angular de volta ao sistema canônico.
+
+    Assim os segmentos ajustados em "Desenhar placa" não servem apenas de guia
+    visual/ORB: quando aquele slot real vence o rastreamento, o mesmo ajuste é
+    usado pelo pipeline F3 que lê as máscaras no frame já alinhado.
+    """
+    if reference not in F3_ORIENTATION_SLOTS:
+        return None
+    project_name = normalizar_nome_projeto_display(project.get("name"))
+    entry = runtime.store.orientations(project_name).get(reference, {})
+    matrix = matrix_np(entry)
+    overrides = entry.get("mask_overrides_reference", {}) if isinstance(entry, dict) else {}
+    if matrix is None or not isinstance(overrides, dict) or not overrides:
+        return None
+    try:
+        inverse = cv2.invertAffineTransform(matrix)
+    except Exception:
+        return None
+
+    original_masks = normalizar_mascaras_display(project.get("masks", []))
+    corrected: list[dict] = []
+    for original in original_masks:
+        mask_id = str(original.get("id") or "")
+        override = _normalize_mask_override(overrides.get(mask_id))
+        if override is None:
+            corrected.append(deepcopy(original))
+            continue
+        canonical = transform_mask(override, inverse)
+        if canonical is None:
+            corrected.append(deepcopy(original))
+            continue
+        canonical["id"] = mask_id
+        corrected.append(canonical)
+
+    return corrected if len(corrected) == len(original_masks) else None
+
+
+def _install_orientation_project_view(app, reference: str):
+    """Aplica máscaras angulares somente durante um ciclo do runtime F3.
+
+    Retorna uma função de restauração. O JSON do Projeto Display nunca é alterado.
+    """
+    runtime = get_tracking_runtime(app)
+    repository = getattr(app, "display_project_repository", None)
+    if (
+        runtime is None
+        or repository is None
+        or reference not in F3_ORIENTATION_SLOTS
+    ):
+        return lambda: None
+
+    original_loader = getattr(repository, "carregar_projeto", None)
+    if not callable(original_loader):
+        return lambda: None
+
+    active_name = normalizar_nome_projeto_display(repository.obter_projeto_ativo())
+    base_project = original_loader(active_name)
+    if not isinstance(base_project, dict):
+        return lambda: None
+    corrected_masks = _canonical_masks_for_orientation(
+        runtime,
+        base_project,
+        reference,
+    )
+    if not corrected_masks:
+        return lambda: None
+
+    entry = runtime.store.orientations(active_name).get(reference, {})
+    orientation_stamp = str((entry or {}).get("updated_at") or "")
+
+    def load_with_orientation(name: str | None = None):
+        project = original_loader(name)
+        if not isinstance(project, dict):
+            return project
+        project_name = normalizar_nome_projeto_display(project.get("name"))
+        if project_name != active_name:
+            return project
+        result = deepcopy(project)
+        result["masks"] = deepcopy(corrected_masks)
+        result["updated_at"] = (
+            f"{str(project.get('updated_at') or '')}"
+            f"|f3-tracking:{reference}:{orientation_stamp}"
+        )
+        result["_f3_tracking_orientation_reference"] = reference
+        return result
+
+    try:
+        repository.carregar_projeto = load_with_orientation
+    except Exception:
+        return lambda: None
+
+    def restore() -> None:
+        try:
+            repository.carregar_projeto = original_loader
+        except Exception:
+            pass
+
+    return restore
+
+
 def set_tracking_enabled(app, enabled: bool) -> bool:
     runtime = get_tracking_runtime(app)
     if runtime is None:
@@ -1304,14 +1409,21 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
             self._display_f3_tracking_frame_override_depth = int(
                 getattr(self, "_display_f3_tracking_frame_override_depth", 0) or 0
             ) + 1
+            restore_project = _install_orientation_project_view(
+                self,
+                str(result.reference or ""),
+            )
             try:
                 return preview_previous(self)
             finally:
-                self.camera_frame_atual = raw
-                self._display_f3_tracking_frame_override_depth = max(
-                    0,
-                    int(getattr(self, "_display_f3_tracking_frame_override_depth", 1) or 1) - 1,
-                )
+                try:
+                    restore_project()
+                finally:
+                    self.camera_frame_atual = raw
+                    self._display_f3_tracking_frame_override_depth = max(
+                        0,
+                        int(getattr(self, "_display_f3_tracking_frame_override_depth", 1) or 1) - 1,
+                    )
 
         preview_with_tracking._odin_f3_object_tracking_runtime = True
         preview_with_tracking._odin_f3_object_tracking_runtime_base = preview_previous
