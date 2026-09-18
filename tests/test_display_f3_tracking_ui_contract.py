@@ -60,6 +60,21 @@ class F3TrackingUiContractTests(unittest.TestCase):
         self.assertIn("_display_f3_tracking_config_open = True", source)
         self.assertIn("_display_f3_tracking_config_open = False", source)
 
+    def test_capture_window_uses_safe_screen_geometry(self):
+        source = inspect.getsource(ui.F3GuidedOrientationCaptureWindow)
+        self.assertIn("_fit_toplevel_inside_screen", source)
+        self.assertNotIn('geometry(f"{sw}x{sh}+0+0")', source)
+
+    def test_editor_has_live_precision_magnifier_and_cursor_zoom(self):
+        source = inspect.getsource(ui.F3OrientationGeometryEditor)
+        self.assertIn("_precision_cursor", source)
+        self.assertIn("_draw_magnifier", source)
+        self.assertIn("_draw_zoom_badge", source)
+        self.assertIn("F3_EDITOR_ZOOM_STEP", source)
+        self.assertIn("view_pan_x", source)
+        self.assertIn("view_pan_y", source)
+        self.assertIn('self.canvas.bind("<Leave>"', source)
+
     def test_runtime_guard_requires_tracking_lock_before_auto_analysis(self):
         source = inspect.getsource(
             tracking.instalar_runtime_rastreamento_objetos_display_f3
