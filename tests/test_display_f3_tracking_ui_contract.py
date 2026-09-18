@@ -48,6 +48,18 @@ class F3TrackingUiContractTests(unittest.TestCase):
         self.assertIn("self.owner.frame_provider()", source)
         self.assertNotIn("VideoCapture(", source)
 
+    def test_configuration_previews_are_loaded_off_tk_opening_path(self):
+        source = inspect.getsource(ui._build_tracking_config_class)
+        self.assertIn("CARREGANDO PREVIEW...", source)
+        self.assertIn("threading.Thread(", source)
+        self.assertIn("_schedule_f3_tracking_previews", source)
+        self.assertIn("_apply_f3_tracking_preview", source)
+
+    def test_configuration_marks_tracking_as_paused_while_open(self):
+        source = inspect.getsource(ui._build_tracking_config_class)
+        self.assertIn("_display_f3_tracking_config_open = True", source)
+        self.assertIn("_display_f3_tracking_config_open = False", source)
+
     def test_runtime_guard_requires_tracking_lock_before_auto_analysis(self):
         source = inspect.getsource(
             tracking.instalar_runtime_rastreamento_objetos_display_f3
