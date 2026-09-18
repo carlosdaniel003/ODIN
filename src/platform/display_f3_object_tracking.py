@@ -1377,6 +1377,21 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
             if tracking_enabled(self):
                 status = getattr(self, "_display_f3_object_tracking_last_status", {})
                 if not isinstance(status, dict) or not bool(status.get("locked")):
+                    # Depois de OK/NG/SEGREGAR o F3 PRECISA continuar enxergando
+                    # o suporte vazio para fazer o handoff físico. Nesse estado,
+                    # deixe o guard terminal anterior rodar sobre o frame bruto.
+                    # Ele não executa CHECK; apenas confirma EMPTY -> nova placa.
+                    rearm_pending = bool(
+                        getattr(self, "_display_f3_waiting_empty_rearm", False)
+                        or getattr(
+                            self,
+                            "_display_f3_waiting_new_board_after_empty",
+                            False,
+                        )
+                    )
+                    if rearm_pending:
+                        return process_previous(self)
+
                     try:
                         self._display_auto_set_preview_status(
                             "RASTREAMENTO F3 ATIVO • procurando e alinhando o Display",
