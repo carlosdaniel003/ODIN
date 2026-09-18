@@ -54,6 +54,8 @@ class F3TrackingUiContractTests(unittest.TestCase):
         )
         self.assertIn("_process_display_auto_check", source)
         self.assertIn('status.get("locked")', source)
+        self.assertIn("_display_f3_waiting_empty_rearm", source)
+        self.assertIn("_display_f3_waiting_new_board_after_empty", source)
         self.assertIn(
             "DisplayAutomaticCheckF3Mixin._atualizar_preview_display_f3",
             source,
