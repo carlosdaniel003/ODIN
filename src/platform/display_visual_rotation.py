@@ -171,6 +171,54 @@ def restaurar_mascara_original_display(
     )
 
 
+def preparar_pontos_visuais_display(
+    points,
+    largura_original: int,
+    altura_original: int,
+    rotacao: int,
+) -> list[list[float]]:
+    angulo = normalizar_rotacao_visual(rotacao)
+    result = []
+    for point in (points or []):
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        x, y = converter_ponto_original_para_visual(
+            float(point[0]),
+            float(point[1]),
+            int(largura_original),
+            int(altura_original),
+            angulo,
+        )
+        result.append([float(x), float(y)])
+    return result
+
+
+def restaurar_pontos_originais_display(
+    points_visual,
+    largura_original: int,
+    altura_original: int,
+    rotacao: int,
+) -> list[list[float]]:
+    angulo = normalizar_rotacao_visual(rotacao)
+    if angulo == 0:
+        return [
+            [float(point[0]), float(point[1])]
+            for point in (points_visual or [])
+            if isinstance(point, (list, tuple)) and len(point) >= 2
+        ]
+    largura_visual, altura_visual = dimensoes_visuais(
+        int(largura_original),
+        int(altura_original),
+        angulo,
+    )
+    return preparar_pontos_visuais_display(
+        points_visual,
+        largura_visual,
+        altura_visual,
+        normalizar_rotacao_visual(360 - angulo),
+    )
+
+
 def preparar_check_visual_display(
     frame,
     master_resolution,
@@ -344,6 +392,58 @@ def instalar_rotacao_visual_editor_check_display() -> None:
                 self.refresh(check_id)
                 self._notify_change()
 
+        board_original = check.get("board_points_reference", [])
+        board_visual = preparar_pontos_visuais_display(
+            board_original,
+            resolution[0],
+            resolution[1],
+            visual_rotation,
+        )
+        raw_overrides = (
+            check.get("mask_overrides_reference", {})
+            if isinstance(check.get("mask_overrides_reference"), dict)
+            else {}
+        )
+        overrides_visual = {
+            str(mask_id): preparar_mascara_visual_display(
+                mask,
+                resolution[0],
+                resolution[1],
+                visual_rotation,
+            )
+            for mask_id, mask in raw_overrides.items()
+            if isinstance(mask, dict)
+        }
+
+        def save_geometry(board_points, edited_masks) -> None:
+            board_original_saved = restaurar_pontos_originais_display(
+                board_points,
+                resolution[0],
+                resolution[1],
+                visual_rotation,
+            )
+            overrides_original = {}
+            for mask in (edited_masks or []):
+                if not isinstance(mask, dict):
+                    continue
+                mask_id = str(mask.get("id") or "")
+                if not mask_id:
+                    continue
+                overrides_original[mask_id] = restaurar_mascara_original_display(
+                    mask,
+                    resolution[0],
+                    resolution[1],
+                    visual_rotation,
+                )
+            if self.repository.salvar_geometria_check(
+                self.project_name,
+                check_id,
+                board_original_saved,
+                overrides_original,
+            ):
+                self.refresh(check_id)
+                self._notify_change()
+
         self.check_editor = check_module.DisplayCheckMaskEditorWindow(
             root=self.root,
             project_name=self.project_name,
@@ -352,6 +452,9 @@ def instalar_rotacao_visual_editor_check_display() -> None:
             masks=masks_visual,
             frame=frame_visual,
             on_save=save_states,
+            board_points=board_visual,
+            mask_overrides=overrides_visual,
+            on_save_geometry=save_geometry,
         )
         try:
             self.check_editor.visual_rotation = visual_rotation
