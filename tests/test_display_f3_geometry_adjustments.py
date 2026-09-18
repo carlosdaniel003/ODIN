@@ -186,6 +186,9 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("on_save_geometry", source)
         self.assertIn("undo_geometry", source)
         self.assertIn("_geometry_wheel", source)
+        self.assertIn("REDESENHAR PLACA", source)
+        self.assertIn("geometry_draw_board_points", source)
+        self.assertIn("_finish_redraw_board_geometry", source)
 
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
