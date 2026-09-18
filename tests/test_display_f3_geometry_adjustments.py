@@ -158,8 +158,7 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
 
     def test_check_analyzer_applies_local_mask_overrides(self):
         source = inspect.getsource(analyzer.DisplayAutomaticCheckAnalyzer.analyze)
-        self.assertIn('check.get("mask_overrides_reference"', source)
-        self.assertIn("overrides.get(str(mask.get", source)
+        self.assertIn("mascaras_geometria_check_display(project, check)", source)
 
     def test_final_f3_analysis_and_previews_use_effective_check_geometry(self):
         self.assertIn(
