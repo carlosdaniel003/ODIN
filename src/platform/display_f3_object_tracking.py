@@ -229,6 +229,12 @@ class F3TrackingConfigStore:
         )
         self.config_file = config_file.parent / F3_TRACKING_CONFIG_FILENAME
         self.image_dir = config_file.parent / F3_TRACKING_IMAGE_DIRNAME
+        # O painel F3 consulta o mesmo sidecar diversas vezes durante uma única
+        # abertura (estado, projeto, contorno e 3 orientações). No Raspberry,
+        # reler/parsing JSON a cada consulta tornava a abertura da configuração
+        # perceptivelmente lenta. Cache local invalidado por mtime/tamanho.
+        self._cache_signature: tuple[int, int] | None = None
+        self._cache_data: dict | None = None
 
     @staticmethod
     def _empty() -> dict:
@@ -238,15 +244,39 @@ class F3TrackingConfigStore:
             "projects": {},
         }
 
-    def _load(self) -> dict:
-        if not self.config_file.exists():
-            return self._empty()
+    def _disk_signature(self) -> tuple[int, int] | None:
+        try:
+            stat = self.config_file.stat()
+            return int(stat.st_mtime_ns), int(stat.st_size)
+        except OSError:
+            return None
+
+    def _load_shared(self) -> dict:
+        signature = self._disk_signature()
+        if (
+            self._cache_data is not None
+            and signature == self._cache_signature
+        ):
+            return self._cache_data
+
+        if signature is None:
+            normalized = self._empty()
+            self._cache_signature = None
+            self._cache_data = normalized
+            return normalized
+
         try:
             data = json.loads(self.config_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
-            return self._empty()
+            normalized = self._empty()
+            self._cache_signature = signature
+            self._cache_data = normalized
+            return normalized
         if not isinstance(data, dict):
-            return self._empty()
+            normalized = self._empty()
+            self._cache_signature = signature
+            self._cache_data = normalized
+            return normalized
 
         projects = {}
         source_projects = data.get("projects", {})
@@ -262,23 +292,31 @@ class F3TrackingConfigStore:
                 raw_orientations = raw_project.get("orientations", {})
                 orientations = {}
                 for slot in F3_ORIENTATION_SLOTS:
-                    normalized = _normalize_orientation_entry(
+                    normalized_entry = _normalize_orientation_entry(
                         raw_orientations.get(slot) if isinstance(raw_orientations, dict) else None,
                         slot,
                     )
-                    if normalized:
-                        orientations[slot] = normalized
+                    if normalized_entry:
+                        orientations[slot] = normalized_entry
                 projects[name] = {
                     "board_points": board_points,
                     "orientations": orientations,
                     "updated_at": str(raw_project.get("updated_at") or ""),
                 }
 
-        return {
+        normalized = {
             "schema_version": F3_TRACKING_SCHEMA_VERSION,
             F3_TRACKING_SETTING_KEY: bool(data.get(F3_TRACKING_SETTING_KEY, False)),
             "projects": projects,
         }
+        self._cache_signature = signature
+        self._cache_data = normalized
+        return normalized
+
+    def _load(self) -> dict:
+        # Chamadores que irão editar o dicionário recebem uma cópia; consultas
+        # de leitura usam _load_shared()/project() sem copiar o arquivo inteiro.
+        return deepcopy(self._load_shared())
 
     def _write(self, data: dict) -> None:
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -314,9 +352,11 @@ class F3TrackingConfigStore:
             encoding="utf-8",
         )
         temporary.replace(self.config_file)
+        self._cache_signature = self._disk_signature()
+        self._cache_data = normalized
 
     def enabled(self) -> bool:
-        return bool(self._load().get(F3_TRACKING_SETTING_KEY, False))
+        return bool(self._load_shared().get(F3_TRACKING_SETTING_KEY, False))
 
     def set_enabled(self, enabled: bool) -> None:
         data = self._load()
@@ -325,7 +365,7 @@ class F3TrackingConfigStore:
 
     def project(self, project_name: str) -> dict:
         name = normalizar_nome_projeto_display(project_name)
-        raw = self._load().get("projects", {}).get(name, {})
+        raw = self._load_shared().get("projects", {}).get(name, {})
         return deepcopy(raw) if isinstance(raw, dict) else {
             "board_points": [],
             "orientations": {},
