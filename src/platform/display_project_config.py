@@ -460,6 +460,309 @@ class DisplayProjectConfigWindow:
         if self.on_change is not None:
             self.on_change()
 
+    def _mask_reference_store(self):
+        from src.platform.display_f3_mask_editor_reference import (
+            DisplayMaskEditorReferenceStore,
+        )
+        return DisplayMaskEditorReferenceStore(self.repository)
+
+    def _clear_mask_reference_preview(self, text: str) -> None:
+        canvas = getattr(self, "mask_reference_preview", None)
+        if canvas is None:
+            return
+        try:
+            canvas.delete("all")
+            width = max(40, int(canvas.winfo_width() or 360))
+            height = max(40, int(canvas.winfo_height() or 150))
+            canvas.create_text(
+                width / 2,
+                height / 2,
+                text=str(text),
+                fill=self.MUTED,
+                font=("Segoe UI", 9, "bold"),
+                justify=tk.CENTER,
+            )
+        except Exception:
+            pass
+        self._mask_preview_photo = None
+
+    def _render_mask_reference_preview(self) -> None:
+        canvas = getattr(self, "mask_reference_preview", None)
+        status = getattr(self, "mask_reference_status", None)
+        if canvas is None:
+            return
+        name = self._selected_name()
+        project = self.repository.carregar_projeto(name) if name else None
+        if project is None:
+            self._clear_mask_reference_preview("Selecione um Projeto Display.")
+            if status is not None:
+                status.configure(text="Nenhuma foto de referência.")
+            return
+
+        store = self._mask_reference_store()
+        frame = store.load_frame(name)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            self._clear_mask_reference_preview(
+                "SEM FOTO\nUse “Tirar foto com a câmera”."
+            )
+            if status is not None:
+                status.configure(text="Nenhuma foto de referência salva.")
+            return
+
+        try:
+            from src.platform.display_f3_object_tracking import (
+                F3TrackingConfigStore,
+                _transform_reference_mask,
+                canonical_board_points,
+                transform_points,
+            )
+            from src.platform.display_f3_tracking_orientation_ui import (
+                draw_reference_geometry,
+            )
+
+            height, width = frame.shape[:2]
+            canvas.update_idletasks()
+            cw = max(120, int(canvas.winfo_width() or 360))
+            ch = max(90, int(canvas.winfo_height() or 150))
+            scale = min(
+                (cw - 12) / max(1.0, float(width)),
+                (ch - 12) / max(1.0, float(height)),
+            )
+            tw = max(1, int(round(width * scale)))
+            th = max(1, int(round(height * scale)))
+            thumb = cv2.resize(
+                frame,
+                (tw, th),
+                interpolation=cv2.INTER_AREA,
+            )
+            matrix = (
+                (scale, 0.0, 0.0),
+                (0.0, scale, 0.0),
+            )
+            board = canonical_board_points(
+                project,
+                F3TrackingConfigStore(self.repository),
+            )
+            board_preview = transform_points(board, matrix)
+            masks_preview = [
+                _transform_reference_mask(mask, matrix)
+                for mask in (project.get("masks", []) or [])
+                if isinstance(mask, dict)
+            ]
+            thumb = draw_reference_geometry(
+                thumb,
+                board_preview,
+                [mask for mask in masks_preview if mask is not None],
+                alpha=0.74,
+            )
+            ok, encoded = cv2.imencode(
+                ".png",
+                thumb,
+                [cv2.IMWRITE_PNG_COMPRESSION, 1],
+            )
+            if not ok:
+                raise ValueError("preview encode failed")
+            self._mask_preview_photo = tk.PhotoImage(
+                data=base64.b64encode(encoded).decode("ascii")
+            )
+            canvas.delete("all")
+            canvas.create_image(
+                cw / 2,
+                ch / 2,
+                image=self._mask_preview_photo,
+                anchor=tk.CENTER,
+            )
+            canvas.create_rectangle(
+                (cw - tw) / 2,
+                (ch - th) / 2,
+                (cw + tw) / 2,
+                (ch + th) / 2,
+                outline="#334155",
+                width=1,
+            )
+            if status is not None:
+                status.configure(
+                    text=(
+                        f"Foto estática salva • {width}x{height} • "
+                        f"{len(project.get('masks', []) or [])} máscara(s)"
+                    )
+                )
+        except Exception:
+            self._clear_mask_reference_preview("FOTO SALVA\nPreview indisponível.")
+            if status is not None:
+                status.configure(text="Foto estática salva.")
+
+    def capture_masks_reference_photo(self) -> None:
+        name = self._selected_name()
+        if not name:
+            return
+        resolution = self._read_resolution_fields()
+        if resolution is None:
+            return
+        try:
+            frame = self.frame_provider()
+        except Exception:
+            frame = None
+        if frame is None or getattr(frame, "size", 0) == 0:
+            messagebox.showwarning(
+                "Câmera indisponível",
+                "Não há um frame válido da câmera para capturar.",
+                parent=self.window,
+            )
+            return
+        metadata = self._mask_reference_store().save_frame(
+            name,
+            frame,
+            resolution,
+        )
+        if metadata is None:
+            messagebox.showerror(
+                "Falha ao capturar",
+                "Não foi possível salvar a foto de referência das máscaras.",
+                parent=self.window,
+            )
+            return
+        self._render_mask_reference_preview()
+        self.status.configure(
+            text=f"Foto estática das máscaras capturada para {name}."
+        )
+
+    def remove_masks_reference_photo(self) -> None:
+        name = self._selected_name()
+        if not name:
+            return
+        if not messagebox.askyesno(
+            "Remover foto",
+            (
+                "Remover somente a foto estática usada para desenhar a placa "
+                "e as máscaras?\n\nAs máscaras e o contorno já salvos serão mantidos."
+            ),
+            parent=self.window,
+        ):
+            return
+        self._mask_reference_store().remove_project(name)
+        self._render_mask_reference_preview()
+        self.status.configure(
+            text="Foto de referência removida. Máscaras e contorno foram mantidos."
+        )
+
+    def draw_masks_geometry(self) -> None:
+        name = self._selected_name()
+        if not name:
+            return
+        resolution = self._read_resolution_fields()
+        if resolution is None:
+            return
+        project = self.repository.carregar_projeto(name)
+        if project is None:
+            return
+
+        store = self._mask_reference_store()
+        frame = store.load_frame(name)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            messagebox.showwarning(
+                "Foto necessária",
+                (
+                    "Tire primeiro uma foto com a câmera. O editor usa essa "
+                    "imagem estática para a placa não mudar de posição entre edições."
+                ),
+                parent=self.window,
+            )
+            return
+
+        from src.platform.display_f3_object_tracking import (
+            F3TrackingConfigStore,
+            canonical_board_points,
+        )
+        from src.platform.display_f3_reference_geometry_editor import (
+            F3ReferenceGeometryEditor,
+        )
+        from src.platform.display_visual_rotation import (
+            obter_rotacao_visual_do_frame_provider,
+            preparar_check_visual_display,
+            preparar_pontos_visuais_display,
+            restaurar_mascara_original_display,
+            restaurar_pontos_originais_display,
+        )
+
+        tracking_store = F3TrackingConfigStore(self.repository)
+        visual_rotation = obter_rotacao_visual_do_frame_provider(
+            self.frame_provider
+        )
+        frame_visual, visual_resolution, masks_visual = (
+            preparar_check_visual_display(
+                frame,
+                resolution,
+                project.get("masks", []),
+                visual_rotation,
+            )
+        )
+        board_original = canonical_board_points(project, tracking_store)
+        board_visual = preparar_pontos_visuais_display(
+            board_original,
+            resolution[0],
+            resolution[1],
+            visual_rotation,
+        )
+
+        def save_geometry(board_points, masks) -> bool:
+            masks_original = [
+                restaurar_mascara_original_display(
+                    mask,
+                    resolution[0],
+                    resolution[1],
+                    visual_rotation,
+                )
+                for mask in (masks or [])
+                if isinstance(mask, dict)
+            ]
+            board_saved = restaurar_pontos_originais_display(
+                board_points,
+                resolution[0],
+                resolution[1],
+                visual_rotation,
+            )
+            masks_ok = self.repository.salvar_configuracao_projeto(
+                name,
+                resolution,
+                masks_original,
+            )
+            board_ok = (
+                tracking_store.save_board_points(name, board_saved)
+                if len(board_saved) >= 3
+                else False
+            )
+            if masks_ok and board_ok:
+                self.refresh(name)
+                self._render_mask_reference_preview()
+                self._notify_change()
+                self.status.configure(
+                    text=(
+                        f"Placa + {len(masks_original)} máscara(s) salvas em {name}."
+                    )
+                )
+                return True
+            return False
+
+        self.mask_geometry_editor = F3ReferenceGeometryEditor(
+            parent=self.window,
+            image=frame_visual,
+            width=int(visual_resolution[0]),
+            height=int(visual_resolution[1]),
+            board_points=board_visual,
+            masks=masks_visual,
+            on_save=save_geometry,
+            title="ODIN • F3 • Placa e máscaras",
+            header_title="F3 • PLACA + MÁSCARAS • REFERÊNCIA ESTÁTICA",
+            on_close=self._render_mask_reference_preview,
+            allow_mask_creation=True,
+        )
+
+    def edit_masks(self) -> None:
+        # Compatibilidade com atalhos/camadas antigas: a edição atual é sempre
+        # feita pelo mesmo editor geométrico usado pelas demais referências F3.
+        self.draw_masks_geometry()
+
     def _current_frame_resolution(self) -> tuple[int, int] | None:
         try:
             frame = self.frame_provider()
@@ -500,6 +803,9 @@ class DisplayProjectConfigWindow:
         self.width_var.set("")
         self.height_var.set("")
         self.mask_summary.configure(text="0 máscaras salvas")
+        self._clear_mask_reference_preview("Selecione um Projeto Display.")
+        if getattr(self, "mask_reference_status", None) is not None:
+            self.mask_reference_status.configure(text="Nenhuma foto de referência.")
         self.check_summary.configure(text="0 CHECKS configurados")
 
     def _load_selected(self) -> None:
@@ -537,6 +843,7 @@ class DisplayProjectConfigWindow:
                 + (f"\n{check_names}" if check_names else "")
             )
         )
+        self._render_mask_reference_preview()
 
     def add_project(self) -> None:
         name = simpledialog.askstring(
@@ -640,71 +947,6 @@ class DisplayProjectConfigWindow:
         if self.repository.definir_projeto_ativo(name):
             self.refresh(name)
             self._notify_change()
-
-    def edit_masks(self) -> None:
-        name = self._selected_name()
-        if not name:
-            messagebox.showwarning(
-                "Sem Projeto Display",
-                "Selecione ou crie um projeto primeiro.",
-                parent=self.window,
-            )
-            return
-        resolution = self._read_resolution_fields()
-        if resolution is None:
-            return
-        if not self.repository.salvar_resolucao_mestra(name, *resolution):
-            return
-        project = self.repository.carregar_projeto(name)
-        if project is None:
-            return
-        from src.platform.display_f3_mask_editor_reference import (
-            DisplayMaskEditorReferenceStore,
-        )
-        from src.platform.display_f3_object_tracking import (
-            F3TrackingConfigStore,
-            canonical_board_points,
-        )
-
-        reference_store = DisplayMaskEditorReferenceStore(self.repository)
-        tracking_store = F3TrackingConfigStore(self.repository)
-        frame = reference_store.load_frame(name)
-        if frame is None or getattr(frame, "size", 0) == 0:
-            try:
-                live_frame = self.frame_provider()
-            except Exception:
-                live_frame = None
-            if live_frame is not None and getattr(live_frame, "size", 0) > 0:
-                frame = live_frame.copy()
-
-        board_points = canonical_board_points(project, tracking_store)
-
-        def save_masks(masks: list[dict]) -> None:
-            if self.repository.salvar_configuracao_projeto(name, resolution, masks):
-                if frame is not None and getattr(frame, "size", 0) > 0:
-                    reference_store.save_frame(name, frame, resolution)
-                self.refresh(name)
-                self.status.configure(
-                    text=(
-                        f"{len(masks)} máscara(s) salvas em {name} • "
-                        "fundo estático preservado."
-                    )
-                )
-                self._notify_change()
-
-        def save_board(points) -> None:
-            if len(points or []) >= 3:
-                tracking_store.save_board_points(name, points)
-
-        self.mask_editor = DisplayMaskEditorWindow(
-            root=self.root,
-            master_resolution=resolution,
-            masks=project.get("masks", []),
-            frame=frame,
-            on_save=save_masks,
-            board_points=board_points,
-            on_save_board=save_board,
-        )
 
     def manage_checks(self) -> None:
         name = self._selected_name()
