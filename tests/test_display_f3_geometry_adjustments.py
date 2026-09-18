@@ -47,6 +47,15 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
                 "type": "polygon",
                 "points": [[300, 200], [340, 200], [340, 230], [300, 230]],
             },
+            {
+                "id": "MASK_003",
+                "type": "segment",
+                "cx": 430,
+                "cy": 260,
+                "width": 72,
+                "height": 16,
+                "angle": 18.0,
+            },
         ]
         self.assertTrue(
             repository.salvar_configuracao_projeto(
@@ -76,7 +85,16 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
                     "cx": 206,
                     "cy": 184,
                     "radius": 16,
-                }
+                },
+                "MASK_003": {
+                    "id": "MASK_003",
+                    "type": "segment",
+                    "cx": 438,
+                    "cy": 266,
+                    "width": 76,
+                    "height": 18,
+                    "angle": 19.0,
+                },
             }
             self.assertTrue(
                 repository.salvar_geometria_check(
@@ -94,6 +112,14 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             self.assertEqual(
                 206,
                 check["mask_overrides_reference"]["MASK_001"]["cx"],
+            )
+            self.assertEqual(
+                "segment",
+                check["mask_overrides_reference"]["MASK_003"]["type"],
+            )
+            self.assertEqual(
+                19.0,
+                check["mask_overrides_reference"]["MASK_003"]["angle"],
             )
             # A geometria canônica do Projeto Display permanece independente.
             self.assertEqual(200, project["masks"][0]["cx"])
