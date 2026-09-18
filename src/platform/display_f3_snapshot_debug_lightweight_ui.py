@@ -16,6 +16,8 @@ import tkinter as tk
 
 import cv2
 
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
+
 import src.platform.display_f3_manual_snapshot_debug as manual_module
 import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_visual_reference_status as visual_status_module
@@ -549,6 +551,14 @@ def _open_lightweight_snapshot_debug(window):
             pass
 
     top = tk.Toplevel(window.root)
+    fit_f3_toplevel(
+        top,
+        window.root,
+        preferred_width=1080,
+        preferred_height=700,
+        min_width=760,
+        min_height=520,
+    )
     window._display_f3_snapshot_debug_window = top
     window._display_f3_snapshot_debug_text = None
     top.title("ODIN • DISPLAY F3 • DEBUG DO FRAME ANALISADO")
