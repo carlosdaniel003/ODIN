@@ -885,6 +885,10 @@ class DisplayProjectConfigWindow:
                 parent=self.window,
             )
             return
+        try:
+            self._mask_reference_store().rename_project(current, new_name)
+        except Exception:
+            pass
         self.refresh(new_name)
         self._notify_change()
 
@@ -899,6 +903,10 @@ class DisplayProjectConfigWindow:
         ):
             return
         if self.repository.remover_projeto(name):
+            try:
+                self._mask_reference_store().remove_project(name)
+            except Exception:
+                pass
             self.refresh()
             self._notify_change()
 
@@ -997,6 +1005,13 @@ class DisplayProjectConfigWindow:
         if editor is not None and editor.visible:
             editor.close()
         self.mask_editor = None
+        geometry_editor = getattr(self, "mask_geometry_editor", None)
+        if geometry_editor is not None:
+            try:
+                geometry_editor.close()
+            except Exception:
+                pass
+        self.mask_geometry_editor = None
         try:
             self.window.destroy()
         except Exception:
