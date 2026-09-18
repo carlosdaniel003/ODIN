@@ -587,6 +587,8 @@ class DisplayCheckMaskEditorWindow:
         self.geometry_selected = None
         self.geometry_drag_last = None
         self.geometry_history: list[dict] = []
+        self.geometry_draw_board_mode = False
+        self.geometry_draw_board_points: list[list[float]] = []
         self._photo = None
         self._scale = 1.0
         self._offset_x = 0.0
@@ -655,6 +657,25 @@ class DisplayCheckMaskEditorWindow:
             self.geometry_button.pack(side=tk.LEFT, padx=3)
         else:
             self.geometry_button = None
+
+        self.redraw_board_button = tk.Button(
+            actions,
+            text="REDESENHAR PLACA",
+            command=self.start_redraw_board_geometry,
+            font=("DejaVu Sans", 8, "bold"),
+            bg="#17314A",
+            fg="#7DD3FC",
+            activebackground="#1E4668",
+            activeforeground="#FFFFFF",
+            disabledforeground="#64748B",
+            relief="flat",
+            padx=10,
+            pady=6,
+            cursor="hand2",
+            state=tk.NORMAL if self.geometry_only else tk.DISABLED,
+        )
+        self.redraw_board_button.pack(side=tk.LEFT, padx=3)
+
         if not self.geometry_only:
             tk.Button(
                 actions,
@@ -788,7 +809,9 @@ class DisplayCheckMaskEditorWindow:
         self.canvas.bind("<ButtonRelease-1>", self._release_canvas)
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.canvas.bind(sequence, self._geometry_wheel, add="+")
-        self.window.bind("<Escape>", lambda _event: self.close())
+        self.window.bind("<Escape>", self._escape_geometry_editor)
+        self.window.bind("<Return>", self._finish_redraw_board_geometry)
+        self.window.bind("<KP_Enter>", self._finish_redraw_board_geometry)
         self.window.bind("<Control-z>", lambda _event: self.undo_geometry())
         self.window.bind("<Control-Z>", lambda _event: self.undo_geometry())
         self.window.bind("<Left>", lambda _event: self._move_geometry_keyboard(-1, 0))
@@ -925,13 +948,60 @@ class DisplayCheckMaskEditorWindow:
         self.geometry_mode = not self.geometry_mode
         self.geometry_selected = None
         self.geometry_drag_last = None
+        if not self.geometry_mode:
+            self.geometry_draw_board_mode = False
+            self.geometry_draw_board_points = []
         if self.geometry_button is not None:
             self.geometry_button.configure(
                 text="VOLTAR AOS ESTADOS" if self.geometry_mode else "AJUSTAR GEOMETRIA",
                 bg="#7C3AED" if self.geometry_mode else "#0E7490",
             )
+        if self.redraw_board_button is not None:
+            self.redraw_board_button.configure(
+                state=tk.NORMAL if self.geometry_mode else tk.DISABLED,
+            )
         self._refresh_segment_buttons()
         self.redraw()
+
+    def start_redraw_board_geometry(self) -> None:
+        if not self.geometry_mode:
+            return
+        self.geometry_draw_board_mode = True
+        self.geometry_draw_board_points = []
+        self.geometry_selected = None
+        self.geometry_drag_last = None
+        self.status.configure(
+            text=(
+                "REDESENHAR PLACA • clique ponto a ponto no contorno • "
+                "Enter conclui • Esc cancela"
+            )
+        )
+        self.redraw()
+
+    def _finish_redraw_board_geometry(self, _event=None) -> str:
+        if not self.geometry_draw_board_mode:
+            return "break"
+        if len(self.geometry_draw_board_points) < 3:
+            self.status.configure(
+                text="REDESENHAR PLACA • use pelo menos 3 pontos antes de concluir."
+            )
+            return "break"
+        self._push_geometry_history()
+        self.board_points = deepcopy(self.geometry_draw_board_points)
+        self.geometry_draw_board_points = []
+        self.geometry_draw_board_mode = False
+        self.geometry_selected = None
+        self.redraw()
+        return "break"
+
+    def _escape_geometry_editor(self, _event=None) -> str:
+        if self.geometry_draw_board_mode:
+            self.geometry_draw_board_mode = False
+            self.geometry_draw_board_points = []
+            self.redraw()
+            return "break"
+        self.close()
+        return "break"
 
     def _nearest_board_vertex(self, canvas_x: float, canvas_y: float):
         best = None
@@ -993,6 +1063,12 @@ class DisplayCheckMaskEditorWindow:
         point = self._to_master(event.x, event.y)
         if point is None:
             return "break"
+        if self.geometry_draw_board_mode:
+            self.geometry_draw_board_points.append(
+                [float(point[0]), float(point[1])]
+            )
+            self.redraw()
+            return "break"
         board_index = self._nearest_board_vertex(event.x, event.y)
         if board_index is not None:
             self.geometry_selected = ("board_vertex", int(board_index))
@@ -1013,7 +1089,11 @@ class DisplayCheckMaskEditorWindow:
         return "break"
 
     def _drag_canvas(self, event) -> str:
-        if not self.geometry_mode or self.geometry_drag_last is None:
+        if (
+            not self.geometry_mode
+            or self.geometry_draw_board_mode
+            or self.geometry_drag_last is None
+        ):
             return "break"
         current = self._to_master(event.x, event.y)
         if current is None:
@@ -1070,6 +1150,10 @@ class DisplayCheckMaskEditorWindow:
     def _geometry_wheel(self, event):
         if not self.geometry_mode:
             return None
+        if self.geometry_draw_board_mode:
+            state = int(getattr(event, "state", 0) or 0)
+            # Ctrl+roda continua reservado para o zoom do wrapper de CHECK.
+            return None if state & 0x0004 else "break"
         state = int(getattr(event, "state", 0) or 0)
         if state & 0x0004:
             return None
@@ -1104,7 +1188,7 @@ class DisplayCheckMaskEditorWindow:
         return "break"
 
     def _move_geometry_keyboard(self, dx: int, dy: int) -> str:
-        if not self.geometry_mode:
+        if not self.geometry_mode or self.geometry_draw_board_mode:
             return "break"
         target = self.geometry_selected
         if not isinstance(target, tuple) or not target:
@@ -1350,6 +1434,24 @@ class DisplayCheckMaskEditorWindow:
                         width=1,
                     )
 
+        if self.geometry_draw_board_mode:
+            coords = []
+            for point in self.geometry_draw_board_points:
+                x, y = self._to_canvas(point[0], point[1])
+                coords.extend((x, y))
+                self.canvas.create_oval(
+                    x-5, y-5, x+5, y+5,
+                    fill="#FACC15",
+                    outline="#020617",
+                    width=1,
+                )
+            if len(coords) >= 4:
+                self.canvas.create_line(
+                    *coords,
+                    fill="#FACC15",
+                    width=2,
+                )
+
     def _draw_mask(self, index: int, mask: dict) -> None:
         mask_id = str(mask["id"])
         state = self.states.get(mask_id, DISPLAY_CHECK_STATE_IGNORE)
@@ -1404,6 +1506,15 @@ class DisplayCheckMaskEditorWindow:
         )
 
     def save(self) -> None:
+        if self.geometry_draw_board_mode:
+            if len(self.geometry_draw_board_points) < 3:
+                messagebox.showwarning(
+                    "Contorno incompleto",
+                    "Conclua o desenho da placa com pelo menos 3 pontos antes de salvar.",
+                    parent=self.window,
+                )
+                return
+            self._finish_redraw_board_geometry()
         states = normalizar_estados_check_display(self.states, self.mask_ids)
         if not self.geometry_only and self.on_save is not None:
             self.on_save(deepcopy(states))
