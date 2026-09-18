@@ -101,6 +101,9 @@ from src.platform.display_f3_visual_best_match_fix import (  # noqa: E402
 from src.platform.display_f3_preview_clarity_fix import (  # noqa: E402
     instalar_preview_claro_display_f3,
 )
+from src.platform.display_f3_reference_preview_rotation import (  # noqa: E402
+    instalar_rotacao_preview_referencias_display_f3,
+)
 from src.platform.display_f3_mask_visibility_ui import (  # noqa: E402
     instalar_guias_mascaras_inicio_display_f3,
     instalar_numeros_editor_mascaras_display_f3,
@@ -189,6 +192,10 @@ def main() -> None:
     # finais depois que toda a composição terminou, sem criar timers ou leituras
     # extras de câmera.
     instalar_preview_claro_display_f3()
+    # Autoridade final das miniaturas de configuração: aplica rotação visual,
+    # máscaras locais e contorno da placa depois que os reparos históricos de
+    # referência já substituíram store/UI durante a construção do app.
+    instalar_rotacao_preview_referencias_display_f3()
     instalar_guias_mascaras_inicio_display_f3()
     instalar_evidencia_energia_mesma_mascara_display_f3()
     instalar_autoridade_energia_final_display_f3()
