@@ -51,8 +51,48 @@ F3_EDITOR_HISTORY_LIMIT = 5
 F3_EDITOR_MAGNIFIER_SIZE = 210
 F3_EDITOR_VERTEX_HIT_PX = 11.0
 F3_EDITOR_MASK_VERTEX_HIT_PX = 10.0
+F3_EDITOR_ZOOM_MIN = 1.0
+F3_EDITOR_ZOOM_MAX = 5.0
+F3_EDITOR_ZOOM_STEP = 1.16
+F3_SAFE_WINDOW_MARGIN_X = 64
+F3_SAFE_WINDOW_MARGIN_Y = 118
 
 _INSTALLED = False
+
+
+def _fit_toplevel_inside_screen(
+    window,
+    *,
+    width_ratio: float = 0.92,
+    height_ratio: float = 0.84,
+    min_width: int = 760,
+    min_height: int = 520,
+) -> None:
+    """Dimensiona a janela sem esconder a barra inferior/botões.
+
+    Usar exatamente screenwidth x screenheight em Linux/Raspberry ignora a área
+    reservada pelo painel/decoração do gerenciador de janelas. Por isso a janela
+    guiada podia ultrapassar a área útil e esconder CAPTURAR/CANCELAR.
+    """
+    try:
+        sw = max(1, int(window.winfo_screenwidth()))
+        sh = max(1, int(window.winfo_screenheight()))
+        available_w = max(480, sw - F3_SAFE_WINDOW_MARGIN_X)
+        available_h = max(420, sh - F3_SAFE_WINDOW_MARGIN_Y)
+        width = min(
+            available_w,
+            max(min_width, int(round(sw * float(width_ratio)))),
+        )
+        height = min(
+            available_h,
+            max(min_height, int(round(sh * float(height_ratio)))),
+        )
+        x = max(0, (sw - width) // 2)
+        y = max(8, (sh - height) // 2 - 8)
+        window.geometry(f"{width}x{height}+{x}+{y}")
+        window.maxsize(available_w, available_h)
+    except Exception:
+        pass
 
 
 def _matrix_homogeneous(matrix) -> np.ndarray:
@@ -228,12 +268,7 @@ class F3GuidedOrientationCaptureWindow:
             f"ODIN • F3 • Captura guiada {F3_ORIENTATION_UI[slot]['short']}"
         )
         self.window.configure(bg="#08111F")
-        try:
-            sw = int(self.window.winfo_screenwidth())
-            sh = int(self.window.winfo_screenheight())
-            self.window.geometry(f"{sw}x{sh}+0+0")
-        except Exception:
-            pass
+        _fit_toplevel_inside_screen(self.window)
         self.window.transient(owner.window)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -513,12 +548,7 @@ class F3OrientationGeometryEditor:
             f"ODIN • F3 • Desenhar placa {F3_ORIENTATION_UI[slot]['short']}"
         )
         self.window.configure(bg="#08111F")
-        try:
-            sw = int(self.window.winfo_screenwidth())
-            sh = int(self.window.winfo_screenheight())
-            self.window.geometry(f"{sw}x{sh}+0+0")
-        except Exception:
-            pass
+        _fit_toplevel_inside_screen(self.window)
         self.window.transient(owner.window)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
 
