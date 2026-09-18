@@ -1371,6 +1371,7 @@ def reset_tracking_runtime(app) -> None:
     runtime = get_tracking_runtime(app)
     if runtime is not None:
         runtime.reset()
+    app._display_f3_tracking_raw_preview_frame = None
     app._display_f3_object_tracking_last_status = {
         "enabled": tracking_enabled(app),
         "locked": False,
@@ -1475,6 +1476,38 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
         process_with_tracking_guard._odin_f3_object_tracking_guard_base = process_previous
         DisplayAutomaticCheckF3Mixin._process_display_auto_check = process_with_tracking_guard
 
+    # O rastreamento pode usar um frame corrigido/rotacionado internamente,
+    # mas a câmera que o operador vê deve continuar sendo a imagem REAL. Antes,
+    # camera_frame_atual era substituído pelo warp do tracker durante todo o
+    # ciclo e o preview parecia girar/entortar quando a pose mudava.
+    base_preview_current = DisplayProductionF3Mixin._atualizar_preview_display_f3
+    if not bool(getattr(base_preview_current, "_odin_f3_raw_preview_guard", False)):
+        base_preview_previous = base_preview_current
+
+        def base_preview_with_raw_camera(self):
+            raw_preview = getattr(
+                self,
+                "_display_f3_tracking_raw_preview_frame",
+                None,
+            )
+            if not _valid_frame(raw_preview):
+                return base_preview_previous(self)
+
+            current = getattr(self, "camera_frame_atual", None)
+            self.camera_frame_atual = raw_preview
+            try:
+                return base_preview_previous(self)
+            finally:
+                self.camera_frame_atual = current
+
+        base_preview_with_raw_camera._odin_f3_raw_preview_guard = True
+        base_preview_with_raw_camera._odin_f3_raw_preview_guard_base = (
+            base_preview_previous
+        )
+        DisplayProductionF3Mixin._atualizar_preview_display_f3 = (
+            base_preview_with_raw_camera
+        )
+
     # O wrapper precisa ficar na camada MAIS EXTERNA do loop F3. O mixin
     # automático chama super()._atualizar_preview_display_f3() e somente depois
     # executa _process_display_auto_check(); se alinhássemos apenas a classe base,
@@ -1508,6 +1541,7 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
                 # guard de _process_display_auto_check impede decisão produtiva.
                 return preview_previous(self)
 
+            self._display_f3_tracking_raw_preview_frame = raw
             self.camera_frame_atual = aligned
             self._display_f3_tracking_frame_override_depth = int(
                 getattr(self, "_display_f3_tracking_frame_override_depth", 0) or 0
@@ -1523,6 +1557,7 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
                     restore_project()
                 finally:
                     self.camera_frame_atual = raw
+                    self._display_f3_tracking_raw_preview_frame = None
                     self._display_f3_tracking_frame_override_depth = max(
                         0,
                         int(getattr(self, "_display_f3_tracking_frame_override_depth", 1) or 1) - 1,
