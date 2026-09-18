@@ -5,6 +5,7 @@ from collections.abc import Callable
 from tkinter import messagebox, simpledialog
 
 from src.platform.display_check_editor import DisplayCheckManagerWindow
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
@@ -43,18 +44,17 @@ class DisplayProjectConfigWindow:
         self.window = tk.Toplevel(root)
         self.window.title("ODIN • Projeto Display")
         self.window.configure(bg=self.BG)
-        self.window.resizable(False, False)
+        self.window.resizable(True, True)
         self.window.transient(root)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
-
-        width = 820
-        height = 680
-        try:
-            x = root.winfo_rootx() + max(0, (root.winfo_width() - width) // 2)
-            y = root.winfo_rooty() + max(0, (root.winfo_height() - height) // 2)
-        except Exception:
-            x = y = 0
-        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        fit_f3_toplevel(
+            self.window,
+            root,
+            preferred_width=900,
+            preferred_height=720,
+            min_width=720,
+            min_height=520,
+        )
 
         tk.Label(
             self.window,
