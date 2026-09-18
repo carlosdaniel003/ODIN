@@ -18,6 +18,7 @@ from src.core.roi_geometry import (
     raio_compatibilidade_segmento,
 )
 from src.models.led_selection import LedSelection
+from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
 from src.platform.display_mask_geometry import (
     bbox_mascara_display,
@@ -218,13 +219,14 @@ class DisplayReferenceConfigWindow:
         self.window.title(f"ODIN • Referências Display • {self.project_name}")
         self.window.configure(bg=self.BG)
         self.window.protocol("WM_DELETE_WINDOW", self.close)
-        width, height = 1080, 700
-        try:
-            x = root.winfo_rootx() + max(0, (root.winfo_width() - width) // 2)
-            y = root.winfo_rooty() + max(0, (root.winfo_height() - height) // 2)
-        except Exception:
-            x = y = 0
-        self.window.geometry(f"{width}x{height}+{x}+{y}")
+        fit_f3_toplevel(
+            self.window,
+            root,
+            preferred_width=1080,
+            preferred_height=700,
+            min_width=820,
+            min_height=560,
+        )
 
         tk.Label(
             self.window,
