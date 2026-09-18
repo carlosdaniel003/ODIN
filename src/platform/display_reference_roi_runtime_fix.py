@@ -190,6 +190,15 @@ def _project_store_capture(
     if not roi_module._encode_jpeg_to_path(path, image):
         return None
 
+    try:
+        data = self._load()
+    except Exception:
+        return None
+    previous = (
+        data.get("projects", {}).get(project, {}).get(ref_kind, {})
+        if isinstance(data, dict)
+        else {}
+    )
     metadata = {
         "image_path": str(path),
         "threshold": check_module.DISPLAY_CHECK_PRESENCE_DEFAULT_THRESHOLD,
@@ -197,8 +206,11 @@ def _project_store_capture(
         "height": int(resolution[1]),
         "captured_at": datetime.now(timezone.utc).isoformat(),
     }
+    if isinstance(previous, dict):
+        for key in ("board_points_reference", "mask_overrides_reference"):
+            if previous.get(key):
+                metadata[key] = deepcopy(previous[key])
     try:
-        data = self._load()
         data.setdefault("projects", {}).setdefault(project, {})[
             ref_kind
         ] = metadata
