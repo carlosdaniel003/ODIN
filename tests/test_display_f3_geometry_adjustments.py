@@ -13,6 +13,10 @@ import src.platform.display_f3_tracking_orientation_ui as tracking_ui
 import src.platform.display_f3_workspace_ui as workspace
 import src.platform.display_visual_rotation as visual_rotation
 import src.platform.display_reference_roi_runtime_fix as reference_runtime_fix
+import src.platform.display_f3_exact_check_template as exact_template
+import src.platform.display_f3_same_mask_reference_fix as same_mask
+import src.platform.display_f3_preview_clarity_fix as preview_clarity
+import src.platform.display_live_roi_overlay as live_overlay
 from src.platform.display_project_repository import DisplayProjectRepository
 from src.platform.display_visual_reference_status import (
     DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
@@ -156,6 +160,24 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         source = inspect.getsource(analyzer.DisplayAutomaticCheckAnalyzer.analyze)
         self.assertIn('check.get("mask_overrides_reference"', source)
         self.assertIn("overrides.get(str(mask.get", source)
+
+    def test_final_f3_analysis_and_previews_use_effective_check_geometry(self):
+        self.assertIn(
+            "mascaras_geometria_check_display",
+            inspect.getsource(exact_template),
+        )
+        self.assertIn(
+            "mascaras_geometria_check_display",
+            inspect.getsource(same_mask),
+        )
+        self.assertIn(
+            "mascaras_geometria_check_display",
+            inspect.getsource(preview_clarity),
+        )
+        self.assertIn(
+            "mascaras_geometria_check_display",
+            inspect.getsource(live_overlay),
+        )
 
     def test_check_editor_exposes_board_and_mask_adjustment(self):
         source = Path(check_editor.__file__).read_text(encoding="utf-8")
