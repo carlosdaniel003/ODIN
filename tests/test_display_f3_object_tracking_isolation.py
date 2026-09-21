@@ -190,6 +190,53 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertEqual("polygon", masks[0]["type"])
         self.assertEqual(3, len(masks[0]["points"]))
 
+    def test_orientation_project_view_keeps_base_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            project = {
+                "name": "DISPLAY TESTE",
+                "master_resolution": {"width": 640, "height": 480},
+                "masks": [
+                    {
+                        "id": "MASK_001",
+                        "type": "polygon",
+                        "points": [[20, 20], [80, 20], [50, 60]],
+                    }
+                ],
+                "checks": [],
+            }
+            self.assertTrue(
+                store.save_orientation(
+                    "DISPLAY TESTE",
+                    tracking.F3_ORIENTATION_90,
+                    {
+                        "image_path": str(Path(directory) / "orientation_90.png"),
+                        "width": 640,
+                        "height": 480,
+                        "canonical_to_reference": [[1, 0, 50], [0, 1, 20]],
+                        "calibrated": True,
+                        "masks_reference": [
+                            {
+                                "id": "MASK_001",
+                                "type": "circle",
+                                "cx": 170,
+                                "cy": 140,
+                                "radius": 30,
+                            }
+                        ],
+                    },
+                )
+            )
+            runtime = SimpleNamespace(store=store)
+            corrected = tracking._canonical_masks_for_orientation(
+                runtime,
+                project,
+                tracking.F3_ORIENTATION_90,
+            )
+            self.assertEqual(1, len(corrected))
+            self.assertEqual("polygon", corrected[0]["type"])
+            self.assertEqual(3, len(corrected[0]["points"]))
+
     def test_reference_pose_is_recovered_from_drawn_board_and_masks(self):
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)

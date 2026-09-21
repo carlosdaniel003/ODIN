@@ -276,6 +276,25 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertAlmostEqual(220.0, center_x, places=3)
         self.assertAlmostEqual(180.0, center_y, places=3)
 
+    def test_segmento_desenhado_na_base_nao_vira_circulo_no_check(self):
+        segment = reference_geometry_editor._segment_polygon_from_drag(
+            100,
+            100,
+            190,
+            100,
+            "MASK_009",
+        )
+        local_circle = {
+            "id": "MASK_009",
+            "type": "circle",
+            "cx": 310,
+            "cy": 220,
+            "radius": 35,
+        }
+        synced = sincronizar_formato_mascara_display(segment, local_circle)
+        self.assertEqual("polygon", synced["type"])
+        self.assertEqual(4, len(synced["points"]))
+
     def test_check_effective_geometry_uses_project_shape_and_local_pose(self):
         from src.platform.display_project_repository import (
             mascaras_geometria_check_display,

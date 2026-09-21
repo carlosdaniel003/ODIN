@@ -1836,17 +1836,31 @@ def _canonical_masks_for_orientation(
         return None
 
     if isinstance(entry, dict) and "masks_reference" in entry:
+        local_by_id = {
+            str(mask.get("id") or ""): mask
+            for mask in (
+                _normalize_mask_override(raw)
+                for raw in entry.get("masks_reference", []) or []
+            )
+            if isinstance(mask, dict) and str(mask.get("id") or "")
+        }
         corrected: list[dict] = []
-        for raw in entry.get("masks_reference", []) or []:
-            local = _normalize_mask_override(raw)
+        for base_mask in normalizar_mascaras_display(project.get("masks", [])):
+            mask_id = str(base_mask.get("id") or "")
+            local = local_by_id.get(mask_id)
             if local is None:
+                # Exclusão local do slot continua respeitada.
                 continue
-            canonical = transform_mask(local, inverse)
-            if canonical is None:
+            canonical_pose = transform_mask(local, inverse)
+            if canonical_pose is None:
                 continue
-            canonical["id"] = str(local.get("id") or canonical.get("id") or "")
-            if canonical["id"]:
-                corrected.append(canonical)
+            canonical_pose["id"] = mask_id
+            corrected.append(
+                sincronizar_formato_mascara_display(
+                    base_mask,
+                    canonical_pose,
+                )
+            )
         return corrected
 
     overrides = entry.get("mask_overrides_reference", {}) if isinstance(entry, dict) else {}
@@ -1865,7 +1879,12 @@ def _canonical_masks_for_orientation(
             corrected.append(deepcopy(original))
             continue
         canonical["id"] = mask_id
-        corrected.append(canonical)
+        corrected.append(
+            sincronizar_formato_mascara_display(
+                original,
+                canonical,
+            )
+        )
 
     return corrected if len(corrected) == len(original_masks) else None
 
