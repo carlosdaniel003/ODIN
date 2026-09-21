@@ -316,6 +316,16 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 (got_points, expected_points),
             )
 
+    def test_cached_lock_never_promotes_held_pose_to_current_evidence(self):
+        source = inspect.getsource(tracking.F3DisplayObjectTracker.align)
+        self.assertIn(
+            "evidence_current=bool(self.last_result.evidence_current)",
+            source,
+        )
+        self.assertIn('reason="lock_held"', inspect.getsource(
+            tracking.F3DisplayObjectTracker._held_lock_result
+        ))
+
     def test_tracker_has_temporal_continuity_and_lock_hysteresis(self):
         source = inspect.getsource(tracking.F3DisplayObjectTracker)
         self.assertIn("_temporal_candidate", source)

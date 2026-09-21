@@ -1689,6 +1689,10 @@ class F3DisplayObjectTracker:
         final_scale = affine_scale(matrix)
         if not (F3_TRACKING_MIN_SCALE <= final_scale <= F3_TRACKING_MAX_SCALE):
             return None
+        if abs(float(matrix[0, 2])) > self.width * F3_TRACKING_MAX_TRANSLATION_FRACTION:
+            return None
+        if abs(float(matrix[1, 2])) > self.height * F3_TRACKING_MAX_TRANSLATION_FRACTION:
+            return None
 
         source_type = (
             str(self.last_result.source_type or "temporal")
@@ -1971,7 +1975,7 @@ class F3DisplayObjectTracker:
                 reason="cached_transform",
                 current_to_canonical=self.last_matrix.copy(),
                 source_type=self.last_result.source_type,
-                evidence_current=True,
+                evidence_current=bool(self.last_result.evidence_current),
             )
             self.last_result = result
             self.last_frame_id = frame_id
@@ -1979,7 +1983,24 @@ class F3DisplayObjectTracker:
 
         gray = self._gray(frame)
         if gray is None:
-            result = F3TrackingResult(False, frame, reason="gray_prepare_failed")
+            self.consecutive_misses += 1
+            held = self._held_lock_result(frame, now)
+            if held is not None:
+                self.last_result = held
+                self.last_frame_id = frame_id
+                self.last_compute_s = now
+                return held
+            self.last_matrix = None
+            self.last_gray = None
+            self.last_verified_s = 0.0
+            self.consecutive_misses = 0
+            self._last_reference = ""
+            result = F3TrackingResult(
+                False,
+                frame,
+                reason="gray_prepare_failed",
+                evidence_current=False,
+            )
             self.last_result = result
             self.last_frame_id = frame_id
             return result
