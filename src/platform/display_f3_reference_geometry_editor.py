@@ -390,106 +390,100 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         button("CANCELAR", self.close, bg="#3A151A", fg="#FCA5A5")
         button("SALVAR", self.save, bg="#0F3A2B", fg="#86EFAC")
 
-        self.mask_toolbar = None
-        if self.allow_mask_creation:
-            self.mask_toolbar = tk.Frame(self.window, bg="#0B1728")
-            self.mask_toolbar.pack(fill=tk.X, padx=10, pady=(0, 8))
-            tk.Label(
+        self.mask_toolbar = tk.Frame(self.window, bg="#0B1728")
+        self.mask_toolbar.pack(fill=tk.X, padx=10, pady=(0, 8))
+        tk.Label(
+            self.mask_toolbar,
+            text="MÁSCARAS",
+            font=("Segoe UI", 8, "bold"),
+            fg="#94A3B8",
+            bg="#0B1728",
+        ).pack(side=tk.LEFT, padx=(6, 10))
+
+        def mask_button(
+            text,
+            mode=None,
+            command=None,
+            danger=False,
+            key=None,
+        ):
+            callback = command or (lambda value=mode: self.set_mask_draw_mode(value))
+            widget = tk.Button(
                 self.mask_toolbar,
-                text="MÁSCARAS",
+                text=text,
+                command=callback,
                 font=("Segoe UI", 8, "bold"),
-                fg="#94A3B8",
-                bg="#0B1728",
-            ).pack(side=tk.LEFT, padx=(6, 10))
+                bg="#3A151A" if danger else "#17314A",
+                fg="#FCA5A5" if danger else "#7DD3FC",
+                activebackground="#1E4668",
+                activeforeground="#FFFFFF",
+                relief=tk.FLAT,
+                bd=0,
+                padx=10,
+                pady=6,
+                cursor="hand2",
+            )
+            widget.pack(side=tk.LEFT, padx=(0, 4))
+            if not danger and key:
+                key_name = str(key)
+                self.mask_draw_buttons[key_name] = widget
+                self.mask_draw_button_labels[key_name] = str(text)
+            return widget
 
-            def mask_button(
-                text,
-                mode=None,
-                command=None,
-                danger=False,
-                key=None,
-            ):
-                callback = command or (lambda value=mode: self.set_mask_draw_mode(value))
-                widget = tk.Button(
-                    self.mask_toolbar,
-                    text=text,
-                    command=callback,
-                    font=("Segoe UI", 8, "bold"),
-                    bg="#3A151A" if danger else "#17314A",
-                    fg="#FCA5A5" if danger else "#7DD3FC",
-                    activebackground="#1E4668",
-                    activeforeground="#FFFFFF",
-                    relief=tk.FLAT,
-                    bd=0,
-                    padx=10,
-                    pady=6,
-                    cursor="hand2",
-                )
-                widget.pack(side=tk.LEFT, padx=(0, 4))
-                if not danger and key:
-                    key_name = str(key)
-                    self.mask_draw_buttons[key_name] = widget
-                    self.mask_draw_button_labels[key_name] = str(text)
-                return widget
-
-            mask_button("SELECIONAR", mode=None, key="select")
+        mask_button("SELECIONAR", mode=None, key="select")
+        if self.allow_mask_creation:
             mask_button("+ SEGMENTO", mode="segment", key="segment")
             mask_button("+ CÍRCULO", mode="circle", key="circle")
             mask_button("+ POR PONTOS", mode="polygon", key="polygon")
-            mask_button(
-                "SELECIONAR TUDO",
-                command=self.select_all_masks,
-            )
-            mask_button(
-                "LIMPAR SELEÇÃO",
-                command=self.clear_mask_selection,
-            )
+        mask_button("SELECIONAR TUDO", command=self.select_all_masks)
+        mask_button("LIMPAR SELEÇÃO", command=self.clear_mask_selection)
+        if self.allow_mask_creation:
             mask_button(
                 "EXCLUIR MÁSCARA",
                 command=self.delete_selected_mask,
                 danger=True,
             )
-            self._update_mask_draw_buttons()
+        self._update_mask_draw_buttons()
 
-            self.mask_transform_toolbar = tk.Frame(self.window, bg="#0A1322")
-            self.mask_transform_toolbar.pack(fill=tk.X, padx=10, pady=(0, 8))
-            tk.Label(
+        self.mask_transform_toolbar = tk.Frame(self.window, bg="#0A1322")
+        self.mask_transform_toolbar.pack(fill=tk.X, padx=10, pady=(0, 8))
+        tk.Label(
+            self.mask_transform_toolbar,
+            text="EDIÇÃO DA SELEÇÃO",
+            font=("Segoe UI", 8, "bold"),
+            fg="#94A3B8",
+            bg="#0A1322",
+        ).pack(side=tk.LEFT, padx=(6, 10))
+
+        def transform_button(text, command):
+            tk.Button(
                 self.mask_transform_toolbar,
-                text="EDIÇÃO DA SELEÇÃO",
+                text=text,
+                command=command,
                 font=("Segoe UI", 8, "bold"),
-                fg="#94A3B8",
-                bg="#0A1322",
-            ).pack(side=tk.LEFT, padx=(6, 10))
+                bg="#172033",
+                fg="#CBD5E1",
+                activebackground="#25324A",
+                activeforeground="#FFFFFF",
+                relief=tk.FLAT,
+                bd=0,
+                padx=7,
+                pady=5,
+                cursor="hand2",
+            ).pack(side=tk.LEFT, padx=(0, 4))
 
-            def transform_button(text, command):
-                tk.Button(
-                    self.mask_transform_toolbar,
-                    text=text,
-                    command=command,
-                    font=("Segoe UI", 8, "bold"),
-                    bg="#172033",
-                    fg="#CBD5E1",
-                    activebackground="#25324A",
-                    activeforeground="#FFFFFF",
-                    relief=tk.FLAT,
-                    bd=0,
-                    padx=7,
-                    pady=5,
-                    cursor="hand2",
-                ).pack(side=tk.LEFT, padx=(0, 4))
-
-            transform_button("←1", lambda: self.transform_selected(dx=-1))
-            transform_button("→1", lambda: self.transform_selected(dx=1))
-            transform_button("↑1", lambda: self.transform_selected(dy=-1))
-            transform_button("↓1", lambda: self.transform_selected(dy=1))
-            transform_button("MENOR -5%", lambda: self.transform_selected(scale_x=0.95, scale_y=0.95))
-            transform_button("MAIOR +5%", lambda: self.transform_selected(scale_x=1.05, scale_y=1.05))
-            transform_button("X -5%", lambda: self.transform_selected(scale_x=0.95, scale_y=1.0))
-            transform_button("X +5%", lambda: self.transform_selected(scale_x=1.05, scale_y=1.0))
-            transform_button("Y -5%", lambda: self.transform_selected(scale_x=1.0, scale_y=0.95))
-            transform_button("Y +5%", lambda: self.transform_selected(scale_x=1.0, scale_y=1.05))
-            transform_button("ROT -1°", lambda: self.transform_selected(degrees=-1.0))
-            transform_button("ROT +1°", lambda: self.transform_selected(degrees=1.0))
+        transform_button("←1", lambda: self.transform_selected(dx=-1))
+        transform_button("→1", lambda: self.transform_selected(dx=1))
+        transform_button("↑1", lambda: self.transform_selected(dy=-1))
+        transform_button("↓1", lambda: self.transform_selected(dy=1))
+        transform_button("MENOR -5%", lambda: self.transform_selected(scale_x=0.95, scale_y=0.95))
+        transform_button("MAIOR +5%", lambda: self.transform_selected(scale_x=1.05, scale_y=1.05))
+        transform_button("X -5%", lambda: self.transform_selected(scale_x=0.95, scale_y=1.0))
+        transform_button("X +5%", lambda: self.transform_selected(scale_x=1.05, scale_y=1.0))
+        transform_button("Y -5%", lambda: self.transform_selected(scale_x=1.0, scale_y=0.95))
+        transform_button("Y +5%", lambda: self.transform_selected(scale_x=1.0, scale_y=1.05))
+        transform_button("ROT -1°", lambda: self.transform_selected(degrees=-1.0))
+        transform_button("ROT +1°", lambda: self.transform_selected(degrees=1.0))
 
         self.status = tk.Label(
             self.window,
@@ -627,7 +621,11 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         )
 
     def set_mask_draw_mode(self, mode=None) -> None:
-        next_mode = mode if mode in {"segment", "circle", "polygon"} else None
+        next_mode = (
+            mode
+            if self.allow_mask_creation and mode in {"segment", "circle", "polygon"}
+            else None
+        )
         self.mask_draw_mode = next_mode
         self.mask_draw_start = None
         self.mask_draw_current = None
@@ -714,7 +712,15 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         return "break"
 
     def delete_selected_mask(self, _event=None) -> str:
-        """Exclui uma ou várias máscaras selecionadas."""
+        """Exclui uma ou várias máscaras apenas no editor canônico."""
+        if not self.allow_mask_creation:
+            self.status.configure(
+                text=(
+                    "ESTRUTURA BLOQUEADA • crie/exclua máscaras em "
+                    "'Desenhar placa e máscaras'. Aqui ajuste somente a geometria."
+                )
+            )
+            return "break"
         selected_ids = self._selected_ids()
         if not selected_ids:
             self.status.configure(
@@ -1053,10 +1059,10 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         return "break"
 
     def _press(self, event) -> None:
-        if not self.allow_mask_creation:
+        if self.draw_board_mode:
             return super()._press(event)
 
-        if self.mask_draw_mode is not None:
+        if self.allow_mask_creation and self.mask_draw_mode is not None:
             self.canvas.focus_set()
             point = self._canvas_to_image(event.x, event.y)
             if self.mask_draw_mode == "polygon":
@@ -1132,7 +1138,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.schedule_render()
 
     def _drag(self, event) -> None:
-        if self.allow_mask_creation and self.mask_draw_mode is None:
+        if self.mask_draw_mode is None:
             if (
                 isinstance(self.drag_target, tuple)
                 and self.drag_target
@@ -1158,22 +1164,26 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 self.drag_last_image = current
                 return
             return super()._drag(event)
-        if not self.allow_mask_creation or self.mask_draw_mode is None:
+        if self.mask_draw_mode is None:
             return super()._drag(event)
-        if self.mask_draw_mode in {"segment", "circle"} and self.mask_draw_start is not None:
+        if self.allow_mask_creation and self.mask_draw_mode in {"segment", "circle"} and self.mask_draw_start is not None:
             self.mask_draw_current = self._canvas_to_image(event.x, event.y)
             self.schedule_render()
 
     def _release(self, event) -> None:
-        if self.allow_mask_creation and self.mask_draw_mode is None:
+        if self.mask_draw_mode is None:
             self.transform_drag_initial_masks = {}
             self.transform_drag_bounds = None
             self.transform_drag_start_canvas = None
             self.transform_drag_start_image = None
             return super()._release(event)
-        if not self.allow_mask_creation or self.mask_draw_mode is None:
+        if self.mask_draw_mode is None:
             return super()._release(event)
-        if self.mask_draw_mode not in {"segment", "circle"} or self.mask_draw_start is None:
+        if (
+            not self.allow_mask_creation
+            or self.mask_draw_mode not in {"segment", "circle"}
+            or self.mask_draw_start is None
+        ):
             return
         current = self._canvas_to_image(event.x, event.y)
         x1, y1 = self.mask_draw_start
@@ -1216,7 +1226,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
     def _motion(self, event) -> None:
         if self.view_pan_active:
             return
-        if not self.allow_mask_creation:
+        if self.draw_board_mode:
             return super()._motion(event)
         if self.mask_draw_mode is None:
             super()._motion(event)
@@ -1347,7 +1357,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             self.status.configure(text=self._mask_draw_status_text())
             self.schedule_render()
             return "break"
-        if self.allow_mask_creation and self._selected_ids():
+        if self._selected_ids():
             return self.clear_mask_selection(event)
         return super()._escape(event)
 
@@ -1523,7 +1533,9 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
 
     def _draw_handles(self) -> None:
         super()._draw_handles()
-        if not self.allow_mask_creation or self.mask_draw_mode is None:
+        if self.mask_draw_mode is None:
+            return
+        if not self.allow_mask_creation:
             return
 
         if self.mask_draw_mode == "polygon":

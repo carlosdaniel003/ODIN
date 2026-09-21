@@ -149,39 +149,20 @@ def mascaras_geometria_check_display(
     project: dict | None,
     check: dict | None,
 ) -> list[dict]:
-    """Resolve a geometria efetiva das máscaras para um CHECK.
+    """CHECKS usam sempre a geometria canônica atual do Projeto Display.
 
-    As máscaras definidas em "Editar máscaras visualmente" continuam sendo a
-    base canônica do Projeto Display. Um CHECK pode guardar somente correções
-    locais por id; IDs sem correção continuam usando a máscara canônica.
+    O CHECK guarda somente estado lógico por máscara. Geometria pertence à tela
+    "Desenhar placa e máscaras"; assim qualquer ajuste nela é refletido em todos
+    os CHECKS e no runtime sem overrides locais divergentes.
     """
+    del check
     if not isinstance(project, dict):
         return []
-    base = [
+    return [
         deepcopy(mask)
         for mask in (project.get("masks", []) or [])
         if isinstance(mask, dict)
     ]
-    overrides = (
-        check.get("mask_overrides_reference", {})
-        if isinstance(check, dict)
-        and isinstance(check.get("mask_overrides_reference"), dict)
-        else {}
-    )
-    if not overrides:
-        return base
-
-    result = []
-    for mask in base:
-        mask_id = str(mask.get("id") or "")
-        override = overrides.get(mask_id)
-        if isinstance(override, dict):
-            item = deepcopy(override)
-            item["id"] = mask_id
-            result.append(item)
-        else:
-            result.append(mask)
-    return result
 
 
 def normalizar_estado_check_display(valor) -> str:
@@ -298,18 +279,8 @@ def normalizar_checks_display(
             "name": nome,
             "mask_states": normalizar_estados_check_display(estados, mask_ids),
         }
-        board_points = normalizar_pontos_geometria_check(
-            check.get("board_points_reference"),
-            minimo=3,
-        )
-        overrides = normalizar_overrides_mascaras_check(
-            check.get("mask_overrides_reference"),
-            masks,
-        )
-        if board_points:
-            item["board_points_reference"] = board_points
-        if overrides:
-            item["mask_overrides_reference"] = overrides
+        # Geometria local por CHECK foi removida: somente mask_states pertence
+        # ao CHECK. A geometria é sempre herdada de projeto["masks"].
         resultado.append(item)
     return resultado
 
@@ -690,23 +661,15 @@ class DisplayProjectRepository:
         if projeto is None or not identificador:
             return False
 
-        board = normalizar_pontos_geometria_check(board_points, minimo=3)
-        overrides = normalizar_overrides_mascaras_check(
-            mask_overrides,
-            projeto.get("masks", []),
-        )
+        # Compatibilidade com chamadas antigas: a geometria de CHECK não é mais
+        # persistida. Limpe qualquer override legado e mantenha apenas estados.
+        del board_points, mask_overrides
         encontrado = False
         for check in projeto.get("checks", []):
             if str(check.get("id", "")).upper() != identificador:
                 continue
-            if board:
-                check["board_points_reference"] = board
-            else:
-                check.pop("board_points_reference", None)
-            if overrides:
-                check["mask_overrides_reference"] = overrides
-            else:
-                check.pop("mask_overrides_reference", None)
+            check.pop("board_points_reference", None)
+            check.pop("mask_overrides_reference", None)
             encontrado = True
             break
         if not encontrado:

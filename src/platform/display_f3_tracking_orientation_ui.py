@@ -2087,17 +2087,116 @@ def _build_tracking_config_class(base_cls):
         def _edit_f3_orientation(self, slot: str) -> None:
             if not bool(self._f3_tracking_enabled_var.get()):
                 return
-            entry = self._f3_tracking_store.orientations(
-                self._selected_name() or ""
-            ).get(slot, {})
-            if not entry:
+            project_name = self._selected_name() or ""
+            project = self.repository.carregar_projeto(project_name)
+            entry = self._f3_tracking_store.orientations(project_name).get(slot, {})
+            if project is None or not entry:
                 messagebox.showwarning(
                     "Referência necessária",
                     "Capture ou carregue primeiro a imagem deste slot.",
                     parent=self.window,
                 )
                 return
-            F3OrientationGeometryEditor(self, slot)
+
+            resolution = normalizar_resolucao_display(
+                project.get("master_resolution")
+            )
+            image = cv2.imread(
+                str(entry.get("image_path") or ""),
+                cv2.IMREAD_COLOR,
+            )
+            if resolution is None or not _valid_frame(image):
+                messagebox.showwarning(
+                    "Imagem indisponível",
+                    "A imagem deste slot não pôde ser carregada.",
+                    parent=self.window,
+                )
+                return
+
+            matrix = matrix_np(entry)
+            if matrix is None:
+                matrix = nominal_orientation_matrix(
+                    project,
+                    self._f3_tracking_store,
+                    slot,
+                )
+            if matrix is None:
+                matrix = np.asarray(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    dtype=np.float32,
+                )
+
+            board, masks = reference_geometry(
+                project,
+                self._f3_tracking_store,
+                slot,
+                entry,
+            )
+            if not board:
+                board = transform_points(
+                    canonical_board_points(project, self._f3_tracking_store),
+                    matrix,
+                )
+            if not masks:
+                masks = transformed_masks(project, matrix)
+
+            def save_geometry(board_points, edited_masks) -> bool:
+                overrides = {
+                    str(mask.get("id") or ""): _normalize_mask_override(mask)
+                    for mask in (edited_masks or [])
+                    if isinstance(mask, dict) and str(mask.get("id") or "")
+                }
+                overrides = {
+                    key: value
+                    for key, value in overrides.items()
+                    if value is not None
+                }
+                current = dict(entry)
+                current.update(
+                    {
+                        "canonical_to_reference": np.asarray(
+                            matrix,
+                            dtype=np.float32,
+                        ).reshape(2, 3).tolist(),
+                        "calibrated": True,
+                        "board_points_reference": deepcopy(board_points),
+                        "mask_overrides_reference": overrides,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                saved = self._f3_tracking_store.save_orientation(
+                    project_name,
+                    slot,
+                    current,
+                )
+                if saved:
+                    self._invalidate_f3_tracking_runtime()
+                    self._render_f3_tracking_panel()
+                return bool(saved)
+
+            from src.platform.display_f3_reference_geometry_editor import (
+                F3ReferenceGeometryEditor,
+            )
+
+            F3ReferenceGeometryEditor(
+                parent=self.window,
+                image=image,
+                width=int(resolution[0]),
+                height=int(resolution[1]),
+                board_points=board,
+                masks=masks,
+                on_save=save_geometry,
+                title=(
+                    f"ODIN • F3 • Desenhar placa "
+                    f"{F3_ORIENTATION_UI[slot]['short']}"
+                ),
+                header_title=(
+                    f"F3 • REFERÊNCIA REAL {F3_ORIENTATION_UI[slot]['short']} • "
+                    "CONTORNO + MÁSCARAS"
+                ),
+                on_close=self._render_f3_tracking_panel,
+                allow_mask_creation=False,
+            )
 
         def _remove_f3_orientation(self, slot: str) -> None:
             project_name = self._selected_name()

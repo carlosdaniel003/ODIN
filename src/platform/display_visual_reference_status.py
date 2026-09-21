@@ -1003,6 +1003,7 @@ class DisplayProjectConfigPresenceWindow(
             header_title=(
                 "F3 • PLACA DESLIGADA NO SUPORTE • CONTORNO + MÁSCARAS"
             ),
+            allow_mask_creation=False,
         )
 
     def capture_project_presence_reference(self, kind: str) -> None:

@@ -573,21 +573,6 @@ class DisplayCheckManagerWindow:
                 self.refresh(check_id)
                 self._notify_change()
 
-        def save_geometry(board_points, edited_masks) -> None:
-            overrides = {
-                str(mask.get("id") or ""): deepcopy(mask)
-                for mask in (edited_masks or [])
-                if isinstance(mask, dict) and str(mask.get("id") or "")
-            }
-            if self.repository.salvar_geometria_check(
-                self.project_name,
-                check_id,
-                board_points,
-                overrides,
-            ):
-                self.refresh(check_id)
-                self._notify_change()
-
         self.check_editor = DisplayCheckMaskEditorWindow(
             root=self.root,
             project_name=self.project_name,
@@ -596,9 +581,10 @@ class DisplayCheckManagerWindow:
             masks=masks,
             frame=frame,
             on_save=save_states,
-            board_points=check.get("board_points_reference"),
-            mask_overrides=check.get("mask_overrides_reference"),
-            on_save_geometry=save_geometry,
+            board_points=None,
+            mask_overrides=None,
+            on_save_geometry=None,
+            allow_geometry_edit=False,
         )
 
     def close(self) -> None:
@@ -637,6 +623,7 @@ class DisplayCheckMaskEditorWindow:
         on_save_geometry=None,
         geometry_only: bool = False,
         geometry_title: str | None = None,
+        allow_geometry_edit: bool = True,
     ) -> None:
         resolution = normalizar_resolucao_display(master_resolution)
         if resolution is None:
@@ -647,7 +634,11 @@ class DisplayCheckMaskEditorWindow:
         self.check_name = str(check.get("name", "CHECK"))
         self.master_width, self.master_height = resolution
         base_masks = normalizar_mascaras_display(deepcopy(masks or []))
-        overrides = mask_overrides if isinstance(mask_overrides, dict) else {}
+        overrides = (
+            mask_overrides
+            if self.allow_geometry_edit and isinstance(mask_overrides, dict)
+            else {}
+        )
         self.masks = []
         for mask in base_masks:
             mask_id = str(mask.get("id") or "")
@@ -671,7 +662,10 @@ class DisplayCheckMaskEditorWindow:
         if frame is not None and getattr(frame, "size", 0) > 0:
             self.frame = frame.copy()
         self.on_save = on_save
-        self.on_save_geometry = on_save_geometry
+        self.allow_geometry_edit = bool(allow_geometry_edit or geometry_only)
+        self.on_save_geometry = (
+            on_save_geometry if self.allow_geometry_edit else None
+        )
         self.geometry_only = bool(geometry_only)
         self.geometry_title = str(geometry_title or "").strip()
         self.geometry_mode = bool(geometry_only)
@@ -731,7 +725,12 @@ class DisplayCheckMaskEditorWindow:
                 + (
                     "ajuste o contorno CIANO e as máscaras; arraste pontos ou máscaras"
                     if self.geometry_only
-                    else "clique para alternar estado • AJUSTAR GEOMETRIA permite mover placa/máscaras"
+                    else (
+                        "clique para alternar estado • geometria sincronizada com "
+                        "'Desenhar placa e máscaras'"
+                        if not self.allow_geometry_edit
+                        else "clique para alternar estado • AJUSTAR GEOMETRIA permite mover placa/máscaras"
+                    )
                 )
             ),
             font=("DejaVu Sans", 8),
@@ -742,7 +741,7 @@ class DisplayCheckMaskEditorWindow:
 
         actions = tk.Frame(toolbar, bg=self.PANEL)
         actions.pack(side=tk.RIGHT, padx=(8, 18), pady=8)
-        if not self.geometry_only:
+        if not self.geometry_only and self.allow_geometry_edit:
             self.geometry_button = tk.Button(
                 actions,
                 text="AJUSTAR GEOMETRIA",
@@ -777,7 +776,8 @@ class DisplayCheckMaskEditorWindow:
             cursor="hand2",
             state=tk.NORMAL if self.geometry_only else tk.DISABLED,
         )
-        self.redraw_board_button.pack(side=tk.LEFT, padx=3)
+        if self.allow_geometry_edit:
+            self.redraw_board_button.pack(side=tk.LEFT, padx=3)
 
         if not self.geometry_only:
             tk.Button(
@@ -1640,7 +1640,7 @@ class DisplayCheckMaskEditorWindow:
         states = normalizar_estados_check_display(self.states, self.mask_ids)
         if not self.geometry_only and self.on_save is not None:
             self.on_save(deepcopy(states))
-        if self.on_save_geometry is not None:
+        if self.allow_geometry_edit and self.on_save_geometry is not None:
             self.on_save_geometry(
                 deepcopy(self.board_points),
                 deepcopy(self.masks),
