@@ -80,7 +80,7 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertTrue(check_id)
         return name, check_id
 
-    def test_check_geometry_is_always_inherited_from_project_masks(self):
+    def test_check_geometry_roundtrip_is_local_to_check(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = self._repository(directory)
             project_name, check_id = self._project(repository)
@@ -92,7 +92,16 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
                     "cx": 206,
                     "cy": 184,
                     "radius": 16,
-                }
+                },
+                "MASK_003": {
+                    "id": "MASK_003",
+                    "type": "segment",
+                    "cx": 438,
+                    "cy": 266,
+                    "width": 76,
+                    "height": 18,
+                    "angle": 19.0,
+                },
             }
             self.assertTrue(
                 repository.salvar_geometria_check(
@@ -102,18 +111,25 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
                     overrides,
                 )
             )
+
             reopened = DisplayProjectRepository(repository.config_file)
             check = reopened.carregar_check(project_name, check_id)
             project = reopened.carregar_projeto(project_name)
-            self.assertNotIn("board_points_reference", check)
-            self.assertNotIn("mask_overrides_reference", check)
-
-            from src.platform.display_project_repository import (
-                mascaras_geometria_check_display,
+            self.assertEqual(board, check["board_points_reference"])
+            self.assertEqual(
+                206,
+                check["mask_overrides_reference"]["MASK_001"]["cx"],
             )
-            effective = mascaras_geometria_check_display(project, check)
-            self.assertEqual(project["masks"], effective)
-            self.assertEqual(200, effective[0]["cx"])
+            self.assertEqual(
+                "segment",
+                check["mask_overrides_reference"]["MASK_003"]["type"],
+            )
+            self.assertEqual(
+                19.0,
+                check["mask_overrides_reference"]["MASK_003"]["angle"],
+            )
+            # A geometria canônica do Projeto Display permanece independente.
+            self.assertEqual(200, project["masks"][0]["cx"])
 
     def test_board_off_accepts_geometry_but_empty_support_does_not(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -173,17 +189,9 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
                 saved["mask_overrides_reference"]["MASK_001"]["cx"],
             )
 
-    def test_check_analyzer_uses_project_mask_geometry_authority(self):
+    def test_check_analyzer_applies_local_mask_overrides(self):
         source = inspect.getsource(analyzer.DisplayAutomaticCheckAnalyzer.analyze)
         self.assertIn("mascaras_geometria_check_display(project, check)", source)
-        resolver_source = inspect.getsource(
-            __import__(
-                "src.platform.display_project_repository",
-                fromlist=["mascaras_geometria_check_display"],
-            ).mascaras_geometria_check_display
-        )
-        self.assertIn('project.get("masks"', resolver_source)
-        self.assertNotIn("mask_overrides_reference", resolver_source)
 
     def test_final_f3_analysis_and_previews_use_effective_check_geometry(self):
         self.assertIn(
@@ -203,24 +211,19 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             inspect.getsource(live_overlay),
         )
 
-    def test_check_manager_disables_local_geometry_editing(self):
-        source = inspect.getsource(check_editor.DisplayCheckManagerWindow.edit_selected)
-        self.assertIn("allow_geometry_edit=False", source)
-        self.assertIn("mask_overrides=None", source)
-        self.assertIn("on_save_geometry=None", source)
-        self.assertNotIn("salvar_geometria_check", source)
+    def test_check_editor_exposes_board_and_mask_adjustment(self):
+        source = Path(check_editor.__file__).read_text(encoding="utf-8")
+        self.assertIn("AJUSTAR GEOMETRIA", source)
+        self.assertIn("board_points", source)
+        self.assertIn("mask_overrides", source)
+        self.assertIn("on_save_geometry", source)
+        self.assertIn("undo_geometry", source)
+        self.assertIn("_geometry_wheel", source)
+        self.assertIn("REDESENHAR PLACA", source)
+        self.assertIn("geometry_draw_board_points", source)
+        self.assertIn("_finish_redraw_board_geometry", source)
 
-        editor_source = inspect.getsource(check_editor.DisplayCheckMaskEditorWindow)
-        self.assertIn("geometria sincronizada com", editor_source)
-        self.assertIn("self.allow_geometry_edit", editor_source)
-
-        init_source = inspect.getsource(check_editor.DisplayCheckMaskEditorWindow.__init__)
-        self.assertLess(
-            init_source.find("self.allow_geometry_edit ="),
-            init_source.find("if self.allow_geometry_edit and isinstance(mask_overrides, dict)"),
-        )
-
-    def test_board_off_uses_shared_reference_geometry_editor(self):
+    def test_board_off_uses_geometry_only_rotation_style_editor(self):
         source = inspect.getsource(
             visual_reference_status.DisplayProjectConfigPresenceWindow.edit_board_off_geometry
         )
@@ -239,9 +242,7 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertNotIn("IGNORAR", editor_source)
 
     def test_rotation_slots_use_same_shared_reference_geometry_editor(self):
-        source = inspect.getsource(
-            tracking_ui._build_tracking_config_class
-        )
+        source = inspect.getsource(tracking_ui._build_tracking_config_class)
         self.assertIn("F3ReferenceGeometryEditor", source)
         self.assertIn("allow_mask_creation=False", source)
         self.assertIn("mask_overrides_reference", source)
