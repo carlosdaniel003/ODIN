@@ -670,7 +670,11 @@ def _estimate_affine_partial(source_points, target_points):
     return np.asarray(matrix, dtype=np.float32).reshape(2, 3)
 
 
-def _best_board_correspondence(reference_board, canonical_board):
+def _best_board_correspondence(
+    reference_board,
+    canonical_board,
+    hint_matrix=None,
+):
     reference = _normalize_points(reference_board, minimum=3)
     canonical = _normalize_points(canonical_board, minimum=3)
     if len(reference) != len(canonical) or len(reference) < 3:
@@ -680,18 +684,32 @@ def _best_board_correspondence(reference_board, canonical_board):
     can = np.asarray(canonical, dtype=np.float32)
     best = None
     n = len(ref)
+    hint = None
+    if hint_matrix is not None:
+        try:
+            hint = np.asarray(hint_matrix, dtype=np.float32).reshape(2, 3)
+        except Exception:
+            hint = None
+
     for reverse in (False, True):
         ordered = ref[::-1].copy() if reverse else ref.copy()
         for shift in range(n):
             candidate = np.roll(ordered, shift, axis=0)
-            matrix = _estimate_affine_partial(candidate, can)
-            if matrix is None:
-                continue
-            projected = cv2.transform(
-                candidate.reshape(-1, 1, 2),
-                matrix,
-            ).reshape(-1, 2)
-            error = float(np.median(np.linalg.norm(projected - can, axis=1)))
+            if hint is not None:
+                projected = cv2.transform(
+                    candidate.reshape(-1, 1, 2),
+                    hint,
+                ).reshape(-1, 2)
+                error = float(np.median(np.linalg.norm(projected - can, axis=1)))
+            else:
+                matrix = _estimate_affine_partial(candidate, can)
+                if matrix is None:
+                    continue
+                projected = cv2.transform(
+                    candidate.reshape(-1, 1, 2),
+                    matrix,
+                ).reshape(-1, 2)
+                error = float(np.median(np.linalg.norm(projected - can, axis=1)))
             if best is None or error < best[0]:
                 best = (error, candidate.tolist(), can.tolist())
     return best
@@ -734,7 +752,16 @@ def estimate_reference_to_canonical(
         source_points.append(source_center)
         target_points.append(target_center)
 
-    board_match = _best_board_correspondence(reference_board, canonical_board)
+    # Máscaras possuem IDs estáveis e por isso dão a orientação inicial sem
+    # ambiguidade. Um retângulo de placa sozinho pode encaixar igualmente em
+    # 0/90/180/270 graus; usamos os centros das máscaras para escolher a ordem
+    # correta dos vértices antes de acrescentar o contorno ao ajuste final.
+    mask_matrix = _estimate_affine_partial(source_points, target_points)
+    board_match = _best_board_correspondence(
+        reference_board,
+        canonical_board,
+        hint_matrix=mask_matrix,
+    )
     if board_match is not None:
         _error, ref_board_ordered, can_board_ordered = board_match
         source_points.extend(ref_board_ordered)
@@ -744,7 +771,11 @@ def estimate_reference_to_canonical(
     if matrix is not None:
         return matrix
 
-    # Se houver poucas máscaras, o contorno sozinho ainda pode resolver a pose.
+    if mask_matrix is not None:
+        return mask_matrix
+
+    # Se não houver máscaras suficientes, o contorno sozinho ainda resolve pose
+    # quando sua correspondência não é ambígua.
     if board_match is not None:
         return _estimate_affine_partial(board_match[1], board_match[2])
     return None
