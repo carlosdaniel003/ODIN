@@ -198,6 +198,10 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
             "_draw_selected_mask_outline",
             "_nearest_mask_body_canvas",
             "_next_available_mask_id",
+            "_polygon_close_target_hit",
+            "_finish_polygon_mask",
+            '"● {base_text}"',
+            '"FECHAR"',
             "mask_draw_buttons",
         ):
             self.assertIn(token, source)
@@ -206,6 +210,9 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
         self.assertIn("clique vazio nunca move tudo", source)
         self.assertIn("as setas não movem o conjunto", source)
         self.assertIn("keep_drawing", source)
+        self.assertIn("tk.SUNKEN if enabled else tk.FLAT", source)
+        self.assertIn("clique no PRIMEIRO PONTO para fechar", source)
+        self.assertIn("return self._finish_polygon_mask()", source)
 
     def test_classe_publica_continua_sendo_display_mask_editor_window(self):
         self.assertTrue(hasattr(DisplayMaskEditorWindow, "save"))

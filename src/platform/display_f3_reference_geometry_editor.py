@@ -27,6 +27,7 @@ from src.platform.display_mask_geometry import (
 
 F3_REFERENCE_HISTORY_LIMIT = 30
 F3_MASK_BODY_HIT_PX = 9.0
+F3_POLYGON_CLOSE_HIT_PX = 14.0
 
 
 def _segment_polygon_from_drag(
@@ -150,6 +151,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.mask_draw_current = None
         self.mask_draw_points: list[list[float]] = []
         self.mask_draw_buttons: dict[str, tk.Button] = {}
+        self.mask_draw_button_labels: dict[str, str] = {}
         self.view_pan_active = False
         self.view_pan_last: tuple[float, float] | None = None
 
@@ -306,7 +308,9 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 )
                 widget.pack(side=tk.LEFT, padx=(0, 4))
                 if not danger and key:
-                    self.mask_draw_buttons[str(key)] = widget
+                    key_name = str(key)
+                    self.mask_draw_buttons[key_name] = widget
+                    self.mask_draw_button_labels[key_name] = str(text)
                 return widget
 
             mask_button("SELECIONAR", mode=None, key="select")
@@ -382,12 +386,19 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         active = self.mask_draw_mode if self.mask_draw_mode else "select"
         for key, button in self.mask_draw_buttons.items():
             enabled = key == active
+            base_text = self.mask_draw_button_labels.get(key, str(key))
             try:
                 button.configure(
-                    bg="#D6A900" if enabled else "#17314A",
+                    text=(f"● {base_text}" if enabled else base_text),
+                    bg="#FACC15" if enabled else "#17314A",
                     fg="#111318" if enabled else "#7DD3FC",
-                    activebackground="#F5C518" if enabled else "#1E4668",
+                    activebackground="#FDE047" if enabled else "#1E4668",
                     activeforeground="#111318" if enabled else "#FFFFFF",
+                    relief=tk.SUNKEN if enabled else tk.FLAT,
+                    bd=2 if enabled else 0,
+                    highlightthickness=2 if enabled else 0,
+                    highlightbackground="#FEF08A" if enabled else "#17314A",
+                    highlightcolor="#FEF08A" if enabled else "#17314A",
                 )
             except Exception:
                 pass
@@ -401,9 +412,14 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         if self.mask_draw_mode == "circle":
             return "MÁSCARA • CÍRCULO • clique no centro e arraste o raio."
         if self.mask_draw_mode == "polygon":
+            if len(self.mask_draw_points) >= 3:
+                return (
+                    f"MÁSCARA • POR PONTOS ATIVO • {len(self.mask_draw_points)} ponto(s) • "
+                    "clique no PRIMEIRO PONTO para fechar ou pressione Enter • Esc cancela."
+                )
             return (
-                f"MÁSCARA • POR PONTOS • {len(self.mask_draw_points)} ponto(s) • "
-                "clique ponto a ponto; Enter conclui; Esc cancela."
+                f"MÁSCARA • POR PONTOS ATIVO • {len(self.mask_draw_points)} ponto(s) • "
+                "adicione pelo menos 3 pontos • Esc cancela."
             )
         return (
             "SELECIONAR • clique dentro de uma máscara para selecioná-la • "
@@ -539,6 +555,47 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                     return mask_id
         return None
 
+    def _polygon_close_target_hit(self, canvas_x: float, canvas_y: float) -> bool:
+        if self.mask_draw_mode != "polygon" or len(self.mask_draw_points) < 3:
+            return False
+        first = self.mask_draw_points[0]
+        first_x, first_y = self._image_to_canvas(first[0], first[1])
+        return math.hypot(
+            float(canvas_x) - float(first_x),
+            float(canvas_y) - float(first_y),
+        ) <= float(F3_POLYGON_CLOSE_HIT_PX)
+
+    def _finish_polygon_mask(self) -> str:
+        if self.mask_draw_mode != "polygon":
+            return "break"
+        if len(self.mask_draw_points) < 3:
+            self.status.configure(
+                text="POR PONTOS • use pelo menos 3 pontos antes de fechar a máscara."
+            )
+            return "break"
+
+        self._push_history()
+        mask = {
+            "id": self._next_mask_id(),
+            "type": "polygon",
+            "points": deepcopy(self.mask_draw_points),
+        }
+        self.masks.append(mask)
+        mask_id = str(mask.get("id") or "")
+        self.selected = ("mask", mask_id)
+        self.mask_draw_points = []
+        self.mask_draw_current = None
+        self.mask_draw_mode = None
+        self._update_mask_draw_buttons()
+        self.status.configure(
+            text=(
+                f"{mask_id} fechada e selecionada • arraste para mover somente ela • "
+                "Delete exclui • setas fazem ajuste fino."
+            )
+        )
+        self.schedule_render()
+        return "break"
+
     def _press(self, event) -> None:
         if not self.allow_mask_creation:
             return super()._press(event)
@@ -547,8 +604,12 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             self.canvas.focus_set()
             point = self._canvas_to_image(event.x, event.y)
             if self.mask_draw_mode == "polygon":
+                if self._polygon_close_target_hit(event.x, event.y):
+                    self._finish_polygon_mask()
+                    return
                 self.mask_draw_points.append([float(point[0]), float(point[1])])
                 self.mask_draw_current = point
+                self.status.configure(text=self._mask_draw_status_text())
             else:
                 self.mask_draw_start = point
                 self.mask_draw_current = point
@@ -679,12 +740,15 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         )
         self.mask_draw_current = point
         if self.mask_draw_mode == "polygon":
-            self.status.configure(
-                text=(
-                    f"MÁSCARA • POR PONTOS • {len(self.mask_draw_points)} ponto(s) • "
-                    "Enter conclui • Esc cancela"
+            if self._polygon_close_target_hit(event.x, event.y):
+                self.status.configure(
+                    text=(
+                        f"FECHAR MÁSCARA • {len(self.mask_draw_points)} pontos • "
+                        "clique agora no ponto inicial."
+                    )
                 )
-            )
+            else:
+                self.status.configure(text=self._mask_draw_status_text())
         self.schedule_render()
 
     def _start_view_pan(self, event) -> str:
@@ -757,30 +821,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
 
     def _enter(self, event=None) -> str:
         if self.allow_mask_creation and self.mask_draw_mode == "polygon":
-            if len(self.mask_draw_points) < 3:
-                self.status.configure(text="Use pelo menos 3 pontos para concluir a máscara.")
-                return "break"
-            self._push_history()
-            mask = {
-                "id": self._next_mask_id(),
-                "type": "polygon",
-                "points": deepcopy(self.mask_draw_points),
-            }
-            self.masks.append(mask)
-            mask_id = str(mask.get("id") or "")
-            self.selected = ("mask", mask_id)
-            self.mask_draw_points = []
-            self.mask_draw_current = None
-            self.mask_draw_mode = None
-            self._update_mask_draw_buttons()
-            self.status.configure(
-                text=(
-                    f"{mask_id} criada e selecionada • arraste para mover somente ela • "
-                    "Delete exclui • setas fazem ajuste fino."
-                )
-            )
-            self.schedule_render()
-            return "break"
+            return self._finish_polygon_mask()
         return super()._enter(event)
 
     def _escape(self, event=None) -> str:
@@ -909,20 +950,85 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
 
         if self.mask_draw_mode == "polygon":
             points = list(self.mask_draw_points)
+            preview_points = list(points)
             if self.mask_draw_current is not None and points:
-                points = points + [[float(self.mask_draw_current[0]), float(self.mask_draw_current[1])]]
+                preview_points.append(
+                    [
+                        float(self.mask_draw_current[0]),
+                        float(self.mask_draw_current[1]),
+                    ]
+                )
             coords = []
-            for point in points:
+            for point in preview_points:
                 x, y = self._image_to_canvas(point[0], point[1])
                 coords.extend((x, y))
             if len(coords) >= 4:
                 self.canvas.create_line(*coords, fill="#FACC15", width=2)
-            for point in self.mask_draw_points:
-                x, y = self._image_to_canvas(point[0], point[1])
-                self.canvas.create_oval(
-                    x-4, y-4, x+4, y+4,
-                    fill="#FACC15", outline="#020617",
+
+            if len(points) >= 3 and self.mask_draw_current is not None:
+                first_x, first_y = self._image_to_canvas(points[0][0], points[0][1])
+                current_x, current_y = self._image_to_canvas(
+                    self.mask_draw_current[0],
+                    self.mask_draw_current[1],
                 )
+                close_ready = math.hypot(
+                    current_x - first_x,
+                    current_y - first_y,
+                ) <= float(F3_POLYGON_CLOSE_HIT_PX)
+                self.canvas.create_line(
+                    current_x,
+                    current_y,
+                    first_x,
+                    first_y,
+                    fill="#22C55E" if close_ready else "#64748B",
+                    width=2,
+                    dash=(5, 4),
+                )
+
+            for index, point in enumerate(points):
+                x, y = self._image_to_canvas(point[0], point[1])
+                if index == 0:
+                    ready = (
+                        len(points) >= 3
+                        and self.mask_draw_current is not None
+                        and math.hypot(
+                            self._image_to_canvas(
+                                self.mask_draw_current[0],
+                                self.mask_draw_current[1],
+                            )[0] - x,
+                            self._image_to_canvas(
+                                self.mask_draw_current[0],
+                                self.mask_draw_current[1],
+                            )[1] - y,
+                        ) <= float(F3_POLYGON_CLOSE_HIT_PX)
+                    )
+                    radius = 8 if len(points) >= 3 else 5
+                    self.canvas.create_oval(
+                        x-radius,
+                        y-radius,
+                        x+radius,
+                        y+radius,
+                        fill="#22C55E" if ready else "#FACC15",
+                        outline="#FFFFFF",
+                        width=2,
+                    )
+                    if len(points) >= 3:
+                        self.canvas.create_text(
+                            x,
+                            y-14,
+                            text="FECHAR",
+                            fill="#86EFAC" if ready else "#FDE68A",
+                            font=("Segoe UI", 7, "bold"),
+                        )
+                else:
+                    self.canvas.create_oval(
+                        x-4,
+                        y-4,
+                        x+4,
+                        y+4,
+                        fill="#FACC15",
+                        outline="#020617",
+                    )
             return
 
         if self.mask_draw_start is None or self.mask_draw_current is None:
