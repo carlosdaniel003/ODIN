@@ -19,7 +19,9 @@ from src.platform.display_mask_editor import (
     mascara_display_contem_ponto,
 )
 from src.platform.display_f3_reference_geometry_editor import (
+    F3_REFERENCE_HISTORY_LIMIT,
     _mask_display_number,
+    _next_available_mask_id,
     _segment_polygon_from_drag,
 )
 from src.platform.display_project_repository import DisplayProjectRepository
@@ -164,6 +166,18 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
         self.assertEqual("27", _mask_display_number({"id": "MASK_027"}, 1))
         self.assertEqual("4", _mask_display_number({"id": "SEM_NUMERO"}, 4))
 
+    def test_editor_f3_reutiliza_menor_numero_livre_ao_criar_mascara(self):
+        masks = [
+            {"id": "MASK_002", "type": "circle"},
+            {"id": "MASK_003", "type": "circle"},
+        ]
+        self.assertEqual("MASK_001", _next_available_mask_id(masks))
+        masks.insert(0, {"id": "MASK_001", "type": "circle"})
+        self.assertEqual("MASK_004", _next_available_mask_id(masks))
+
+    def test_editor_f3_tem_historico_operacional_maior(self):
+        self.assertGreaterEqual(F3_REFERENCE_HISTORY_LIMIT, 30)
+
     def test_editor_f3_referencia_tem_pan_exclusao_e_numeracao_visual(self):
         module = __import__(
             "src.platform.display_f3_reference_geometry_editor",
@@ -176,15 +190,22 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
             '"<ButtonRelease-2>"',
             '"<Delete>"',
             '"<BackSpace>"',
+            '"<Shift-Left>"',
+            '"<Shift-Right>"',
             '"EXCLUIR MÁSCARA"',
             "delete_selected_mask",
             "_draw_mask_numbers",
-            "_mask_display_number",
+            "_draw_selected_mask_outline",
+            "_nearest_mask_body_canvas",
+            "_next_available_mask_id",
             "mask_draw_buttons",
         ):
             self.assertIn(token, source)
         self.assertNotIn("CÍRCULO → SEGMENTO", source)
         self.assertNotIn("replace_selected_circle_with_segment", source)
+        self.assertIn("clique vazio nunca move tudo", source)
+        self.assertIn("as setas não movem o conjunto", source)
+        self.assertIn("keep_drawing", source)
 
     def test_classe_publica_continua_sendo_display_mask_editor_window(self):
         self.assertTrue(hasattr(DisplayMaskEditorWindow, "save"))
