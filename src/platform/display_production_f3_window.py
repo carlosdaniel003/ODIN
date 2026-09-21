@@ -261,12 +261,13 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             highlightbackground=self.DISPLAY_READOUT_BORDER,
             highlightthickness=1,
             bd=0,
+            width=320,
             height=68,
         )
         self.display_readout_canvas.grid(
             row=1,
             column=0,
-            sticky="ew",
+            sticky="",
             padx=10,
             pady=(0, 8),
         )
