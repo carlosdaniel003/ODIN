@@ -2867,11 +2867,21 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         str(value).strip().lower() == "on"
                         for value in classifications.values()
                     )
+                    try:
+                        self_window.set_display_readout_context(
+                            semantic_context
+                        )
+                    except (AttributeError, TypeError):
+                        pass
                     decorated = renderizar_preview_claro_display_f3(
                         visual,
                         semantic_context,
                     )
                 else:
+                    try:
+                        self_window.set_display_readout_context(None)
+                    except (AttributeError, TypeError):
+                        pass
                     decorated = _draw_tracking_geometry_visual(
                         source,
                         geometry,

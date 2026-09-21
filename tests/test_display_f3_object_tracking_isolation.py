@@ -424,6 +424,44 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
         self.assertGreater(int(np.count_nonzero(rendered)), 0)
 
+    def test_display_readout_uses_same_semantic_context_as_live_rois(self):
+        window_source = inspect.getsource(
+            tracking.DisplayProductionF3Window
+        ) if hasattr(tracking, "DisplayProductionF3Window") else ""
+        clarity_source = inspect.getsource(
+            preview_clarity._contexto_preview_claro
+        )
+        self.assertIn("set_display_readout_context", clarity_source)
+
+        tracking_source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("set_display_readout_context", tracking_source)
+
+    def test_display_readout_ng_covers_low_light_and_on_off_mismatch(self):
+        from src.platform.display_production_f3_window import (
+            DisplayProductionF3Window,
+        )
+        state = DisplayProductionF3Window._display_readout_semantic_state
+        self.assertEqual("ng", state("low_light", "on", False))
+        self.assertEqual("ng", state("off", "on", False))
+        self.assertEqual("ng", state("on", "off", False))
+        self.assertEqual("ng", state("on", "on", True))
+        self.assertEqual("on", state("on", "on", False))
+        self.assertEqual("off", state("off", "off", False))
+
+    def test_display_readout_numbers_are_drawn_outside_segment_without_badge(self):
+        from src.platform.display_production_f3_window import (
+            DisplayProductionF3Window,
+        )
+        number_source = inspect.getsource(
+            DisplayProductionF3Window._draw_mask_readout_number
+        )
+        self.assertIn("create_text", number_source)
+        self.assertNotIn("create_rectangle", number_source)
+        self.assertIn('anchor = "s"', number_source)
+        self.assertIn('anchor = "e"', number_source)
+
     def test_tracking_preview_uses_semantic_mask_renderer_instead_of_cyan_only(self):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3

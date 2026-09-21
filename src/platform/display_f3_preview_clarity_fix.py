@@ -430,6 +430,10 @@ def _contexto_preview_claro(original):
         project_context = _project_preview_context(window, visual_rotation)
 
         if not isinstance(project_context, dict):
+            try:
+                window.set_display_readout_context(None)
+            except (AttributeError, TypeError):
+                pass
             return base
 
         result = dict(base) if isinstance(base, dict) else {}
@@ -462,6 +466,10 @@ def _contexto_preview_claro(original):
             str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
             for state in classifications.values()
         )
+        try:
+            window.set_display_readout_context(result)
+        except (AttributeError, TypeError):
+            pass
         return result
 
     return build
