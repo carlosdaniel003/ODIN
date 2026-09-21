@@ -2031,11 +2031,121 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
                     except Exception:
                         pass
                     return None
+            if tracking_enabled(self):
+                self._display_f3_auto_decision_in_progress = True
+                try:
+                    return process_previous(self)
+                finally:
+                    self._display_f3_auto_decision_in_progress = False
             return process_previous(self)
 
         process_with_tracking_guard._odin_f3_object_tracking_guard = True
         process_with_tracking_guard._odin_f3_object_tracking_guard_base = process_previous
         DisplayAutomaticCheckF3Mixin._process_display_auto_check = process_with_tracking_guard
+
+    # Fail-safe final: mesmo que alguma camada histórica tente registrar um
+    # resultado diretamente, o modo automático com tracking não pode avançar
+    # para além do H1 sem energia física confirmada no MESMO ciclo.
+    register_current = DisplayProductionF3Mixin.registrar_resultado_check_display_f3
+    if not bool(getattr(register_current, "_odin_f3_tracking_h1_guard", False)):
+        register_previous = register_current
+
+        def register_with_tracking_h1_guard(self, aprovado: bool = True):
+            automatic = bool(
+                getattr(self, "_display_f3_auto_decision_in_progress", False)
+            )
+            if tracking_enabled(self) and automatic:
+                runtime = getattr(self, "display_check_runtime", None)
+                snapshot = runtime.snapshot() if runtime is not None else {}
+                try:
+                    cycle_token = int(snapshot.get("total", 0) or 0)
+                except (TypeError, ValueError):
+                    cycle_token = 0
+
+                try:
+                    context = self._display_auto_current_context()
+                except Exception:
+                    context = None
+                reference_gate = bool(
+                    isinstance(context, dict)
+                    and self._display_auto_is_reference_gate(context)
+                )
+
+                if reference_gate:
+                    analysis = getattr(self, "_display_auto_last_analysis", None)
+                    try:
+                        optical_power = self._display_auto_has_reference_power_evidence(
+                            analysis
+                        )
+                    except Exception:
+                        optical_power = False
+
+                    power_status = getattr(
+                        self,
+                        "_display_f3_power_authority_status",
+                        None,
+                    )
+                    physical_power = bool(
+                        isinstance(power_status, dict)
+                        and power_status.get("board_present") is True
+                        and power_status.get("decision_allowed") is True
+                        and isinstance(power_status.get("energy"), dict)
+                        and power_status["energy"].get("powered_confirmed") is True
+                    )
+
+                    if not bool(aprovado) or not (optical_power and physical_power):
+                        try:
+                            self._display_auto_set_preview_status(
+                                "AUTO • H1 • aguardando placa realmente ligada",
+                                "#FDE68A",
+                            )
+                        except Exception:
+                            pass
+                        return {
+                            "event": "waiting_check",
+                            "blocked_by": "tracking_h1_power_guard",
+                            "snapshot": snapshot,
+                        }
+
+                    self._display_f3_tracking_h1_confirmed_cycle = cycle_token
+                else:
+                    confirmed_cycle = getattr(
+                        self,
+                        "_display_f3_tracking_h1_confirmed_cycle",
+                        None,
+                    )
+                    if confirmed_cycle != cycle_token:
+                        try:
+                            self._display_auto_set_preview_status(
+                                "AUTO • aguardando confirmação H1 desta placa",
+                                "#FDE68A",
+                            )
+                        except Exception:
+                            pass
+                        return {
+                            "event": "waiting_check",
+                            "blocked_by": "tracking_h1_cycle_guard",
+                            "snapshot": snapshot,
+                        }
+
+            event = register_previous(self, aprovado)
+            if (
+                tracking_enabled(self)
+                and automatic
+                and isinstance(event, dict)
+                and str(event.get("event") or "")
+                in {"plate_ok", "plate_ng", "plate_discarded"}
+            ):
+                self._display_f3_tracking_h1_confirmed_cycle = None
+            return event
+
+        register_with_tracking_h1_guard._odin_f3_tracking_h1_guard = True
+        register_with_tracking_h1_guard._odin_f3_tracking_h1_guard_base = (
+            register_previous
+        )
+        DisplayProductionF3Mixin.registrar_resultado_check_display_f3 = (
+            register_with_tracking_h1_guard
+        )
 
     # O rastreamento pode usar um frame corrigido/rotacionado internamente,
     # mas a câmera que o operador vê deve continuar sendo a imagem REAL. Antes,
