@@ -1010,6 +1010,7 @@ class F3DisplayObjectTracker:
         self.store = F3TrackingConfigStore(repository)
         self.check_store = DisplayCheckPresenceReferenceStore(repository)
         self.project_presence_store = DisplayProjectPresenceReferenceStore(repository)
+        self.mask_reference_store = DisplayMaskEditorReferenceStore(repository)
         self.reset()
 
     def reset(self) -> None:
@@ -1037,26 +1038,121 @@ class F3DisplayObjectTracker:
         except Exception:
             return None
 
-    def _canonical_reference_paths(self, project: dict) -> list[tuple[str, str]]:
-        project_name = str(project.get("name") or "")
-        values: list[tuple[str, str]] = []
-        for check in project.get("checks", []) if isinstance(project.get("checks"), list) else []:
-            check_id = str((check or {}).get("id") or "")
-            if not check_id:
-                continue
-            metadata = self.check_store.get(project_name, check_id)
-            path = str((metadata or {}).get("image_path") or "").strip()
-            if path:
-                values.append((f"check:{check_id}", path))
+    def _calibrated_reference_specs(self, project: dict) -> list[dict]:
+        """Monta o banco multivista F3 a partir de TODAS as geometrias salvas.
 
+        Cada foto traz sua própria posição da placa. Por isso nenhuma foto de
+        CHECK/placa desligada é tratada como identidade: o contorno e as máscaras
+        desenhadas naquela foto estimam REFERÊNCIA -> CANÔNICO.
+        """
+        project_name = str(project.get("name") or "")
+        canonical_board = canonical_board_points(project, self.store)
+        canonical_masks = [
+            converter_mascara_legada_para_editor(mask)
+            for mask in (project.get("masks", []) or [])
+            if isinstance(mask, dict)
+        ]
+        specs: list[dict] = []
+
+        # A foto estática de "Máscaras" define o espaço canônico: nela foram
+        # desenhados o contorno compartilhado e as máscaras principais.
+        mask_metadata = self.mask_reference_store.get(project_name)
+        mask_path = str((mask_metadata or {}).get("image_path") or "").strip()
+        if mask_path and canonical_board:
+            specs.append(
+                {
+                    "key": "mask_reference",
+                    "path": mask_path,
+                    "board": deepcopy(canonical_board),
+                    "masks": deepcopy(canonical_masks),
+                    "reference_to_canonical": np.asarray(
+                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                        dtype=np.float32,
+                    ),
+                    "angle": 0.0,
+                    "real_orientation": False,
+                    "source_type": "mask_reference",
+                }
+            )
+
+        # PLACA DESLIGADA NO SUPORTE: usa exatamente a geometria desenhada
+        # naquela foto para descobrir sua pose relativa ao espaço canônico.
         board_off = self.project_presence_store.get(
             project_name,
             DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
         )
-        path = str((board_off or {}).get("image_path") or "").strip()
-        if path:
-            values.append(("board_off", path))
-        return values
+        board_off_path = str((board_off or {}).get("image_path") or "").strip()
+        if board_off_path:
+            board_ref = _normalize_points(
+                (board_off or {}).get("board_points_reference"),
+                minimum=3,
+            )
+            masks_ref = _reference_masks_from_overrides(
+                project,
+                (board_off or {}).get("mask_overrides_reference", {}),
+            )
+            mapping = estimate_reference_to_canonical(
+                project,
+                self.store,
+                board_ref,
+                masks_ref,
+            )
+            if mapping is not None:
+                specs.append(
+                    {
+                        "key": "board_off",
+                        "path": board_off_path,
+                        "board": board_ref,
+                        "masks": masks_ref,
+                        "reference_to_canonical": mapping,
+                        "angle": affine_rotation_deg(mapping),
+                        "real_orientation": False,
+                        "source_type": "board_off",
+                    }
+                )
+
+        # Cada CHECK é também uma vista válida da mesma placa: H1/BLUE/USB/AUX
+        # podem estar em posições e rotações diferentes, mas seus ids de máscara
+        # e o contorno desenhado fornecem correspondências geométricas.
+        checks = (
+            project.get("checks", [])
+            if isinstance(project.get("checks"), list)
+            else []
+        )
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            check_id = str(check.get("id") or "")
+            if not check_id:
+                continue
+            metadata = self.check_store.get(project_name, check_id)
+            path = str((metadata or {}).get("image_path") or "").strip()
+            if not path:
+                continue
+            board_ref, masks_ref = _check_reference_geometry(project, check)
+            mapping = estimate_reference_to_canonical(
+                project,
+                self.store,
+                board_ref,
+                masks_ref,
+            )
+            if mapping is None:
+                continue
+            specs.append(
+                {
+                    "key": f"check:{check_id}",
+                    "path": path,
+                    "board": board_ref,
+                    "masks": masks_ref,
+                    "reference_to_canonical": mapping,
+                    "angle": affine_rotation_deg(mapping),
+                    "real_orientation": False,
+                    "source_type": "check",
+                    "check_id": check_id,
+                }
+            )
+
+        return specs
 
     @staticmethod
     def _file_signature(path_value: str) -> tuple[str, int, int]:
@@ -1068,7 +1164,22 @@ class F3DisplayObjectTracker:
             return str(path), 0, 0
 
     def _signature(self, project: dict, board, orientations) -> tuple:
-        canonical = self._canonical_reference_paths(project)
+        reference_specs = self._calibrated_reference_specs(project)
+        reference_files = tuple(
+            (
+                str(spec.get("key") or ""),
+                self._file_signature(str(spec.get("path") or "")),
+                repr(spec.get("board")),
+                repr(spec.get("masks")),
+                repr(
+                    np.asarray(
+                        spec.get("reference_to_canonical"),
+                        dtype=np.float32,
+                    ).reshape(2, 3).round(5).tolist()
+                ),
+            )
+            for spec in reference_specs
+        )
         orientation_files = []
         for slot in F3_ORIENTATION_SLOTS:
             entry = orientations.get(slot, {})
@@ -1086,7 +1197,7 @@ class F3DisplayObjectTracker:
             repr(project.get("master_resolution")),
             repr(board),
             repr(project.get("masks", [])),
-            tuple((key, self._file_signature(path)) for key, path in canonical),
+            reference_files,
             tuple(orientation_files),
         )
 
