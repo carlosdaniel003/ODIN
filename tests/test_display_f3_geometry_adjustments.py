@@ -156,12 +156,17 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             board = [[40, 40], [600, 40], [600, 440], [40, 440]]
             masks = [
                 {
-                    "id": "MASK_001",
+                    "id": "MASK_002",
+                    "type": "polygon",
+                    "points": [[300, 200], [342, 200], [342, 232], [300, 232]],
+                },
+                {
+                    "id": "MASK_004",
                     "type": "circle",
                     "cx": 205,
                     "cy": 181,
                     "radius": 15,
-                }
+                },
             ]
             self.assertTrue(
                 store.save_geometry(
@@ -185,8 +190,68 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             )
             self.assertEqual(board, saved["board_points_reference"])
             self.assertEqual(
+                ["MASK_002", "MASK_004"],
+                [mask["id"] for mask in saved["masks_reference"]],
+            )
+            self.assertNotIn(
+                "MASK_001",
+                {mask["id"] for mask in saved["masks_reference"]},
+            )
+            self.assertEqual(
                 205,
-                saved["mask_overrides_reference"]["MASK_001"]["cx"],
+                saved["mask_overrides_reference"]["MASK_004"]["cx"],
+            )
+
+    def test_rotation_reference_can_persist_deleted_and_new_masks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = self._repository(directory)
+            project_name, _ = self._project(repository)
+            store = tracking.F3TrackingConfigStore(repository)
+            image_path = Path(directory) / "slot90.jpg"
+            image_path.write_bytes(b"x")
+            masks = [
+                {
+                    "id": "MASK_002",
+                    "type": "polygon",
+                    "points": [[20, 20], [50, 20], [50, 40], [20, 40]],
+                },
+                {
+                    "id": "MASK_004",
+                    "type": "circle",
+                    "cx": 80,
+                    "cy": 90,
+                    "radius": 12,
+                },
+            ]
+            self.assertTrue(
+                store.save_orientation(
+                    project_name,
+                    tracking.F3_ORIENTATION_90,
+                    {
+                        "image_path": str(image_path),
+                        "width": 640,
+                        "height": 480,
+                        "canonical_to_reference": [[1, 0, 0], [0, 1, 0]],
+                        "calibrated": True,
+                        "masks_reference": masks,
+                    },
+                )
+            )
+            entry = store.orientations(project_name)[tracking.F3_ORIENTATION_90]
+            self.assertEqual(
+                ["MASK_002", "MASK_004"],
+                [mask["id"] for mask in entry["masks_reference"]],
+            )
+            project = repository.carregar_projeto(project_name)
+            _board, loaded_masks = tracking.reference_geometry(
+                project,
+                store,
+                tracking.F3_ORIENTATION_90,
+                entry,
+            )
+            self.assertEqual(
+                ["MASK_002", "MASK_004"],
+                [mask["id"] for mask in loaded_masks],
             )
 
     def test_check_analyzer_applies_local_mask_overrides(self):
@@ -228,7 +293,7 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             visual_reference_status.DisplayProjectConfigPresenceWindow.edit_board_off_geometry
         )
         self.assertIn("F3ReferenceGeometryEditor", source)
-        self.assertIn("allow_mask_creation=False", source)
+        self.assertIn("allow_mask_creation=True", source)
         self.assertNotIn("DisplayCheckMaskEditorWindow", source)
         self.assertNotIn("mask_states", source)
 
@@ -244,7 +309,8 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
     def test_rotation_slots_use_same_shared_reference_geometry_editor(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
         self.assertIn("F3ReferenceGeometryEditor", source)
-        self.assertIn("allow_mask_creation=False", source)
+        self.assertIn("allow_mask_creation=True", source)
+        self.assertIn("masks_reference", source)
         self.assertIn("mask_overrides_reference", source)
         self.assertNotIn("F3OrientationGeometryEditor(self, slot)", source)
 
@@ -394,6 +460,7 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         )
         self.assertIn("canonical_board_points", metadata_source)
         self.assertIn("mask_overrides_reference", metadata_source)
+        self.assertIn("masks_reference", metadata_source)
 
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
@@ -419,6 +486,7 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         source = inspect.getsource(reference_runtime_fix._project_store_capture)
         self.assertIn('"board_points_reference"', source)
         self.assertIn('"mask_overrides_reference"', source)
+        self.assertIn('"masks_reference"', source)
         self.assertIn("previous", source)
 
     def test_main_reasserts_final_reference_geometry_preview(self):

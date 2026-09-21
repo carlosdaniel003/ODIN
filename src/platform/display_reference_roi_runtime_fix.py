@@ -219,6 +219,10 @@ def _project_store_capture(
         for key in ("board_points_reference", "mask_overrides_reference"):
             if previous.get(key):
                 metadata[key] = deepcopy(previous[key])
+        if "masks_reference" in previous:
+            metadata["masks_reference"] = deepcopy(
+                previous.get("masks_reference", [])
+            )
     try:
         data.setdefault("projects", {}).setdefault(project, {})[
             ref_kind

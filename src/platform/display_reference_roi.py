@@ -155,20 +155,26 @@ def _decorate_metadata(repository, project_name: str, metadata: dict | None):
     resolution, masks, signature = _project_mask_context(repository, project_name)
     result = deepcopy(metadata)
     result.pop("roi", None)
-    overrides = (
-        result.get("mask_overrides_reference", {})
-        if isinstance(result.get("mask_overrides_reference"), dict)
-        else {}
-    )
-    if overrides:
-        masks = [
-            deepcopy(overrides.get(str(mask.get("id") or "")))
-            if isinstance(overrides.get(str(mask.get("id") or "")), dict)
-            else deepcopy(mask)
-            for mask in masks
-            if isinstance(mask, dict)
-        ]
+    if "masks_reference" in result:
+        masks = normalizar_mascaras_display(
+            deepcopy(result.get("masks_reference", []))
+        )
         signature = _mask_signature(masks)
+    else:
+        overrides = (
+            result.get("mask_overrides_reference", {})
+            if isinstance(result.get("mask_overrides_reference"), dict)
+            else {}
+        )
+        if overrides:
+            masks = [
+                deepcopy(overrides.get(str(mask.get("id") or "")))
+                if isinstance(overrides.get(str(mask.get("id") or "")), dict)
+                else deepcopy(mask)
+                for mask in masks
+                if isinstance(mask, dict)
+            ]
+            signature = _mask_signature(masks)
     result["_display_master_resolution"] = tuple(resolution) if resolution else None
     result["_display_mask_regions"] = masks
     result["_display_mask_signature"] = signature
@@ -277,6 +283,10 @@ def _capture_project_reference_fallback(
         for key in ("board_points_reference", "mask_overrides_reference"):
             if previous.get(key):
                 metadata[key] = deepcopy(previous[key])
+        if "masks_reference" in previous:
+            metadata["masks_reference"] = deepcopy(
+                previous.get("masks_reference", [])
+            )
     try:
         data["projects"].setdefault(project, {})[ref_kind] = metadata
         store._write(data)

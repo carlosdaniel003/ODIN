@@ -196,6 +196,11 @@ class DisplayProjectPresenceReferenceStore:
                             overrides[str(mask_id)] = items[0]
                 if overrides:
                     normalized["mask_overrides_reference"] = overrides
+
+                if "masks_reference" in value:
+                    normalized["masks_reference"] = normalizar_mascaras_display(
+                        deepcopy(value.get("masks_reference", []))
+                    )
                 normalized_refs[kind] = normalized
             if normalized_refs:
                 projects[project_name] = normalized_refs
@@ -270,6 +275,10 @@ class DisplayProjectPresenceReferenceStore:
             for key in ("board_points_reference", "mask_overrides_reference"):
                 if previous.get(key):
                     metadata[key] = deepcopy(previous[key])
+            if "masks_reference" in previous:
+                metadata["masks_reference"] = deepcopy(
+                    previous.get("masks_reference", [])
+                )
         data["projects"].setdefault(project, {})[ref_kind] = metadata
         self._write(data)
         return deepcopy(metadata)
@@ -299,23 +308,18 @@ class DisplayProjectPresenceReferenceStore:
             except (TypeError, ValueError):
                 pass
 
-        overrides = {}
-        for raw in (masks or []):
-            if not isinstance(raw, dict):
-                continue
-            mask_id = str(raw.get("id") or "")
-            if not mask_id:
-                continue
-            normalized = normalizar_mascaras_display(
-                [{**deepcopy(raw), "id": mask_id}]
-            )
-            if normalized:
-                overrides[mask_id] = normalized[0]
+        reference_masks = normalizar_mascaras_display(deepcopy(masks or []))
+        overrides = {
+            str(mask.get("id") or ""): deepcopy(mask)
+            for mask in reference_masks
+            if str(mask.get("id") or "")
+        }
 
         if len(board) >= 3:
             metadata["board_points_reference"] = board
         else:
             metadata.pop("board_points_reference", None)
+        metadata["masks_reference"] = deepcopy(reference_masks)
         if overrides:
             metadata["mask_overrides_reference"] = overrides
         else:
@@ -912,6 +916,16 @@ class DisplayProjectConfigPresenceWindow(
 
         board = metadata.get("board_points_reference") or board_default
         overrides = metadata.get("mask_overrides_reference", {})
+        if "masks_reference" in metadata:
+            source_masks = normalizar_mascaras_display(
+                deepcopy(metadata.get("masks_reference", []))
+            )
+        else:
+            source_masks = [
+                deepcopy((overrides or {}).get(str(mask.get("id") or ""), mask))
+                for mask in project.get("masks", [])
+                if isinstance(mask, dict)
+            ]
         angle = 0
         try:
             from src.platform.display_visual_rotation import (
@@ -931,12 +945,12 @@ class DisplayProjectConfigPresenceWindow(
             )
             visual_masks = [
                 preparar_mascara_visual_display(
-                    (overrides or {}).get(str(mask.get("id") or ""), mask),
+                    mask,
                     resolution[0],
                     resolution[1],
                     angle,
                 )
-                for mask in project.get("masks", [])
+                for mask in source_masks
                 if isinstance(mask, dict)
             ]
             visual_board = preparar_pontos_visuais_display(
@@ -948,7 +962,7 @@ class DisplayProjectConfigPresenceWindow(
         except Exception:
             visual_image = image
             visual_resolution = resolution
-            visual_masks = list(project.get("masks", []) or [])
+            visual_masks = deepcopy(source_masks)
             visual_board = board
 
         def save_geometry(board_points, masks) -> None:
@@ -1003,7 +1017,7 @@ class DisplayProjectConfigPresenceWindow(
             header_title=(
                 "F3 • PLACA DESLIGADA NO SUPORTE • CONTORNO + MÁSCARAS"
             ),
-            allow_mask_creation=False,
+            allow_mask_creation=True,
         )
 
     def capture_project_presence_reference(self, kind: str) -> None:

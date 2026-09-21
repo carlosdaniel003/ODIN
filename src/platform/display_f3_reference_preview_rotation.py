@@ -113,22 +113,27 @@ def _metadata_com_mascaras_do_projeto(
         return result
 
     resolution = normalizar_resolucao_display(project.get("master_resolution"))
-    overrides = (
-        result.get("mask_overrides_reference", {})
-        if isinstance(result.get("mask_overrides_reference"), dict)
-        else {}
-    )
-    masks = []
-    for mask in (project.get("masks", []) or []):
-        if not isinstance(mask, dict) or mask.get("id") is None:
-            continue
-        mask_id = str(mask.get("id"))
-        override = overrides.get(mask_id)
-        masks.append(
-            deepcopy(override)
-            if isinstance(override, dict)
-            else deepcopy(mask)
+    if "masks_reference" in result:
+        masks = normalizar_mascaras_display(
+            deepcopy(result.get("masks_reference", []))
         )
+    else:
+        overrides = (
+            result.get("mask_overrides_reference", {})
+            if isinstance(result.get("mask_overrides_reference"), dict)
+            else {}
+        )
+        masks = []
+        for mask in (project.get("masks", []) or []):
+            if not isinstance(mask, dict) or mask.get("id") is None:
+                continue
+            mask_id = str(mask.get("id"))
+            override = overrides.get(mask_id)
+            masks.append(
+                deepcopy(override)
+                if isinstance(override, dict)
+                else deepcopy(mask)
+            )
     if resolution is not None:
         result["_display_master_resolution"] = tuple(resolution)
     result["_display_mask_regions"] = masks

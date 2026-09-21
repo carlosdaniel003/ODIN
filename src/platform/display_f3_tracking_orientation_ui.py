@@ -223,6 +223,7 @@ def _save_orientation_image(
             "calibrated": bool(calibrated),
             "board_points_reference": board,
             "mask_overrides_reference": overrides,
+            "masks_reference": deepcopy(masks),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -1783,7 +1784,7 @@ def _build_tracking_config_class(base_cls):
                 ).pack(fill=tk.X, pady=(3, 0))
                 draw_button = self._button(
                     actions,
-                    "Desenhar placa",
+                    "Desenhar placa e máscaras",
                     lambda s=slot: self._edit_f3_orientation(s),
                 )
                 draw_button.pack(fill=tk.X, pady=(3, 0))
@@ -2132,12 +2133,13 @@ def _build_tracking_config_class(base_cls):
                 slot,
                 entry,
             )
+            has_full_masks = isinstance(entry, dict) and "masks_reference" in entry
             if not board:
                 board = transform_points(
                     canonical_board_points(project, self._f3_tracking_store),
                     matrix,
                 )
-            if not masks:
+            if not masks and not has_full_masks:
                 masks = transformed_masks(project, matrix)
 
             def save_geometry(board_points, edited_masks) -> bool:
@@ -2151,6 +2153,15 @@ def _build_tracking_config_class(base_cls):
                     for key, value in overrides.items()
                     if value is not None
                 }
+                full_masks = [
+                    normalized
+                    for normalized in (
+                        _normalize_mask_override(mask)
+                        for mask in (edited_masks or [])
+                        if isinstance(mask, dict)
+                    )
+                    if normalized is not None
+                ]
                 current = dict(entry)
                 current.update(
                     {
@@ -2161,6 +2172,7 @@ def _build_tracking_config_class(base_cls):
                         "calibrated": True,
                         "board_points_reference": deepcopy(board_points),
                         "mask_overrides_reference": overrides,
+                        "masks_reference": deepcopy(full_masks),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 )
@@ -2195,7 +2207,7 @@ def _build_tracking_config_class(base_cls):
                     "CONTORNO + MÁSCARAS"
                 ),
                 on_close=self._render_f3_tracking_panel,
-                allow_mask_creation=False,
+                allow_mask_creation=True,
             )
 
         def _remove_f3_orientation(self, slot: str) -> None:

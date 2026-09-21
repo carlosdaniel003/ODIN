@@ -228,6 +228,13 @@ def _normalize_orientation_entry(value, slot: str) -> dict:
         result["board_points_reference"] = board_points
     if overrides:
         result["mask_overrides_reference"] = overrides
+    if "masks_reference" in value:
+        full_masks = []
+        for raw in value.get("masks_reference", []) or []:
+            normalized = _normalize_mask_override(raw)
+            if normalized is not None:
+                full_masks.append(normalized)
+        result["masks_reference"] = full_masks
     return result
 
 
@@ -633,6 +640,27 @@ def _reference_masks_from_overrides(
     return result
 
 
+def _reference_masks_from_metadata(
+    project: dict,
+    metadata: dict | None,
+    *,
+    explicit_only: bool = False,
+) -> list[dict]:
+    value = metadata if isinstance(metadata, dict) else {}
+    if "masks_reference" in value:
+        result = []
+        for raw in value.get("masks_reference", []) or []:
+            normalized = _normalize_mask_override(raw)
+            if normalized is not None:
+                result.append(converter_mascara_legada_para_editor(normalized))
+        return result
+    return _reference_masks_from_overrides(
+        project,
+        value.get("mask_overrides_reference", {}),
+        explicit_only=explicit_only,
+    )
+
+
 def _estimate_affine_partial(source_points, target_points):
     try:
         source = np.asarray(source_points, dtype=np.float32).reshape(-1, 2)
@@ -854,6 +882,14 @@ def reference_geometry(
     )
     if not board:
         board = transform_points(canonical_board_points(project, store), matrix)
+
+    if isinstance(current, dict) and "masks_reference" in current:
+        masks = []
+        for raw in current.get("masks_reference", []) or []:
+            normalized = _normalize_mask_override(raw)
+            if normalized is not None:
+                masks.append(normalized)
+        return board, masks
 
     defaults = transformed_masks(project, matrix)
     overrides = (current or {}).get("mask_overrides_reference", {})
@@ -1128,14 +1164,13 @@ class F3DisplayObjectTracker:
                 (board_off or {}).get("board_points_reference"),
                 minimum=3,
             )
-            overrides = (board_off or {}).get("mask_overrides_reference", {})
-            masks_ref = _reference_masks_from_overrides(
+            masks_ref = _reference_masks_from_metadata(
                 project,
-                overrides,
+                board_off,
             )
-            pose_masks = _reference_masks_from_overrides(
+            pose_masks = _reference_masks_from_metadata(
                 project,
-                overrides,
+                board_off,
                 explicit_only=True,
             )
             mapping = estimate_reference_to_canonical(
@@ -1242,6 +1277,7 @@ class F3DisplayObjectTracker:
                     repr(entry.get("canonical_to_reference")),
                     repr(entry.get("board_points_reference")),
                     repr(entry.get("mask_overrides_reference")),
+                    repr(entry.get("masks_reference")),
                 )
             )
         return (
@@ -1787,14 +1823,30 @@ def _canonical_masks_for_orientation(
     project_name = normalizar_nome_projeto_display(project.get("name"))
     entry = runtime.store.orientations(project_name).get(reference, {})
     matrix = matrix_np(entry)
-    overrides = entry.get("mask_overrides_reference", {}) if isinstance(entry, dict) else {}
-    if matrix is None or not isinstance(overrides, dict) or not overrides:
+    if matrix is None:
         return None
     try:
         inverse = cv2.invertAffineTransform(matrix)
     except Exception:
         return None
 
+    if isinstance(entry, dict) and "masks_reference" in entry:
+        corrected: list[dict] = []
+        for raw in entry.get("masks_reference", []) or []:
+            local = _normalize_mask_override(raw)
+            if local is None:
+                continue
+            canonical = transform_mask(local, inverse)
+            if canonical is None:
+                continue
+            canonical["id"] = str(local.get("id") or canonical.get("id") or "")
+            if canonical["id"]:
+                corrected.append(canonical)
+        return corrected
+
+    overrides = entry.get("mask_overrides_reference", {}) if isinstance(entry, dict) else {}
+    if not isinstance(overrides, dict) or not overrides:
+        return None
     original_masks = normalizar_mascaras_display(project.get("masks", []))
     corrected: list[dict] = []
     for original in original_masks:
