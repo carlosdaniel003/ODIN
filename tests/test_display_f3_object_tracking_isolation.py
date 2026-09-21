@@ -12,6 +12,7 @@ import numpy as np
 
 import src.platform.display_f3_object_tracking as tracking
 import src.platform.display_f3_tracking_orientation_ui as tracking_ui
+import src.platform.display_f3_preview_clarity_fix as preview_clarity
 
 
 class F3ObjectTrackingIsolationTests(unittest.TestCase):
@@ -160,6 +161,107 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             self.assertAlmostEqual(105.0, float(corrected[0]["cx"]), places=3)
             self.assertAlmostEqual(105.0, float(corrected[0]["cy"]), places=3)
             self.assertAlmostEqual(12.0, float(corrected[0]["radius"]), places=3)
+
+    def test_reference_pose_is_recovered_from_drawn_board_and_masks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            project = {
+                "name": "DISPLAY TESTE",
+                "master_resolution": {"width": 640, "height": 480},
+                "masks": [
+                    {
+                        "id": "MASK_001",
+                        "type": "circle",
+                        "cx": 190,
+                        "cy": 170,
+                        "radius": 12,
+                    },
+                    {
+                        "id": "MASK_002",
+                        "type": "circle",
+                        "cx": 420,
+                        "cy": 270,
+                        "radius": 14,
+                    },
+                    {
+                        "id": "MASK_003",
+                        "type": "polygon",
+                        "points": [[280, 120], [330, 120], [330, 145], [280, 145]],
+                    },
+                ],
+                "checks": [],
+            }
+            canonical_board = [
+                [90, 70],
+                [550, 70],
+                [550, 410],
+                [90, 410],
+            ]
+            self.assertTrue(
+                store.save_board_points("DISPLAY TESTE", canonical_board)
+            )
+
+            canonical_to_reference = cv2.getRotationMatrix2D(
+                (320.0, 240.0),
+                17.0,
+                1.08,
+            ).astype(np.float32)
+            canonical_to_reference[0, 2] += 34.0
+            canonical_to_reference[1, 2] -= 21.0
+
+            reference_board = tracking.transform_points(
+                canonical_board,
+                canonical_to_reference,
+            )
+            reference_masks = [
+                tracking.transform_mask(mask, canonical_to_reference)
+                for mask in project["masks"]
+            ]
+            reference_masks = [
+                mask for mask in reference_masks if mask is not None
+            ]
+
+            estimated = tracking.estimate_reference_to_canonical(
+                project,
+                store,
+                reference_board,
+                reference_masks,
+            )
+            self.assertIsNotNone(estimated)
+
+            expected = cv2.invertAffineTransform(canonical_to_reference)
+            probe = np.asarray(
+                [[[140.0, 120.0]], [[510.0, 360.0]], [[320.0, 240.0]]],
+                dtype=np.float32,
+            )
+            got_points = cv2.transform(probe, estimated)
+            expected_points = cv2.transform(probe, expected)
+            self.assertTrue(
+                np.allclose(got_points, expected_points, atol=2.0),
+                (got_points, expected_points),
+            )
+
+    def test_runtime_uses_all_calibrated_f3_sources_and_live_geometry(self):
+        source = inspect.getsource(tracking.F3DisplayObjectTracker._calibrated_reference_specs)
+        self.assertIn('"mask_reference"', source)
+        self.assertIn('"board_off"', source)
+        self.assertIn('f"check:{check_id}"', source)
+
+        runtime_source = inspect.getsource(
+            tracking.instalar_runtime_rastreamento_objetos_display_f3
+        )
+        self.assertIn("_update_tracking_live_geometry(self, raw, result)", runtime_source)
+        self.assertIn("_analysis_alignment_for_current_check", runtime_source)
+        self.assertIn("analysis_aligned", runtime_source)
+
+        preview_source = inspect.getsource(preview_clarity._project_preview_context)
+        self.assertIn("_display_f3_tracking_live_geometry", preview_source)
+        self.assertIn('"tracking_locked": True', preview_source)
+        renderer_source = inspect.getsource(
+            preview_clarity.renderizar_preview_claro_display_f3
+        )
+        self.assertIn('context.get("board_points")', renderer_source)
+        self.assertIn("cv2.polylines", renderer_source)
 
     def test_tracking_mask_excludes_display_segments(self):
         board = [[80, 80], [560, 80], [560, 400], [80, 400]]
