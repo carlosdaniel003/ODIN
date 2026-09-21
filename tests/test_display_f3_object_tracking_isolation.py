@@ -13,6 +13,8 @@ import numpy as np
 import src.platform.display_f3_object_tracking as tracking
 import src.platform.display_f3_tracking_orientation_ui as tracking_ui
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
+import src.platform.display_auto_check_runtime as auto_runtime
+import src.platform.display_auto_check_policy as auto_policy
 
 
 class F3ObjectTrackingIsolationTests(unittest.TestCase):
@@ -262,6 +264,117 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
         self.assertIn('context.get("board_points")', renderer_source)
         self.assertIn("cv2.polylines", renderer_source)
+
+    def test_live_preview_propagates_tracking_board_and_hides_fixed_fallback(self):
+        context_source = inspect.getsource(preview_clarity._contexto_preview_claro)
+        self.assertIn('result["board_points"]', context_source)
+        self.assertIn('result["tracking_active"]', context_source)
+        self.assertIn('result["tracking_locked"]', context_source)
+
+        project_source = inspect.getsource(preview_clarity._project_preview_context)
+        self.assertIn("tracking_runtime_enabled(app)", project_source)
+        self.assertIn("Rastreamento ligado mas ainda sem LOCK", project_source)
+        self.assertIn('"masks": ()', project_source)
+
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        rendered = preview_clarity.renderizar_preview_claro_display_f3(
+            frame,
+            {
+                "resolution": (320, 240),
+                "tracking_active": True,
+                "tracking_locked": True,
+                "board_points": (
+                    (40, 40),
+                    (280, 40),
+                    (280, 200),
+                    (40, 200),
+                ),
+                "masks": (
+                    {
+                        "id": "MASK_001",
+                        "type": "circle",
+                        "cx": 120,
+                        "cy": 110,
+                        "radius": 20,
+                    },
+                    {
+                        "id": "MASK_002",
+                        "type": "polygon",
+                        "points": [[180, 90], [230, 90], [230, 120], [180, 120]],
+                    },
+                ),
+                "expected_states": {},
+                "classifications": {},
+            },
+        )
+        self.assertGreater(int(np.count_nonzero(rendered)), 0)
+
+    def test_h1_reference_gate_requires_real_on_evidence(self):
+        helper = auto_runtime.DisplayAutomaticCheckF3Mixin._display_auto_has_reference_power_evidence
+
+        off_analysis = {
+            "ready": True,
+            "approved": True,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": True,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_002",
+                    "expected": "off",
+                    "classified": "off",
+                    "matched": True,
+                    "confidence": 0.99,
+                },
+            ],
+        }
+        self.assertFalse(helper(off_analysis))
+
+        powered_analysis = {
+            "ready": True,
+            "approved": True,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_002",
+                    "expected": "off",
+                    "classified": "off",
+                    "matched": True,
+                    "confidence": 0.99,
+                },
+            ],
+        }
+        self.assertTrue(helper(powered_analysis))
+
+        decision = auto_policy.decidir_analise_display_f3(
+            off_analysis,
+            reference_gate=True,
+        )
+        self.assertEqual(
+            auto_policy.DISPLAY_AUTO_DECISION_SEARCHING,
+            decision["decision"],
+        )
+        self.assertFalse(decision["board_powered"])
+
+    def test_tracking_installs_final_h1_cycle_fail_safe(self):
+        source = inspect.getsource(
+            tracking.instalar_runtime_rastreamento_objetos_display_f3
+        )
+        self.assertIn("_display_f3_auto_decision_in_progress", source)
+        self.assertIn("_display_f3_tracking_h1_confirmed_cycle", source)
+        self.assertIn("_display_f3_power_authority_status", source)
+        self.assertIn("tracking_h1_power_guard", source)
+        self.assertIn("tracking_h1_cycle_guard", source)
 
     def test_tracking_mask_excludes_display_segments(self):
         board = [[80, 80], [560, 80], [560, 400], [80, 400]]
