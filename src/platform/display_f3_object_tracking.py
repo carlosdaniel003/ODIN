@@ -1642,19 +1642,17 @@ class F3DisplayObjectTracker:
             fastThreshold=7,
         )
         current_kp, current_desc = orb.detectAndCompute(gray, None)
-        if current_desc is None or len(current_kp) < F3_TRACKING_MIN_MATCHES:
-            self.last_matrix = None
-            result = F3TrackingResult(False, frame, reason="current_features_insufficient")
-            self.last_result = result
-            self.last_frame_id = frame_id
-            self.last_compute_s = now
-            return result
+        orb_available = bool(
+            current_desc is not None
+            and len(current_kp) >= F3_TRACKING_MIN_MATCHES
+        )
 
         candidates = []
-        for key in tuple(self.references):
-            candidate = self._candidate(current_kp, current_desc, key)
-            if candidate is not None:
-                candidates.append(candidate)
+        if orb_available:
+            for key in tuple(self.references):
+                candidate = self._candidate(current_kp, current_desc, key)
+                if candidate is not None:
+                    candidates.append(candidate)
 
         # Câmera e suporte são fixos: se o PCB tiver poucos corners ORB, use as
         # bordas do contorno desenhado como fallback de translação. Os slots
@@ -1672,7 +1670,15 @@ class F3DisplayObjectTracker:
         if not candidates:
             self.last_matrix = None
             self._last_reference = ""
-            result = F3TrackingResult(False, frame, reason="object_not_locked")
+            result = F3TrackingResult(
+                False,
+                frame,
+                reason=(
+                    "current_features_insufficient"
+                    if not orb_available
+                    else "object_not_locked"
+                ),
+            )
             self.last_result = result
             self.last_frame_id = frame_id
             self.last_compute_s = now
