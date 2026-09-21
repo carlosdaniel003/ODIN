@@ -214,6 +214,12 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("geometria sincronizada com", editor_source)
         self.assertIn("self.allow_geometry_edit", editor_source)
 
+        init_source = inspect.getsource(check_editor.DisplayCheckMaskEditorWindow.__init__)
+        self.assertLess(
+            init_source.find("self.allow_geometry_edit ="),
+            init_source.find("if self.allow_geometry_edit and isinstance(mask_overrides, dict)"),
+        )
+
     def test_board_off_uses_shared_reference_geometry_editor(self):
         source = inspect.getsource(
             visual_reference_status.DisplayProjectConfigPresenceWindow.edit_board_off_geometry

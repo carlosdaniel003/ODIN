@@ -633,6 +633,8 @@ class DisplayCheckMaskEditorWindow:
         self.check = deepcopy(check)
         self.check_name = str(check.get("name", "CHECK"))
         self.master_width, self.master_height = resolution
+        self.geometry_only = bool(geometry_only)
+        self.allow_geometry_edit = bool(allow_geometry_edit or self.geometry_only)
         base_masks = normalizar_mascaras_display(deepcopy(masks or []))
         overrides = (
             mask_overrides
@@ -662,11 +664,9 @@ class DisplayCheckMaskEditorWindow:
         if frame is not None and getattr(frame, "size", 0) > 0:
             self.frame = frame.copy()
         self.on_save = on_save
-        self.allow_geometry_edit = bool(allow_geometry_edit or geometry_only)
         self.on_save_geometry = (
             on_save_geometry if self.allow_geometry_edit else None
         )
-        self.geometry_only = bool(geometry_only)
         self.geometry_title = str(geometry_title or "").strip()
         self.geometry_mode = bool(geometry_only)
         self.board_points = []

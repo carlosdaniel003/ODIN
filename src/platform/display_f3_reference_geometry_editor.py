@@ -1164,8 +1164,6 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 self.drag_last_image = current
                 return
             return super()._drag(event)
-        if self.mask_draw_mode is None:
-            return super()._drag(event)
         if self.allow_mask_creation and self.mask_draw_mode in {"segment", "circle"} and self.mask_draw_start is not None:
             self.mask_draw_current = self._canvas_to_image(event.x, event.y)
             self.schedule_render()
@@ -1176,8 +1174,6 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             self.transform_drag_bounds = None
             self.transform_drag_start_canvas = None
             self.transform_drag_start_image = None
-            return super()._release(event)
-        if self.mask_draw_mode is None:
             return super()._release(event)
         if (
             not self.allow_mask_creation
