@@ -625,6 +625,8 @@ def draw_reference_geometry(
     *,
     alpha: float = 0.42,
     selected_mask_id: str | None = None,
+    board_thickness: int = 3,
+    mask_thickness: int = 2,
 ):
     if not _valid_frame(image):
         return image
@@ -639,7 +641,7 @@ def draw_reference_geometry(
             [polygon],
             True,
             F3_TRACKING_BOARD_BGR,
-            3,
+            max(1, int(board_thickness)),
             cv2.LINE_AA,
         )
 
@@ -659,7 +661,14 @@ def draw_reference_geometry(
                     int(round(float(mask.get("cy", 0)))),
                 )
                 radius = max(1, int(round(float(mask.get("radius", 1)))))
-                cv2.circle(overlay, center, radius, color, 2, cv2.LINE_AA)
+                cv2.circle(
+                    overlay,
+                    center,
+                    radius,
+                    color,
+                    max(1, int(mask_thickness)),
+                    cv2.LINE_AA,
+                )
             else:
                 points = _normalize_points(mask.get("points"), minimum=3)
                 if not points:
@@ -670,7 +679,7 @@ def draw_reference_geometry(
                     [polygon],
                     True,
                     color,
-                    2,
+                    max(1, int(mask_thickness)),
                     cv2.LINE_AA,
                 )
         except Exception:
