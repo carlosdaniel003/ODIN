@@ -134,6 +134,21 @@ def _metadata_com_mascaras_do_projeto(
     result["_display_mask_regions"] = masks
     result["mask_region_count"] = len(masks)
     board = result.get("board_points_reference", [])
+    if not (isinstance(board, (list, tuple)) and len(board) >= 3):
+        # PLACA FORA DO SUPORTE não possui ajuste geométrico próprio, mas sua
+        # preview deve mostrar a mesma geometria canônica do projeto usada em
+        # "Máscaras". PLACA DESLIGADA continua preferindo seu contorno local.
+        try:
+            from src.platform.display_f3_object_tracking import (
+                F3TrackingConfigStore,
+                canonical_board_points,
+            )
+            board = canonical_board_points(
+                project,
+                F3TrackingConfigStore(repository),
+            )
+        except Exception:
+            board = []
     if isinstance(board, (list, tuple)) and len(board) >= 3:
         result["_display_board_points_reference"] = deepcopy(board)
     result["comparison_mode"] = roi_module.DISPLAY_REFERENCE_MASK_COMPARE_MODE
@@ -170,11 +185,16 @@ def preparar_preview_referencia_com_mascaras_f3(
     target_width: int,
     target_height: int,
 ):
-    """Retorna miniatura já rotacionada e com cada ROI/máscara visível.
+    """Miniatura de presença com o MESMO visual da preview de Máscaras.
 
-    A imagem é reduzida *antes* de desenhar o contorno. Isso é intencional:
-    desenhar uma linha de 2 px em 1920x1080 e depois reduzi-la para ~170 px
-    fazia o contorno desaparecer por subpixel na preview.
+    Tanto PLACA DESLIGADA NO SUPORTE quanto PLACA FORA DO SUPORTE exibem:
+    - foto estática da referência;
+    - contorno da placa;
+    - segmentos/círculos/demais máscaras do Projeto Display.
+
+    A referência de placa desligada pode ter ajustes locais; suporte vazio usa
+    a geometria canônica do projeto. A foto é reduzida antes dos overlays, para
+    os traços não virarem um bloco espesso na miniatura.
     """
     if image_raw is None or getattr(image_raw, "size", 0) == 0:
         return image_raw, 0
@@ -185,38 +205,34 @@ def preparar_preview_referencia_com_mascaras_f3(
         metadata,
     )
     masks = list(enriched.get("_display_mask_regions", []) or [])
+    board_original = list(
+        enriched.get("_display_board_points_reference", []) or []
+    )
     resolution = normalizar_resolucao_display(
         enriched.get("_display_master_resolution")
     )
     angle = normalizar_rotacao_visual(rotacao)
 
-    board_original = enriched.get("_display_board_points_reference", [])
-    visual_board = []
-    if resolution is not None and masks:
+    if resolution is not None:
         image_visual, visual_resolution, visual_masks = preparar_check_visual_display(
             image_raw,
             resolution,
             masks,
             angle,
         )
-        visual_metadata = deepcopy(enriched)
-        visual_metadata["_display_master_resolution"] = tuple(visual_resolution)
-        visual_metadata["_display_mask_regions"] = visual_masks
-        visual_metadata["mask_region_count"] = len(visual_masks)
-        if isinstance(board_original, (list, tuple)) and len(board_original) >= 3:
-            visual_board = preparar_pontos_visuais_display(
-                board_original,
-                int(resolution[0]),
-                int(resolution[1]),
-                angle,
-            )
+        visual_board = preparar_pontos_visuais_display(
+            board_original,
+            int(resolution[0]),
+            int(resolution[1]),
+            angle,
+        ) if len(board_original) >= 3 else []
     else:
         image_visual = preparar_preview_referencia_visual_f3(image_raw, angle)
-        visual_metadata = enriched
-        visual_masks = []
+        visual_masks = masks
+        visual_board = board_original
         visual_resolution = (
             (image_visual.shape[1], image_visual.shape[0])
-            if image_visual is not None
+            if image_visual is not None and getattr(image_visual, "size", 0)
             else (1, 1)
         )
 
@@ -224,38 +240,47 @@ def preparar_preview_referencia_com_mascaras_f3(
     if preview is None or getattr(preview, "size", 0) == 0:
         return preview, len(visual_masks)
 
-    if visual_masks:
-        preview = roi_module._decorate_reference_image(
-            preview,
-            visual_metadata,
+    source_w = max(1.0, float(visual_resolution[0]))
+    source_h = max(1.0, float(visual_resolution[1]))
+    ph, pw = preview.shape[:2]
+    sx = pw / source_w
+    sy = ph / source_h
+
+    try:
+        from src.platform.display_f3_object_tracking import (
+            transform_mask,
+            transform_points,
+        )
+        from src.platform.display_f3_tracking_orientation_ui import (
+            draw_reference_geometry,
         )
 
-    # O contorno da placa é desenhado DEPOIS da redução da miniatura para não
-    # desaparecer por subpixel, exatamente como os slots 90/180/270.
-    if visual_board and preview is not None and getattr(preview, "size", 0):
-        try:
-            source_w = max(1.0, float(visual_resolution[0]))
-            source_h = max(1.0, float(visual_resolution[1]))
-            ph, pw = preview.shape[:2]
-            sx = pw / source_w
-            sy = ph / source_h
-            polygon = [
-                [int(round(float(point[0]) * sx)), int(round(float(point[1]) * sy))]
-                for point in visual_board
-                if isinstance(point, (list, tuple)) and len(point) >= 2
-            ]
-            if len(polygon) >= 3:
-                import numpy as np
-                cv2.polylines(
-                    preview,
-                    [np.asarray(polygon, dtype=np.int32)],
-                    True,
-                    (255, 214, 56),
-                    2,
-                    cv2.LINE_AA,
-                )
-        except Exception:
-            pass
+        matrix = (
+            (sx, 0.0, 0.0),
+            (0.0, sy, 0.0),
+        )
+        board_preview = (
+            transform_points(visual_board, matrix)
+            if len(visual_board) >= 3
+            else []
+        )
+        masks_preview = [
+            transform_mask(mask, matrix)
+            for mask in visual_masks
+            if isinstance(mask, dict)
+        ]
+        preview = draw_reference_geometry(
+            preview,
+            board_preview,
+            [mask for mask in masks_preview if mask is not None],
+            alpha=0.74,
+            board_thickness=2,
+            mask_thickness=1,
+        )
+    except Exception:
+        # A foto continua útil mesmo se um overlay legado estiver inválido.
+        pass
+
     return preview, len(visual_masks)
 
 
