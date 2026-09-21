@@ -2288,31 +2288,49 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
     previous_preview = app._atualizar_preview_display_f3
 
     def instance_preview(self):
-        if tracking_enabled(self) and not bool(
-            getattr(self, "_display_f3_tracking_config_open", False)
-        ):
-            raw = getattr(self, "camera_frame_atual", None)
-            if _valid_frame(raw):
-                self._display_f3_tracking_raw_authority_frame = raw
-                _aligned, result = align_frame_for_f3(self, raw)
-                self._display_f3_tracking_result = result
-                _update_tracking_live_geometry(self, raw, result)
-                locked = bool(result is not None and result.locked)
-                if locked:
-                    analysis_frame, _matrix = _analysis_alignment_for_current_check(
-                        self,
-                        raw,
-                        result,
-                    )
-                    self._display_f3_tracking_analysis_frame = (
-                        analysis_frame if _valid_frame(analysis_frame) else None
-                    )
-                else:
-                    self._display_f3_tracking_analysis_frame = None
+        raw = getattr(self, "camera_frame_atual", None)
+        use_tracking = bool(
+            tracking_enabled(self)
+            and not bool(
+                getattr(self, "_display_f3_tracking_config_open", False)
+            )
+        )
+        analysis_frame = None
+
+        if use_tracking and _valid_frame(raw):
+            self._display_f3_tracking_raw_authority_frame = raw
+            _aligned, result = align_frame_for_f3(self, raw)
+            self._display_f3_tracking_result = result
+            _update_tracking_live_geometry(self, raw, result)
+            locked = bool(result is not None and result.locked)
+            if locked:
+                aligned_check, _matrix = _analysis_alignment_for_current_check(
+                    self,
+                    raw,
+                    result,
+                )
+                if _valid_frame(aligned_check):
+                    analysis_frame = aligned_check
+            self._display_f3_tracking_analysis_frame = analysis_frame
+        elif use_tracking:
+            self._display_f3_tracking_live_geometry = None
+            self._display_f3_tracking_analysis_frame = None
+
+        # A câmera que o operador vê vem do frame bruto de autoridade; somente o
+        # pipeline interno recebe a imagem alinhada ao CHECK. Assim o tracking é
+        # efetivo mesmo se wrappers históricos da MRO não delegarem como esperado.
+        previous_frame = getattr(self, "camera_frame_atual", None)
+        if use_tracking and _valid_frame(analysis_frame):
+            self.camera_frame_atual = analysis_frame
+        self._display_f3_tracking_instance_frame_prepared = bool(use_tracking)
+        try:
+            return previous_preview()
+        finally:
+            self._display_f3_tracking_instance_frame_prepared = False
+            if use_tracking and _valid_frame(raw):
+                self.camera_frame_atual = raw
             else:
-                self._display_f3_tracking_live_geometry = None
-                self._display_f3_tracking_analysis_frame = None
-        return previous_preview()
+                self.camera_frame_atual = previous_frame
 
     app._atualizar_preview_display_f3 = MethodType(instance_preview, app)
 
@@ -2686,6 +2704,17 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
         preview_previous = preview_current
 
         def preview_with_tracking(self):
+            # A autoridade final aplicada diretamente à instância já preparou
+            # frame de análise + geometria móvel. Não rastreie uma segunda vez.
+            if bool(
+                getattr(
+                    self,
+                    "_display_f3_tracking_instance_frame_prepared",
+                    False,
+                )
+            ):
+                return preview_previous(self)
+
             if not tracking_enabled(self):
                 # Contrato opt-in: desligado, o F3 percorre literalmente a cadeia
                 # anterior, sem cópia, warp, bloqueio ou alteração de estado.
