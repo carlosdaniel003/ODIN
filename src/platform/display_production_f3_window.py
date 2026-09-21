@@ -68,8 +68,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             fg=self.PREVIEW_MUTED,
         )
 
-        # Reserva visual para o futuro espelhamento lógico do display físico.
-        # Por enquanto é somente apresentação: nenhuma regra de CHECK depende dele.
+        # Visor lógico 88:88: espelha os 28 segmentos do CHECK atual sem
+        # depender da posição física/rastreamento das máscaras na câmera.
         self._build_display_readout()
 
         self.footer_label.configure(
@@ -217,7 +217,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self.set_check_sequence(self._check_snapshot)
 
     def _build_display_readout(self) -> None:
-        """Cria um visor 7 segmentos independente da lógica dos CHECKS."""
+        """Cria o visor lógico fixo 88:88 (4 dígitos × 7 segmentos)."""
         self.display_readout_value = "88:88"
         self._display_readout_context: dict | None = None
 
@@ -426,16 +426,19 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         failed: bool = False,
         ready: bool = True,
     ) -> str:
-        """Estado lógico do visor fixo; NG só aparece após leitura autorizada."""
-        if not bool(ready):
-            return "neutral"
-
+        """Estado lógico do visor fixo com cinza enquanto não há leitura."""
         current = str(classified or "").strip().lower()
         target = str(expected or "").strip().lower()
 
+        # POUCA LUZ já é uma anomalia visual por si só, mesmo antes de o H1
+        # conseguir estabelecer autoridade completa de energia.
+        if current == "low_light":
+            return "ng"
+        if not bool(ready):
+            return "neutral"
         if target not in {"on", "off"}:
             return "neutral"
-        if bool(failed) or current == "low_light":
+        if bool(failed):
             return "ng"
         if current in {"on", "off"} and current != target:
             return "ng"
@@ -749,7 +752,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self._draw_seven_segment_digit(x, y, digit_width, digit_height, digits[3])
 
     def set_display_readout(self, value: str = "88:88") -> None:
-        """Ponto de integração futuro; atualmente apenas atualiza o desenho."""
+        """Fallback/manual: mostra um 88:88 neutro fora do contexto automático."""
         text = str(value or "88:88").strip()
         if len(text) != 5 or text[2] != ":":
             text = "88:88"
