@@ -513,8 +513,8 @@ class DisplayProjectConfigWindow:
         try:
             from src.platform.display_f3_object_tracking import (
                 F3TrackingConfigStore,
-                _transform_reference_mask,
                 canonical_board_points,
+                transform_mask,
                 transform_points,
             )
             from src.platform.display_f3_tracking_orientation_ui import (
@@ -545,8 +545,12 @@ class DisplayProjectConfigWindow:
                 F3TrackingConfigStore(self.repository),
             )
             board_preview = transform_points(board, matrix)
+            # Use o transformador canônico do F3. Ele normaliza inclusive
+            # máscaras do tipo "segment" para polígono antes de aplicar escala;
+            # o helper privado do editor angular não é autoridade para máscaras
+            # canônicas e fazia segmentos desaparecerem da miniatura.
             masks_preview = [
-                _transform_reference_mask(mask, matrix)
+                transform_mask(mask, matrix)
                 for mask in (project.get("masks", []) or [])
                 if isinstance(mask, dict)
             ]
@@ -588,10 +592,12 @@ class DisplayProjectConfigWindow:
                         f"{len(project.get('masks', []) or [])} máscara(s)"
                     )
                 )
-        except Exception:
+        except Exception as exc:
             self._clear_mask_reference_preview("FOTO SALVA\nPreview indisponível.")
             if status is not None:
-                status.configure(text="Foto estática salva.")
+                status.configure(
+                    text=f"Foto estática salva • erro da preview: {type(exc).__name__}"
+                )
 
     def capture_masks_reference_photo(self) -> None:
         name = self._selected_name()
