@@ -366,6 +366,57 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
         self.assertFalse(decision["board_powered"])
 
+    def test_final_tracking_power_gate_rejects_stale_or_unpowered_h1(self):
+        context = {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_001",
+            "check_name": "H1",
+            "current_index": 0,
+        }
+        analysis = {
+            "ready": True,
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_001",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                    "confidence": 0.99,
+                }
+            ],
+        }
+        app = SimpleNamespace(
+            _display_f3_object_tracking_last_status={"locked": True},
+            _display_auto_last_analysis=analysis,
+            _display_auto_current_context=lambda: context,
+            _display_f3_power_authority_status={
+                "board_present": True,
+                "decision_allowed": True,
+                "energy": {
+                    "powered_confirmed": True,
+                    "raw_analysis_ready": True,
+                    "powered_votes": 1,
+                    "project_name": "DISPLAY A",
+                    "check_id": "CHECK_OLD",
+                },
+            },
+        )
+        allowed, reason = tracking._tracking_h1_power_gate(app)
+        self.assertFalse(allowed)
+        self.assertEqual("energia_fisica_nao_confirmada", reason)
+
+        app._display_f3_power_authority_status["energy"]["check_id"] = "CHECK_001"
+        allowed, reason = tracking._tracking_h1_power_gate(app)
+        self.assertTrue(allowed)
+        self.assertEqual("h1_ligado_confirmado", reason)
+
+        app._display_auto_last_analysis["mask_results"][0]["classified"] = "off"
+        allowed, reason = tracking._tracking_h1_power_gate(app)
+        self.assertFalse(allowed)
+        self.assertEqual("h1_sem_segmento_aceso", reason)
+
     def test_tracking_installs_final_h1_cycle_fail_safe(self):
         source = inspect.getsource(
             tracking.instalar_runtime_rastreamento_objetos_display_f3
@@ -450,6 +501,8 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("sequence.registrar_resultado_check = MethodType", source)
         self.assertIn("_tracking_h1_power_gate(app)", source)
         self.assertIn("_display_f3_tracking_raw_authority_frame", source)
+        self.assertIn("self.camera_frame_atual = analysis_frame", source)
+        self.assertIn("_display_f3_tracking_instance_frame_prepared", source)
 
         main_source = Path("main_rpi.py").read_text(encoding="utf-8")
         self.assertIn("app = RaspberryPi3ProductionApp(root)", main_source)
