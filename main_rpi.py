@@ -136,6 +136,7 @@ from src.platform.display_f3_live_status_consistency_fix import (  # noqa: E402
     instalar_consistencia_status_live_display_f3,
 )
 from src.platform.display_f3_object_tracking import (  # noqa: E402
+    instalar_autoridade_final_instancia_rastreamento_f3,
     instalar_runtime_rastreamento_objetos_display_f3,
 )
 from src.platform.display_f3_tracking_orientation_ui import (  # noqa: E402
@@ -175,7 +176,7 @@ instalar_numeros_editor_mascaras_display_f3()
 
 def main() -> None:
     root = tk.Tk()
-    RaspberryPi3ProductionApp(root)
+    app = RaspberryPi3ProductionApp(root)
     # Renderer F2 instalado somente depois que a aplicação inteira terminou de
     # inicializar. Ele substitui diretamente o render_settings do controller de
     # presença: ligada/desligada recebem as ROIs dos LEDs e o contorno compartilhado
@@ -231,6 +232,10 @@ def main() -> None:
     # modificado por estas duas camadas.
     instalar_runtime_rastreamento_objetos_display_f3()
     instalar_ui_rastreamento_objetos_display_f3()
+    # Autoridade final aplicada diretamente à instância real. Isso impede que
+    # wrappers históricos da MRO escondam a bounding box móvel ou avancem CHECKS
+    # por caminhos alternativos da máquina de sequência.
+    instalar_autoridade_final_instancia_rastreamento_f3(app)
     root.mainloop()
 
 
