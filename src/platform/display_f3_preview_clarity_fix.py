@@ -30,12 +30,14 @@ o defeito na preview.
 """
 
 from copy import deepcopy
+import re
 
 import cv2
 import numpy as np
 
 import src.platform.display_f3_strict_mask_conformity as strict_module
 import src.platform.display_live_roi_overlay as overlay_module
+from src.platform.display_mask_geometry import bbox_mascara_display
 from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LOW_LIGHT
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
@@ -49,14 +51,17 @@ from src.platform.display_visual_rotation import (
 )
 
 
-# Máscaras normais permanecem translúcidas para mostrar o segmento real.
-F3_PREVIEW_CLEAR_ALPHA = 0.22
+# O contorno é a informação principal. O preenchimento é deliberadamente muito
+# leve para não esconder os segmentos reais do display na câmera ao vivo.
+F3_PREVIEW_CLEAR_ALPHA = 0.06
 F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 2
-# Divergência precisa saltar aos olhos do operador sem introduzir outra cor.
-F3_PREVIEW_ALERT_ALPHA = 0.58
-F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 6
+# POUCA LUZ/divergência continua evidente pelo amarelo e contorno mais espesso,
+# sem cobrir visualmente o segmento defeituoso.
+F3_PREVIEW_ALERT_ALPHA = 0.10
+F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 3
 F3_PREVIEW_TRACKING_GUIDE_BGR = (248, 189, 56)  # ciano #38BDF8 em BGR
 F3_PREVIEW_TRACKING_GUIDE_THICKNESS = 1
+F3_PREVIEW_STARTUP_NUMBER_BGR = (240, 232, 226)  # branco frio #E2E8F0
 
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
@@ -510,6 +515,81 @@ def _draw_contour(result, geometry, color, thickness: int) -> None:
     )
 
 
+_F3_MASK_NUMBER_RE = re.compile(r"(\d+)$")
+
+
+def _numero_mascara_f3(mask: dict) -> str:
+    mask_id = str((mask or {}).get("id") or "").strip()
+    if not mask_id:
+        return ""
+    match = _F3_MASK_NUMBER_RE.search(mask_id)
+    if match is None:
+        return mask_id
+    try:
+        return str(int(match.group(1)))
+    except (TypeError, ValueError):
+        return match.group(1)
+
+
+def _draw_live_mask_number(
+    result,
+    mask: dict,
+    sx: float,
+    sy: float,
+    color,
+) -> None:
+    """Número pequeno junto à borda da ROI, sem badge/pill opaco."""
+    label = _numero_mascara_f3(mask)
+    if not label:
+        return
+    try:
+        x1, y1, x2, _y2 = bbox_mascara_display(mask)
+        center_x = ((float(x1) + float(x2)) / 2.0) * float(sx)
+        top_y = float(y1) * float(sy)
+    except Exception:
+        return
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.38
+    thickness = 1
+    (text_w, text_h), _baseline = cv2.getTextSize(
+        label,
+        font,
+        font_scale,
+        thickness,
+    )
+    frame_h, frame_w = result.shape[:2]
+    x = int(round(center_x - text_w / 2.0))
+    x = max(2, min(max(2, frame_w - text_w - 2), x))
+    # Preferimos acima da ROI; se não houver espaço, fica imediatamente dentro
+    # da borda superior. Não há fundo sólido, apenas sombra fina para contraste.
+    y = int(round(top_y - 4.0))
+    if y < text_h + 2:
+        y = int(round(top_y + text_h + 3.0))
+    y = max(text_h + 2, min(max(text_h + 2, frame_h - 3), y))
+
+    cv2.putText(
+        result,
+        label,
+        (x + 1, y + 1),
+        font,
+        font_scale,
+        (2, 6, 23),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        result,
+        label,
+        (x, y),
+        font,
+        font_scale,
+        color,
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
 def renderizar_preview_claro_display_f3(frame, context):
     """Render final: máscara normal suave e divergência amarela muito evidente."""
     if frame is None or getattr(frame, "size", 0) == 0:
@@ -722,6 +802,33 @@ def renderizar_preview_claro_display_f3(frame, context):
             geometry,
             color,
             F3_PREVIEW_ALERT_CONTOUR_THICKNESS,
+        )
+
+    # Numeração visível em todas as máscaras, inclusive antes da classificação.
+    # O número usa a cor semântica quando existe resultado e uma cor neutra quando
+    # ainda estamos apenas rastreando a geometria.
+    for mask in masks:
+        if not isinstance(mask, dict):
+            continue
+        mask_id = str(mask.get("id") or "")
+        presentation = estado_visual_mascara_f3(
+            classifications.get(mask_id),
+            expected_states.get(mask_id),
+            has_any_on=has_any_on,
+        )
+        if mask_id in failed_mask_ids and has_any_on:
+            presentation = "alert"
+        number_color = (
+            F3_PREVIEW_CLEAR_COLORS[presentation]
+            if presentation in F3_PREVIEW_CLEAR_COLORS
+            else F3_PREVIEW_STARTUP_NUMBER_BGR
+        )
+        _draw_live_mask_number(
+            result,
+            mask,
+            sx,
+            sy,
+            number_color,
         )
 
     return result

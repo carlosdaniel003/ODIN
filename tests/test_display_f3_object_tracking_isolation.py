@@ -382,6 +382,31 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
         self.assertGreater(int(np.count_nonzero(rendered)), 0)
 
+    def test_tracking_preview_uses_semantic_mask_renderer_instead_of_cyan_only(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("renderizar_preview_claro_display_f3", source)
+        self.assertIn("_project_preview_context", source)
+        self.assertIn("_mask_snapshot_for_current_check", source)
+        self.assertIn('semantic_context["classifications"]', source)
+        self.assertIn("VERDE ACESO", source)
+        self.assertIn("VERMELHO APAGADO", source)
+        self.assertIn("AMARELO POUCA LUZ", source)
+
+    def test_live_semantic_renderer_draws_mask_numbers_without_solid_badge(self):
+        renderer_source = inspect.getsource(
+            preview_clarity.renderizar_preview_claro_display_f3
+        )
+        helper_source = inspect.getsource(
+            preview_clarity._draw_live_mask_number
+        )
+        self.assertIn("_draw_live_mask_number", renderer_source)
+        self.assertIn("cv2.putText", helper_source)
+        self.assertNotIn("cv2.rectangle", helper_source)
+        self.assertLessEqual(preview_clarity.F3_PREVIEW_CLEAR_ALPHA, 0.08)
+        self.assertLessEqual(preview_clarity.F3_PREVIEW_ALERT_ALPHA, 0.12)
+
     def test_h1_reference_gate_requires_real_on_evidence(self):
         helper = auto_runtime.DisplayAutomaticCheckF3Mixin._display_auto_has_reference_power_evidence
 

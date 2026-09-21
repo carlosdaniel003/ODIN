@@ -2459,15 +2459,65 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 "_display_f3_tracking_live_geometry",
                 None,
             )
-            decorated = _draw_tracking_geometry_visual(
-                source,
-                geometry,
-                visual_rotation,
-            )
             locked = bool(
                 isinstance(geometry, dict)
                 and geometry.get("locked")
             )
+
+            # IMPORTANTE: o caminho de tracking não pode publicar um frame apenas
+            # com contorno ciano. Ele usa o MESMO renderer semântico da câmera F3
+            # (verde/vermelho/amarelo + números), alimentado pela geometria móvel.
+            try:
+                from src.platform.display_f3_preview_clarity_fix import (
+                    _mask_snapshot_for_current_check,
+                    _project_preview_context,
+                    renderizar_preview_claro_display_f3,
+                )
+                from src.platform.display_visual_rotation import (
+                    preparar_frame_visual_display,
+                )
+
+                visual = preparar_frame_visual_display(
+                    source,
+                    int(visual_rotation or 0) % 360,
+                )
+                semantic_context = _project_preview_context(
+                    self_window,
+                    int(visual_rotation or 0) % 360,
+                )
+                if isinstance(semantic_context, dict):
+                    classifications, failed_mask_ids = _mask_snapshot_for_current_check(
+                        self_window,
+                        project_name=str(semantic_context.get("project_name") or ""),
+                        check_id=str(semantic_context.get("check_id") or ""),
+                        base=semantic_context,
+                    )
+                    semantic_context = dict(semantic_context)
+                    semantic_context["classifications"] = classifications
+                    semantic_context["failed_mask_ids"] = tuple(
+                        sorted(failed_mask_ids)
+                    )
+                    semantic_context["has_any_on"] = any(
+                        str(value).strip().lower() == "on"
+                        for value in classifications.values()
+                    )
+                    decorated = renderizar_preview_claro_display_f3(
+                        visual,
+                        semantic_context,
+                    )
+                else:
+                    decorated = _draw_tracking_geometry_visual(
+                        source,
+                        geometry,
+                        visual_rotation,
+                    )
+            except Exception:
+                decorated = _draw_tracking_geometry_visual(
+                    source,
+                    geometry,
+                    visual_rotation,
+                )
+
             status = getattr(
                 app,
                 "_display_f3_object_tracking_last_status",
@@ -2475,11 +2525,10 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             )
             if locked:
                 legend = (
-                    "RASTREAMENTO F3 • LOCK • "
-                    f"{str(status.get('reference') or '--')} • "
-                    f"{int(status.get('inliers', 0) or 0)} inliers"
+                    "LOCK • VERDE ACESO • VERMELHO APAGADO • "
+                    "AMARELO POUCA LUZ / DIVERGÊNCIA"
                 )
-                color = "#38BDF8"
+                color = "#E2E8F0"
             else:
                 reason = str(status.get("reason") or "procurando")
                 legend = f"RASTREAMENTO F3 • PROCURANDO PLACA • {reason}"
