@@ -38,7 +38,10 @@ class DisplayF3AutoCheckPolicyTests(unittest.TestCase):
             reference_gate=True,
         )
         self.assertEqual(DISPLAY_AUTO_DECISION_SEARCHING, decision["decision"])
-        self.assertEqual("aguardando_referencia_h1", decision["reason"])
+        self.assertEqual(
+            "aguardando_evidencia_placa_ligada",
+            decision["reason"],
+        )
 
     def test_h1_advances_when_reference_is_confirmed(self):
         decision = decidir_analise_display_f3(
