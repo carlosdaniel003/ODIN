@@ -20,6 +20,54 @@ from src.platform.display_f3_tracking_orientation_ui import (
     _fit_toplevel_inside_screen,
     _valid_frame,
 )
+from src.platform.display_mask_geometry import (
+    criar_segmento_display_por_arrasto,
+    pontos_mascara_display,
+)
+
+
+def _segment_polygon_from_drag(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    mask_id: str,
+) -> dict:
+    """Cria a forma real de segmento, mas persiste como polígono compatível com o F3."""
+    segment = criar_segmento_display_por_arrasto(
+        x1,
+        y1,
+        x2,
+        y2,
+        id_mascara=str(mask_id),
+    )
+    return {
+        "id": str(mask_id),
+        "type": "polygon",
+        "points": [
+            [float(x), float(y)]
+            for x, y in pontos_mascara_display(segment)
+        ],
+    }
+
+
+def _circle_to_segment_polygon(mask: dict) -> dict | None:
+    """Substitui um círculo por um segmento horizontal mantendo id e centro."""
+    if not isinstance(mask, dict) or str(mask.get("type") or "").lower() != "circle":
+        return None
+    try:
+        cx = float(mask.get("cx", 0))
+        cy = float(mask.get("cy", 0))
+        radius = max(1.0, float(mask.get("radius", 1)))
+    except (TypeError, ValueError):
+        return None
+    return _segment_polygon_from_drag(
+        cx - radius,
+        cy,
+        cx + radius,
+        cy,
+        str(mask.get("id") or ""),
+    )
 
 
 class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
@@ -66,6 +114,9 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.mask_draw_start = None
         self.mask_draw_current = None
         self.mask_draw_points: list[list[float]] = []
+        self.mask_draw_buttons: dict[str, tk.Button] = {}
+        self.view_pan_active = False
+        self.view_pan_last: tuple[float, float] | None = None
 
         self.history: list[dict] = []
         self.drag_target = None
@@ -138,6 +189,9 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.canvas.bind("<ButtonRelease-1>", self._release)
         self.canvas.bind("<Motion>", self._motion)
         self.canvas.bind("<Leave>", self._leave_canvas)
+        self.canvas.bind("<ButtonPress-2>", self._start_view_pan)
+        self.canvas.bind("<B2-Motion>", self._drag_view_pan)
+        self.canvas.bind("<ButtonRelease-2>", self._end_view_pan)
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.canvas.bind(sequence, self._wheel, add="+")
 
@@ -189,9 +243,15 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 bg="#0B1728",
             ).pack(side=tk.LEFT, padx=(6, 10))
 
-            def mask_button(text, mode=None, command=None, danger=False):
+            def mask_button(
+                text,
+                mode=None,
+                command=None,
+                danger=False,
+                key=None,
+            ):
                 callback = command or (lambda value=mode: self.set_mask_draw_mode(value))
-                tk.Button(
+                widget = tk.Button(
                     self.mask_toolbar,
                     text=text,
                     command=callback,
@@ -204,17 +264,28 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                     bd=0,
                     padx=10,
                     pady=6,
-                ).pack(side=tk.LEFT, padx=(0, 4))
+                    cursor="hand2",
+                )
+                widget.pack(side=tk.LEFT, padx=(0, 4))
+                if not danger and key:
+                    self.mask_draw_buttons[str(key)] = widget
+                return widget
 
-            mask_button("SELECIONAR", mode=None)
-            mask_button("+ SEGMENTO", mode="segment")
-            mask_button("+ CÍRCULO", mode="circle")
-            mask_button("+ POR PONTOS", mode="polygon")
+            mask_button("SELECIONAR", mode=None, key="select")
+            mask_button("+ SEGMENTO", mode="segment", key="segment")
+            mask_button("+ CÍRCULO", mode="circle", key="circle")
+            mask_button("+ POR PONTOS", mode="polygon", key="polygon")
+            mask_button(
+                "CÍRCULO → SEGMENTO",
+                command=self.replace_selected_circle_with_segment,
+                key="replace_circle",
+            )
             mask_button(
                 "EXCLUIR SELEÇÃO",
                 command=self.delete_selected_mask,
                 danger=True,
             )
+            self._update_mask_draw_buttons()
 
         self.status = tk.Label(
             self.window,
@@ -264,6 +335,46 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             index += 1
         return f"MASK_{index:03d}"
 
+    def _update_mask_draw_buttons(self) -> None:
+        active = self.mask_draw_mode if self.mask_draw_mode else "select"
+        for key, button in self.mask_draw_buttons.items():
+            if key == "replace_circle":
+                try:
+                    button.configure(
+                        bg="#3F2B12",
+                        fg="#FCD34D",
+                        activebackground="#5A3D18",
+                        activeforeground="#FEF3C7",
+                    )
+                except Exception:
+                    pass
+                continue
+            enabled = key == active
+            try:
+                button.configure(
+                    bg="#D6A900" if enabled else "#17314A",
+                    fg="#111318" if enabled else "#7DD3FC",
+                    activebackground="#F5C518" if enabled else "#1E4668",
+                    activeforeground="#111318" if enabled else "#FFFFFF",
+                )
+            except Exception:
+                pass
+
+    def _mask_draw_status_text(self) -> str:
+        if self.mask_draw_mode == "segment":
+            return (
+                "MÁSCARA • SEGMENTO • clique e arraste no sentido da barra. "
+                "O comprimento e o ângulo acompanham o arrasto."
+            )
+        if self.mask_draw_mode == "circle":
+            return "MÁSCARA • CÍRCULO • clique no centro e arraste o raio."
+        if self.mask_draw_mode == "polygon":
+            return (
+                f"MÁSCARA • POR PONTOS • {len(self.mask_draw_points)} ponto(s) • "
+                "clique ponto a ponto; Enter conclui; Esc cancela."
+            )
+        return "SELECIONAR • clique em placa/máscara para ajustar."
+
     def set_mask_draw_mode(self, mode=None) -> None:
         self.mask_draw_mode = mode if mode in {"segment", "circle", "polygon"} else None
         self.mask_draw_start = None
@@ -271,15 +382,47 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.mask_draw_points = []
         self.drag_target = None
         self.selected = None
-        if self.mask_draw_mode == "segment":
-            text = "MÁSCARA • SEGMENTO • clique e arraste para desenhar."
-        elif self.mask_draw_mode == "circle":
-            text = "MÁSCARA • CÍRCULO • clique no centro e arraste o raio."
-        elif self.mask_draw_mode == "polygon":
-            text = "MÁSCARA • POR PONTOS • clique ponto a ponto; Enter conclui; Esc cancela."
-        else:
-            text = "SELECIONAR • clique em placa/máscara para ajustar."
-        self.status.configure(text=text)
+        self._update_mask_draw_buttons()
+        self.status.configure(text=self._mask_draw_status_text())
+        self.schedule_render()
+        try:
+            self.canvas.focus_set()
+        except Exception:
+            pass
+
+    def replace_selected_circle_with_segment(self) -> None:
+        target = self.selected
+        if not isinstance(target, tuple) or not target or target[0] != "mask":
+            self.status.configure(
+                text="CÍRCULO → SEGMENTO • selecione primeiro uma máscara circular."
+            )
+            return
+        mask_id = str(target[1])
+        current = self._mask_by_id(mask_id)
+        converted = _circle_to_segment_polygon(current)
+        if converted is None:
+            self.status.configure(
+                text="CÍRCULO → SEGMENTO • a máscara selecionada não é circular."
+            )
+            return
+
+        self._push_history()
+        self.masks = [
+            converted if str(mask.get("id") or "") == mask_id else mask
+            for mask in self.masks
+        ]
+        self.mask_draw_mode = None
+        self.mask_draw_start = None
+        self.mask_draw_current = None
+        self.mask_draw_points = []
+        self.selected = ("mask", mask_id)
+        self._update_mask_draw_buttons()
+        self.status.configure(
+            text=(
+                f"{mask_id} substituída por segmento mantendo o mesmo centro e ID. "
+                "Ajuste os vértices se precisar refinar a máscara."
+            )
+        )
         self.schedule_render()
 
     def delete_selected_mask(self) -> None:
@@ -335,19 +478,13 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 "radius": float(radius),
             }
         else:
-            left, right = sorted((float(x1), float(x2)))
-            top, bottom = sorted((float(y1), float(y2)))
-            if right - left >= 2.0 and bottom - top >= 2.0:
-                mask = {
-                    "id": self._next_mask_id(),
-                    "type": "polygon",
-                    "points": [
-                        [left, top],
-                        [right, top],
-                        [right, bottom],
-                        [left, bottom],
-                    ],
-                }
+            mask = _segment_polygon_from_drag(
+                float(x1),
+                float(y1),
+                float(x2),
+                float(y2),
+                self._next_mask_id(),
+            )
         if mask is not None:
             self._push_history()
             self.masks.append(mask)
@@ -357,6 +494,8 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.schedule_render()
 
     def _motion(self, event) -> None:
+        if self.view_pan_active:
+            return
         if not self.allow_mask_creation or self.mask_draw_mode is None:
             return super()._motion(event)
         point = self._canvas_to_image(event.x, event.y)
@@ -375,6 +514,57 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 )
             )
         self.schedule_render()
+
+    def _start_view_pan(self, event) -> str:
+        if float(self.view_zoom) <= 1.001:
+            self.status.configure(
+                text="PAN • use Ctrl+roda para ampliar; depois segure a rodinha e arraste."
+            )
+            return "break"
+        self.view_pan_active = True
+        self.view_pan_last = (float(event.x), float(event.y))
+        self._precision_cursor = None
+        try:
+            self.canvas.configure(cursor="fleur")
+            self.canvas.focus_set()
+        except Exception:
+            pass
+        return "break"
+
+    def _clamp_view_pan(self) -> None:
+        cw = max(1.0, float(self.canvas.winfo_width()))
+        ch = max(1.0, float(self.canvas.winfo_height()))
+        fit = min(
+            cw / max(1.0, float(self.width)),
+            ch / max(1.0, float(self.height)),
+        )
+        scale = max(0.01, fit * float(self.view_zoom))
+        overflow_x = max(0.0, (float(self.width) * scale - cw) / 2.0)
+        overflow_y = max(0.0, (float(self.height) * scale - ch) / 2.0)
+        self.view_pan_x = max(-overflow_x, min(overflow_x, float(self.view_pan_x)))
+        self.view_pan_y = max(-overflow_y, min(overflow_y, float(self.view_pan_y)))
+
+    def _drag_view_pan(self, event) -> str:
+        if not self.view_pan_active or self.view_pan_last is None:
+            return "break"
+        current = (float(event.x), float(event.y))
+        dx = current[0] - self.view_pan_last[0]
+        dy = current[1] - self.view_pan_last[1]
+        self.view_pan_last = current
+        self.view_pan_x = float(self.view_pan_x) + dx
+        self.view_pan_y = float(self.view_pan_y) + dy
+        self._clamp_view_pan()
+        self.schedule_render()
+        return "break"
+
+    def _end_view_pan(self, _event=None) -> str:
+        self.view_pan_active = False
+        self.view_pan_last = None
+        try:
+            self.canvas.configure(cursor="crosshair")
+        except Exception:
+            pass
+        return "break"
 
     def _wheel(self, event) -> str:
         state = int(getattr(event, "state", 0) or 0)
@@ -448,10 +638,32 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 outline="#FACC15", width=2,
             )
         else:
-            self.canvas.create_rectangle(
-                cx1, cy1, cx2, cy2,
-                outline="#FACC15", width=2,
+            preview = _segment_polygon_from_drag(
+                float(x1),
+                float(y1),
+                float(x2),
+                float(y2),
+                "__PREVIEW__",
             )
+            coords = []
+            for point in preview.get("points", []):
+                px, py = self._image_to_canvas(point[0], point[1])
+                coords.extend((px, py))
+            if len(coords) >= 6:
+                self.canvas.create_polygon(
+                    *coords,
+                    fill="",
+                    outline="#FACC15",
+                    width=2,
+                )
+
+    def render(self) -> None:
+        super().render()
+        if self.allow_mask_creation and self.mask_draw_mode is not None:
+            try:
+                self.status.configure(text=self._mask_draw_status_text())
+            except Exception:
+                pass
 
     def save(self) -> None:
         if not _valid_frame(self.image):

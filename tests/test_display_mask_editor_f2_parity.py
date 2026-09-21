@@ -18,6 +18,10 @@ from src.platform.display_mask_editor import (
     criar_segmento_display_por_arrasto,
     mascara_display_contem_ponto,
 )
+from src.platform.display_f3_reference_geometry_editor import (
+    _circle_to_segment_polygon,
+    _segment_polygon_from_drag,
+)
 from src.platform.display_project_repository import DisplayProjectRepository
 
 
@@ -137,6 +141,58 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
             "LedSelection",
         ):
             self.assertNotIn(forbidden, source)
+
+    def test_editor_f3_segmento_inferior_usa_barra_real_mesmo_em_arrasto_horizontal(self):
+        mask = _segment_polygon_from_drag(
+            100,
+            200,
+            220,
+            200,
+            "MASK_031",
+        )
+        self.assertEqual("MASK_031", mask["id"])
+        self.assertEqual("polygon", mask["type"])
+        self.assertGreaterEqual(len(mask["points"]), 4)
+        xs = [float(point[0]) for point in mask["points"]]
+        ys = [float(point[1]) for point in mask["points"]]
+        self.assertLessEqual(min(xs), 100.0)
+        self.assertGreaterEqual(max(xs), 220.0)
+        self.assertGreater(max(ys) - min(ys), 0.0)
+
+    def test_editor_f3_converte_circulo_selecionado_em_segmento_preservando_id_e_centro(self):
+        converted = _circle_to_segment_polygon(
+            {
+                "id": "MASK_007",
+                "type": "circle",
+                "cx": 320,
+                "cy": 240,
+                "radius": 24,
+            }
+        )
+        self.assertIsNotNone(converted)
+        self.assertEqual("MASK_007", converted["id"])
+        self.assertEqual("polygon", converted["type"])
+        xs = [float(point[0]) for point in converted["points"]]
+        ys = [float(point[1]) for point in converted["points"]]
+        self.assertAlmostEqual(320.0, (min(xs) + max(xs)) / 2.0)
+        self.assertAlmostEqual(240.0, (min(ys) + max(ys)) / 2.0)
+        self.assertGreater(max(xs) - min(xs), max(ys) - min(ys))
+
+    def test_editor_f3_referencia_vincula_pan_e_expõe_conversao_circulo_segmento(self):
+        module = __import__(
+            "src.platform.display_f3_reference_geometry_editor",
+            fromlist=["F3ReferenceGeometryEditor"],
+        )
+        source = inspect.getsource(module)
+        for token in (
+            '"<ButtonPress-2>"',
+            '"<B2-Motion>"',
+            '"<ButtonRelease-2>"',
+            '"CÍRCULO → SEGMENTO"',
+            "replace_selected_circle_with_segment",
+            "mask_draw_buttons",
+        ):
+            self.assertIn(token, source)
 
     def test_classe_publica_continua_sendo_display_mask_editor_window(self):
         self.assertTrue(hasattr(DisplayMaskEditorWindow, "save"))
