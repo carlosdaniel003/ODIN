@@ -280,6 +280,8 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("Remover foto", config_source)
         self.assertIn("Desenhar placa e máscaras", config_source)
         self.assertIn("capture_masks_reference_photo", config_source)
+        self.assertIn("F3MaskReferenceCaptureWindow", config_source)
+        self.assertIn("mask_capture_window", config_source)
         self.assertIn("remove_masks_reference_photo", config_source)
         self.assertIn("draw_masks_geometry", config_source)
         self.assertIn("F3ReferenceGeometryEditor", config_source)
@@ -299,6 +301,17 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         )
         self.assertIn("self.draw_masks_geometry()", rotation_source)
         self.assertNotIn("DisplayMaskEditorWindow(", rotation_source)
+
+    def test_mask_photo_button_opens_visible_live_capture(self):
+        capture_source = inspect.getsource(
+            mask_editor_reference.F3MaskReferenceCaptureWindow
+        )
+        self.assertIn("AGUARDANDO FRAME DA CÂMERA", capture_source)
+        self.assertIn("CÂMERA SEM FRAME", capture_source)
+        self.assertIn('text="CAPTURAR"', capture_source)
+        self.assertIn("self.frame_provider()", capture_source)
+        self.assertIn("self.store.save_frame", capture_source)
+        self.assertIn("self._render_latest()", capture_source)
 
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
