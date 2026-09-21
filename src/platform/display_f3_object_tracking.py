@@ -1747,12 +1747,27 @@ def tracking_enabled(app) -> bool:
     runtime = get_tracking_runtime(app)
     if runtime is None:
         return False
-    # Não consulte o JSON a cada frame do F3. O valor é carregado uma vez ao
-    # construir o runtime e atualizado imediatamente pelo checkbox da UI.
-    if hasattr(app, "_display_f3_object_tracking_enabled"):
-        return bool(getattr(app, "_display_f3_object_tracking_enabled"))
+
+    # A flag persistida é a autoridade final. O store possui cache por
+    # mtime/tamanho, então esta leitura não reprocessa JSON a cada frame. Isso
+    # evita um estado perigoso em que o checkbox fica marcado no arquivo, mas uma
+    # cópia antiga em memória mantém o tracking efetivamente desligado.
     enabled = bool(runtime.store.enabled())
-    app._display_f3_object_tracking_enabled = enabled
+    cached = bool(
+        getattr(app, "_display_f3_object_tracking_enabled", enabled)
+    )
+    if cached != enabled or not hasattr(
+        app,
+        "_display_f3_object_tracking_enabled",
+    ):
+        app._display_f3_object_tracking_enabled = enabled
+        if cached != enabled:
+            runtime.reset()
+            app._display_f3_object_tracking_last_status = {
+                "enabled": enabled,
+                "locked": False,
+                "reason": "setting_resynchronized",
+            }
     return enabled
 
 
