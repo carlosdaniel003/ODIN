@@ -32,6 +32,7 @@ o defeito na preview.
 from copy import deepcopy
 
 import cv2
+import numpy as np
 
 import src.platform.display_f3_strict_mask_conformity as strict_module
 import src.platform.display_live_roi_overlay as overlay_module
@@ -42,7 +43,10 @@ from src.platform.display_project_repository import (
     mascaras_geometria_check_display,
     normalizar_resolucao_display,
 )
-from src.platform.display_visual_rotation import preparar_check_visual_display
+from src.platform.display_visual_rotation import (
+    preparar_check_visual_display,
+    preparar_pontos_visuais_display,
+)
 
 
 # Máscaras normais permanecem translúcidas para mostrar o segmento real.
@@ -93,7 +97,7 @@ def estado_visual_mascara_f3(
 
 
 def _project_preview_context(window, visual_rotation: int) -> dict | None:
-    """Carrega geometria/estado esperado direto do projeto, sem depender da análise."""
+    """Geometria visível do CHECK, usando pose rastreada quando o modo está ativo."""
     app = overlay_module._app_from_window(window)
     if app is None:
         return None
@@ -110,25 +114,11 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
     if not project_name or not check_id:
         return None
 
-    cache_key = (
-        project_name,
-        check_id,
-        int(visual_rotation or 0) % 360,
-        overlay_module._config_signature(repository),
-    )
-    if cache_key == getattr(window, "_display_f3_clear_preview_project_key", None):
-        cached = getattr(window, "_display_f3_clear_preview_project_context", None)
-        return deepcopy(cached) if isinstance(cached, dict) else None
-
     try:
         project = repository.carregar_projeto(project_name)
     except Exception:
         project = None
     if not isinstance(project, dict):
-        return None
-
-    resolution = normalizar_resolucao_display(project.get("master_resolution"))
-    if resolution is None:
         return None
 
     checks = list(project.get("checks", []) or [])
@@ -155,6 +145,82 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         if str(state).strip().lower()
         in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
     }
+
+    # Rastreamento ativo: contorno e ROIs já estão projetados para o frame RAW
+    # atual. Rotacionamos essa geometria apenas para a orientação visual escolhida
+    # pelo operador e NÃO usamos cache, pois ela muda junto com a placa.
+    tracking_enabled = bool(
+        getattr(app, "_display_f3_object_tracking_enabled", False)
+    )
+    live_geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    if (
+        tracking_enabled
+        and isinstance(live_geometry, dict)
+        and bool(live_geometry.get("locked"))
+    ):
+        raw_resolution = live_geometry.get("resolution")
+        if (
+            isinstance(raw_resolution, (list, tuple))
+            and len(raw_resolution) >= 2
+        ):
+            raw_width = max(1, int(raw_resolution[0]))
+            raw_height = max(1, int(raw_resolution[1]))
+            tracked_masks = [
+                deepcopy(mask)
+                for mask in (live_geometry.get("masks") or [])
+                if isinstance(mask, dict)
+                and expected.get(str(mask.get("id") or ""))
+                in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
+            ]
+            try:
+                _, visual_resolution, visual_masks = preparar_check_visual_display(
+                    None,
+                    (raw_width, raw_height),
+                    tracked_masks,
+                    int(visual_rotation or 0) % 360,
+                )
+                visual_board = preparar_pontos_visuais_display(
+                    live_geometry.get("board_points") or [],
+                    raw_width,
+                    raw_height,
+                    int(visual_rotation or 0) % 360,
+                )
+            except Exception:
+                visual_masks = []
+                visual_board = []
+                visual_resolution = (raw_width, raw_height)
+
+            return {
+                "project_name": project_name,
+                "check_id": check_id,
+                "resolution": tuple(visual_resolution),
+                "masks": tuple(visual_masks),
+                "board_points": tuple(visual_board),
+                "expected_states": expected,
+                "tracking_locked": True,
+                "tracking_reference": str(
+                    live_geometry.get("reference") or ""
+                ),
+                "tracking_space": str(
+                    live_geometry.get("geometry_space") or ""
+                ),
+            }
+
+    # Modo legado/desligado: geometria fixa do Projeto Display.
+    resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    if resolution is None:
+        return None
+
+    cache_key = (
+        project_name,
+        check_id,
+        int(visual_rotation or 0) % 360,
+        overlay_module._config_signature(repository),
+    )
+    if cache_key == getattr(window, "_display_f3_clear_preview_project_key", None):
+        cached = getattr(window, "_display_f3_clear_preview_project_context", None)
+        return deepcopy(cached) if isinstance(cached, dict) else None
+
     effective_masks = mascaras_geometria_check_display(project, check)
     active_masks = [
         deepcopy(mask)
@@ -179,7 +245,9 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "check_id": check_id,
         "resolution": tuple(visual_resolution),
         "masks": tuple(visual_masks),
+        "board_points": (),
         "expected_states": expected,
+        "tracking_locked": False,
     }
     window._display_f3_clear_preview_project_key = cache_key
     window._display_f3_clear_preview_project_context = deepcopy(result)
@@ -439,6 +507,31 @@ def renderizar_preview_claro_display_f3(frame, context):
     )
 
     result = frame.copy()
+
+    # Bounding box/contorno da placa rastreada: permanece sobre a câmera REAL e
+    # acompanha translação/rotação/escala da placa sem deformar a imagem.
+    board_points = context.get("board_points") or ()
+    if len(board_points) >= 3:
+        try:
+            board = []
+            for point in board_points:
+                board.append(
+                    [
+                        int(round(float(point[0]) * sx)),
+                        int(round(float(point[1]) * sy)),
+                    ]
+                )
+            cv2.polylines(
+                result,
+                [np.asarray(board, dtype=np.int32)],
+                True,
+                (248, 189, 56),
+                max(2, F3_PREVIEW_CLEAR_CONTOUR_THICKNESS),
+                cv2.LINE_AA,
+            )
+        except Exception:
+            pass
+
     normal_tint = result.copy()
     alert_tint = result.copy()
     normal_geometries = []
