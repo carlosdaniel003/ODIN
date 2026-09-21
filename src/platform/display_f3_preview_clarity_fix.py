@@ -55,6 +55,8 @@ F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 2
 # Divergência precisa saltar aos olhos do operador sem introduzir outra cor.
 F3_PREVIEW_ALERT_ALPHA = 0.58
 F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 6
+F3_PREVIEW_TRACKING_GUIDE_BGR = (248, 189, 56)  # ciano #38BDF8 em BGR
+F3_PREVIEW_TRACKING_GUIDE_THICKNESS = 1
 
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
@@ -149,9 +151,15 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
     # Rastreamento ativo: contorno e ROIs já estão projetados para o frame RAW
     # atual. Rotacionamos essa geometria apenas para a orientação visual escolhida
     # pelo operador e NÃO usamos cache, pois ela muda junto com a placa.
-    tracking_enabled = bool(
-        getattr(app, "_display_f3_object_tracking_enabled", False)
-    )
+    try:
+        from src.platform.display_f3_object_tracking import (
+            tracking_enabled as tracking_runtime_enabled,
+        )
+        tracking_enabled = bool(tracking_runtime_enabled(app))
+    except Exception:
+        tracking_enabled = bool(
+            getattr(app, "_display_f3_object_tracking_enabled", False)
+        )
     live_geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
     if (
         tracking_enabled
@@ -165,12 +173,13 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         ):
             raw_width = max(1, int(raw_resolution[0]))
             raw_height = max(1, int(raw_resolution[1]))
+            # Exiba TODA a geometria rastreada, não somente as máscaras
+            # ativas do CHECK. As máscaras sem estado neste CHECK ficam como
+            # guias neutras; as ativas recebem verde/vermelho/amarelo depois.
             tracked_masks = [
                 deepcopy(mask)
                 for mask in (live_geometry.get("masks") or [])
                 if isinstance(mask, dict)
-                and expected.get(str(mask.get("id") or ""))
-                in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
             ]
             try:
                 _, visual_resolution, visual_masks = preparar_check_visual_display(
@@ -197,6 +206,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                 "masks": tuple(visual_masks),
                 "board_points": tuple(visual_board),
                 "expected_states": expected,
+                "tracking_active": True,
                 "tracking_locked": True,
                 "tracking_reference": str(
                     live_geometry.get("reference") or ""
@@ -205,6 +215,35 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                     live_geometry.get("geometry_space") or ""
                 ),
             }
+
+    if tracking_enabled:
+        # Rastreamento ligado mas ainda sem LOCK: nunca volte às ROIs fixas.
+        # Isso evita exatamente o efeito visual enganoso de "máscaras paradas"
+        # enquanto o tracker ainda procura a placa.
+        resolution = normalizar_resolucao_display(project.get("master_resolution"))
+        if resolution is None:
+            return None
+        try:
+            _, visual_resolution, _ = preparar_check_visual_display(
+                None,
+                resolution,
+                [],
+                int(visual_rotation or 0) % 360,
+            )
+        except Exception:
+            visual_resolution = resolution
+        return {
+            "project_name": project_name,
+            "check_id": check_id,
+            "resolution": tuple(visual_resolution),
+            "masks": (),
+            "board_points": (),
+            "expected_states": expected,
+            "tracking_active": True,
+            "tracking_locked": False,
+            "tracking_reference": "",
+            "tracking_space": "",
+        }
 
     # Modo legado/desligado: geometria fixa do Projeto Display.
     resolution = normalizar_resolucao_display(project.get("master_resolution"))
@@ -247,6 +286,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "masks": tuple(visual_masks),
         "board_points": (),
         "expected_states": expected,
+        "tracking_active": False,
         "tracking_locked": False,
     }
     window._display_f3_clear_preview_project_key = cache_key
@@ -390,7 +430,20 @@ def _contexto_preview_claro(original):
         result = dict(base) if isinstance(base, dict) else {}
         result["resolution"] = project_context["resolution"]
         result["masks"] = project_context["masks"]
+        result["board_points"] = tuple(project_context.get("board_points") or ())
         result["expected_states"] = dict(project_context["expected_states"])
+        result["tracking_active"] = bool(
+            project_context.get("tracking_active")
+        )
+        result["tracking_locked"] = bool(
+            project_context.get("tracking_locked")
+        )
+        result["tracking_reference"] = str(
+            project_context.get("tracking_reference") or ""
+        )
+        result["tracking_space"] = str(
+            project_context.get("tracking_space") or ""
+        )
 
         classifications, failed_mask_ids = _mask_snapshot_for_current_check(
             window,
@@ -531,6 +584,49 @@ def renderizar_preview_claro_display_f3(frame, context):
             )
         except Exception:
             pass
+
+    # Com tracking ativo/LOCK, todas as máscaras aparecem como guias
+    # ciano móveis. Isso torna visível o bounding geometry mesmo antes de existir
+    # classificação do CHECK. As máscaras classificadas são recoloridas abaixo.
+    if bool(context.get("tracking_active")) and bool(context.get("tracking_locked")):
+        for mask in masks:
+            if not isinstance(mask, dict):
+                continue
+            kind = str(mask.get("type") or "").lower()
+            try:
+                if kind == "circle":
+                    center = (
+                        int(round(float(mask.get("cx", 0)) * sx)),
+                        int(round(float(mask.get("cy", 0)) * sy)),
+                    )
+                    axes = (
+                        max(1, int(round(float(mask.get("radius", 1)) * sx))),
+                        max(1, int(round(float(mask.get("radius", 1)) * sy))),
+                    )
+                    cv2.ellipse(
+                        result,
+                        center,
+                        axes,
+                        0,
+                        0,
+                        360,
+                        F3_PREVIEW_TRACKING_GUIDE_BGR,
+                        F3_PREVIEW_TRACKING_GUIDE_THICKNESS,
+                        cv2.LINE_AA,
+                    )
+                else:
+                    polygon = overlay_module._scaled_polygon(mask, sx, sy)
+                    if polygon is not None and len(polygon) >= 3:
+                        cv2.polylines(
+                            result,
+                            [polygon],
+                            True,
+                            F3_PREVIEW_TRACKING_GUIDE_BGR,
+                            F3_PREVIEW_TRACKING_GUIDE_THICKNESS,
+                            cv2.LINE_AA,
+                        )
+            except Exception:
+                continue
 
     normal_tint = result.copy()
     alert_tint = result.copy()
