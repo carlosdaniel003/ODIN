@@ -1464,6 +1464,7 @@ class F3DisplayObjectTracker:
                 angle=float(spec.get("angle", 0.0) or 0.0),
                 real_orientation=bool(spec.get("real_orientation", False)),
                 source_type=str(spec.get("source_type") or "reference"),
+                board_points=spec.get("board", []),
             )
 
         for slot in F3_ORIENTATION_SLOTS:
@@ -1497,6 +1498,7 @@ class F3DisplayObjectTracker:
                 angle=F3_ORIENTATION_ANGLE[slot],
                 real_orientation=True,
                 source_type="orientation",
+                board_points=board_ref,
             )
 
         if not refs:
@@ -1510,7 +1512,9 @@ class F3DisplayObjectTracker:
 
     def _candidate(self, current_kp, current_desc, key: str):
         ref = self.references[key]
-        descriptors = ref["descriptors"]
+        descriptors = ref.get("descriptors")
+        if descriptors is None or current_desc is None:
+            return None
         matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
         try:
             pairs = matcher.knnMatch(descriptors, current_desc, k=2)
@@ -1651,6 +1655,20 @@ class F3DisplayObjectTracker:
             candidate = self._candidate(current_kp, current_desc, key)
             if candidate is not None:
                 candidates.append(candidate)
+
+        # Câmera e suporte são fixos: se o PCB tiver poucos corners ORB, use as
+        # bordas do contorno desenhado como fallback de translação. Os slots
+        # 0/90/180/270 e CHECKS fornecem as orientações reais disponíveis.
+        if not candidates:
+            try:
+                current_edges = cv2.Canny(gray, 45, 135)
+            except Exception:
+                current_edges = None
+            for key in tuple(self.references):
+                candidate = self._template_candidate(current_edges, key)
+                if candidate is not None:
+                    candidates.append(candidate)
+
         if not candidates:
             self.last_matrix = None
             self._last_reference = ""
@@ -1690,7 +1708,11 @@ class F3DisplayObjectTracker:
             inlier_ratio=float(best["ratio"]),
             rotation_deg=float(best["rotation_deg"]),
             scale=float(best["scale"]),
-            reason="locked",
+            reason=(
+                "locked_template"
+                if str(best.get("fallback") or "") == "edge_template"
+                else "locked"
+            ),
             current_to_canonical=matrix.copy(),
             source_type=str(best.get("source_type") or ""),
         )
