@@ -521,7 +521,41 @@ class DisplayProjectConfigWindow:
                 draw_reference_geometry,
             )
 
-            height, width = frame.shape[:2]
+            from src.platform.display_visual_rotation import (
+                obter_rotacao_visual_do_frame_provider,
+                preparar_check_visual_display,
+                preparar_pontos_visuais_display,
+            )
+
+            master_resolution = normalizar_resolucao_display(
+                project.get("master_resolution")
+            )
+            if master_resolution is None:
+                raise ValueError("invalid master resolution")
+
+            visual_rotation = obter_rotacao_visual_do_frame_provider(
+                self.frame_provider
+            )
+            frame_visual, visual_resolution, masks_visual = (
+                preparar_check_visual_display(
+                    frame,
+                    master_resolution,
+                    project.get("masks", []),
+                    visual_rotation,
+                )
+            )
+            board_master = canonical_board_points(
+                project,
+                F3TrackingConfigStore(self.repository),
+            )
+            board_visual = preparar_pontos_visuais_display(
+                board_master,
+                master_resolution[0],
+                master_resolution[1],
+                visual_rotation,
+            )
+
+            height, width = frame_visual.shape[:2]
             canvas.update_idletasks()
             cw = max(120, int(canvas.winfo_width() or 360))
             ch = max(90, int(canvas.winfo_height() or 150))
@@ -532,7 +566,7 @@ class DisplayProjectConfigWindow:
             tw = max(1, int(round(width * scale)))
             th = max(1, int(round(height * scale)))
             thumb = cv2.resize(
-                frame,
+                frame_visual,
                 (tw, th),
                 interpolation=cv2.INTER_AREA,
             )
@@ -540,18 +574,13 @@ class DisplayProjectConfigWindow:
                 (scale, 0.0, 0.0),
                 (0.0, scale, 0.0),
             )
-            board = canonical_board_points(
-                project,
-                F3TrackingConfigStore(self.repository),
-            )
-            board_preview = transform_points(board, matrix)
-            # Use o transformador canônico do F3. Ele normaliza inclusive
-            # máscaras do tipo "segment" para polígono antes de aplicar escala;
-            # o helper privado do editor angular não é autoridade para máscaras
-            # canônicas e fazia segmentos desaparecerem da miniatura.
+            board_preview = transform_points(board_visual, matrix)
+            # A miniatura usa a MESMA orientação visual do editor. Assim, se a
+            # câmera principal está em 180°, foto, placa e máscaras também são
+            # mostradas em 180° antes de qualquer redução para o card.
             masks_preview = [
                 transform_mask(mask, matrix)
-                for mask in (project.get("masks", []) or [])
+                for mask in (masks_visual or [])
                 if isinstance(mask, dict)
             ]
             thumb = draw_reference_geometry(
@@ -589,7 +618,8 @@ class DisplayProjectConfigWindow:
                 status.configure(
                     text=(
                         f"Foto estática salva • {width}x{height} • "
-                        f"{len(project.get('masks', []) or [])} máscara(s)"
+                        f"{len(project.get('masks', []) or [])} máscara(s) • "
+                        f"VISUAL {visual_rotation}°"
                     )
                 )
         except Exception as exc:
