@@ -15,6 +15,13 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
     CHECK_PENDING = "#172033"
     CHECK_BORDER = "#475569"
 
+    DISPLAY_READOUT_PANEL = "#0B1220"
+    DISPLAY_READOUT_SCREEN = "#020617"
+    DISPLAY_READOUT_BORDER = "#334155"
+    DISPLAY_READOUT_ACTIVE = "#FBBF24"
+    DISPLAY_READOUT_INACTIVE = "#2B2508"
+    DISPLAY_READOUT_TITLE = "#E2E8F0"
+
     def __init__(
         self,
         root,
@@ -54,6 +61,11 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             text="CHECK ATUAL • MONITORAMENTO CONTÍNUO",
             fg=self.PREVIEW_MUTED,
         )
+
+        # Reserva visual para o futuro espelhamento lógico do display físico.
+        # Por enquanto é somente apresentação: nenhuma regra de CHECK depende dele.
+        self._build_display_readout()
+
         self.footer_label.configure(
             text="1: DESCARTAR PLACA  •  F3 ou ESC: voltar ao ODIN"
         )
@@ -197,6 +209,226 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self.container.unbind("<F1>")
 
         self.set_check_sequence(self._check_snapshot)
+
+    def _build_display_readout(self) -> None:
+        """Cria um visor 7 segmentos independente da lógica dos CHECKS."""
+        self.display_readout_value = "88:88"
+
+        # O status "Ao vivo" desce uma linha; a câmera continua sendo a área
+        # expansível da coluna direita.
+        self.preview_status.grid_configure(
+            row=3,
+            pady=(7, 11),
+        )
+        self.preview_frame.grid_rowconfigure(2, weight=0)
+        self.preview_frame.grid_rowconfigure(3, weight=0)
+
+        self.display_readout_frame = tk.Frame(
+            self.preview_frame,
+            bg=self.DISPLAY_READOUT_PANEL,
+            highlightbackground=self.DISPLAY_READOUT_BORDER,
+            highlightthickness=1,
+        )
+        self.display_readout_frame.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=12,
+            pady=(9, 0),
+        )
+        self.display_readout_frame.grid_columnconfigure(0, weight=1)
+
+        self.display_readout_title = tk.Label(
+            self.display_readout_frame,
+            text="VISOR DO DISPLAY",
+            font=("DejaVu Sans", 9, "bold"),
+            bg=self.DISPLAY_READOUT_PANEL,
+            fg=self.DISPLAY_READOUT_TITLE,
+            anchor="w",
+            justify="left",
+        )
+        self.display_readout_title.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=10,
+            pady=(7, 2),
+        )
+
+        self.display_readout_canvas = tk.Canvas(
+            self.display_readout_frame,
+            bg=self.DISPLAY_READOUT_SCREEN,
+            highlightbackground=self.DISPLAY_READOUT_BORDER,
+            highlightthickness=1,
+            bd=0,
+            height=68,
+        )
+        self.display_readout_canvas.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=10,
+            pady=(0, 8),
+        )
+        self.display_readout_canvas.bind(
+            "<Configure>",
+            self._redraw_display_readout,
+        )
+
+        try:
+            self.root.after_idle(self._redraw_display_readout)
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _seven_segment_points(
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        thickness: float,
+    ) -> dict[str, list[float]]:
+        """Polígonos afilados A..G para um dígito de sete segmentos."""
+        t = float(thickness)
+        half = height / 2.0
+        bevel = max(2.0, t * 0.42)
+
+        def horizontal(top_y: float):
+            return [
+                x + t * 0.72, top_y,
+                x + width - t * 0.72, top_y,
+                x + width - bevel, top_y + t / 2.0,
+                x + width - t * 0.72, top_y + t,
+                x + t * 0.72, top_y + t,
+                x + bevel, top_y + t / 2.0,
+            ]
+
+        def vertical(left_x: float, top_y: float, bottom_y: float):
+            return [
+                left_x, top_y + t * 0.72,
+                left_x + t / 2.0, top_y + bevel,
+                left_x + t, top_y + t * 0.72,
+                left_x + t, bottom_y - t * 0.72,
+                left_x + t / 2.0, bottom_y - bevel,
+                left_x, bottom_y - t * 0.72,
+            ]
+
+        return {
+            "a": horizontal(y),
+            "g": horizontal(y + half - t / 2.0),
+            "d": horizontal(y + height - t),
+            "f": vertical(x, y, y + half),
+            "b": vertical(x + width - t, y, y + half),
+            "e": vertical(x, y + half, y + height),
+            "c": vertical(x + width - t, y + half, y + height),
+        }
+
+    def _draw_seven_segment_digit(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        character: str,
+    ) -> None:
+        canvas = self.display_readout_canvas
+        segment_map = {
+            "0": "abcdef",
+            "1": "bc",
+            "2": "abdeg",
+            "3": "abcdg",
+            "4": "bcfg",
+            "5": "acdfg",
+            "6": "acdefg",
+            "7": "abc",
+            "8": "abcdefg",
+            "9": "abcdfg",
+            "-": "g",
+            " ": "",
+        }
+        active = set(segment_map.get(str(character), "abcdefg"))
+        thickness = max(4.0, min(width, height) * 0.115)
+        polygons = self._seven_segment_points(
+            x,
+            y,
+            width,
+            height,
+            thickness,
+        )
+        for name, points in polygons.items():
+            canvas.create_polygon(
+                points,
+                fill=(
+                    self.DISPLAY_READOUT_ACTIVE
+                    if name in active
+                    else self.DISPLAY_READOUT_INACTIVE
+                ),
+                outline="",
+                tags=("display-readout-segment",),
+            )
+
+    def _redraw_display_readout(self, _event=None) -> None:
+        canvas = getattr(self, "display_readout_canvas", None)
+        if canvas is None:
+            return
+        try:
+            canvas.delete("all")
+            width = max(280, int(canvas.winfo_width()))
+            height = max(62, int(canvas.winfo_height()))
+        except tk.TclError:
+            return
+
+        value = str(getattr(self, "display_readout_value", "88:88") or "88:88")
+        if ":" not in value:
+            value = "88:88"
+        left, right = value.split(":", 1)
+        left = (left + "88")[:2]
+        right = (right + "88")[:2]
+        digits = [left[0], left[1], right[0], right[1]]
+
+        digit_height = min(50.0, max(40.0, height - 14.0))
+        digit_width = digit_height * 0.56
+        digit_gap = max(7.0, digit_width * 0.20)
+        colon_width = max(13.0, digit_width * 0.38)
+        total_width = (
+            digit_width * 4.0
+            + digit_gap * 3.0
+            + colon_width
+        )
+        start_x = (width - total_width) / 2.0
+        y = (height - digit_height) / 2.0
+
+        x = start_x
+        self._draw_seven_segment_digit(x, y, digit_width, digit_height, digits[0])
+        x += digit_width + digit_gap
+        self._draw_seven_segment_digit(x, y, digit_width, digit_height, digits[1])
+        x += digit_width + digit_gap * 0.55
+
+        dot_radius = max(2.7, digit_width * 0.075)
+        colon_x = x + colon_width / 2.0
+        for cy in (y + digit_height * 0.36, y + digit_height * 0.66):
+            canvas.create_oval(
+                colon_x - dot_radius,
+                cy - dot_radius,
+                colon_x + dot_radius,
+                cy + dot_radius,
+                fill=self.DISPLAY_READOUT_ACTIVE,
+                outline="",
+                tags=("display-readout-colon",),
+            )
+
+        x += colon_width + digit_gap * 0.45
+        self._draw_seven_segment_digit(x, y, digit_width, digit_height, digits[2])
+        x += digit_width + digit_gap
+        self._draw_seven_segment_digit(x, y, digit_width, digit_height, digits[3])
+
+    def set_display_readout(self, value: str = "88:88") -> None:
+        """Ponto de integração futuro; atualmente apenas atualiza o desenho."""
+        text = str(value or "88:88").strip()
+        if len(text) != 5 or text[2] != ":":
+            text = "88:88"
+        self.display_readout_value = text
+        self._redraw_display_readout()
 
     def _open_project_config(self) -> None:
         if self.on_configure is not None:
