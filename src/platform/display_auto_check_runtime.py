@@ -241,6 +241,45 @@ class DisplayAutomaticCheckF3Mixin:
             for item in confident
         )
 
+    @staticmethod
+    def _display_auto_has_reference_power_evidence(analysis: dict) -> bool:
+        """H1 só pode avançar quando existir segmento esperado ACESO realmente ACESO.
+
+        Não confia apenas em analysis['approved'], porque uma placa desligada nunca
+        pode validar o primeiro CHECK por coincidência/classificação equivocada.
+        """
+        if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
+            return False
+
+        results = [
+            item
+            for item in (analysis.get("mask_results") or [])
+            if isinstance(item, dict)
+        ]
+        if not results:
+            return False
+
+        expected_on = [
+            item
+            for item in results
+            if str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+        ]
+        if not expected_on:
+            return False
+
+        for item in expected_on:
+            try:
+                confidence = float(item.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if (
+                confidence >= DISPLAY_AUTO_MIN_CONFIDENCE
+                and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
+                and item.get("matched") is not False
+            ):
+                return True
+        return False
+
     def _display_auto_arm_manual_entry_gate(
         self,
         context: dict,
@@ -369,6 +408,21 @@ class DisplayAutomaticCheckF3Mixin:
                 "AUTO INDISPONÍVEL • "
                 + self._display_auto_reason_text(analysis.get("reason", "")),
                 "#FCA5A5",
+            )
+            return
+
+        # O primeiro CHECK/H1 é a trava física do ciclo. Sem pelo menos um
+        # segmento que H1 espera ACESO efetivamente classificado como ACESO,
+        # não existe OK, NG nem avanço para Bluetooth/BLUE.
+        if (
+            reference_gate
+            and not self._display_auto_has_reference_power_evidence(analysis)
+        ):
+            self._display_auto_last_decision = None
+            self._display_auto_stable_frames = 0
+            self._display_auto_set_preview_status(
+                "AUTO • H1 • aguardando placa ligada / segmento aceso confirmado",
+                "#FDE68A",
             )
             return
 
