@@ -84,6 +84,18 @@ def decidir_analise_display_f3(
 
     all_matched = all(bool(item.get("matched")) for item in results)
     all_confident = len(confident_results) == len(results)
+
+    # O H1/primeiro CHECK só pode ser OK quando a própria leitura comprova que
+    # existe pelo menos um segmento ACESO. Uma placa totalmente apagada nunca
+    # valida o referencial, mesmo que alguma camada anterior marque "approved".
+    if reference_gate and not board_powered:
+        return {
+            "decision": DISPLAY_AUTO_DECISION_SEARCHING,
+            "reason": "aguardando_evidencia_placa_ligada",
+            "confirmed_ng": False,
+            "board_powered": False,
+        }
+
     if all_matched and all_confident:
         return {
             "decision": DISPLAY_AUTO_DECISION_OK,
