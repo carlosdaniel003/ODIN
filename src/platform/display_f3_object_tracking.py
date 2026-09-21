@@ -584,6 +584,207 @@ def transform_mask(mask: dict, matrix) -> dict | None:
     }
 
 
+def _mask_center(mask: dict) -> tuple[float, float] | None:
+    if not isinstance(mask, dict):
+        return None
+    item = converter_mascara_legada_para_editor(mask)
+    kind = str(item.get("type") or "").lower()
+    try:
+        if kind in {"circle", "segment"}:
+            return float(item.get("cx", 0)), float(item.get("cy", 0))
+        points = pontos_mascara_display(item)
+        if not points:
+            return None
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+        return sum(xs) / len(xs), sum(ys) / len(ys)
+    except (TypeError, ValueError):
+        return None
+
+
+def _reference_masks_from_overrides(
+    project: dict,
+    overrides,
+) -> list[dict]:
+    """Geometria desenhada sobre uma foto de referência.
+
+    Quando não existe override para um id, preserva a máscara canônica apenas
+    como fallback. Para estimar pose, os pares com override explícito recebem
+    prioridade via centros por id.
+    """
+    source = overrides if isinstance(overrides, dict) else {}
+    result = []
+    for base in project.get("masks", []) or []:
+        if not isinstance(base, dict):
+            continue
+        mask_id = str(base.get("id") or "")
+        raw = source.get(mask_id)
+        item = deepcopy(raw) if isinstance(raw, dict) else deepcopy(base)
+        item["id"] = mask_id
+        result.append(converter_mascara_legada_para_editor(item))
+    return result
+
+
+def _estimate_affine_partial(source_points, target_points):
+    try:
+        source = np.asarray(source_points, dtype=np.float32).reshape(-1, 2)
+        target = np.asarray(target_points, dtype=np.float32).reshape(-1, 2)
+    except Exception:
+        return None
+    if len(source) < F3_TRACKING_GEOMETRY_MIN_ANCHORS or len(source) != len(target):
+        return None
+
+    try:
+        matrix, inliers = cv2.estimateAffinePartial2D(
+            source.reshape(-1, 1, 2),
+            target.reshape(-1, 1, 2),
+            method=cv2.RANSAC,
+            ransacReprojThreshold=F3_TRACKING_GEOMETRY_MAX_REPROJECTION_PX,
+            maxIters=3000,
+            confidence=0.995,
+            refineIters=20,
+        )
+    except Exception:
+        return None
+    if matrix is None:
+        return None
+
+    scale = affine_scale(matrix)
+    if not (F3_TRACKING_REFERENCE_SCALE_MIN <= scale <= F3_TRACKING_REFERENCE_SCALE_MAX):
+        return None
+
+    projected = cv2.transform(
+        source.reshape(-1, 1, 2),
+        np.asarray(matrix, dtype=np.float32),
+    ).reshape(-1, 2)
+    errors = np.linalg.norm(projected - target, axis=1)
+    if len(errors) and float(np.median(errors)) > F3_TRACKING_GEOMETRY_MAX_REPROJECTION_PX:
+        return None
+
+    if inliers is not None and int(np.count_nonzero(inliers)) < min(2, len(source)):
+        return None
+    return np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+
+
+def _best_board_correspondence(reference_board, canonical_board):
+    reference = _normalize_points(reference_board, minimum=3)
+    canonical = _normalize_points(canonical_board, minimum=3)
+    if len(reference) != len(canonical) or len(reference) < 3:
+        return None
+
+    ref = np.asarray(reference, dtype=np.float32)
+    can = np.asarray(canonical, dtype=np.float32)
+    best = None
+    n = len(ref)
+    for reverse in (False, True):
+        ordered = ref[::-1].copy() if reverse else ref.copy()
+        for shift in range(n):
+            candidate = np.roll(ordered, shift, axis=0)
+            matrix = _estimate_affine_partial(candidate, can)
+            if matrix is None:
+                continue
+            projected = cv2.transform(
+                candidate.reshape(-1, 1, 2),
+                matrix,
+            ).reshape(-1, 2)
+            error = float(np.median(np.linalg.norm(projected - can, axis=1)))
+            if best is None or error < best[0]:
+                best = (error, candidate.tolist(), can.tolist())
+    return best
+
+
+def estimate_reference_to_canonical(
+    project: dict,
+    store: F3TrackingConfigStore,
+    reference_board,
+    reference_masks,
+) -> np.ndarray | None:
+    """Estima REFERÊNCIA -> CANÔNICO usando a geometria já desenhada pelo usuário.
+
+    As máscaras são pareadas pelo id, portanto a placa pode estar em outra posição,
+    escala ou rotação em cada foto. O contorno entra como reforço quando possui a
+    mesma quantidade de vértices do contorno canônico.
+    """
+    canonical_board = canonical_board_points(project, store)
+    canonical_masks = {
+        str(mask.get("id") or ""): converter_mascara_legada_para_editor(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    }
+    reference_by_id = {
+        str(mask.get("id") or ""): converter_mascara_legada_para_editor(mask)
+        for mask in (reference_masks or [])
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    }
+
+    source_points = []
+    target_points = []
+    for mask_id, canonical_mask in canonical_masks.items():
+        reference_mask = reference_by_id.get(mask_id)
+        if reference_mask is None:
+            continue
+        source_center = _mask_center(reference_mask)
+        target_center = _mask_center(canonical_mask)
+        if source_center is None or target_center is None:
+            continue
+        source_points.append(source_center)
+        target_points.append(target_center)
+
+    board_match = _best_board_correspondence(reference_board, canonical_board)
+    if board_match is not None:
+        _error, ref_board_ordered, can_board_ordered = board_match
+        source_points.extend(ref_board_ordered)
+        target_points.extend(can_board_ordered)
+
+    matrix = _estimate_affine_partial(source_points, target_points)
+    if matrix is not None:
+        return matrix
+
+    # Se houver poucas máscaras, o contorno sozinho ainda pode resolver a pose.
+    if board_match is not None:
+        return _estimate_affine_partial(board_match[1], board_match[2])
+    return None
+
+
+def compose_affine(after, before) -> np.ndarray | None:
+    """Composição 2x3: resultado = after(before(ponto))."""
+    try:
+        a = np.vstack(
+            [np.asarray(after, dtype=np.float32).reshape(2, 3), [0.0, 0.0, 1.0]]
+        )
+        b = np.vstack(
+            [np.asarray(before, dtype=np.float32).reshape(2, 3), [0.0, 0.0, 1.0]]
+        )
+        return (a @ b)[:2].astype(np.float32)
+    except Exception:
+        return None
+
+
+def _current_check(app):
+    runtime = getattr(app, "display_check_runtime", None)
+    if runtime is None:
+        return None
+    try:
+        current = runtime.snapshot().get("current_check")
+    except Exception:
+        return None
+    return current if isinstance(current, dict) else None
+
+
+def _check_reference_geometry(
+    project: dict,
+    check: dict | None,
+) -> tuple[list[list[float]], list[dict]]:
+    if not isinstance(check, dict):
+        return [], []
+    board = _normalize_points(check.get("board_points_reference"), minimum=3)
+    masks = _reference_masks_from_overrides(
+        project,
+        check.get("mask_overrides_reference", {}),
+    )
+    return board, masks
+
+
 def transformed_masks(project: dict, matrix) -> list[dict]:
     result = []
     for mask in normalizar_mascaras_display(project.get("masks", [])):
