@@ -104,6 +104,9 @@ F3_TRACKING_GEOMETRY_MAX_REPROJECTION_PX = 18.0
 F3_TRACKING_REFERENCE_SCALE_MIN = 0.55
 F3_TRACKING_REFERENCE_SCALE_MAX = 1.80
 F3_TRACKING_OVERLAY_BOARD_BGR = (255, 214, 56)
+F3_TRACKING_TEMPLATE_MIN_SCORE = 0.42
+F3_TRACKING_TEMPLATE_MIN_SIZE = 28
+F3_TRACKING_TEMPLATE_PADDING_FRACTION = 0.035
 
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
@@ -1261,10 +1264,19 @@ class F3DisplayObjectTracker:
         angle: float,
         real_orientation: bool,
         source_type: str = "reference",
+        board_points=None,
     ) -> None:
         gray = self._gray(image)
         if gray is None:
             return
+
+        reference_to_canonical = np.asarray(
+            reference_to_canonical,
+            dtype=np.float32,
+        ).reshape(2, 3)
+
+        descriptors = None
+        canonical_points = np.empty((0, 2), dtype=np.float32)
         orb = cv2.ORB_create(
             nfeatures=F3_TRACKING_ORB_FEATURES,
             scaleFactor=1.2,
@@ -1272,17 +1284,50 @@ class F3DisplayObjectTracker:
             edgeThreshold=12,
             fastThreshold=7,
         )
-        keypoints, descriptors = orb.detectAndCompute(gray, tracking_mask)
-        if descriptors is None or len(keypoints) < F3_TRACKING_MIN_MATCHES:
-            return
+        keypoints, detected = orb.detectAndCompute(gray, tracking_mask)
+        if detected is not None and len(keypoints) >= F3_TRACKING_MIN_MATCHES:
+            points = np.asarray(
+                [kp.pt for kp in keypoints],
+                dtype=np.float32,
+            ).reshape(-1, 1, 2)
+            try:
+                canonical_points = cv2.transform(
+                    points,
+                    reference_to_canonical,
+                ).reshape(-1, 2)
+                descriptors = detected
+            except Exception:
+                descriptors = None
+                canonical_points = np.empty((0, 2), dtype=np.float32)
 
-        points = np.asarray([kp.pt for kp in keypoints], dtype=np.float32).reshape(-1, 1, 2)
-        try:
-            canonical_points = cv2.transform(
-                points,
-                np.asarray(reference_to_canonical, dtype=np.float32).reshape(2, 3),
-            ).reshape(-1, 2)
-        except Exception:
+        template_edges = None
+        template_origin = None
+        normalized_board = _normalize_points(board_points, minimum=3)
+        if normalized_board:
+            xs = [float(p[0]) for p in normalized_board]
+            ys = [float(p[1]) for p in normalized_board]
+            x1, x2 = min(xs), max(xs)
+            y1, y2 = min(ys), max(ys)
+            pad_x = max(3.0, (x2 - x1) * F3_TRACKING_TEMPLATE_PADDING_FRACTION)
+            pad_y = max(3.0, (y2 - y1) * F3_TRACKING_TEMPLATE_PADDING_FRACTION)
+            ix1 = max(0, int(math.floor(x1 - pad_x)))
+            iy1 = max(0, int(math.floor(y1 - pad_y)))
+            ix2 = min(gray.shape[1], int(math.ceil(x2 + pad_x)))
+            iy2 = min(gray.shape[0], int(math.ceil(y2 + pad_y)))
+            if (
+                ix2 - ix1 >= F3_TRACKING_TEMPLATE_MIN_SIZE
+                and iy2 - iy1 >= F3_TRACKING_TEMPLATE_MIN_SIZE
+            ):
+                edges = cv2.Canny(gray, 45, 135)
+                crop = edges[iy1:iy2, ix1:ix2]
+                if crop.size and float(np.std(crop)) >= 8.0:
+                    template_edges = crop.copy()
+                    template_origin = (float(ix1), float(iy1))
+
+        # Uma referência pode ser útil mesmo com pouco ORB. O fallback por
+        # template de bordas resolve translação quando câmera/suporte são fixos,
+        # exatamente o cenário produtivo do F3.
+        if descriptors is None and template_edges is None:
             return
 
         refs[key] = {
@@ -1291,10 +1336,68 @@ class F3DisplayObjectTracker:
             "angle_deg": float(angle),
             "real_orientation": bool(real_orientation),
             "source_type": str(source_type or "reference"),
-            "reference_to_canonical": np.asarray(
-                reference_to_canonical,
-                dtype=np.float32,
-            ).reshape(2, 3),
+            "reference_to_canonical": reference_to_canonical,
+            "template_edges": template_edges,
+            "template_origin": template_origin,
+        }
+
+    def _template_candidate(self, current_edges, key: str):
+        ref = self.references.get(key, {})
+        template = ref.get("template_edges")
+        origin = ref.get("template_origin")
+        if (
+            current_edges is None
+            or template is None
+            or origin is None
+            or template.shape[0] > current_edges.shape[0]
+            or template.shape[1] > current_edges.shape[1]
+        ):
+            return None
+        try:
+            response = cv2.matchTemplate(
+                current_edges,
+                template,
+                cv2.TM_CCOEFF_NORMED,
+            )
+            _min_value, max_value, _min_loc, max_loc = cv2.minMaxLoc(response)
+        except Exception:
+            return None
+        score = float(max_value)
+        if score < F3_TRACKING_TEMPLATE_MIN_SCORE:
+            return None
+
+        ref_x, ref_y = float(origin[0]), float(origin[1])
+        cur_x, cur_y = float(max_loc[0]), float(max_loc[1])
+        current_to_reference = np.asarray(
+            [
+                [1.0, 0.0, ref_x - cur_x],
+                [0.0, 1.0, ref_y - cur_y],
+            ],
+            dtype=np.float32,
+        )
+        matrix = compose_affine(
+            ref.get("reference_to_canonical"),
+            current_to_reference,
+        )
+        if matrix is None:
+            return None
+        scale = affine_scale(matrix)
+        if not (F3_TRACKING_MIN_SCALE <= scale <= F3_TRACKING_MAX_SCALE):
+            return None
+
+        source_type = str(ref.get("source_type") or "reference")
+        return {
+            "reference": key,
+            "matrix": matrix.astype(np.float32),
+            "matches": 0,
+            "inliers": 0,
+            "ratio": score,
+            "rotation_deg": affine_rotation_deg(matrix),
+            "scale": scale,
+            # ORB deve ganhar sempre que existir; template é fallback.
+            "score": 2.0 + score * 8.0,
+            "source_type": source_type,
+            "fallback": "edge_template",
         }
 
     def configure(self, project_name: str | None = None) -> bool:
