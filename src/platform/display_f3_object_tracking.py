@@ -2867,6 +2867,16 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         str(value).strip().lower() == "on"
                         for value in classifications.values()
                     )
+                    power = getattr(
+                        app,
+                        "_display_f3_power_authority_status",
+                        None,
+                    )
+                    energy = power.get("energy") if isinstance(power, dict) else None
+                    semantic_context["power_confirmed"] = bool(
+                        isinstance(energy, dict)
+                        and energy.get("powered_confirmed") is True
+                    )
                     try:
                         self_window.set_display_readout_context(
                             semantic_context

@@ -3,10 +3,6 @@ from __future__ import annotations
 import tkinter as tk
 from collections.abc import Callable
 
-from src.platform.display_mask_geometry import (
-    bbox_mascara_display,
-    pontos_mascara_display,
-)
 from src.platform.display_visual_rotation import preparar_frame_visual_display
 from src.ui.operation_window_raspberry import RaspberryOperationWindow
 
@@ -22,9 +18,10 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
     DISPLAY_READOUT_PANEL = "#0B1220"
     DISPLAY_READOUT_SCREEN = "#020617"
     DISPLAY_READOUT_BORDER = "#334155"
-    DISPLAY_READOUT_ACTIVE = "#FBBF24"
-    DISPLAY_READOUT_OFF = "#4A3A08"
-    DISPLAY_READOUT_INACTIVE = "#201B08"
+    DISPLAY_READOUT_ACTIVE = "#22C55E"
+    DISPLAY_READOUT_OFF = "#14532D"
+    DISPLAY_READOUT_INACTIVE = "#64748B"
+    DISPLAY_READOUT_INACTIVE_OUTLINE = "#94A3B8"
     DISPLAY_READOUT_NG = "#EF4444"
     DISPLAY_READOUT_NG_OUTLINE = "#FCA5A5"
     DISPLAY_READOUT_NUMBER = "#CBD5E1"
@@ -271,8 +268,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             highlightbackground=self.DISPLAY_READOUT_BORDER,
             highlightthickness=1,
             bd=0,
-            width=320,
-            height=68,
+            width=420,
+            height=108,
         )
         self.display_readout_canvas.grid(
             row=1,
@@ -369,45 +366,84 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         for name, points in polygons.items():
             canvas.create_polygon(
                 points,
-                fill=(
-                    self.DISPLAY_READOUT_ACTIVE
+                fill=self.DISPLAY_READOUT_INACTIVE,
+                outline=(
+                    self.DISPLAY_READOUT_INACTIVE_OUTLINE
                     if name in active
                     else self.DISPLAY_READOUT_INACTIVE
                 ),
-                outline="",
                 tags=("display-readout-segment",),
             )
 
     @staticmethod
-    def _display_readout_mask_number(mask: dict) -> str:
-        mask_id = str((mask or {}).get("id") or "").strip()
-        if not mask_id:
+    def _display_readout_mask_number(mask_id: str) -> str:
+        text = str(mask_id or "").strip()
+        if not text:
             return ""
-        suffix = mask_id.rsplit("_", 1)[-1]
+        suffix = text.rsplit("_", 1)[-1]
         try:
             return str(int(suffix))
         except (TypeError, ValueError):
-            return suffix or mask_id
+            return suffix or text
+
+    @staticmethod
+    def _display_readout_mask_sort_key(mask_id: str):
+        text = str(mask_id or "").strip()
+        suffix = text.rsplit("_", 1)[-1]
+        try:
+            return (0, int(suffix), text)
+        except (TypeError, ValueError):
+            return (1, 0, text)
+
+    @classmethod
+    def _display_readout_mask_slots(cls, mask_ids) -> list[str]:
+        """28 máscaras -> 4 dígitos, 7 segmentos A..G por dígito."""
+        unique = []
+        seen = set()
+        for raw in mask_ids or ():
+            mask_id = str(raw or "").strip()
+            if not mask_id or mask_id in seen:
+                continue
+            seen.add(mask_id)
+            unique.append(mask_id)
+        unique.sort(key=cls._display_readout_mask_sort_key)
+
+        # Este modelo usa exatamente 28 máscaras. Se o contexto ainda estiver
+        # carregando, complete os slots visualmente sem inventar classificações.
+        slots = unique[:28]
+        while len(slots) < 28:
+            candidate = f"MASK_{len(slots) + 1:03d}"
+            if candidate not in slots:
+                slots.append(candidate)
+            else:
+                slots.append(f"SLOT_{len(slots) + 1:02d}")
+        return slots
 
     @staticmethod
     def _display_readout_semantic_state(
         classified: str | None,
         expected: str | None,
         failed: bool = False,
+        ready: bool = True,
     ) -> str:
-        """Mesma semântica do ao vivo, destacando qualquer divergência como NG."""
+        """Estado lógico do visor fixo; NG só aparece após leitura autorizada."""
+        if not bool(ready):
+            return "neutral"
+
         current = str(classified or "").strip().lower()
         target = str(expected or "").strip().lower()
 
+        if target not in {"on", "off"}:
+            return "neutral"
         if bool(failed) or current == "low_light":
             return "ng"
-        if current in {"on", "off"} and target in {"on", "off"} and current != target:
+        if current in {"on", "off"} and current != target:
             return "ng"
-        if current == "on":
+        if target == "on" and current == "on":
             return "on"
-        if current == "off":
+        if target == "off" and current == "off":
             return "off"
-        return "unknown"
+        return "neutral"
 
     def _display_readout_color(self, state: str) -> tuple[str, str, str]:
         if state == "ng":
@@ -419,32 +455,40 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         if state == "on":
             return (
                 self.DISPLAY_READOUT_ACTIVE,
-                self.DISPLAY_READOUT_ACTIVE,
+                "#86EFAC",
                 self.DISPLAY_READOUT_NUMBER,
             )
         if state == "off":
             return (
                 self.DISPLAY_READOUT_OFF,
-                "#6B5510",
+                "#166534",
                 self.DISPLAY_READOUT_NUMBER,
             )
         return (
             self.DISPLAY_READOUT_INACTIVE,
-            "#3B320A",
-            "#64748B",
+            self.DISPLAY_READOUT_INACTIVE_OUTLINE,
+            "#CBD5E1",
         )
 
     def set_display_readout_context(self, context: dict | None) -> None:
-        """Espelha máscaras + classificação do CHECK atual no visor digital."""
+        """Recebe estados das máscaras; a geometria física NÃO entra no visor."""
         if not isinstance(context, dict):
             self._display_readout_context = None
         else:
-            self._display_readout_context = {
-                "masks": tuple(
-                    mask
+            mask_ids = tuple(
+                str(mask_id)
+                for mask_id in (context.get("readout_mask_ids") or ())
+                if str(mask_id)
+            )
+            if not mask_ids:
+                mask_ids = tuple(
+                    str(mask.get("id") or "")
                     for mask in (context.get("masks") or ())
-                    if isinstance(mask, dict)
-                ),
+                    if isinstance(mask, dict) and str(mask.get("id") or "")
+                )
+
+            self._display_readout_context = {
+                "mask_ids": mask_ids,
                 "classifications": {
                     str(key): str(value).strip().lower()
                     for key, value in dict(
@@ -462,42 +506,44 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                     for mask_id in (context.get("failed_mask_ids") or ())
                     if str(mask_id)
                 },
+                "has_any_on": bool(context.get("has_any_on")),
+                "power_confirmed": bool(context.get("power_confirmed")),
             }
         self._redraw_display_readout()
 
-    def _draw_mask_readout_number(
+    def _draw_fixed_segment_number(
         self,
-        mask: dict,
-        transform,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        segment_name: str,
+        mask_id: str,
         state: str,
     ) -> None:
-        label = self._display_readout_mask_number(mask)
+        label = self._display_readout_mask_number(mask_id)
         if not label:
             return
-        try:
-            x1, y1, x2, y2 = bbox_mascara_display(mask)
-            sx1, sy1 = transform(float(x1), float(y1))
-            sx2, sy2 = transform(float(x2), float(y2))
-        except Exception:
-            return
 
-        width = abs(float(sx2) - float(sx1))
-        height = abs(float(sy2) - float(sy1))
+        half = height / 2.0
+        placements = {
+            "a": (x + width / 2.0, y - 3.0, "s"),
+            "b": (x + width + 4.0, y + half * 0.50, "w"),
+            "c": (x + width + 4.0, y + half * 1.50, "w"),
+            "d": (x + width / 2.0, y + height + 3.0, "n"),
+            "e": (x - 4.0, y + half * 1.50, "e"),
+            "f": (x - 4.0, y + half * 0.50, "e"),
+            "g": (x + width / 2.0, y + half + 4.0, "n"),
+        }
+        px, py, anchor = placements.get(
+            segment_name,
+            (x + width / 2.0, y + height / 2.0, "center"),
+        )
         _fill, _outline, number_color = self._display_readout_color(state)
 
-        # Rótulo fica FORA do corpo do segmento sempre que houver espaço.
-        if width >= height:
-            x = (sx1 + sx2) / 2.0
-            y = min(sy1, sy2) - 5.0
-            anchor = "s"
-        else:
-            x = min(sx1, sx2) - 4.0
-            y = (sy1 + sy2) / 2.0
-            anchor = "e"
-
         self.display_readout_canvas.create_text(
-            x + 1,
-            y + 1,
+            px + 1,
+            py + 1,
             text=label,
             fill="#020617",
             font=("DejaVu Sans", 6, "bold"),
@@ -505,8 +551,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             tags=("display-readout-number-shadow",),
         )
         self.display_readout_canvas.create_text(
-            x,
-            y,
+            px,
+            py,
             text=label,
             fill=number_color,
             font=("DejaVu Sans", 6, "bold"),
@@ -514,121 +560,26 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             tags=("display-readout-number",),
         )
 
-    def _draw_mask_readout_geometry(
+    def _draw_fixed_semantic_digit(
         self,
-        mask: dict,
-        transform,
-        state: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        mask_ids: list[str],
+        context: dict,
+        ready: bool,
     ) -> None:
-        canvas = self.display_readout_canvas
-        fill, outline, _number = self._display_readout_color(state)
-        kind = str(mask.get("type") or "").strip().lower()
-
-        if kind == "circle":
-            try:
-                cx = float(mask.get("cx", 0.0))
-                cy = float(mask.get("cy", 0.0))
-                radius = max(1.0, float(mask.get("radius", 1.0)))
-                x1, y1 = transform(cx - radius, cy - radius)
-                x2, y2 = transform(cx + radius, cy + radius)
-            except (TypeError, ValueError):
-                return
-            if state == "ng":
-                canvas.create_oval(
-                    x1 - 2,
-                    y1 - 2,
-                    x2 + 2,
-                    y2 + 2,
-                    outline=self.DISPLAY_READOUT_NG_OUTLINE,
-                    width=2,
-                    tags=("display-readout-ng-halo",),
-                )
-            canvas.create_oval(
-                x1,
-                y1,
-                x2,
-                y2,
-                fill=fill,
-                outline=outline,
-                width=2 if state == "ng" else 1,
-                tags=("display-readout-mask",),
-            )
-            self._draw_mask_readout_number(mask, transform, state)
-            return
-
-        points = pontos_mascara_display(mask)
-        if len(points) < 3:
-            return
-        coords = []
-        for point in points:
-            try:
-                px, py = transform(float(point[0]), float(point[1]))
-            except (TypeError, ValueError, IndexError):
-                return
-            coords.extend([px, py])
-
-        if state == "ng":
-            canvas.create_polygon(
-                coords,
-                fill="",
-                outline=self.DISPLAY_READOUT_NG_OUTLINE,
-                width=4,
-                tags=("display-readout-ng-halo",),
-            )
-        canvas.create_polygon(
-            coords,
-            fill=fill,
-            outline=outline,
-            width=2 if state == "ng" else 1,
-            tags=("display-readout-mask",),
+        """Desenha um dígito 8 fixo; cada barra A..G representa uma MASK_xxx."""
+        thickness = max(5.0, min(width, height) * 0.105)
+        polygons = self._seven_segment_points(
+            x,
+            y,
+            width,
+            height,
+            thickness,
         )
-        self._draw_mask_readout_number(mask, transform, state)
-
-    def _draw_live_display_readout(self, context: dict) -> bool:
-        masks = [
-            mask
-            for mask in (context.get("masks") or ())
-            if isinstance(mask, dict)
-        ]
-        if not masks:
-            return False
-
-        boxes = []
-        for mask in masks:
-            try:
-                boxes.append(bbox_mascara_display(mask))
-            except Exception:
-                continue
-        if not boxes:
-            return False
-
-        min_x = min(float(box[0]) for box in boxes)
-        min_y = min(float(box[1]) for box in boxes)
-        max_x = max(float(box[2]) for box in boxes)
-        max_y = max(float(box[3]) for box in boxes)
-        source_width = max(1.0, max_x - min_x)
-        source_height = max(1.0, max_y - min_y)
-
-        canvas = self.display_readout_canvas
-        width = max(280, int(canvas.winfo_width()))
-        height = max(62, int(canvas.winfo_height()))
-        pad_x = 22.0
-        pad_y = 13.0
-        scale = min(
-            max(0.01, (width - pad_x * 2.0) / source_width),
-            max(0.01, (height - pad_y * 2.0) / source_height),
-        )
-        drawn_width = source_width * scale
-        drawn_height = source_height * scale
-        offset_x = (width - drawn_width) / 2.0
-        offset_y = (height - drawn_height) / 2.0
-
-        def transform(x: float, y: float):
-            return (
-                offset_x + (float(x) - min_x) * scale,
-                offset_y + (float(y) - min_y) * scale,
-            )
-
+        segment_order = ("a", "b", "c", "d", "e", "f", "g")
         classifications = dict(context.get("classifications") or {})
         expected_states = dict(context.get("expected_states") or {})
         failed = {
@@ -637,16 +588,105 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             if str(mask_id)
         }
 
-        # Primeiro desenha segmentos; números vêm no próprio helper e ficam fora
-        # do corpo sempre que a orientação permite.
-        for mask in masks:
-            mask_id = str(mask.get("id") or "")
+        for segment_name, mask_id in zip(segment_order, mask_ids):
             state = self._display_readout_semantic_state(
                 classifications.get(mask_id),
                 expected_states.get(mask_id),
                 mask_id in failed,
+                ready=ready,
             )
-            self._draw_mask_readout_geometry(mask, transform, state)
+            fill, outline, _number = self._display_readout_color(state)
+            points = polygons[segment_name]
+
+            if state == "ng":
+                self.display_readout_canvas.create_polygon(
+                    points,
+                    fill="",
+                    outline=self.DISPLAY_READOUT_NG_OUTLINE,
+                    width=4,
+                    tags=("display-readout-ng-halo",),
+                )
+            self.display_readout_canvas.create_polygon(
+                points,
+                fill=fill,
+                outline=outline,
+                width=2 if state == "ng" else 1,
+                tags=("display-readout-segment",),
+            )
+            self._draw_fixed_segment_number(
+                x,
+                y,
+                width,
+                height,
+                segment_name,
+                mask_id,
+                state,
+            )
+
+    def _draw_live_display_readout(self, context: dict) -> bool:
+        slots = self._display_readout_mask_slots(
+            context.get("mask_ids") or ()
+        )
+        if len(slots) != 28:
+            return False
+
+        canvas = self.display_readout_canvas
+        width = max(360, int(canvas.winfo_width()))
+        height = max(96, int(canvas.winfo_height()))
+
+        digit_height = min(72.0, max(58.0, height - 30.0))
+        digit_width = digit_height * 0.52
+        digit_gap = 18.0
+        colon_width = 22.0
+        group_gap = 16.0
+        total_width = (
+            digit_width * 4.0
+            + digit_gap * 2.0
+            + group_gap * 2.0
+            + colon_width
+        )
+        start_x = (width - total_width) / 2.0
+        y = (height - digit_height) / 2.0
+
+        # Sem energia/leitura válida: tudo CINZA. Após confirmação, o CHECK
+        # corrente passa a comandar verde, verde escuro ou vermelho NG.
+        ready = bool(
+            context.get("power_confirmed")
+            or context.get("has_any_on")
+        )
+
+        x = start_x
+        self._draw_fixed_semantic_digit(
+            x, y, digit_width, digit_height, slots[0:7], context, ready
+        )
+        x += digit_width + digit_gap
+        self._draw_fixed_semantic_digit(
+            x, y, digit_width, digit_height, slots[7:14], context, ready
+        )
+        x += digit_width + group_gap
+
+        # O ":" não pertence às 28 máscaras; permanece neutro.
+        colon_x = x + colon_width / 2.0
+        dot_radius = 3.2
+        for cy in (y + digit_height * 0.36, y + digit_height * 0.66):
+            canvas.create_oval(
+                colon_x - dot_radius,
+                cy - dot_radius,
+                colon_x + dot_radius,
+                cy + dot_radius,
+                fill=self.DISPLAY_READOUT_INACTIVE,
+                outline=self.DISPLAY_READOUT_INACTIVE_OUTLINE,
+                tags=("display-readout-colon",),
+            )
+
+        x += colon_width + group_gap
+        self._draw_fixed_semantic_digit(
+            x, y, digit_width, digit_height, slots[14:21], context, ready
+        )
+        x += digit_width + digit_gap
+        self._draw_fixed_semantic_digit(
+            x, y, digit_width, digit_height, slots[21:28], context, ready
+        )
         return True
 
     def _redraw_display_readout(self, _event=None) -> None:
@@ -672,8 +712,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         right = (right + "88")[:2]
         digits = [left[0], left[1], right[0], right[1]]
 
-        digit_height = min(50.0, max(40.0, height - 14.0))
-        digit_width = digit_height * 0.56
+        digit_height = min(72.0, max(58.0, height - 30.0))
+        digit_width = digit_height * 0.52
         digit_gap = max(7.0, digit_width * 0.20)
         colon_width = max(13.0, digit_width * 0.38)
         total_width = (
@@ -698,8 +738,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 cy - dot_radius,
                 colon_x + dot_radius,
                 cy + dot_radius,
-                fill=self.DISPLAY_READOUT_ACTIVE,
-                outline="",
+                fill=self.DISPLAY_READOUT_INACTIVE,
+                outline=self.DISPLAY_READOUT_INACTIVE_OUTLINE,
                 tags=("display-readout-colon",),
             )
 

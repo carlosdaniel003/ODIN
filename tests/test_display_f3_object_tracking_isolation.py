@@ -443,24 +443,66 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             DisplayProductionF3Window,
         )
         state = DisplayProductionF3Window._display_readout_semantic_state
-        self.assertEqual("ng", state("low_light", "on", False))
-        self.assertEqual("ng", state("off", "on", False))
-        self.assertEqual("ng", state("on", "off", False))
-        self.assertEqual("ng", state("on", "on", True))
-        self.assertEqual("on", state("on", "on", False))
-        self.assertEqual("off", state("off", "off", False))
+        self.assertEqual("neutral", state("off", "on", False, ready=False))
+        self.assertEqual("ng", state("low_light", "on", False, ready=True))
+        self.assertEqual("ng", state("off", "on", False, ready=True))
+        self.assertEqual("ng", state("on", "off", False, ready=True))
+        self.assertEqual("ng", state("on", "on", True, ready=True))
+        self.assertEqual("on", state("on", "on", False, ready=True))
+        self.assertEqual("off", state("off", "off", False, ready=True))
+        self.assertEqual("neutral", state("on", "ignore", False, ready=True))
 
-    def test_display_readout_numbers_are_drawn_outside_segment_without_badge(self):
+    def test_display_readout_is_fixed_28_segment_88_88_canvas(self):
+        from src.platform.display_production_f3_window import (
+            DisplayProductionF3Window,
+        )
+        slots = DisplayProductionF3Window._display_readout_mask_slots(
+            [f"MASK_{index:03d}" for index in range(28, 0, -1)]
+        )
+        self.assertEqual("MASK_001", slots[0])
+        self.assertEqual("MASK_007", slots[6])
+        self.assertEqual("MASK_008", slots[7])
+        self.assertEqual("MASK_014", slots[13])
+        self.assertEqual("MASK_015", slots[14])
+        self.assertEqual("MASK_021", slots[20])
+        self.assertEqual("MASK_022", slots[21])
+        self.assertEqual("MASK_028", slots[27])
+
+        source = inspect.getsource(
+            DisplayProductionF3Window._draw_live_display_readout
+        )
+        self.assertIn("slots[0:7]", source)
+        self.assertIn("slots[7:14]", source)
+        self.assertIn("slots[14:21]", source)
+        self.assertIn("slots[21:28]", source)
+        self.assertNotIn("bbox_mascara_display", source)
+        self.assertNotIn("pontos_mascara_display", source)
+
+    def test_display_readout_numbers_are_outside_fixed_segments_without_badge(self):
         from src.platform.display_production_f3_window import (
             DisplayProductionF3Window,
         )
         number_source = inspect.getsource(
-            DisplayProductionF3Window._draw_mask_readout_number
+            DisplayProductionF3Window._draw_fixed_segment_number
         )
         self.assertIn("create_text", number_source)
         self.assertNotIn("create_rectangle", number_source)
-        self.assertIn('anchor = "s"', number_source)
-        self.assertIn('anchor = "e"', number_source)
+        self.assertIn('"a":', number_source)
+        self.assertIn('"b":', number_source)
+        self.assertIn('"g":', number_source)
+
+    def test_display_readout_palette_is_green_dark_green_gray_and_red(self):
+        from src.platform.display_production_f3_window import (
+            DisplayProductionF3Window,
+        )
+        self.assertEqual("#22C55E", DisplayProductionF3Window.DISPLAY_READOUT_ACTIVE)
+        self.assertEqual("#14532D", DisplayProductionF3Window.DISPLAY_READOUT_OFF)
+        self.assertEqual("#64748B", DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE)
+        self.assertEqual("#EF4444", DisplayProductionF3Window.DISPLAY_READOUT_NG)
+
+        clarity_source = inspect.getsource(preview_clarity._contexto_preview_claro)
+        self.assertIn('result["power_confirmed"]', clarity_source)
+        self.assertIn('result["readout_mask_ids"]', clarity_source)
 
     def test_tracking_preview_uses_semantic_mask_renderer_instead_of_cyan_only(self):
         source = inspect.getsource(

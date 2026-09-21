@@ -152,6 +152,11 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         if str(state).strip().lower()
         in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
     }
+    readout_mask_ids = tuple(
+        str(mask.get("id") or "")
+        for mask in (project.get("masks") or [])
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    )
 
     # Rastreamento ativo: contorno e ROIs já estão projetados para o frame RAW
     # atual. Rotacionamos essa geometria apenas para a orientação visual escolhida
@@ -211,6 +216,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                 "masks": tuple(visual_masks),
                 "board_points": tuple(visual_board),
                 "expected_states": expected,
+                "readout_mask_ids": readout_mask_ids,
                 "tracking_active": True,
                 "tracking_locked": True,
                 "tracking_reference": str(
@@ -244,6 +250,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
             "masks": (),
             "board_points": (),
             "expected_states": expected,
+            "readout_mask_ids": readout_mask_ids,
             "tracking_active": True,
             "tracking_locked": False,
             "tracking_reference": "",
@@ -291,6 +298,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "masks": tuple(visual_masks),
         "board_points": (),
         "expected_states": expected,
+        "readout_mask_ids": readout_mask_ids,
         "tracking_active": False,
         "tracking_locked": False,
     }
@@ -441,6 +449,9 @@ def _contexto_preview_claro(original):
         result["masks"] = project_context["masks"]
         result["board_points"] = tuple(project_context.get("board_points") or ())
         result["expected_states"] = dict(project_context["expected_states"])
+        result["readout_mask_ids"] = tuple(
+            project_context.get("readout_mask_ids") or ()
+        )
         result["tracking_active"] = bool(
             project_context.get("tracking_active")
         )
@@ -465,6 +476,13 @@ def _contexto_preview_claro(original):
         result["has_any_on"] = any(
             str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
             for state in classifications.values()
+        )
+        app = overlay_module._app_from_window(window)
+        power = getattr(app, "_display_f3_power_authority_status", None)
+        energy = power.get("energy") if isinstance(power, dict) else None
+        result["power_confirmed"] = bool(
+            isinstance(energy, dict)
+            and energy.get("powered_confirmed") is True
         )
         try:
             window.set_display_readout_context(result)
