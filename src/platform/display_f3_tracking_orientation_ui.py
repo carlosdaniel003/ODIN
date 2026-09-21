@@ -56,6 +56,7 @@ F3_EDITOR_ZOOM_MAX = 5.0
 F3_EDITOR_ZOOM_STEP = 1.16
 F3_SAFE_WINDOW_MARGIN_X = 64
 F3_SAFE_WINDOW_MARGIN_Y = 118
+F3_ORIENTATION_PREVIEW_STYLE_VERSION = 3
 
 _INSTALLED = False
 
@@ -1836,6 +1837,7 @@ def _build_tracking_config_class(base_cls):
                 file_stamp,
                 str(entry.get("updated_at") or ""),
                 str(project.get("updated_at") or ""),
+                F3_ORIENTATION_PREVIEW_STYLE_VERSION,
             )
 
         def _schedule_f3_tracking_previews(
@@ -1906,11 +1908,17 @@ def _build_tracking_config_class(base_cls):
                                 for mask in tuple(masks or ())
                                 if isinstance(mask, dict)
                             ]
+                            # Mesmo visual da preview principal de "Máscaras",
+                            # mas com traço proporcional ao card menor. Antes,
+                            # 2/3 px em uma miniatura de ~184 px fazia dezenas de
+                            # segmentos se fundirem numa "caixa" amarela sobre o display.
                             thumbnail = draw_reference_geometry(
                                 thumbnail,
                                 board_preview,
                                 masks_preview,
-                                alpha=0.78,
+                                alpha=0.74,
+                                board_thickness=2,
+                                mask_thickness=1,
                             )
                             self._f3_tracking_preview_cache[key] = thumbnail
 
