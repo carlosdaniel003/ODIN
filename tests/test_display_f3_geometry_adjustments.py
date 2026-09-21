@@ -18,6 +18,7 @@ import src.platform.display_f3_exact_check_template as exact_template
 import src.platform.display_f3_same_mask_reference_fix as same_mask
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
 import src.platform.display_live_roi_overlay as live_overlay
+from src.platform.display_mask_geometry import sincronizar_formato_mascara_display
 import src.platform.display_check_presence_reference as check_presence
 import src.platform.display_f3_reference_geometry_editor as reference_geometry_editor
 import src.platform.display_f3_reference_preview_rotation as reference_preview_rotation
@@ -253,6 +254,64 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
                 ["MASK_002", "MASK_004"],
                 [mask["id"] for mask in loaded_masks],
             )
+
+    def test_formato_canonico_triangular_substitui_override_circular_sem_perder_posicao(self):
+        base = {
+            "id": "MASK_001",
+            "type": "polygon",
+            "points": [[10, 10], [50, 10], [30, 45]],
+        }
+        local = {
+            "id": "MASK_001",
+            "type": "circle",
+            "cx": 220,
+            "cy": 180,
+            "radius": 30,
+        }
+        synced = sincronizar_formato_mascara_display(base, local)
+        self.assertEqual("polygon", synced["type"])
+        self.assertEqual(3, len(synced["points"]))
+        center_x = sum(point[0] for point in synced["points"]) / 3.0
+        center_y = sum(point[1] for point in synced["points"]) / 3.0
+        self.assertAlmostEqual(220.0, center_x, places=3)
+        self.assertAlmostEqual(180.0, center_y, places=3)
+
+    def test_check_effective_geometry_uses_project_shape_and_local_pose(self):
+        from src.platform.display_project_repository import (
+            mascaras_geometria_check_display,
+        )
+        project = {
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "polygon",
+                    "points": [[10, 10], [70, 10], [40, 50]],
+                }
+            ]
+        }
+        check = {
+            "mask_overrides_reference": {
+                "MASK_001": {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 300,
+                    "cy": 200,
+                    "radius": 25,
+                }
+            }
+        }
+        effective = mascaras_geometria_check_display(project, check)
+        self.assertEqual(1, len(effective))
+        self.assertEqual("polygon", effective[0]["type"])
+        self.assertEqual(3, len(effective[0]["points"]))
+
+    def test_check_editor_and_live_overlay_share_canonical_shape_authority(self):
+        editor_source = inspect.getsource(
+            check_editor.DisplayCheckMaskEditorWindow.__init__
+        )
+        self.assertIn("sincronizar_formato_mascara_display", editor_source)
+        overlay_source = inspect.getsource(live_overlay._overlay_context)
+        self.assertIn("mascaras_geometria_check_display", overlay_source)
 
     def test_check_analyzer_applies_local_mask_overrides(self):
         source = inspect.getsource(analyzer.DisplayAutomaticCheckAnalyzer.analyze)

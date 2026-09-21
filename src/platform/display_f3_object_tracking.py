@@ -38,6 +38,7 @@ from src.platform.display_mask_geometry import (
     bbox_mascara_display,
     converter_mascara_legada_para_editor,
     pontos_mascara_display,
+    sincronizar_formato_mascara_display,
 )
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
@@ -634,7 +635,11 @@ def _reference_masks_from_overrides(
         raw = source.get(mask_id)
         if explicit_only and not isinstance(raw, dict):
             continue
-        item = deepcopy(raw) if isinstance(raw, dict) else deepcopy(base)
+        item = (
+            sincronizar_formato_mascara_display(base, raw)
+            if isinstance(raw, dict)
+            else deepcopy(base)
+        )
         item["id"] = mask_id
         result.append(converter_mascara_legada_para_editor(item))
     return result

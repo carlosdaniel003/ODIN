@@ -171,16 +171,20 @@ def mascaras_geometria_check_display(
     if not overrides:
         return base
 
+    from src.platform.display_mask_geometry import (
+        sincronizar_formato_mascara_display,
+    )
+
     result = []
     for mask in base:
         mask_id = str(mask.get("id") or "")
         override = overrides.get(mask_id)
-        if isinstance(override, dict):
-            item = deepcopy(override)
-            item["id"] = mask_id
-            result.append(item)
-        else:
-            result.append(mask)
+        result.append(
+            sincronizar_formato_mascara_display(
+                mask,
+                override if isinstance(override, dict) else mask,
+            )
+        )
     return result
 
 
@@ -253,10 +257,17 @@ def normalizar_pontos_geometria_check(valor, minimo: int = 3) -> list[list[float
 
 def normalizar_overrides_mascaras_check(valor, mascaras) -> dict[str, dict]:
     base = normalizar_mascaras_display(mascaras)
-    ids = {str(mask["id"]) for mask in base}
+    base_by_id = {str(mask["id"]): mask for mask in base}
     origem = valor if isinstance(valor, dict) else {}
     resultado = {}
-    for mask_id in ids:
+    try:
+        from src.platform.display_mask_geometry import (
+            sincronizar_formato_mascara_display,
+        )
+    except Exception:
+        sincronizar_formato_mascara_display = None
+
+    for mask_id, base_mask in base_by_id.items():
         raw = origem.get(mask_id)
         if not isinstance(raw, dict):
             continue
@@ -264,9 +275,15 @@ def normalizar_overrides_mascaras_check(valor, mascaras) -> dict[str, dict]:
             {**raw, "id": mask_id},
             1,
         )
-        if normalized is not None:
-            normalized["id"] = mask_id
-            resultado[mask_id] = normalized
+        if normalized is None:
+            continue
+        normalized["id"] = mask_id
+        if sincronizar_formato_mascara_display is not None:
+            normalized = sincronizar_formato_mascara_display(
+                base_mask,
+                normalized,
+            )
+        resultado[mask_id] = normalized
     return resultado
 
 

@@ -164,6 +164,32 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             self.assertAlmostEqual(105.0, float(corrected[0]["cy"]), places=3)
             self.assertAlmostEqual(12.0, float(corrected[0]["radius"]), places=3)
 
+    def test_check_reference_geometry_keeps_project_polygon_shape(self):
+        project = {
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "polygon",
+                    "points": [[10, 10], [70, 10], [40, 50]],
+                }
+            ]
+        }
+        check = {
+            "mask_overrides_reference": {
+                "MASK_001": {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 200,
+                    "cy": 180,
+                    "radius": 25,
+                }
+            }
+        }
+        _board, masks = tracking._check_reference_geometry(project, check)
+        self.assertEqual(1, len(masks))
+        self.assertEqual("polygon", masks[0]["type"])
+        self.assertEqual(3, len(masks[0]["points"]))
+
     def test_reference_pose_is_recovered_from_drawn_board_and_masks(self):
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)

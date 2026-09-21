@@ -13,6 +13,7 @@ from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_mask_geometry import (
     instalar_suporte_segmento_mascara_display,
     pontos_mascara_display,
+    sincronizar_formato_mascara_display,
 )
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
@@ -574,11 +575,23 @@ class DisplayCheckManagerWindow:
                 self._notify_change()
 
         def save_geometry(board_points, edited_masks) -> None:
-            overrides = {
-                str(mask.get("id") or ""): deepcopy(mask)
-                for mask in (edited_masks or [])
+            base_by_id = {
+                str(mask.get("id") or ""): mask
+                for mask in masks
                 if isinstance(mask, dict) and str(mask.get("id") or "")
             }
+            overrides = {}
+            for mask in (edited_masks or []):
+                if not isinstance(mask, dict):
+                    continue
+                mask_id = str(mask.get("id") or "")
+                base_mask = base_by_id.get(mask_id)
+                if not mask_id or not isinstance(base_mask, dict):
+                    continue
+                overrides[mask_id] = sincronizar_formato_mascara_display(
+                    base_mask,
+                    mask,
+                )
             if self.repository.salvar_geometria_check(
                 self.project_name,
                 check_id,
@@ -659,8 +672,9 @@ class DisplayCheckMaskEditorWindow:
                 if isinstance(override, dict)
                 else []
             )
+            local = normalized_override[0] if normalized_override else mask
             self.masks.append(
-                normalized_override[0] if normalized_override else deepcopy(mask)
+                sincronizar_formato_mascara_display(mask, local)
             )
         self.mask_ids = [str(mask["id"]) for mask in self.masks]
         self.states = normalizar_estados_check_display(

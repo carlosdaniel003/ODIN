@@ -165,6 +165,163 @@ def _inside_poly(points, x, y) -> bool:
     return inside
 
 
+def _centro_escala_mascara_display(mask: dict):
+    item = converter_mascara_legada_para_editor(mask)
+    kind = str(item.get("type") or "").lower()
+    if kind == "circle":
+        try:
+            cx = float(item.get("cx", 0))
+            cy = float(item.get("cy", 0))
+            diameter = max(2.0, float(item.get("radius", 1)) * 2.0)
+            return (cx, cy), diameter
+        except (TypeError, ValueError):
+            return None, 0.0
+
+    points = pontos_mascara_display(item)
+    if not points:
+        return None, 0.0
+    cx = sum(float(point[0]) for point in points) / len(points)
+    cy = sum(float(point[1]) for point in points) / len(points)
+    diameter = 0.0
+    for index, point in enumerate(points):
+        for other in points[index + 1:]:
+            diameter = max(
+                diameter,
+                math.hypot(
+                    float(other[0]) - float(point[0]),
+                    float(other[1]) - float(point[1]),
+                ),
+            )
+    return (cx, cy), max(1.0, diameter)
+
+
+def _angulo_formato_mascara_display(mask: dict) -> float | None:
+    item = converter_mascara_legada_para_editor(mask)
+    kind = str(item.get("type") or "").lower()
+    if kind == "segment":
+        try:
+            return float(item.get("angle", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    if kind != "polygon":
+        return None
+    points = pontos_mascara_display(item)
+    if len(points) < 2:
+        return None
+    x1, y1 = points[0]
+    for x2, y2 in points[1:]:
+        if math.hypot(float(x2) - float(x1), float(y2) - float(y1)) > 1e-6:
+            return math.degrees(
+                math.atan2(float(y2) - float(y1), float(x2) - float(x1))
+            )
+    return None
+
+
+def _formatos_compativeis_para_rotacao(base: dict, local: dict) -> bool:
+    base_item = converter_mascara_legada_para_editor(base)
+    local_item = converter_mascara_legada_para_editor(local)
+    base_kind = str(base_item.get("type") or "").lower()
+    local_kind = str(local_item.get("type") or "").lower()
+    if base_kind == "segment" and local_kind == "segment":
+        return True
+    if base_kind == "polygon" and local_kind == "polygon":
+        return len(pontos_mascara_display(base_item)) == len(
+            pontos_mascara_display(local_item)
+        )
+    return False
+
+
+def sincronizar_formato_mascara_display(
+    mascara_base: dict,
+    geometria_local: dict | None,
+) -> dict:
+    """Mantém o FORMATO canônico e reaproveita apenas a pose local.
+
+    A máscara desenhada em "Desenhar placa e máscaras" é a autoridade do formato.
+    CHECKS/rastreamento podem manter posição, escala e rotação próprias, mas um
+    triângulo continua triângulo, um segmento continua segmento e um círculo
+    continua círculo.
+    """
+    base = converter_mascara_legada_para_editor(deepcopy(mascara_base or {}))
+    local = converter_mascara_legada_para_editor(
+        deepcopy(geometria_local or mascara_base or {})
+    )
+    mask_id = str(base.get("id") or local.get("id") or "")
+    if mask_id:
+        base["id"] = mask_id
+
+    base_center, base_size = _centro_escala_mascara_display(base)
+    local_center, local_size = _centro_escala_mascara_display(local)
+    if base_center is None:
+        return deepcopy(base)
+    if local_center is None:
+        return deepcopy(base)
+
+    scale = (
+        max(0.05, min(20.0, float(local_size) / max(1e-6, float(base_size))))
+        if local_size > 0
+        else 1.0
+    )
+
+    rotation = 0.0
+    if _formatos_compativeis_para_rotacao(base, local):
+        base_angle = _angulo_formato_mascara_display(base)
+        local_angle = _angulo_formato_mascara_display(local)
+        if base_angle is not None and local_angle is not None:
+            rotation = float(local_angle) - float(base_angle)
+
+    kind = str(base.get("type") or "").lower()
+    if kind == "circle":
+        result = deepcopy(base)
+        result["cx"] = float(local_center[0])
+        result["cy"] = float(local_center[1])
+        result["radius"] = max(
+            1.0,
+            float(base.get("radius", 1)) * scale,
+        )
+        return result
+
+    if kind == "segment":
+        result = deepcopy(base)
+        result["cx"] = float(local_center[0])
+        result["cy"] = float(local_center[1])
+        result["width"] = max(
+            SEGMENTO_LARGURA_MINIMA,
+            float(base.get("width", SEGMENTO_LARGURA_PADRAO)) * scale,
+        )
+        result["height"] = max(
+            SEGMENTO_ALTURA_MINIMA,
+            float(base.get("height", SEGMENTO_ALTURA_PADRAO)) * scale,
+        )
+        result["angle"] = normalizar_angulo_segmento(
+            float(base.get("angle", 0.0) or 0.0) + rotation
+        )
+        return result
+
+    points = pontos_mascara_display(base)
+    if kind == "polygon" and len(points) >= 3:
+        angle = math.radians(rotation)
+        cos_a = math.cos(angle)
+        sin_a = math.sin(angle)
+        transformed = []
+        for x, y in points:
+            dx = (float(x) - float(base_center[0])) * scale
+            dy = (float(y) - float(base_center[1])) * scale
+            transformed.append(
+                [
+                    float(local_center[0]) + dx * cos_a - dy * sin_a,
+                    float(local_center[1]) + dx * sin_a + dy * cos_a,
+                ]
+            )
+        return {
+            "id": mask_id,
+            "type": "polygon",
+            "points": transformed,
+        }
+
+    return deepcopy(base)
+
+
 def mascara_display_contem_ponto(mask: dict, x, y) -> bool:
     kind = str(mask.get("type", "")).lower()
     if kind == "circle":
