@@ -23,6 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MethodType
 
 import cv2
 import numpy as np
@@ -1972,6 +1973,370 @@ def _update_tracking_live_geometry(
         "inliers": int(result.inliers),
         "inlier_ratio": float(result.inlier_ratio),
     }
+
+
+def _tracking_h1_power_gate(app) -> tuple[bool, str]:
+    """Fail-safe independente da cadeia histórica de wrappers do F3."""
+    status = getattr(app, "_display_f3_object_tracking_last_status", None)
+    if not isinstance(status, dict) or not bool(status.get("locked")):
+        return False, "rastreamento_sem_lock"
+
+    analysis = getattr(app, "_display_auto_last_analysis", None)
+    try:
+        context = app._display_auto_current_context()
+    except Exception:
+        context = None
+    if not isinstance(context, dict) or not isinstance(analysis, dict):
+        return False, "analise_h1_ausente"
+    if (
+        str(analysis.get("project_name") or "")
+        and str(analysis.get("project_name") or "")
+        != str(context.get("project_name") or "")
+    ):
+        return False, "analise_projeto_antiga"
+    if (
+        str(analysis.get("check_id") or "")
+        and str(analysis.get("check_id") or "")
+        != str(context.get("check_id") or "")
+    ):
+        return False, "analise_check_antiga"
+
+    results = [
+        item
+        for item in (analysis.get("mask_results") or [])
+        if isinstance(item, dict)
+    ]
+    on_evidence = False
+    for item in results:
+        if str(item.get("expected") or "") != "on":
+            continue
+        try:
+            confidence = float(item.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if (
+            str(item.get("classified") or "") == "on"
+            and item.get("matched") is not False
+            and confidence >= 0.50
+        ):
+            on_evidence = True
+            break
+    if not on_evidence:
+        return False, "h1_sem_segmento_aceso"
+
+    power = getattr(app, "_display_f3_power_authority_status", None)
+    energy = power.get("energy") if isinstance(power, dict) else None
+    if not (
+        isinstance(power, dict)
+        and power.get("board_present") is True
+        and power.get("decision_allowed") is True
+        and isinstance(energy, dict)
+        and energy.get("powered_confirmed") is True
+    ):
+        return False, "energia_fisica_nao_confirmada"
+    return True, "h1_ligado_confirmado"
+
+
+def _draw_tracking_geometry_visual(
+    frame,
+    geometry: dict | None,
+    visual_rotation: int,
+):
+    """Desenha somente geometria móvel sobre a câmera real."""
+    from src.platform.display_visual_rotation import (
+        preparar_check_visual_display,
+        preparar_frame_visual_display,
+        preparar_pontos_visuais_display,
+    )
+
+    visual = preparar_frame_visual_display(frame, int(visual_rotation or 0) % 360)
+    if not _valid_frame(visual):
+        return frame
+
+    if not isinstance(geometry, dict) or not bool(geometry.get("locked")):
+        return visual
+
+    resolution = geometry.get("resolution")
+    if not (
+        isinstance(resolution, (list, tuple))
+        and len(resolution) >= 2
+    ):
+        return visual
+    width = max(1, int(resolution[0]))
+    height = max(1, int(resolution[1]))
+    rotation = int(visual_rotation or 0) % 360
+
+    try:
+        _, visual_resolution, visual_masks = preparar_check_visual_display(
+            None,
+            (width, height),
+            geometry.get("masks") or [],
+            rotation,
+        )
+        visual_board = preparar_pontos_visuais_display(
+            geometry.get("board_points") or [],
+            width,
+            height,
+            rotation,
+        )
+    except Exception:
+        return visual
+
+    result = visual.copy()
+    vh, vw = result.shape[:2]
+    rw = max(1.0, float(visual_resolution[0]))
+    rh = max(1.0, float(visual_resolution[1]))
+    sx = vw / rw
+    sy = vh / rh
+    color = (248, 189, 56)  # ciano #38BDF8 em BGR
+
+    if len(visual_board) >= 3:
+        points = np.asarray(
+            [
+                [round(float(p[0]) * sx), round(float(p[1]) * sy)]
+                for p in visual_board
+            ],
+            dtype=np.int32,
+        )
+        cv2.polylines(result, [points], True, color, 3, cv2.LINE_AA)
+
+    for raw_mask in visual_masks or []:
+        if not isinstance(raw_mask, dict):
+            continue
+        mask = converter_mascara_legada_para_editor(raw_mask)
+        kind = str(mask.get("type") or "").lower()
+        try:
+            if kind == "circle":
+                center = (
+                    int(round(float(mask.get("cx", 0)) * sx)),
+                    int(round(float(mask.get("cy", 0)) * sy)),
+                )
+                radius = max(
+                    1,
+                    int(
+                        round(
+                            float(mask.get("radius", 1))
+                            * ((sx + sy) / 2.0)
+                        )
+                    ),
+                )
+                cv2.circle(result, center, radius, color, 1, cv2.LINE_AA)
+                continue
+            points = pontos_mascara_display(mask)
+            if len(points) < 3:
+                continue
+            polygon = np.asarray(
+                [
+                    [round(float(p[0]) * sx), round(float(p[1]) * sy)]
+                    for p in points
+                ],
+                dtype=np.int32,
+            )
+            cv2.polylines(result, [polygon], True, color, 1, cv2.LINE_AA)
+        except Exception:
+            continue
+    return result
+
+
+def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
+    """Autoridade final no OBJETO real criado por main_rpi.
+
+    Evita que wrappers históricos na MRO escondam o tracker. Também protege a
+    própria máquina de sequência, portanto nenhum caminho alternativo consegue
+    aprovar CHECKS sem passar pela confirmação física do H1.
+    """
+    if app is None or bool(
+        getattr(app, "_display_f3_tracking_instance_authority", False)
+    ):
+        return
+
+    runtime = get_tracking_runtime(app)
+    if runtime is not None:
+        app._display_f3_object_tracking_enabled = bool(runtime.store.enabled())
+
+    previous_preview = app._atualizar_preview_display_f3
+
+    def instance_preview(self):
+        if tracking_enabled(self) and not bool(
+            getattr(self, "_display_f3_tracking_config_open", False)
+        ):
+            raw = getattr(self, "camera_frame_atual", None)
+            if _valid_frame(raw):
+                self._display_f3_tracking_raw_authority_frame = raw
+                _aligned, result = align_frame_for_f3(self, raw)
+                self._display_f3_tracking_result = result
+                _update_tracking_live_geometry(self, raw, result)
+                locked = bool(result is not None and result.locked)
+                if locked:
+                    analysis_frame, _matrix = _analysis_alignment_for_current_check(
+                        self,
+                        raw,
+                        result,
+                    )
+                    self._display_f3_tracking_analysis_frame = (
+                        analysis_frame if _valid_frame(analysis_frame) else None
+                    )
+                else:
+                    self._display_f3_tracking_analysis_frame = None
+            else:
+                self._display_f3_tracking_live_geometry = None
+                self._display_f3_tracking_analysis_frame = None
+        return previous_preview()
+
+    app._atualizar_preview_display_f3 = MethodType(instance_preview, app)
+
+    window = getattr(app, "display_f3_window", None)
+    if window is not None:
+        previous_window_update = window.update_camera_preview
+
+        def tracked_window_update(self_window, frame, visual_rotation: int = 0):
+            if not tracking_enabled(app):
+                return previous_window_update(
+                    frame,
+                    visual_rotation=visual_rotation,
+                )
+
+            authority_frame = getattr(
+                app,
+                "_display_f3_tracking_raw_authority_frame",
+                None,
+            )
+            source = authority_frame if _valid_frame(authority_frame) else frame
+            if not _valid_frame(source):
+                return previous_window_update(
+                    frame,
+                    visual_rotation=visual_rotation,
+                )
+
+            geometry = getattr(
+                app,
+                "_display_f3_tracking_live_geometry",
+                None,
+            )
+            decorated = _draw_tracking_geometry_visual(
+                source,
+                geometry,
+                visual_rotation,
+            )
+            locked = bool(
+                isinstance(geometry, dict)
+                and geometry.get("locked")
+            )
+            status = getattr(
+                app,
+                "_display_f3_object_tracking_last_status",
+                {},
+            )
+            if locked:
+                legend = (
+                    "RASTREAMENTO F3 • LOCK • "
+                    f"{str(status.get('reference') or '--')} • "
+                    f"{int(status.get('inliers', 0) or 0)} inliers"
+                )
+                color = "#38BDF8"
+            else:
+                reason = str(status.get("reason") or "procurando")
+                legend = f"RASTREAMENTO F3 • PROCURANDO PLACA • {reason}"
+                color = "#FBBF24"
+
+            try:
+                self_window.preview_legend.configure(
+                    text=legend,
+                    fg=color,
+                )
+            except Exception:
+                pass
+            h, w = decorated.shape[:2]
+            rendered = self_window.update_preview(decorated, leds=())
+            if rendered:
+                try:
+                    self_window.show_camera_ready(
+                        int(w),
+                        int(h),
+                        int(visual_rotation or 0) % 360,
+                    )
+                except Exception:
+                    pass
+            return rendered
+
+        window.update_camera_preview = MethodType(
+            tracked_window_update,
+            window,
+        )
+
+    sequence = getattr(app, "display_check_runtime", None)
+    if sequence is not None and not bool(
+        getattr(sequence, "_odin_f3_tracking_sequence_guard", False)
+    ):
+        previous_register = sequence.registrar_resultado_check
+
+        def guarded_register(self_sequence, aprovado: bool = True):
+            if not tracking_enabled(app):
+                return previous_register(aprovado)
+
+            snapshot = self_sequence.snapshot()
+            current = snapshot.get("current_check")
+            if not isinstance(current, dict):
+                return previous_register(aprovado)
+            try:
+                index = int(snapshot.get("current_index", 0) or 0)
+            except (TypeError, ValueError):
+                index = 0
+            try:
+                cycle = int(snapshot.get("total", 0) or 0)
+            except (TypeError, ValueError):
+                cycle = 0
+
+            if index == 0:
+                power_ok, reason = _tracking_h1_power_gate(app)
+                if not power_ok:
+                    try:
+                        app._display_auto_set_preview_status(
+                            "AUTO • H1 BLOQUEADO • "
+                            + reason.replace("_", " "),
+                            "#FDE68A",
+                        )
+                    except Exception:
+                        pass
+                    return {
+                        "event": "waiting_check",
+                        "blocked_by": reason,
+                        "snapshot": snapshot,
+                    }
+                if not bool(aprovado):
+                    return {
+                        "event": "waiting_check",
+                        "blocked_by": "h1_nao_gera_ng_antes_do_referencial",
+                        "snapshot": snapshot,
+                    }
+                app._display_f3_tracking_h1_confirmed_cycle = cycle
+            elif getattr(
+                app,
+                "_display_f3_tracking_h1_confirmed_cycle",
+                None,
+            ) != cycle:
+                return {
+                    "event": "waiting_check",
+                    "blocked_by": "h1_nao_confirmado_neste_ciclo",
+                    "snapshot": snapshot,
+                }
+
+            event = previous_register(aprovado)
+            if (
+                isinstance(event, dict)
+                and str(event.get("event") or "")
+                in {"plate_ok", "plate_ng", "plate_discarded"}
+            ):
+                app._display_f3_tracking_h1_confirmed_cycle = None
+            return event
+
+        sequence.registrar_resultado_check = MethodType(
+            guarded_register,
+            sequence,
+        )
+        sequence._odin_f3_tracking_sequence_guard = True
+
+    app._display_f3_tracking_instance_authority = True
 
 
 def instalar_runtime_rastreamento_objetos_display_f3() -> None:
