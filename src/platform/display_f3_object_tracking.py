@@ -1720,6 +1720,8 @@ def reset_tracking_runtime(app) -> None:
     if runtime is not None:
         runtime.reset()
     app._display_f3_tracking_raw_preview_frame = None
+    app._display_f3_tracking_result = None
+    app._display_f3_tracking_live_geometry = None
     app._display_f3_object_tracking_last_status = {
         "enabled": tracking_enabled(app),
         "locked": False,
@@ -1756,9 +1758,174 @@ def align_frame_for_f3(app, frame):
         "inlier_ratio": round(float(result.inlier_ratio), 4),
         "rotation_deg": round(float(result.rotation_deg), 3),
         "scale": round(float(result.scale), 5),
+        "source_type": str(result.source_type or ""),
         "reason": result.reason,
     }
     return (result.frame if result.locked else frame), result
+
+
+def _analysis_alignment_for_current_check(
+    app,
+    raw_frame,
+    result: F3TrackingResult | None,
+):
+    """Alinha somente a ANÁLISE ao frame de referência do CHECK atual.
+
+    O tracker localiza qualquer vista -> canônico. Em seguida, para analisar H1,
+    BLUE, AUX etc., compomos CANÔNICO -> FOTO DO CHECK. Assim as máscaras que o
+    usuário desenhou naquela foto continuam coincidindo pixel a pixel, mesmo que
+    cada CHECK tenha sido fotografado em uma posição diferente.
+    """
+    if (
+        result is None
+        or not result.locked
+        or result.current_to_canonical is None
+        or not _valid_frame(raw_frame)
+    ):
+        return None, None
+
+    runtime = get_tracking_runtime(app)
+    current = _current_check(app)
+    if runtime is None or not isinstance(current, dict):
+        return result.frame, result.current_to_canonical
+
+    check_id = str(current.get("id") or "")
+    reference = runtime.references.get(f"check:{check_id}")
+    mapping = (
+        reference.get("reference_to_canonical")
+        if isinstance(reference, dict)
+        else None
+    )
+    if mapping is None:
+        return result.frame, result.current_to_canonical
+
+    try:
+        canonical_to_check = cv2.invertAffineTransform(
+            np.asarray(mapping, dtype=np.float32).reshape(2, 3)
+        )
+    except Exception:
+        return result.frame, result.current_to_canonical
+
+    current_to_check = compose_affine(
+        canonical_to_check,
+        result.current_to_canonical,
+    )
+    if current_to_check is None:
+        return result.frame, result.current_to_canonical
+
+    tracker = runtime
+    aligned = cv2.warpAffine(
+        raw_frame,
+        current_to_check,
+        (int(tracker.width), int(tracker.height)),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT101,
+    )
+    return aligned, current_to_check
+
+
+def _update_tracking_live_geometry(
+    app,
+    raw_frame,
+    result: F3TrackingResult | None,
+) -> None:
+    """Projeta contorno+ROIs para a câmera REAL, como bounding boxes móveis."""
+    if (
+        result is None
+        or not result.locked
+        or result.current_to_canonical is None
+        or not _valid_frame(raw_frame)
+    ):
+        app._display_f3_tracking_live_geometry = None
+        return
+
+    runtime = get_tracking_runtime(app)
+    repository = getattr(app, "display_project_repository", None)
+    if runtime is None or repository is None:
+        app._display_f3_tracking_live_geometry = None
+        return
+
+    project_name = repository.obter_projeto_ativo()
+    project = repository.carregar_projeto(project_name)
+    if not isinstance(project, dict):
+        app._display_f3_tracking_live_geometry = None
+        return
+
+    source_board = canonical_board_points(project, runtime.store)
+    source_masks = [
+        converter_mascara_legada_para_editor(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict)
+    ]
+    source_to_current = None
+    geometry_space = "canonical"
+
+    current = _current_check(app)
+    if isinstance(current, dict):
+        check_id = str(current.get("id") or "")
+        try:
+            check = repository.carregar_check(project_name, check_id)
+        except Exception:
+            check = None
+        reference = runtime.references.get(f"check:{check_id}")
+        ref_to_canonical = (
+            reference.get("reference_to_canonical")
+            if isinstance(reference, dict)
+            else None
+        )
+        if isinstance(check, dict) and ref_to_canonical is not None:
+            check_board, check_masks = _check_reference_geometry(project, check)
+            if check_board:
+                source_board = check_board
+            if check_masks:
+                source_masks = check_masks
+            analysis_frame, current_to_check = _analysis_alignment_for_current_check(
+                app,
+                raw_frame,
+                result,
+            )
+            del analysis_frame
+            if current_to_check is not None:
+                try:
+                    source_to_current = cv2.invertAffineTransform(
+                        np.asarray(current_to_check, dtype=np.float32).reshape(2, 3)
+                    )
+                    geometry_space = f"check:{check_id}"
+                except Exception:
+                    source_to_current = None
+
+    if source_to_current is None:
+        try:
+            source_to_current = cv2.invertAffineTransform(
+                np.asarray(
+                    result.current_to_canonical,
+                    dtype=np.float32,
+                ).reshape(2, 3)
+            )
+        except Exception:
+            app._display_f3_tracking_live_geometry = None
+            return
+
+    board_current = transform_points(source_board, source_to_current)
+    masks_current = []
+    for mask in source_masks:
+        transformed = transform_mask(mask, source_to_current)
+        if transformed is not None:
+            masks_current.append(transformed)
+
+    h, w = raw_frame.shape[:2]
+    app._display_f3_tracking_live_geometry = {
+        "locked": True,
+        "reference": str(result.reference or ""),
+        "source_type": str(result.source_type or ""),
+        "geometry_space": geometry_space,
+        "resolution": (int(w), int(h)),
+        "board_points": board_current,
+        "masks": masks_current,
+        "matches": int(result.matches),
+        "inliers": int(result.inliers),
+        "inlier_ratio": float(result.inlier_ratio),
+    }
 
 
 def instalar_runtime_rastreamento_objetos_display_f3() -> None:
