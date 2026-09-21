@@ -2178,6 +2178,12 @@ def _tracking_h1_power_gate(app) -> tuple[bool, str]:
         and power.get("decision_allowed") is True
         and isinstance(energy, dict)
         and energy.get("powered_confirmed") is True
+        and energy.get("raw_analysis_ready") is True
+        and int(energy.get("powered_votes", 0) or 0) >= 1
+        and str(energy.get("project_name") or "")
+        == str(context.get("project_name") or "")
+        and str(energy.get("check_id") or "")
+        == str(context.get("check_id") or "")
     ):
         return False, "energia_fisica_nao_confirmada"
     return True, "h1_ligado_confirmado"
