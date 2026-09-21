@@ -10,6 +10,7 @@ import numpy as np
 import src.platform.display_auto_check_analyzer as analyzer
 import src.platform.display_check_editor as check_editor
 import src.platform.display_f3_tracking_orientation_ui as tracking_ui
+import src.platform.display_f3_object_tracking as tracking
 import src.platform.display_f3_workspace_ui as workspace
 import src.platform.display_visual_rotation as visual_rotation
 import src.platform.display_reference_roi_runtime_fix as reference_runtime_fix
