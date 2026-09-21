@@ -302,6 +302,33 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("self.draw_masks_geometry()", rotation_source)
         self.assertNotIn("DisplayMaskEditorWindow(", rotation_source)
 
+    def test_static_mask_preview_uses_canonical_transformer_for_segments(self):
+        config_source = Path(project_config.__file__).read_text(encoding="utf-8")
+        self.assertIn("transform_mask", config_source)
+        self.assertNotIn(
+            "from src.platform.display_f3_object_tracking import (\n"
+            "                F3TrackingConfigStore,\n"
+            "                _transform_reference_mask,",
+            config_source,
+        )
+
+        segment = {
+            "id": "MASK_SEG",
+            "type": "segment",
+            "cx": 120,
+            "cy": 90,
+            "width": 60,
+            "height": 14,
+            "angle": 20.0,
+        }
+        transformed = tracking.transform_mask(
+            segment,
+            [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0]],
+        )
+        self.assertIsNotNone(transformed)
+        self.assertEqual("polygon", transformed["type"])
+        self.assertGreaterEqual(len(transformed.get("points", [])), 3)
+
     def test_mask_photo_button_opens_visible_live_capture(self):
         capture_source = inspect.getsource(
             mask_editor_reference.F3MaskReferenceCaptureWindow
