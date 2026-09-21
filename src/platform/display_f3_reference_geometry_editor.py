@@ -364,14 +364,21 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 pady=7,
             ).pack(side=tk.LEFT, padx=(0, 4))
 
-        button("GLOBAL ←5", lambda: self.translate_all(-5, 0))
-        button("GLOBAL →5", lambda: self.translate_all(5, 0))
-        button("GLOBAL ↑5", lambda: self.translate_all(0, -5))
-        button("GLOBAL ↓5", lambda: self.translate_all(0, 5))
-        button("GLOBAL ROT -1°", lambda: self.rotate_all(-1.0))
-        button("GLOBAL ROT +1°", lambda: self.rotate_all(1.0))
-        button("GLOBAL ESC -1%", lambda: self.scale_all(0.99))
-        button("GLOBAL ESC +1%", lambda: self.scale_all(1.01))
+        tk.Label(
+            toolbar,
+            text="GLOBAL",
+            font=("Segoe UI", 8, "bold"),
+            fg="#94A3B8",
+            bg="#111827",
+        ).pack(side=tk.LEFT, padx=(4, 8))
+        button("←5", lambda: self.translate_all(-5, 0))
+        button("→5", lambda: self.translate_all(5, 0))
+        button("↑5", lambda: self.translate_all(0, -5))
+        button("↓5", lambda: self.translate_all(0, 5))
+        button("ROT -1°", lambda: self.rotate_all(-1.0))
+        button("ROT +1°", lambda: self.rotate_all(1.0))
+        button("ESC -1%", lambda: self.scale_all(0.99))
+        button("ESC +1%", lambda: self.scale_all(1.01))
         button(
             "REDESENHAR PLACA",
             self.start_redraw_board,
@@ -562,6 +569,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.board = deepcopy(self._initial_board)
         self.masks = deepcopy(self._initial_masks)
         self.selected = None
+        self.selected_mask_ids.clear()
         self.draw_board_mode = False
         self.draw_board_points = []
         self.redraw_board_committed = False
@@ -1423,6 +1431,9 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                         width=3,
                         tags=("f3_selected_mask",),
                     )
+
+        if self.mask_draw_mode is not None:
+            return
 
         bounds = self._selection_bounds(selected_ids)
         handles = self._selection_handles_canvas()
