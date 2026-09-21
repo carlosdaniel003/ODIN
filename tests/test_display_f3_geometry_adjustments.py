@@ -19,6 +19,7 @@ import src.platform.display_f3_preview_clarity_fix as preview_clarity
 import src.platform.display_live_roi_overlay as live_overlay
 import src.platform.display_check_presence_reference as check_presence
 import src.platform.display_f3_reference_geometry_editor as reference_geometry_editor
+import src.platform.display_f3_reference_preview_rotation as reference_preview_rotation
 import src.platform.display_f3_mask_editor_reference as mask_editor_reference
 import src.platform.display_project_config as project_config
 import src.platform.display_visual_reference_status as visual_reference_status
@@ -350,6 +351,21 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         renderer = inspect.getsource(tracking.draw_reference_geometry)
         self.assertIn("board_thickness", renderer)
         self.assertIn("mask_thickness", renderer)
+
+    def test_board_presence_previews_share_mask_preview_geometry_style(self):
+        source = inspect.getsource(
+            reference_preview_rotation.preparar_preview_referencia_com_mascaras_f3
+        )
+        self.assertIn("draw_reference_geometry", source)
+        self.assertIn("alpha=0.74", source)
+        self.assertIn("board_thickness=2", source)
+        self.assertIn("mask_thickness=1", source)
+
+        metadata_source = inspect.getsource(
+            reference_preview_rotation._metadata_com_mascaras_do_projeto
+        )
+        self.assertIn("canonical_board_points", metadata_source)
+        self.assertIn("mask_overrides_reference", metadata_source)
 
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
