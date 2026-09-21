@@ -605,6 +605,8 @@ def _mask_center(mask: dict) -> tuple[float, float] | None:
 def _reference_masks_from_overrides(
     project: dict,
     overrides,
+    *,
+    explicit_only: bool = False,
 ) -> list[dict]:
     """Geometria desenhada sobre uma foto de referência.
 
@@ -619,6 +621,8 @@ def _reference_masks_from_overrides(
             continue
         mask_id = str(base.get("id") or "")
         raw = source.get(mask_id)
+        if explicit_only and not isinstance(raw, dict):
+            continue
         item = deepcopy(raw) if isinstance(raw, dict) else deepcopy(base)
         item["id"] = mask_id
         result.append(converter_mascara_legada_para_editor(item))
@@ -1089,15 +1093,21 @@ class F3DisplayObjectTracker:
                 (board_off or {}).get("board_points_reference"),
                 minimum=3,
             )
+            overrides = (board_off or {}).get("mask_overrides_reference", {})
             masks_ref = _reference_masks_from_overrides(
                 project,
-                (board_off or {}).get("mask_overrides_reference", {}),
+                overrides,
+            )
+            pose_masks = _reference_masks_from_overrides(
+                project,
+                overrides,
+                explicit_only=True,
             )
             mapping = estimate_reference_to_canonical(
                 project,
                 self.store,
                 board_ref,
-                masks_ref,
+                pose_masks,
             )
             if mapping is not None:
                 specs.append(
@@ -1132,11 +1142,16 @@ class F3DisplayObjectTracker:
             if not path:
                 continue
             board_ref, masks_ref = _check_reference_geometry(project, check)
+            pose_masks = _reference_masks_from_overrides(
+                project,
+                check.get("mask_overrides_reference", {}),
+                explicit_only=True,
+            )
             mapping = estimate_reference_to_canonical(
                 project,
                 self.store,
                 board_ref,
-                masks_ref,
+                pose_masks,
             )
             if mapping is None:
                 continue
