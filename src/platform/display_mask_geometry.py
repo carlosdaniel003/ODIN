@@ -217,6 +217,24 @@ def _angulo_formato_mascara_display(mask: dict) -> float | None:
     return None
 
 
+def _mesmo_formato_mascara_display(base: dict, local: dict) -> bool:
+    base_item = converter_mascara_legada_para_editor(base)
+    local_item = converter_mascara_legada_para_editor(local)
+    base_kind = str(base_item.get("type") or "").lower()
+    local_kind = str(local_item.get("type") or "").lower()
+    if base_kind != local_kind:
+        return False
+    if base_kind == "circle":
+        return True
+    if base_kind == "segment":
+        return True
+    if base_kind == "polygon":
+        return len(pontos_mascara_display(base_item)) == len(
+            pontos_mascara_display(local_item)
+        )
+    return False
+
+
 def _formatos_compativeis_para_rotacao(base: dict, local: dict) -> bool:
     base_item = converter_mascara_legada_para_editor(base)
     local_item = converter_mascara_legada_para_editor(local)
@@ -249,6 +267,13 @@ def sincronizar_formato_mascara_display(
     mask_id = str(base.get("id") or local.get("id") or "")
     if mask_id:
         base["id"] = mask_id
+        local["id"] = mask_id
+
+    # O CHECK continua livre para ajustar sua própria geometria enquanto o
+    # FORMATO for o mesmo. Triângulo (3 pontos) continua triângulo, segmento
+    # continua segmento e círculo continua círculo. Só corrigimos incompatíveis.
+    if _mesmo_formato_mascara_display(base, local):
+        return deepcopy(local)
 
     base_center, base_size = _centro_escala_mascara_display(base)
     local_center, local_size = _centro_escala_mascara_display(local)

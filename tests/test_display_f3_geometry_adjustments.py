@@ -295,6 +295,20 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertEqual("polygon", synced["type"])
         self.assertEqual(4, len(synced["points"]))
 
+    def test_check_mantem_geometria_local_quando_formato_continua_triangular(self):
+        base = {
+            "id": "MASK_001",
+            "type": "polygon",
+            "points": [[10, 10], [50, 10], [30, 45]],
+        }
+        local = {
+            "id": "MASK_001",
+            "type": "polygon",
+            "points": [[200, 180], [270, 190], [225, 250]],
+        }
+        synced = sincronizar_formato_mascara_display(base, local)
+        self.assertEqual(local, synced)
+
     def test_check_effective_geometry_uses_project_shape_and_local_pose(self):
         from src.platform.display_project_repository import (
             mascaras_geometria_check_display,
