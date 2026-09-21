@@ -19,7 +19,7 @@ from src.platform.display_mask_editor import (
     mascara_display_contem_ponto,
 )
 from src.platform.display_f3_reference_geometry_editor import (
-    _circle_to_segment_polygon,
+    _mask_display_number,
     _segment_polygon_from_drag,
 )
 from src.platform.display_project_repository import DisplayProjectRepository
@@ -159,26 +159,12 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
         self.assertGreaterEqual(max(xs), 220.0)
         self.assertGreater(max(ys) - min(ys), 0.0)
 
-    def test_editor_f3_converte_circulo_selecionado_em_segmento_preservando_id_e_centro(self):
-        converted = _circle_to_segment_polygon(
-            {
-                "id": "MASK_007",
-                "type": "circle",
-                "cx": 320,
-                "cy": 240,
-                "radius": 24,
-            }
-        )
-        self.assertIsNotNone(converted)
-        self.assertEqual("MASK_007", converted["id"])
-        self.assertEqual("polygon", converted["type"])
-        xs = [float(point[0]) for point in converted["points"]]
-        ys = [float(point[1]) for point in converted["points"]]
-        self.assertAlmostEqual(320.0, (min(xs) + max(xs)) / 2.0)
-        self.assertAlmostEqual(240.0, (min(ys) + max(ys)) / 2.0)
-        self.assertGreater(max(xs) - min(xs), max(ys) - min(ys))
+    def test_editor_f3_exibe_numero_humano_da_mascara(self):
+        self.assertEqual("1", _mask_display_number({"id": "MASK_001"}, 7))
+        self.assertEqual("27", _mask_display_number({"id": "MASK_027"}, 1))
+        self.assertEqual("4", _mask_display_number({"id": "SEM_NUMERO"}, 4))
 
-    def test_editor_f3_referencia_vincula_pan_e_expõe_conversao_circulo_segmento(self):
+    def test_editor_f3_referencia_tem_pan_exclusao_e_numeracao_visual(self):
         module = __import__(
             "src.platform.display_f3_reference_geometry_editor",
             fromlist=["F3ReferenceGeometryEditor"],
@@ -188,11 +174,17 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
             '"<ButtonPress-2>"',
             '"<B2-Motion>"',
             '"<ButtonRelease-2>"',
-            '"CÍRCULO → SEGMENTO"',
-            "replace_selected_circle_with_segment",
+            '"<Delete>"',
+            '"<BackSpace>"',
+            '"EXCLUIR MÁSCARA"',
+            "delete_selected_mask",
+            "_draw_mask_numbers",
+            "_mask_display_number",
             "mask_draw_buttons",
         ):
             self.assertIn(token, source)
+        self.assertNotIn("CÍRCULO → SEGMENTO", source)
+        self.assertNotIn("replace_selected_circle_with_segment", source)
 
     def test_classe_publica_continua_sendo_display_mask_editor_window(self):
         self.assertTrue(hasattr(DisplayMaskEditorWindow, "save"))

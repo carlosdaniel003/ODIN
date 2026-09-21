@@ -51,23 +51,16 @@ def _segment_polygon_from_drag(
     }
 
 
-def _circle_to_segment_polygon(mask: dict) -> dict | None:
-    """Substitui um círculo por um segmento horizontal mantendo id e centro."""
-    if not isinstance(mask, dict) or str(mask.get("type") or "").lower() != "circle":
-        return None
-    try:
-        cx = float(mask.get("cx", 0))
-        cy = float(mask.get("cy", 0))
-        radius = max(1.0, float(mask.get("radius", 1)))
-    except (TypeError, ValueError):
-        return None
-    return _segment_polygon_from_drag(
-        cx - radius,
-        cy,
-        cx + radius,
-        cy,
-        str(mask.get("id") or ""),
-    )
+def _mask_display_number(mask: dict, fallback_index: int) -> str:
+    """Retorna a numeração humana exibida sobre a máscara no editor."""
+    mask_id = str((mask or {}).get("id") or "").strip()
+    digits = "".join(char for char in mask_id if char.isdigit())
+    if digits:
+        try:
+            return str(int(digits))
+        except ValueError:
+            pass
+    return str(max(1, int(fallback_index)))
 
 
 class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
@@ -192,6 +185,8 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.canvas.bind("<ButtonPress-2>", self._start_view_pan)
         self.canvas.bind("<B2-Motion>", self._drag_view_pan)
         self.canvas.bind("<ButtonRelease-2>", self._end_view_pan)
+        self.canvas.bind("<Delete>", self.delete_selected_mask)
+        self.canvas.bind("<BackSpace>", self.delete_selected_mask)
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.canvas.bind(sequence, self._wheel, add="+")
 
@@ -276,12 +271,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             mask_button("+ CÍRCULO", mode="circle", key="circle")
             mask_button("+ POR PONTOS", mode="polygon", key="polygon")
             mask_button(
-                "CÍRCULO → SEGMENTO",
-                command=self.replace_selected_circle_with_segment,
-                key="replace_circle",
-            )
-            mask_button(
-                "EXCLUIR SELEÇÃO",
+                "EXCLUIR MÁSCARA",
                 command=self.delete_selected_mask,
                 danger=True,
             )
@@ -301,6 +291,8 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.window.bind("<Return>", self._enter)
         self.window.bind("<Control-z>", lambda _e: self.undo())
         self.window.bind("<Control-Z>", lambda _e: self.undo())
+        self.window.bind("<Delete>", self.delete_selected_mask)
+        self.window.bind("<BackSpace>", self.delete_selected_mask)
         self.window.bind("<Left>", lambda _e: self._keyboard_move(-1, 0))
         self.window.bind("<Right>", lambda _e: self._keyboard_move(1, 0))
         self.window.bind("<Up>", lambda _e: self._keyboard_move(0, -1))
@@ -338,17 +330,6 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
     def _update_mask_draw_buttons(self) -> None:
         active = self.mask_draw_mode if self.mask_draw_mode else "select"
         for key, button in self.mask_draw_buttons.items():
-            if key == "replace_circle":
-                try:
-                    button.configure(
-                        bg="#3F2B12",
-                        fg="#FCD34D",
-                        activebackground="#5A3D18",
-                        activeforeground="#FEF3C7",
-                    )
-                except Exception:
-                    pass
-                continue
             enabled = key == active
             try:
                 button.configure(
@@ -373,7 +354,10 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 f"MÁSCARA • POR PONTOS • {len(self.mask_draw_points)} ponto(s) • "
                 "clique ponto a ponto; Enter conclui; Esc cancela."
             )
-        return "SELECIONAR • clique em placa/máscara para ajustar."
+        return (
+            "SELECIONAR • clique dentro de uma máscara para selecioná-la • "
+            "Delete/Backspace ou EXCLUIR MÁSCARA remove a seleção."
+        )
 
     def set_mask_draw_mode(self, mode=None) -> None:
         self.mask_draw_mode = mode if mode in {"segment", "circle", "polygon"} else None
@@ -390,54 +374,63 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         except Exception:
             pass
 
-    def replace_selected_circle_with_segment(self) -> None:
+    def _selected_mask_id(self) -> str | None:
         target = self.selected
-        if not isinstance(target, tuple) or not target or target[0] != "mask":
-            self.status.configure(
-                text="CÍRCULO → SEGMENTO • selecione primeiro uma máscara circular."
-            )
-            return
-        mask_id = str(target[1])
-        current = self._mask_by_id(mask_id)
-        converted = _circle_to_segment_polygon(current)
-        if converted is None:
-            self.status.configure(
-                text="CÍRCULO → SEGMENTO • a máscara selecionada não é circular."
-            )
-            return
+        if (
+            isinstance(target, tuple)
+            and len(target) >= 2
+            and target[0] in {"mask", "mask_vertex"}
+        ):
+            mask_id = str(target[1] or "").strip()
+            return mask_id or None
+        return None
 
-        self._push_history()
-        self.masks = [
-            converted if str(mask.get("id") or "") == mask_id else mask
+    def delete_selected_mask(self, _event=None) -> str:
+        """Exclui máscara antiga ou recém-criada sem depender do tipo geométrico."""
+        mask_id = self._selected_mask_id()
+        if not mask_id:
+            self.status.configure(
+                text=(
+                    "EXCLUIR MÁSCARA • clique primeiro sobre a máscara desejada "
+                    "e use o botão, Delete ou Backspace."
+                )
+            )
+            return "break"
+
+        exists = any(
+            str(mask.get("id") or "") == mask_id
             for mask in self.masks
-        ]
-        self.mask_draw_mode = None
-        self.mask_draw_start = None
-        self.mask_draw_current = None
-        self.mask_draw_points = []
-        self.selected = ("mask", mask_id)
-        self._update_mask_draw_buttons()
-        self.status.configure(
-            text=(
-                f"{mask_id} substituída por segmento mantendo o mesmo centro e ID. "
-                "Ajuste os vértices se precisar refinar a máscara."
-            )
+            if isinstance(mask, dict)
         )
-        self.schedule_render()
+        if not exists:
+            self.selected = None
+            self.status.configure(text="A máscara selecionada não existe mais.")
+            self.schedule_render()
+            return "break"
 
-    def delete_selected_mask(self) -> None:
-        target = self.selected
-        if not isinstance(target, tuple) or not target or target[0] not in {"mask", "mask_vertex"}:
-            self.status.configure(text="Selecione uma máscara para excluir.")
-            return
-        mask_id = str(target[1])
         self._push_history()
         self.masks = [
-            mask for mask in self.masks
+            mask
+            for mask in self.masks
             if str(mask.get("id") or "") != mask_id
         ]
         self.selected = None
+        self.drag_target = None
+        self.drag_last_image = None
+        self.mask_draw_start = None
+        self.mask_draw_current = None
+        self.mask_draw_points = []
+        self.status.configure(
+            text=(
+                f"{mask_id} excluída • Ctrl+Z desfaz • SALVAR confirma a alteração."
+            )
+        )
         self.schedule_render()
+        try:
+            self.canvas.focus_set()
+        except Exception:
+            pass
+        return "break"
 
     def _press(self, event) -> None:
         if not self.allow_mask_creation or self.mask_draw_mode is None:
@@ -602,6 +595,65 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             return "break"
         return super()._escape(event)
 
+    @staticmethod
+    def _mask_label_center(mask: dict) -> tuple[float, float] | None:
+        if not isinstance(mask, dict):
+            return None
+        kind = str(mask.get("type") or "").lower()
+        if kind == "circle":
+            try:
+                return float(mask.get("cx", 0)), float(mask.get("cy", 0))
+            except (TypeError, ValueError):
+                return None
+        points = mask.get("points", [])
+        if not isinstance(points, (list, tuple)):
+            return None
+        valid = []
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                valid.append((float(point[0]), float(point[1])))
+            except (TypeError, ValueError):
+                continue
+        if not valid:
+            return None
+        return (
+            sum(point[0] for point in valid) / len(valid),
+            sum(point[1] for point in valid) / len(valid),
+        )
+
+    def _draw_mask_numbers(self) -> None:
+        """Desenha a numeração em cima das máscaras existentes e recém-criadas."""
+        for index, mask in enumerate(self.masks, start=1):
+            center = self._mask_label_center(mask)
+            if center is None:
+                continue
+            mask_id = str(mask.get("id") or "")
+            selected = mask_id == self._selected_mask_id()
+            x, y = self._image_to_canvas(center[0], center[1])
+            label = _mask_display_number(mask, index)
+            half_width = max(9, 5 + 4 * len(label))
+            half_height = 9
+            self.canvas.create_rectangle(
+                x - half_width,
+                y - half_height,
+                x + half_width,
+                y + half_height,
+                fill="#FBBF24" if selected else "#07111F",
+                outline="#111827" if selected else "#38BDF8",
+                width=1,
+                tags=("f3_mask_number",),
+            )
+            self.canvas.create_text(
+                x,
+                y,
+                text=label,
+                fill="#111318" if selected else "#F8FAFC",
+                font=("Segoe UI", 8, "bold"),
+                tags=("f3_mask_number",),
+            )
+
     def _draw_handles(self) -> None:
         super()._draw_handles()
         if not self.allow_mask_creation or self.mask_draw_mode is None:
@@ -659,6 +711,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
 
     def render(self) -> None:
         super().render()
+        self._draw_mask_numbers()
         if self.allow_mask_creation and self.mask_draw_mode is not None:
             try:
                 self.status.configure(text=self._mask_draw_status_text())
