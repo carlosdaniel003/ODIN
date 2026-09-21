@@ -19,7 +19,10 @@ import tkinter as tk
 import src.platform.display_check_presence_reference as check_module
 import src.platform.display_reference_roi as roi_module
 import src.platform.display_visual_reference_status as visual_module
-from src.platform.display_project_repository import normalizar_resolucao_display
+from src.platform.display_project_repository import (
+    normalizar_mascaras_display,
+    normalizar_resolucao_display,
+)
 from src.platform.display_visual_rotation import (
     obter_rotacao_visual_do_frame_provider,
     preparar_check_visual_display,

@@ -26,6 +26,7 @@ from src.platform.display_mask_geometry import (
     pontos_mascara_display,
 )
 from src.platform.display_project_repository import (
+    normalizar_mascaras_display,
     normalizar_nome_projeto_display,
     normalizar_resolucao_display,
 )
