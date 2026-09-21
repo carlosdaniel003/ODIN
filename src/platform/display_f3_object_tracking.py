@@ -30,6 +30,9 @@ import numpy as np
 from src.platform.display_check_presence_reference import (
     DisplayCheckPresenceReferenceStore,
 )
+from src.platform.display_f3_mask_editor_reference import (
+    DisplayMaskEditorReferenceStore,
+)
 from src.platform.display_mask_geometry import (
     bbox_mascara_display,
     converter_mascara_legada_para_editor,
@@ -95,6 +98,11 @@ F3_TRACKING_MAX_SCALE = 1.38
 F3_TRACKING_MAX_TRANSLATION_FRACTION = 1.25
 F3_TRACKING_BOARD_PADDING_FRACTION = 0.10
 F3_TRACKING_MASK_EXCLUSION_PADDING_PX = 7
+F3_TRACKING_GEOMETRY_MIN_ANCHORS = 2
+F3_TRACKING_GEOMETRY_MAX_REPROJECTION_PX = 18.0
+F3_TRACKING_REFERENCE_SCALE_MIN = 0.55
+F3_TRACKING_REFERENCE_SCALE_MAX = 1.80
+F3_TRACKING_OVERLAY_BOARD_BGR = (255, 214, 56)
 
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
