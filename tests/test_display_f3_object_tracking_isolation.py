@@ -376,6 +376,133 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("tracking_h1_power_guard", source)
         self.assertIn("tracking_h1_cycle_guard", source)
 
+    def test_edge_template_fallback_recovers_board_translation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            reference = np.zeros((240, 320, 3), dtype=np.uint8)
+            cv2.rectangle(reference, (70, 55), (250, 185), (210, 210, 210), 3)
+            cv2.circle(reference, (120, 110), 18, (255, 255, 255), 3)
+            cv2.line(reference, (155, 75), (220, 160), (180, 180, 180), 4)
+            cv2.putText(
+                reference,
+                "PCB",
+                (135, 145),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            board = [[70, 55], [250, 55], [250, 185], [70, 185]]
+            tracking_mask = tracking.build_tracking_mask(
+                320,
+                240,
+                board,
+                [],
+            )
+            refs = {}
+            tracker._add_reference(
+                refs,
+                key="ref",
+                image=reference,
+                tracking_mask=tracking_mask,
+                reference_to_canonical=np.asarray(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    dtype=np.float32,
+                ),
+                angle=0.0,
+                real_orientation=False,
+                source_type="mask_reference",
+                board_points=board,
+            )
+            self.assertIn("ref", refs)
+            tracker.references = refs
+
+            dx, dy = 28, -17
+            current = cv2.warpAffine(
+                reference,
+                np.asarray(
+                    [[1.0, 0.0, dx], [0.0, 1.0, dy]],
+                    dtype=np.float32,
+                ),
+                (320, 240),
+            )
+            gray = tracker._gray(current)
+            candidate = tracker._template_candidate(
+                cv2.Canny(gray, 45, 135),
+                "ref",
+            )
+            self.assertIsNotNone(candidate)
+            self.assertEqual("edge_template", candidate.get("fallback"))
+            matrix = np.asarray(candidate["matrix"], dtype=np.float32)
+            self.assertAlmostEqual(-dx, float(matrix[0, 2]), delta=3.0)
+            self.assertAlmostEqual(-dy, float(matrix[1, 2]), delta=3.0)
+
+    def test_final_instance_authority_bypasses_historical_f3_wrappers(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("app._atualizar_preview_display_f3 = MethodType", source)
+        self.assertIn("window.update_camera_preview = MethodType", source)
+        self.assertIn("sequence.registrar_resultado_check = MethodType", source)
+        self.assertIn("_tracking_h1_power_gate(app)", source)
+        self.assertIn("_display_f3_tracking_raw_authority_frame", source)
+
+        main_source = Path("main_rpi.py").read_text(encoding="utf-8")
+        self.assertIn("app = RaspberryPi3ProductionApp(root)", main_source)
+        self.assertIn(
+            "instalar_autoridade_final_instancia_rastreamento_f3(app)",
+            main_source,
+        )
+
+    def test_tracking_renderer_draws_moving_board_and_all_masks(self):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        geometry = {
+            "locked": True,
+            "resolution": (320, 240),
+            "board_points": [[50, 45], [270, 45], [270, 195], [50, 195]],
+            "masks": [
+                {
+                    "id": "A",
+                    "type": "circle",
+                    "cx": 110,
+                    "cy": 110,
+                    "radius": 14,
+                },
+                {
+                    "id": "B",
+                    "type": "polygon",
+                    "points": [[180, 90], [225, 90], [225, 120], [180, 120]],
+                },
+            ],
+        }
+        rendered = tracking._draw_tracking_geometry_visual(frame, geometry, 0)
+        self.assertGreater(int(np.count_nonzero(rendered)), 0)
+        # Move a geometria: o desenho precisa mudar junto, não permanecer fixo.
+        moved = dict(geometry)
+        moved["board_points"] = [
+            [p[0] + 20, p[1] + 10] for p in geometry["board_points"]
+        ]
+        moved["masks"] = [
+            tracking.transform_mask(
+                mask,
+                np.asarray(
+                    [[1.0, 0.0, 20.0], [0.0, 1.0, 10.0]],
+                    dtype=np.float32,
+                ),
+            )
+            for mask in geometry["masks"]
+        ]
+        rendered_moved = tracking._draw_tracking_geometry_visual(
+            frame,
+            moved,
+            0,
+        )
+        self.assertFalse(np.array_equal(rendered, rendered_moved))
+
     def test_tracking_mask_excludes_display_segments(self):
         board = [[80, 80], [560, 80], [560, 400], [80, 400]]
         masks = [
