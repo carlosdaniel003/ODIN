@@ -1211,6 +1211,7 @@ class F3DisplayObjectTracker:
         reference_to_canonical,
         angle: float,
         real_orientation: bool,
+        source_type: str = "reference",
     ) -> None:
         gray = self._gray(image)
         if gray is None:
@@ -1240,6 +1241,11 @@ class F3DisplayObjectTracker:
             "canonical_points": canonical_points,
             "angle_deg": float(angle),
             "real_orientation": bool(real_orientation),
+            "source_type": str(source_type or "reference"),
+            "reference_to_canonical": np.asarray(
+                reference_to_canonical,
+                dtype=np.float32,
+            ).reshape(2, 3),
         }
 
     def configure(self, project_name: str | None = None) -> bool:
@@ -1279,36 +1285,34 @@ class F3DisplayObjectTracker:
         self.width = width
         self.height = height
 
-        canonical_masks = [
-            converter_mascara_legada_para_editor(mask)
-            for mask in normalizar_mascaras_display(project.get("masks", []))
-        ]
-        canonical_tracking_mask = build_tracking_mask(
-            width,
-            height,
-            board,
-            canonical_masks,
-        )
         refs: dict[str, dict] = {}
 
-        if canonical_tracking_mask is not None:
-            identity = np.asarray(
-                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                dtype=np.float32,
+        # Banco multivista real: foto canônica de Máscaras, placa desligada e
+        # todos os CHECKS. Cada uma usa SEU contorno e SUAS máscaras desenhadas,
+        # portanto a posição física da placa na foto não precisa coincidir.
+        for spec in self._calibrated_reference_specs(project):
+            path = str(spec.get("path") or "")
+            image = cv2.imread(path, cv2.IMREAD_COLOR)
+            if not _valid_frame(image) or image.shape[:2] != (height, width):
+                continue
+            tracking_mask = build_tracking_mask(
+                width,
+                height,
+                spec.get("board", []),
+                spec.get("masks", []),
             )
-            for key, path in self._canonical_reference_paths(project):
-                image = cv2.imread(path, cv2.IMREAD_COLOR)
-                if not _valid_frame(image) or image.shape[:2] != (height, width):
-                    continue
-                self._add_reference(
-                    refs,
-                    key=key,
-                    image=image,
-                    tracking_mask=canonical_tracking_mask,
-                    reference_to_canonical=identity,
-                    angle=0.0,
-                    real_orientation=False,
-                )
+            if tracking_mask is None:
+                continue
+            self._add_reference(
+                refs,
+                key=str(spec.get("key") or ""),
+                image=image,
+                tracking_mask=tracking_mask,
+                reference_to_canonical=spec.get("reference_to_canonical"),
+                angle=float(spec.get("angle", 0.0) or 0.0),
+                real_orientation=bool(spec.get("real_orientation", False)),
+                source_type=str(spec.get("source_type") or "reference"),
+            )
 
         for slot in F3_ORIENTATION_SLOTS:
             entry = orientations.get(slot, {})
@@ -1340,6 +1344,7 @@ class F3DisplayObjectTracker:
                 reference_to_canonical=reference_to_canonical,
                 angle=F3_ORIENTATION_ANGLE[slot],
                 real_orientation=True,
+                source_type="orientation",
             )
 
         if not refs:
