@@ -1000,6 +1000,8 @@ class F3TrackingResult:
     rotation_deg: float = 0.0
     scale: float = 1.0
     reason: str = ""
+    current_to_canonical: object | None = None
+    source_type: str = ""
 
 
 class F3DisplayObjectTracker:
@@ -1409,8 +1411,15 @@ class F3DisplayObjectTracker:
             return None
 
         score = float(inliers) + ratio * 12.0
+        source_type = str(ref.get("source_type") or "reference")
         if bool(ref.get("real_orientation")):
             score += 5.0
+        elif source_type == "mask_reference":
+            score += 4.0
+        elif source_type == "check":
+            score += 3.0
+        elif source_type == "board_off":
+            score += 2.0
         return {
             "reference": key,
             "matrix": matrix.astype(np.float32),
@@ -1420,6 +1429,7 @@ class F3DisplayObjectTracker:
             "rotation_deg": rotation,
             "scale": scale,
             "score": score,
+            "source_type": source_type,
         }
 
     def align(self, frame, frame_id=None) -> F3TrackingResult:
@@ -1456,6 +1466,8 @@ class F3DisplayObjectTracker:
                 rotation_deg=self.last_result.rotation_deg,
                 scale=self.last_result.scale,
                 reason="cached_transform",
+                current_to_canonical=self.last_matrix.copy(),
+                source_type=self.last_result.source_type,
             )
             self.last_result = result
             self.last_frame_id = frame_id
@@ -1529,6 +1541,8 @@ class F3DisplayObjectTracker:
             rotation_deg=float(best["rotation_deg"]),
             scale=float(best["scale"]),
             reason="locked",
+            current_to_canonical=matrix.copy(),
+            source_type=str(best.get("source_type") or ""),
         )
         self.last_result = result
         return result
