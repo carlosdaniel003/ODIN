@@ -2066,13 +2066,26 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
 
             aligned, result = align_frame_for_f3(self, raw)
             locked = bool(result is not None and result.locked)
+            self._display_f3_tracking_result = result
+            _update_tracking_live_geometry(self, raw, result)
             if not locked:
                 # O preview ao vivo continua visível no frame bruto enquanto o
                 # guard de _process_display_auto_check impede decisão produtiva.
                 return preview_previous(self)
 
+            # Para análise do CHECK atual, alinhe a câmera ao MESMO espaço da
+            # foto do CHECK onde placa e máscaras foram ajustadas. O operador,
+            # porém, continua vendo o frame bruto + geometria rastreada.
+            analysis_aligned, _analysis_matrix = _analysis_alignment_for_current_check(
+                self,
+                raw,
+                result,
+            )
+            if not _valid_frame(analysis_aligned):
+                analysis_aligned = aligned
+
             self._display_f3_tracking_raw_preview_frame = raw
-            self.camera_frame_atual = aligned
+            self.camera_frame_atual = analysis_aligned
             self._display_f3_tracking_frame_override_depth = int(
                 getattr(self, "_display_f3_tracking_frame_override_depth", 0) or 0
             ) + 1
