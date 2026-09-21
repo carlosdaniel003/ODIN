@@ -21,8 +21,10 @@ from src.platform.display_mask_editor import (
 from src.platform.display_f3_reference_geometry_editor import (
     F3_REFERENCE_HISTORY_LIMIT,
     _mask_display_number,
+    _mask_geometry_bounds,
     _next_available_mask_id,
     _segment_polygon_from_drag,
+    _transform_mask_geometry,
 )
 from src.platform.display_project_repository import DisplayProjectRepository
 
@@ -178,6 +180,42 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
     def test_editor_f3_tem_historico_operacional_maior(self):
         self.assertGreaterEqual(F3_REFERENCE_HISTORY_LIMIT, 30)
 
+    def test_editor_f3_transforma_mascara_individual_sem_mudar_id(self):
+        mask = {
+            "id": "MASK_007",
+            "type": "polygon",
+            "points": [[10, 10], [30, 10], [30, 20], [10, 20]],
+        }
+        moved = _transform_mask_geometry(
+            mask,
+            center_x=20,
+            center_y=15,
+            dx=5,
+            dy=-2,
+        )
+        self.assertEqual("MASK_007", moved["id"])
+        self.assertEqual([15.0, 8.0], moved["points"][0])
+        self.assertEqual((15.0, 8.0, 35.0, 18.0), _mask_geometry_bounds(moved))
+
+    def test_editor_f3_esticar_circulo_vira_poligono_compativel(self):
+        mask = {
+            "id": "MASK_003",
+            "type": "circle",
+            "cx": 100,
+            "cy": 100,
+            "radius": 20,
+        }
+        stretched = _transform_mask_geometry(
+            mask,
+            center_x=100,
+            center_y=100,
+            scale_x=1.5,
+            scale_y=1.0,
+        )
+        self.assertEqual("MASK_003", stretched["id"])
+        self.assertEqual("polygon", stretched["type"])
+        self.assertEqual(32, len(stretched["points"]))
+
     def test_editor_f3_referencia_tem_pan_exclusao_e_numeracao_visual(self):
         module = __import__(
             "src.platform.display_f3_reference_geometry_editor",
@@ -200,6 +238,15 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
             "_next_available_mask_id",
             "_polygon_close_target_hit",
             "_finish_polygon_mask",
+            "selected_mask_ids",
+            "select_all_masks",
+            "clear_mask_selection",
+            "transform_selected",
+            "_selection_handles_canvas",
+            "_drag_selection_handle",
+            '"<Control-a>"',
+            '"SELECIONAR TUDO"',
+            '"EDIÇÃO DA SELEÇÃO"',
             '"● {base_text}"',
             '"FECHAR"',
             "mask_draw_buttons",
@@ -213,6 +260,10 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
         self.assertIn("tk.SUNKEN if enabled else tk.FLAT", source)
         self.assertIn("clique no PRIMEIRO PONTO para fechar", source)
         self.assertIn("return self._finish_polygon_mask()", source)
+        self.assertIn('self.drag_target = ("mask_group", mask_id)', source)
+        self.assertIn('"selection_handle"', source)
+        self.assertNotIn("keep_drawing", source)
+        self.assertIn("continua ativa", source)
 
     def test_classe_publica_continua_sendo_display_mask_editor_window(self):
         self.assertTrue(hasattr(DisplayMaskEditorWindow, "save"))

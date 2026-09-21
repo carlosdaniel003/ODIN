@@ -85,6 +85,112 @@ def _next_available_mask_id(masks) -> str:
     return f"MASK_{index:03d}"
 
 
+def _mask_geometry_bounds(mask: dict) -> tuple[float, float, float, float] | None:
+    if not isinstance(mask, dict):
+        return None
+    kind = str(mask.get("type") or "").lower()
+    if kind == "circle":
+        try:
+            cx = float(mask.get("cx", 0))
+            cy = float(mask.get("cy", 0))
+            radius = max(1.0, float(mask.get("radius", 1)))
+        except (TypeError, ValueError):
+            return None
+        return cx - radius, cy - radius, cx + radius, cy + radius
+
+    points = mask.get("points", [])
+    valid = []
+    if isinstance(points, (list, tuple)):
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                valid.append((float(point[0]), float(point[1])))
+            except (TypeError, ValueError):
+                continue
+    if not valid:
+        return None
+    xs = [point[0] for point in valid]
+    ys = [point[1] for point in valid]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _transform_mask_geometry(
+    mask: dict,
+    *,
+    center_x: float,
+    center_y: float,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+    degrees: float = 0.0,
+    dx: float = 0.0,
+    dy: float = 0.0,
+) -> dict:
+    """Transforma uma máscara sem afetar placa ou outras máscaras."""
+    result = deepcopy(mask)
+    sx = max(0.05, float(scale_x))
+    sy = max(0.05, float(scale_y))
+    angle = math.radians(float(degrees))
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+    cx = float(center_x)
+    cy = float(center_y)
+
+    def transform_point(x: float, y: float) -> list[float]:
+        px = (float(x) - cx) * sx
+        py = (float(y) - cy) * sy
+        rx = px * cos_a - py * sin_a
+        ry = px * sin_a + py * cos_a
+        return [rx + cx + float(dx), ry + cy + float(dy)]
+
+    kind = str(result.get("type") or "").lower()
+    if kind == "circle":
+        try:
+            mask_cx = float(result.get("cx", 0))
+            mask_cy = float(result.get("cy", 0))
+            radius = max(1.0, float(result.get("radius", 1)))
+        except (TypeError, ValueError):
+            return result
+        transformed_center = transform_point(mask_cx, mask_cy)
+        if abs(sx - sy) <= 1e-6:
+            result["cx"] = transformed_center[0]
+            result["cy"] = transformed_center[1]
+            result["radius"] = max(1.0, radius * sx)
+            return result
+
+        # Esticar um círculo produz elipse; o F3 persiste isso como polígono.
+        points = []
+        for index in range(32):
+            theta = (2.0 * math.pi * index) / 32.0
+            points.append(
+                transform_point(
+                    mask_cx + radius * math.cos(theta),
+                    mask_cy + radius * math.sin(theta),
+                )
+            )
+        result["type"] = "polygon"
+        result["points"] = points
+        result.pop("cx", None)
+        result.pop("cy", None)
+        result.pop("radius", None)
+        return result
+
+    points = result.get("points", [])
+    transformed = []
+    if isinstance(points, (list, tuple)):
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                transformed.append(transform_point(float(point[0]), float(point[1])))
+            except (TypeError, ValueError):
+                continue
+    if transformed:
+        result["type"] = "polygon"
+        result["points"] = transformed
+    return result
+
+
 def _distance_point_to_segment(
     px: float,
     py: float,
@@ -152,6 +258,11 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.mask_draw_points: list[list[float]] = []
         self.mask_draw_buttons: dict[str, tk.Button] = {}
         self.mask_draw_button_labels: dict[str, str] = {}
+        self.selected_mask_ids: set[str] = set()
+        self.transform_drag_initial_masks: dict[str, dict] = {}
+        self.transform_drag_bounds = None
+        self.transform_drag_start_canvas = None
+        self.transform_drag_start_image = None
         self.view_pan_active = False
         self.view_pan_last: tuple[float, float] | None = None
 
@@ -160,6 +271,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.drag_last_image = None
         self.drag_snapshot_pushed = False
         self.selected = None
+        self.selected_mask_ids.clear()
         self.draw_board_mode = False
         self.draw_board_points: list[list[float]] = []
         self.redraw_board_committed = False
@@ -252,14 +364,14 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 pady=7,
             ).pack(side=tk.LEFT, padx=(0, 4))
 
-        button("← 5px", lambda: self.translate_all(-5, 0))
-        button("→ 5px", lambda: self.translate_all(5, 0))
-        button("↑ 5px", lambda: self.translate_all(0, -5))
-        button("↓ 5px", lambda: self.translate_all(0, 5))
-        button("ROT -1°", lambda: self.rotate_all(-1.0))
-        button("ROT +1°", lambda: self.rotate_all(1.0))
-        button("ESC -1%", lambda: self.scale_all(0.99))
-        button("ESC +1%", lambda: self.scale_all(1.01))
+        button("GLOBAL ←5", lambda: self.translate_all(-5, 0))
+        button("GLOBAL →5", lambda: self.translate_all(5, 0))
+        button("GLOBAL ↑5", lambda: self.translate_all(0, -5))
+        button("GLOBAL ↓5", lambda: self.translate_all(0, 5))
+        button("GLOBAL ROT -1°", lambda: self.rotate_all(-1.0))
+        button("GLOBAL ROT +1°", lambda: self.rotate_all(1.0))
+        button("GLOBAL ESC -1%", lambda: self.scale_all(0.99))
+        button("GLOBAL ESC +1%", lambda: self.scale_all(1.01))
         button(
             "REDESENHAR PLACA",
             self.start_redraw_board,
@@ -318,11 +430,59 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             mask_button("+ CÍRCULO", mode="circle", key="circle")
             mask_button("+ POR PONTOS", mode="polygon", key="polygon")
             mask_button(
+                "SELECIONAR TUDO",
+                command=self.select_all_masks,
+            )
+            mask_button(
+                "LIMPAR SELEÇÃO",
+                command=self.clear_mask_selection,
+            )
+            mask_button(
                 "EXCLUIR MÁSCARA",
                 command=self.delete_selected_mask,
                 danger=True,
             )
             self._update_mask_draw_buttons()
+
+            self.mask_transform_toolbar = tk.Frame(self.window, bg="#0A1322")
+            self.mask_transform_toolbar.pack(fill=tk.X, padx=10, pady=(0, 8))
+            tk.Label(
+                self.mask_transform_toolbar,
+                text="EDIÇÃO DA SELEÇÃO",
+                font=("Segoe UI", 8, "bold"),
+                fg="#94A3B8",
+                bg="#0A1322",
+            ).pack(side=tk.LEFT, padx=(6, 10))
+
+            def transform_button(text, command):
+                tk.Button(
+                    self.mask_transform_toolbar,
+                    text=text,
+                    command=command,
+                    font=("Segoe UI", 8, "bold"),
+                    bg="#172033",
+                    fg="#CBD5E1",
+                    activebackground="#25324A",
+                    activeforeground="#FFFFFF",
+                    relief=tk.FLAT,
+                    bd=0,
+                    padx=7,
+                    pady=5,
+                    cursor="hand2",
+                ).pack(side=tk.LEFT, padx=(0, 4))
+
+            transform_button("←1", lambda: self.transform_selected(dx=-1))
+            transform_button("→1", lambda: self.transform_selected(dx=1))
+            transform_button("↑1", lambda: self.transform_selected(dy=-1))
+            transform_button("↓1", lambda: self.transform_selected(dy=1))
+            transform_button("MENOR -5%", lambda: self.transform_selected(scale_x=0.95, scale_y=0.95))
+            transform_button("MAIOR +5%", lambda: self.transform_selected(scale_x=1.05, scale_y=1.05))
+            transform_button("X -5%", lambda: self.transform_selected(scale_x=0.95, scale_y=1.0))
+            transform_button("X +5%", lambda: self.transform_selected(scale_x=1.05, scale_y=1.0))
+            transform_button("Y -5%", lambda: self.transform_selected(scale_x=1.0, scale_y=0.95))
+            transform_button("Y +5%", lambda: self.transform_selected(scale_x=1.0, scale_y=1.05))
+            transform_button("ROT -1°", lambda: self.transform_selected(degrees=-1.0))
+            transform_button("ROT +1°", lambda: self.transform_selected(degrees=1.0))
 
         self.status = tk.Label(
             self.window,
@@ -338,6 +498,10 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.window.bind("<Return>", self._enter)
         self.window.bind("<Control-z>", lambda _e: self.undo())
         self.window.bind("<Control-Z>", lambda _e: self.undo())
+        self.window.bind("<Control-a>", self.select_all_masks)
+        self.window.bind("<Control-A>", self.select_all_masks)
+        self.window.bind("<Control-d>", self.clear_mask_selection)
+        self.window.bind("<Control-D>", self.clear_mask_selection)
         self.window.bind("<Delete>", self.delete_selected_mask)
         self.window.bind("<BackSpace>", self.delete_selected_mask)
         self.window.bind("<Left>", lambda _e: self._keyboard_move(-1, 0))
@@ -356,6 +520,11 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             pass
         self.schedule_render()
 
+    def _snapshot(self) -> dict:
+        state = super()._snapshot()
+        state["selected_mask_ids"] = sorted(self.selected_mask_ids)
+        return state
+
     def _push_history(self, snapshot=None) -> None:
         """Histórico maior no editor operacional F3, sem alterar outros editores."""
         self.history.append(
@@ -363,6 +532,29 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         )
         if len(self.history) > F3_REFERENCE_HISTORY_LIMIT:
             self.history = self.history[-F3_REFERENCE_HISTORY_LIMIT:]
+
+    def undo(self) -> str:
+        if not self.history:
+            return super().undo()
+        state = self.history[-1]
+        result = super().undo()
+        valid_ids = {
+            str(mask.get("id") or "")
+            for mask in self.masks
+            if isinstance(mask, dict)
+        }
+        restored = {
+            str(mask_id)
+            for mask_id in state.get("selected_mask_ids", [])
+            if str(mask_id) in valid_ids
+        }
+        if not restored:
+            primary = self._selected_mask_id()
+            if primary in valid_ids:
+                restored.add(primary)
+        self.selected_mask_ids = restored
+        self.schedule_render()
+        return result
 
     def reset(self) -> None:
         self._push_history()
@@ -422,8 +614,8 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 "adicione pelo menos 3 pontos • Esc cancela."
             )
         return (
-            "SELECIONAR • clique dentro de uma máscara para selecioná-la • "
-            "Delete/Backspace ou EXCLUIR MÁSCARA remove a seleção."
+            "SELECIONAR • arraste para mover • alças laterais esticam • cantos redimensionam • "
+            "alça roxa rotaciona • Ctrl+clique seleciona várias • Ctrl+A seleciona todas."
         )
 
     def set_mask_draw_mode(self, mode=None) -> None:
@@ -435,6 +627,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.drag_target = None
         if next_mode is not None:
             self.selected = None
+            self.selected_mask_ids.clear()
         self._update_mask_draw_buttons()
         self.status.configure(text=self._mask_draw_status_text())
         self.schedule_render()
@@ -452,38 +645,87 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         ):
             mask_id = str(target[1] or "").strip()
             return mask_id or None
+        if self.selected_mask_ids:
+            return sorted(self.selected_mask_ids)[0]
         return None
 
-    def delete_selected_mask(self, _event=None) -> str:
-        """Exclui máscara antiga ou recém-criada sem depender do tipo geométrico."""
-        mask_id = self._selected_mask_id()
-        if not mask_id:
+    def _selected_ids(self) -> set[str]:
+        valid_ids = {
+            str(mask.get("id") or "")
+            for mask in self.masks
+            if isinstance(mask, dict) and str(mask.get("id") or "")
+        }
+        selected = {
+            str(mask_id)
+            for mask_id in self.selected_mask_ids
+            if str(mask_id) in valid_ids
+        }
+        primary = self._selected_mask_id()
+        if primary in valid_ids:
+            selected.add(primary)
+        self.selected_mask_ids = selected
+        return set(selected)
+
+    def select_all_masks(self, _event=None) -> str:
+        if self.mask_draw_mode is not None:
+            self.mask_draw_mode = None
+            self.mask_draw_points = []
+            self.mask_draw_start = None
+            self.mask_draw_current = None
+            self._update_mask_draw_buttons()
+        self.selected_mask_ids = {
+            str(mask.get("id") or "")
+            for mask in self.masks
+            if isinstance(mask, dict) and str(mask.get("id") or "")
+        }
+        if self.selected_mask_ids:
+            self.selected = ("mask", sorted(self.selected_mask_ids)[0])
             self.status.configure(
                 text=(
-                    "EXCLUIR MÁSCARA • clique primeiro sobre a máscara desejada "
-                    "e use o botão, Delete ou Backspace."
+                    f"{len(self.selected_mask_ids)} máscara(s) selecionada(s) • "
+                    "arraste uma delas para mover o grupo ou use EDIÇÃO DA SELEÇÃO."
                 )
             )
-            return "break"
-
-        exists = any(
-            str(mask.get("id") or "") == mask_id
-            for mask in self.masks
-            if isinstance(mask, dict)
-        )
-        if not exists:
+        else:
             self.selected = None
-            self.status.configure(text="A máscara selecionada não existe mais.")
-            self.schedule_render()
+            self.status.configure(text="Não há máscaras para selecionar.")
+        self.schedule_render()
+        return "break"
+
+    def clear_mask_selection(self, _event=None) -> str:
+        self.selected_mask_ids.clear()
+        if (
+            isinstance(self.selected, tuple)
+            and self.selected
+            and self.selected[0] in {"mask", "mask_vertex"}
+        ):
+            self.selected = None
+        self.drag_target = None
+        self.status.configure(text=self._mask_draw_status_text())
+        self.schedule_render()
+        return "break"
+
+    def delete_selected_mask(self, _event=None) -> str:
+        """Exclui uma ou várias máscaras selecionadas."""
+        selected_ids = self._selected_ids()
+        if not selected_ids:
+            self.status.configure(
+                text=(
+                    "EXCLUIR MÁSCARA • selecione uma máscara, use Ctrl+clique para várias "
+                    "ou SELECIONAR TUDO."
+                )
+            )
             return "break"
 
         self._push_history()
         self.masks = [
             mask
             for mask in self.masks
-            if str(mask.get("id") or "") != mask_id
+            if str(mask.get("id") or "") not in selected_ids
         ]
+        count = len(selected_ids)
         self.selected = None
+        self.selected_mask_ids.clear()
         self.drag_target = None
         self.drag_last_image = None
         self.mask_draw_start = None
@@ -492,7 +734,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         next_id = self._next_mask_id()
         self.status.configure(
             text=(
-                f"{mask_id} excluída • próxima máscara nova: {next_id} • "
+                f"{count} máscara(s) excluída(s) • próxima máscara nova: {next_id} • "
                 "Ctrl+Z desfaz • SALVAR confirma."
             )
         )
@@ -502,6 +744,212 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         except Exception:
             pass
         return "break"
+
+    def _selection_bounds(self, ids=None):
+        selected_ids = set(ids or self._selected_ids())
+        bounds = []
+        for mask in self.masks:
+            mask_id = str(mask.get("id") or "") if isinstance(mask, dict) else ""
+            if mask_id not in selected_ids:
+                continue
+            value = _mask_geometry_bounds(mask)
+            if value is not None:
+                bounds.append(value)
+        if not bounds:
+            return None
+        return (
+            min(value[0] for value in bounds),
+            min(value[1] for value in bounds),
+            max(value[2] for value in bounds),
+            max(value[3] for value in bounds),
+        )
+
+    def _selection_center(self, ids=None):
+        bounds = self._selection_bounds(ids)
+        if bounds is None:
+            return None
+        return (
+            (float(bounds[0]) + float(bounds[2])) / 2.0,
+            (float(bounds[1]) + float(bounds[3])) / 2.0,
+        )
+
+    def transform_selected(
+        self,
+        *,
+        scale_x: float = 1.0,
+        scale_y: float = 1.0,
+        degrees: float = 0.0,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        push: bool = True,
+        center=None,
+        source_masks=None,
+    ) -> str:
+        selected_ids = self._selected_ids()
+        if not selected_ids:
+            self.status.configure(
+                text="EDIÇÃO DA SELEÇÃO • selecione uma ou mais máscaras primeiro."
+            )
+            return "break"
+        transform_center = center or self._selection_center(selected_ids)
+        if transform_center is None:
+            return "break"
+        if push:
+            self._push_history()
+
+        source_by_id = source_masks if isinstance(source_masks, dict) else None
+        updated = []
+        for mask in self.masks:
+            mask_id = str(mask.get("id") or "") if isinstance(mask, dict) else ""
+            if mask_id not in selected_ids:
+                updated.append(mask)
+                continue
+            source = (
+                deepcopy(source_by_id.get(mask_id))
+                if source_by_id is not None and mask_id in source_by_id
+                else mask
+            )
+            updated.append(
+                _transform_mask_geometry(
+                    source,
+                    center_x=float(transform_center[0]),
+                    center_y=float(transform_center[1]),
+                    scale_x=float(scale_x),
+                    scale_y=float(scale_y),
+                    degrees=float(degrees),
+                    dx=float(dx),
+                    dy=float(dy),
+                )
+            )
+        self.masks = updated
+        self.schedule_render()
+        return "break"
+
+    def _selection_handles_canvas(self) -> dict[str, tuple[float, float]]:
+        bounds = self._selection_bounds()
+        if bounds is None:
+            return {}
+        x1, y1 = self._image_to_canvas(bounds[0], bounds[1])
+        x2, y2 = self._image_to_canvas(bounds[2], bounds[3])
+        left, right = min(x1, x2), max(x1, x2)
+        top, bottom = min(y1, y2), max(y1, y2)
+        mid_x = (left + right) / 2.0
+        mid_y = (top + bottom) / 2.0
+        return {
+            "nw": (left, top),
+            "n": (mid_x, top),
+            "ne": (right, top),
+            "e": (right, mid_y),
+            "se": (right, bottom),
+            "s": (mid_x, bottom),
+            "sw": (left, bottom),
+            "w": (left, mid_y),
+            "rotate": (mid_x, top - 30.0),
+        }
+
+    def _selection_handle_at(self, cx: float, cy: float) -> str | None:
+        for name, point in self._selection_handles_canvas().items():
+            if math.hypot(float(cx) - point[0], float(cy) - point[1]) <= 9.0:
+                return name
+        return None
+
+    def _begin_selection_handle_drag(self, handle: str, event) -> None:
+        selected_ids = self._selected_ids()
+        bounds = self._selection_bounds(selected_ids)
+        if not selected_ids or bounds is None:
+            return
+        self.drag_target = ("selection_handle", str(handle))
+        self.drag_snapshot_pushed = False
+        self.transform_drag_initial_masks = {
+            str(mask.get("id") or ""): deepcopy(mask)
+            for mask in self.masks
+            if isinstance(mask, dict)
+            and str(mask.get("id") or "") in selected_ids
+        }
+        self.transform_drag_bounds = tuple(float(value) for value in bounds)
+        self.transform_drag_start_canvas = (float(event.x), float(event.y))
+        self.transform_drag_start_image = self._canvas_to_image(event.x, event.y)
+
+    def _drag_selection_handle(self, event) -> None:
+        if (
+            not isinstance(self.drag_target, tuple)
+            or not self.drag_target
+            or self.drag_target[0] != "selection_handle"
+            or self.transform_drag_bounds is None
+        ):
+            return
+        handle = str(self.drag_target[1])
+        if not self.drag_snapshot_pushed:
+            self._push_history()
+            self.drag_snapshot_pushed = True
+
+        left, top, right, bottom = self.transform_drag_bounds
+        width = max(1.0, right - left)
+        height = max(1.0, bottom - top)
+        center = ((left + right) / 2.0, (top + bottom) / 2.0)
+        current = self._canvas_to_image(event.x, event.y)
+
+        if handle == "rotate":
+            center_canvas = self._image_to_canvas(center[0], center[1])
+            start = self.transform_drag_start_canvas or (float(event.x), float(event.y))
+            start_angle = math.atan2(start[1] - center_canvas[1], start[0] - center_canvas[0])
+            current_angle = math.atan2(
+                float(event.y) - center_canvas[1],
+                float(event.x) - center_canvas[0],
+            )
+            degrees = math.degrees(current_angle - start_angle)
+            self.transform_selected(
+                degrees=degrees,
+                push=False,
+                center=center,
+                source_masks=self.transform_drag_initial_masks,
+            )
+            return
+
+        if handle in {"w", "nw", "sw"}:
+            anchor_x = right
+            original = max(1.0, right - left)
+            scale_x = max(0.05, (anchor_x - float(current[0])) / original)
+        elif handle in {"e", "ne", "se"}:
+            anchor_x = left
+            original = max(1.0, right - left)
+            scale_x = max(0.05, (float(current[0]) - anchor_x) / original)
+        else:
+            anchor_x = center[0]
+            scale_x = 1.0
+
+        if handle in {"n", "nw", "ne"}:
+            anchor_y = bottom
+            original = max(1.0, bottom - top)
+            scale_y = max(0.05, (anchor_y - float(current[1])) / original)
+        elif handle in {"s", "sw", "se"}:
+            anchor_y = top
+            original = max(1.0, bottom - top)
+            scale_y = max(0.05, (float(current[1]) - anchor_y) / original)
+        else:
+            anchor_y = center[1]
+            scale_y = 1.0
+
+        if handle in {"nw", "ne", "se", "sw"}:
+            factor = max(0.05, min(scale_x, scale_y))
+            scale_x = factor
+            scale_y = factor
+            anchor = (
+                right if handle in {"nw", "sw"} else left,
+                bottom if handle in {"nw", "ne"} else top,
+            )
+        elif handle in {"w", "e"}:
+            anchor = (anchor_x, center[1])
+        else:
+            anchor = (center[0], anchor_y)
+
+        self.transform_selected(
+            scale_x=scale_x,
+            scale_y=scale_y,
+            push=False,
+            center=anchor,
+            source_masks=self.transform_drag_initial_masks,
+        )
 
     def _nearest_mask_body_canvas(self, cx: float, cy: float) -> str | None:
         """Aceita clique ligeiramente fora da máscara para facilitar segmentos finos."""
@@ -583,14 +1031,14 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.masks.append(mask)
         mask_id = str(mask.get("id") or "")
         self.selected = ("mask", mask_id)
+        self.selected_mask_ids = {mask_id}
         self.mask_draw_points = []
         self.mask_draw_current = None
-        self.mask_draw_mode = None
         self._update_mask_draw_buttons()
         self.status.configure(
             text=(
-                f"{mask_id} fechada e selecionada • arraste para mover somente ela • "
-                "Delete exclui • setas fazem ajuste fino."
+                f"{mask_id} fechada • + POR PONTOS continua ativo para a próxima máscara • "
+                "use SELECIONAR quando quiser editar."
             )
         )
         self.schedule_render()
@@ -616,12 +1064,21 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             self.schedule_render()
             return
 
-        # Modo selecionar: máscara tem prioridade e clique vazio nunca move tudo.
+        # Modo selecionar: handles > máscara > placa. Clique vazio nunca move tudo.
         self.canvas.focus_set()
         image_pos = self._canvas_to_image(event.x, event.y)
+        ctrl = bool(int(getattr(event, "state", 0) or 0) & 0x0004)
+
+        handle = self._selection_handle_at(float(event.x), float(event.y))
+        if handle is not None and self._selected_ids():
+            self._begin_selection_handle_drag(handle, event)
+            self.drag_last_image = image_pos
+            self.schedule_render()
+            return
 
         mask_vertex = self._nearest_mask_vertex(float(event.x), float(event.y))
-        if mask_vertex is not None:
+        if mask_vertex is not None and len(self._selected_ids()) <= 1:
+            self.selected_mask_ids = {str(mask_vertex[0])}
             self.selected = ("mask_vertex", mask_vertex[0], mask_vertex[1])
             self.drag_target = self.selected
         else:
@@ -630,18 +1087,36 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
                 float(event.y),
             )
             if mask_id:
-                self.selected = ("mask", mask_id)
-                self.drag_target = self.selected
+                if ctrl:
+                    if mask_id in self.selected_mask_ids:
+                        self.selected_mask_ids.discard(mask_id)
+                        self.selected = (
+                            ("mask", sorted(self.selected_mask_ids)[0])
+                            if self.selected_mask_ids
+                            else None
+                        )
+                        self.drag_target = None
+                    else:
+                        self.selected_mask_ids.add(mask_id)
+                        self.selected = ("mask", mask_id)
+                        self.drag_target = None
+                else:
+                    if mask_id not in self.selected_mask_ids:
+                        self.selected_mask_ids = {mask_id}
+                    self.selected = ("mask", mask_id)
+                    self.drag_target = ("mask_group", mask_id)
             else:
                 board_index = self._nearest_board_vertex(
                     float(event.x),
                     float(event.y),
                 )
                 if board_index is not None:
+                    self.selected_mask_ids.clear()
                     self.selected = ("board_vertex", board_index)
                     self.drag_target = self.selected
                 else:
                     self.selected = None
+                    self.selected_mask_ids.clear()
                     self.drag_target = None
 
         self.drag_last_image = image_pos
@@ -649,6 +1124,32 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         self.schedule_render()
 
     def _drag(self, event) -> None:
+        if self.allow_mask_creation and self.mask_draw_mode is None:
+            if (
+                isinstance(self.drag_target, tuple)
+                and self.drag_target
+                and self.drag_target[0] == "selection_handle"
+            ):
+                self._drag_selection_handle(event)
+                return
+            if (
+                isinstance(self.drag_target, tuple)
+                and self.drag_target
+                and self.drag_target[0] == "mask_group"
+            ):
+                current = self._canvas_to_image(event.x, event.y)
+                previous = self.drag_last_image or current
+                dx = float(current[0] - previous[0])
+                dy = float(current[1] - previous[1])
+                if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+                    return
+                if not self.drag_snapshot_pushed:
+                    self._push_history()
+                    self.drag_snapshot_pushed = True
+                self.transform_selected(dx=dx, dy=dy, push=False)
+                self.drag_last_image = current
+                return
+            return super()._drag(event)
         if not self.allow_mask_creation or self.mask_draw_mode is None:
             return super()._drag(event)
         if self.mask_draw_mode in {"segment", "circle"} and self.mask_draw_start is not None:
@@ -656,6 +1157,12 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             self.schedule_render()
 
     def _release(self, event) -> None:
+        if self.allow_mask_creation and self.mask_draw_mode is None:
+            self.transform_drag_initial_masks = {}
+            self.transform_drag_bounds = None
+            self.transform_drag_start_canvas = None
+            self.transform_drag_start_image = None
+            return super()._release(event)
         if not self.allow_mask_creation or self.mask_draw_mode is None:
             return super()._release(event)
         if self.mask_draw_mode not in {"segment", "circle"} or self.mask_draw_start is None:
@@ -686,23 +1193,14 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             self.masks.append(mask)
             mask_id = str(mask.get("id") or "")
             self.selected = ("mask", mask_id)
-            keep_drawing = bool(int(getattr(event, "state", 0) or 0) & 0x0001)
-            if not keep_drawing:
-                self.mask_draw_mode = None
-                self._update_mask_draw_buttons()
-                self.status.configure(
-                    text=(
-                        f"{mask_id} criada e selecionada • arraste para mover somente ela • "
-                        "setas = 1 px • Shift+setas = 5 px."
-                    )
+            self.selected_mask_ids = {mask_id}
+            self._update_mask_draw_buttons()
+            self.status.configure(
+                text=(
+                    f"{mask_id} criada • ferramenta {self.mask_draw_mode.upper()} continua ativa • "
+                    "crie outra ou use SELECIONAR para editar."
                 )
-            else:
-                self.status.configure(
-                    text=(
-                        f"{mask_id} criada • Shift mantém {self.mask_draw_mode.upper()} ativo "
-                        "para criar outra máscara."
-                    )
-                )
+            )
         self.mask_draw_start = None
         self.mask_draw_current = None
         self.schedule_render()
@@ -726,8 +1224,8 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             if mask_id and self.drag_target is None:
                 self.status.configure(
                     text=(
-                        f"{mask_id} • arraste para mover somente esta máscara • "
-                        "Delete exclui • setas fazem ajuste fino."
+                        f"{mask_id} • arraste para mover • Ctrl+clique adiciona/remove da seleção • "
+                        "alças redimensionam/esticam/rotacionam."
                     )
                 )
             return
@@ -803,12 +1301,19 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         return "break"
 
     def _keyboard_move(self, dx: float, dy: float) -> str:
-        if isinstance(self.selected, tuple) and self.selected:
+        selected_ids = self._selected_ids()
+        if selected_ids:
+            return self.transform_selected(dx=dx, dy=dy, push=True)
+        if (
+            isinstance(self.selected, tuple)
+            and self.selected
+            and self.selected[0] == "board_vertex"
+        ):
             return super()._keyboard_move(dx, dy)
         self.status.configure(
             text=(
                 "Nenhuma máscara/ponto selecionado • as setas não movem o conjunto. "
-                "Selecione uma máscara ou use os controles globais explicitamente."
+                "Selecione máscaras ou use os controles GLOBAL."
             )
         )
         return "break"
@@ -834,6 +1339,8 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             self.status.configure(text=self._mask_draw_status_text())
             self.schedule_render()
             return "break"
+        if self.allow_mask_creation and self._selected_ids():
+            return self.clear_mask_selection(event)
         return super()._escape(event)
 
     @staticmethod
@@ -865,52 +1372,112 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
         )
 
     def _draw_selected_mask_outline(self) -> None:
-        mask_id = self._selected_mask_id()
-        mask = self._mask_by_id(mask_id) if mask_id else None
-        if not isinstance(mask, dict):
-            return
-        kind = str(mask.get("type") or "").lower()
-        if kind == "circle":
-            try:
-                cx, cy = self._image_to_canvas(
-                    float(mask.get("cx", 0)),
-                    float(mask.get("cy", 0)),
-                )
-                radius = (
-                    max(1.0, float(mask.get("radius", 1)))
-                    * max(1e-6, float(self._display_scale))
-                )
-            except (TypeError, ValueError):
-                return
-            self.canvas.create_oval(
-                cx - radius,
-                cy - radius,
-                cx + radius,
-                cy + radius,
-                outline="#FBBF24",
-                width=3,
-                tags=("f3_selected_mask",),
-            )
+        selected_ids = self._selected_ids()
+        if not selected_ids:
             return
 
-        coords = []
-        points = mask.get("points", [])
-        for point in points if isinstance(points, (list, tuple)) else ():
-            if not isinstance(point, (list, tuple)) or len(point) < 2:
+        for mask in self.masks:
+            if not isinstance(mask, dict):
                 continue
-            try:
-                x, y = self._image_to_canvas(float(point[0]), float(point[1]))
-            except (TypeError, ValueError):
+            mask_id = str(mask.get("id") or "")
+            if mask_id not in selected_ids:
                 continue
-            coords.extend((x, y))
-        if len(coords) >= 6:
-            self.canvas.create_polygon(
-                *coords,
-                fill="",
-                outline="#FBBF24",
-                width=3,
-                tags=("f3_selected_mask",),
+            kind = str(mask.get("type") or "").lower()
+            if kind == "circle":
+                try:
+                    cx, cy = self._image_to_canvas(
+                        float(mask.get("cx", 0)),
+                        float(mask.get("cy", 0)),
+                    )
+                    radius = (
+                        max(1.0, float(mask.get("radius", 1)))
+                        * max(1e-6, float(self._display_scale))
+                    )
+                except (TypeError, ValueError):
+                    continue
+                self.canvas.create_oval(
+                    cx-radius,
+                    cy-radius,
+                    cx+radius,
+                    cy+radius,
+                    outline="#FBBF24",
+                    width=3,
+                    tags=("f3_selected_mask",),
+                )
+            else:
+                coords = []
+                points = mask.get("points", [])
+                for point in points if isinstance(points, (list, tuple)) else ():
+                    if not isinstance(point, (list, tuple)) or len(point) < 2:
+                        continue
+                    try:
+                        x, y = self._image_to_canvas(float(point[0]), float(point[1]))
+                    except (TypeError, ValueError):
+                        continue
+                    coords.extend((x, y))
+                if len(coords) >= 6:
+                    self.canvas.create_polygon(
+                        *coords,
+                        fill="",
+                        outline="#FBBF24",
+                        width=3,
+                        tags=("f3_selected_mask",),
+                    )
+
+        bounds = self._selection_bounds(selected_ids)
+        handles = self._selection_handles_canvas()
+        if bounds is None or not handles:
+            return
+        x1, y1 = self._image_to_canvas(bounds[0], bounds[1])
+        x2, y2 = self._image_to_canvas(bounds[2], bounds[3])
+        left, right = min(x1, x2), max(x1, x2)
+        top, bottom = min(y1, y2), max(y1, y2)
+        self.canvas.create_rectangle(
+            left,
+            top,
+            right,
+            bottom,
+            outline="#38BDF8",
+            width=2,
+            dash=(6, 4),
+            tags=("f3_selection_box",),
+        )
+        rotate = handles.get("rotate")
+        north = handles.get("n")
+        if rotate is not None and north is not None:
+            self.canvas.create_line(
+                north[0],
+                north[1],
+                rotate[0],
+                rotate[1],
+                fill="#38BDF8",
+                width=2,
+                tags=("f3_selection_box",),
             )
+
+        for name, (x, y) in handles.items():
+            if name == "rotate":
+                self.canvas.create_oval(
+                    x-6,
+                    y-6,
+                    x+6,
+                    y+6,
+                    fill="#A78BFA",
+                    outline="#FFFFFF",
+                    width=2,
+                    tags=("f3_selection_handle",),
+                )
+            else:
+                self.canvas.create_rectangle(
+                    x-5,
+                    y-5,
+                    x+5,
+                    y+5,
+                    fill="#38BDF8",
+                    outline="#FFFFFF",
+                    width=1,
+                    tags=("f3_selection_handle",),
+                )
 
     def _draw_mask_numbers(self) -> None:
         """Desenha a numeração em cima das máscaras existentes e recém-criadas."""
@@ -919,7 +1486,7 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
             if center is None:
                 continue
             mask_id = str(mask.get("id") or "")
-            selected = mask_id == self._selected_mask_id()
+            selected = mask_id in self._selected_ids()
             x, y = self._image_to_canvas(center[0], center[1])
             label = _mask_display_number(mask, index)
             half_width = max(9, 5 + 4 * len(label))
