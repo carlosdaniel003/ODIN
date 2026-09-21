@@ -224,6 +224,15 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                 "approved": True,
                 "matched_mask_count": 1,
                 "active_mask_count": 1,
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_001",
+                        "expected": "on",
+                        "classified": "on",
+                        "matched": True,
+                        "confidence": 0.99,
+                    }
+                ],
             },
         )
         app._display_auto_signature = ("DISPLAY A", "CHECK_001")
