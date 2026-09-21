@@ -41,6 +41,7 @@ class DisplayProjectConfigWindow:
         self.on_close = on_close
         self.mask_editor: DisplayMaskEditorWindow | None = None
         self.mask_geometry_editor = None
+        self.mask_capture_window = None
         self._mask_preview_photo = None
         self.check_manager: DisplayCheckManagerWindow | None = None
         self._project_scroll_canvas: tk.Canvas | None = None
@@ -595,36 +596,44 @@ class DisplayProjectConfigWindow:
     def capture_masks_reference_photo(self) -> None:
         name = self._selected_name()
         if not name:
+            messagebox.showwarning(
+                "Sem Projeto Display",
+                "Selecione um Projeto Display antes de capturar a foto.",
+                parent=self.window,
+            )
             return
         resolution = self._read_resolution_fields()
         if resolution is None:
             return
-        try:
-            frame = self.frame_provider()
-        except Exception:
-            frame = None
-        if frame is None or getattr(frame, "size", 0) == 0:
-            messagebox.showwarning(
-                "Câmera indisponível",
-                "Não há um frame válido da câmera para capturar.",
-                parent=self.window,
-            )
-            return
-        metadata = self._mask_reference_store().save_frame(
-            name,
-            frame,
-            resolution,
+
+        existing = getattr(self, "mask_capture_window", None)
+        if existing is not None:
+            try:
+                if bool(existing.window.winfo_exists()):
+                    existing.window.lift()
+                    existing.window.focus_force()
+                    return
+            except Exception:
+                pass
+
+        from src.platform.display_f3_mask_editor_reference import (
+            F3MaskReferenceCaptureWindow,
         )
-        if metadata is None:
-            messagebox.showerror(
-                "Falha ao capturar",
-                "Não foi possível salvar a foto de referência das máscaras.",
-                parent=self.window,
+
+        def captured(_metadata=None) -> None:
+            self.mask_capture_window = None
+            self._render_mask_reference_preview()
+            self.status.configure(
+                text=f"Foto estática das máscaras capturada para {name}."
             )
-            return
-        self._render_mask_reference_preview()
-        self.status.configure(
-            text=f"Foto estática das máscaras capturada para {name}."
+
+        self.mask_capture_window = F3MaskReferenceCaptureWindow(
+            parent=self.window,
+            frame_provider=self.frame_provider,
+            store=self._mask_reference_store(),
+            project_name=name,
+            master_resolution=resolution,
+            on_captured=captured,
         )
 
     def remove_masks_reference_photo(self) -> None:
@@ -1012,6 +1021,13 @@ class DisplayProjectConfigWindow:
             except Exception:
                 pass
         self.mask_geometry_editor = None
+        capture_window = getattr(self, "mask_capture_window", None)
+        if capture_window is not None:
+            try:
+                capture_window.close()
+            except Exception:
+                pass
+        self.mask_capture_window = None
         try:
             self.window.destroy()
         except Exception:
