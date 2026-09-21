@@ -274,6 +274,25 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
             self.assertEqual((480, 640), loaded.shape[:2])
             self.assertGreater(int(loaded[120, 150].mean()), 200)
 
+    def test_mask_preview_uses_same_visual_rotation_as_geometry_editor(self):
+        config_source = Path(project_config.__file__).read_text(encoding="utf-8")
+        self.assertIn(
+            "obter_rotacao_visual_do_frame_provider",
+            config_source,
+        )
+        self.assertIn(
+            "preparar_check_visual_display(",
+            config_source,
+        )
+        self.assertIn(
+            "preparar_pontos_visuais_display(",
+            config_source,
+        )
+        self.assertIn(
+            'f"VISUAL {visual_rotation}°"',
+            config_source,
+        )
+
     def test_mask_settings_show_preview_capture_remove_and_shared_draw_editor(self):
         config_source = Path(project_config.__file__).read_text(encoding="utf-8")
         self.assertIn("mask_reference_preview", config_source)
