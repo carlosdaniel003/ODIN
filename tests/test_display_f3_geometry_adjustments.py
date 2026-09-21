@@ -340,6 +340,17 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         self.assertIn("self.store.save_frame", capture_source)
         self.assertIn("self._render_latest()", capture_source)
 
+    def test_rotation_slot_preview_uses_thin_mask_preview_style(self):
+        source = inspect.getsource(tracking_ui._build_tracking_config_class)
+        self.assertIn("F3_ORIENTATION_PREVIEW_STYLE_VERSION", source)
+        self.assertIn("alpha=0.74", source)
+        self.assertIn("board_thickness=2", source)
+        self.assertIn("mask_thickness=1", source)
+
+        renderer = inspect.getsource(tracking.draw_reference_geometry)
+        self.assertIn("board_thickness", renderer)
+        self.assertIn("mask_thickness", renderer)
+
     def test_orientation_preview_draws_after_thumbnail_resize(self):
         source = inspect.getsource(tracking_ui._build_tracking_config_class)
         resize_index = source.find("thumbnail = cv2.resize")
