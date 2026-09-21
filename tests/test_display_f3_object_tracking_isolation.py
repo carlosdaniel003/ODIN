@@ -316,6 +316,38 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 (got_points, expected_points),
             )
 
+    def test_tracker_has_temporal_continuity_and_lock_hysteresis(self):
+        source = inspect.getsource(tracking.F3DisplayObjectTracker)
+        self.assertIn("_temporal_candidate", source)
+        self.assertIn("cv2.calcOpticalFlowPyrLK", source)
+        self.assertIn("_held_lock_result", source)
+        self.assertIn("F3_TRACKING_LOCK_GRACE_FRAMES", source)
+        self.assertIn("evidence_current=False", source)
+        self.assertIn("locked_temporal", source)
+
+    def test_multiview_bank_includes_mask_board_off_checks_and_rotations(self):
+        source = inspect.getsource(
+            tracking.F3DisplayObjectTracker._calibrated_reference_specs
+        )
+        self.assertIn('"mask_reference"', source)
+        self.assertIn('"board_off"', source)
+        self.assertIn('f"check:{check_id}"', source)
+
+        configure_source = inspect.getsource(
+            tracking.F3DisplayObjectTracker.configure
+        )
+        self.assertIn("for slot in F3_ORIENTATION_SLOTS", configure_source)
+        self.assertIn("reference_geometry(project, self.store, slot, entry)", configure_source)
+
+    def test_held_lock_is_visual_only_and_blocks_automatic_decision(self):
+        runtime_source = inspect.getsource(
+            tracking.instalar_runtime_rastreamento_objetos_display_f3
+        )
+        self.assertIn('status.get("evidence_current"', runtime_source)
+        self.assertIn("LOCK MANTIDO", runtime_source)
+        gate_source = inspect.getsource(tracking._tracking_h1_power_gate)
+        self.assertIn("evidence_current", gate_source)
+
     def test_runtime_uses_all_calibrated_f3_sources_and_live_geometry(self):
         source = inspect.getsource(tracking.F3DisplayObjectTracker._calibrated_reference_specs)
         self.assertIn('"mask_reference"', source)

@@ -109,6 +109,22 @@ F3_TRACKING_TEMPLATE_MIN_SCORE = 0.42
 F3_TRACKING_TEMPLATE_MIN_SIZE = 28
 F3_TRACKING_TEMPLATE_PADDING_FRACTION = 0.035
 
+# Continuidade temporal: a placa pode se mover, mas câmera e suporte são fixos.
+# ORB/multivista continua sendo a autoridade absoluta; fluxo óptico cobre os
+# intervalos em que uma referência perde contraste por poucos frames.
+F3_TRACKING_TEMPORAL_MAX_CORNERS = 320
+F3_TRACKING_TEMPORAL_MIN_POINTS = 12
+F3_TRACKING_TEMPORAL_MIN_INLIERS = 8
+F3_TRACKING_TEMPORAL_MIN_INLIER_RATIO = 0.46
+F3_TRACKING_TEMPORAL_MAX_ROTATION_DEG = 24.0
+F3_TRACKING_TEMPORAL_MIN_SCALE = 0.82
+F3_TRACKING_TEMPORAL_MAX_SCALE = 1.22
+F3_TRACKING_TEMPORAL_MAX_TRANSLATION_FRACTION = 0.22
+F3_TRACKING_LOCK_GRACE_FRAMES = 5
+F3_TRACKING_LOCK_GRACE_S = 0.72
+F3_TRACKING_REFERENCE_STICK_BONUS = 2.5
+F3_TRACKING_CONTINUITY_BONUS = 5.0
+
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
 F3_TRACKING_SELECTED_BGR = (94, 234, 212)
@@ -1082,6 +1098,7 @@ class F3TrackingResult:
     reason: str = ""
     current_to_canonical: object | None = None
     source_type: str = ""
+    evidence_current: bool = False
 
 
 class F3DisplayObjectTracker:
@@ -1108,6 +1125,11 @@ class F3DisplayObjectTracker:
         self.last_result: F3TrackingResult | None = None
         self.last_frame_id = None
         self._last_reference = ""
+        self.canonical_board: list[list[float]] = []
+        self.canonical_masks: list[dict] = []
+        self.last_gray = None
+        self.last_verified_s = 0.0
+        self.consecutive_misses = 0
 
     @staticmethod
     def _gray(image):
@@ -1441,6 +1463,286 @@ class F3DisplayObjectTracker:
             "fallback": "edge_template",
         }
 
+    def _temporal_tracking_mask(self):
+        """Máscara da placa no frame anterior, excluindo as ROIs do display."""
+        if self.last_matrix is None or not self.canonical_board:
+            return None
+        try:
+            canonical_to_previous = cv2.invertAffineTransform(
+                np.asarray(self.last_matrix, dtype=np.float32).reshape(2, 3)
+            )
+        except Exception:
+            return None
+
+        board_previous = transform_points(
+            self.canonical_board,
+            canonical_to_previous,
+        )
+        masks_previous = []
+        for mask in self.canonical_masks:
+            transformed = transform_mask(mask, canonical_to_previous)
+            if transformed is not None:
+                masks_previous.append(transformed)
+        return build_tracking_mask(
+            self.width,
+            self.height,
+            board_previous,
+            masks_previous,
+        )
+
+    @staticmethod
+    def _angle_delta_deg(first: float, second: float) -> float:
+        value = (float(first) - float(second) + 180.0) % 360.0 - 180.0
+        return abs(value)
+
+    def _matrix_continuity(self, matrix) -> tuple[bool, float]:
+        """Compara a pose nova com a última sem exigir a mesma referência."""
+        if self.last_matrix is None or matrix is None or not self.canonical_board:
+            return False, 0.0
+        try:
+            previous_inverse = cv2.invertAffineTransform(
+                np.asarray(self.last_matrix, dtype=np.float32).reshape(2, 3)
+            )
+            current_inverse = cv2.invertAffineTransform(
+                np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+            )
+            board = np.asarray(self.canonical_board, dtype=np.float32).reshape(-1, 2)
+            center = np.mean(board, axis=0).reshape(1, 1, 2)
+            previous_center = cv2.transform(
+                center,
+                previous_inverse,
+            ).reshape(2)
+            current_center = cv2.transform(
+                center,
+                current_inverse,
+            ).reshape(2)
+            distance = float(np.linalg.norm(current_center - previous_center))
+        except Exception:
+            return False, 0.0
+
+        diagonal = max(
+            1.0,
+            math.hypot(float(self.width), float(self.height)),
+        )
+        max_distance = diagonal * 0.20
+        previous_rotation = affine_rotation_deg(self.last_matrix)
+        current_rotation = affine_rotation_deg(matrix)
+        rotation_delta = self._angle_delta_deg(
+            current_rotation,
+            previous_rotation,
+        )
+        previous_scale = max(1e-6, affine_scale(self.last_matrix))
+        current_scale = max(1e-6, affine_scale(matrix))
+        scale_ratio = current_scale / previous_scale
+
+        compatible = bool(
+            distance <= max_distance
+            and rotation_delta <= 32.0
+            and 0.72 <= scale_ratio <= 1.38
+        )
+        closeness = max(0.0, 1.0 - distance / max_distance)
+        return compatible, closeness
+
+    def _candidate_rank(self, candidate: dict) -> float:
+        rank = float(candidate.get("score", 0.0) or 0.0)
+        if str(candidate.get("reference") or "") == self._last_reference:
+            rank += F3_TRACKING_REFERENCE_STICK_BONUS
+        compatible, closeness = self._matrix_continuity(
+            candidate.get("matrix")
+        )
+        if compatible:
+            rank += F3_TRACKING_CONTINUITY_BONUS * closeness
+        return rank
+
+    def _temporal_candidate(self, gray):
+        """Segue a placa entre frames usando LK apenas dentro do contorno anterior.
+
+        Isso não substitui as referências. Serve para atravessar pequenas perdas
+        de ORB causadas por blur, reflexo ou mudança de LEDs sem piscar LOCK/SEARCH.
+        """
+        if (
+            gray is None
+            or self.last_gray is None
+            or self.last_matrix is None
+            or self.last_gray.shape != gray.shape
+        ):
+            return None
+
+        tracking_mask = self._temporal_tracking_mask()
+        if tracking_mask is None:
+            return None
+
+        try:
+            previous_points = cv2.goodFeaturesToTrack(
+                self.last_gray,
+                maxCorners=F3_TRACKING_TEMPORAL_MAX_CORNERS,
+                qualityLevel=0.01,
+                minDistance=6,
+                mask=tracking_mask,
+                blockSize=7,
+            )
+        except Exception:
+            return None
+        if (
+            previous_points is None
+            or len(previous_points) < F3_TRACKING_TEMPORAL_MIN_POINTS
+        ):
+            return None
+
+        try:
+            current_points, forward_status, _forward_error = cv2.calcOpticalFlowPyrLK(
+                self.last_gray,
+                gray,
+                previous_points,
+                None,
+                winSize=(25, 25),
+                maxLevel=3,
+                criteria=(
+                    cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                    30,
+                    0.01,
+                ),
+            )
+            backward_points, backward_status, _backward_error = cv2.calcOpticalFlowPyrLK(
+                gray,
+                self.last_gray,
+                current_points,
+                None,
+                winSize=(25, 25),
+                maxLevel=3,
+                criteria=(
+                    cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                    30,
+                    0.01,
+                ),
+            )
+        except Exception:
+            return None
+        if current_points is None or backward_points is None:
+            return None
+
+        previous_flat = previous_points.reshape(-1, 2)
+        current_flat = current_points.reshape(-1, 2)
+        backward_flat = backward_points.reshape(-1, 2)
+        forward_ok = forward_status.reshape(-1).astype(bool)
+        backward_ok = backward_status.reshape(-1).astype(bool)
+        fb_error = np.linalg.norm(previous_flat - backward_flat, axis=1)
+        finite = (
+            np.isfinite(previous_flat).all(axis=1)
+            & np.isfinite(current_flat).all(axis=1)
+            & np.isfinite(backward_flat).all(axis=1)
+        )
+        valid = forward_ok & backward_ok & finite & (fb_error <= 1.8)
+        previous_good = previous_flat[valid]
+        current_good = current_flat[valid]
+        if len(previous_good) < F3_TRACKING_TEMPORAL_MIN_POINTS:
+            return None
+
+        try:
+            # CURRENT -> PREVIOUS. Depois compomos PREVIOUS -> CANÔNICO.
+            motion, inlier_mask = cv2.estimateAffinePartial2D(
+                current_good.reshape(-1, 1, 2),
+                previous_good.reshape(-1, 1, 2),
+                method=cv2.RANSAC,
+                ransacReprojThreshold=3.0,
+                maxIters=1600,
+                confidence=0.995,
+                refineIters=10,
+            )
+        except Exception:
+            return None
+        if motion is None or inlier_mask is None:
+            return None
+
+        inliers = int(np.count_nonzero(inlier_mask))
+        ratio = float(inliers / max(1, len(previous_good)))
+        if (
+            inliers < F3_TRACKING_TEMPORAL_MIN_INLIERS
+            or ratio < F3_TRACKING_TEMPORAL_MIN_INLIER_RATIO
+        ):
+            return None
+
+        motion_scale = affine_scale(motion)
+        motion_rotation = abs(affine_rotation_deg(motion))
+        motion_translation = math.hypot(
+            float(motion[0, 2]),
+            float(motion[1, 2]),
+        )
+        max_translation = (
+            max(float(self.width), float(self.height))
+            * F3_TRACKING_TEMPORAL_MAX_TRANSLATION_FRACTION
+        )
+        if not (
+            F3_TRACKING_TEMPORAL_MIN_SCALE
+            <= motion_scale
+            <= F3_TRACKING_TEMPORAL_MAX_SCALE
+        ):
+            return None
+        if motion_rotation > F3_TRACKING_TEMPORAL_MAX_ROTATION_DEG:
+            return None
+        if motion_translation > max_translation:
+            return None
+
+        matrix = compose_affine(self.last_matrix, motion)
+        if matrix is None:
+            return None
+        final_scale = affine_scale(matrix)
+        if not (F3_TRACKING_MIN_SCALE <= final_scale <= F3_TRACKING_MAX_SCALE):
+            return None
+
+        source_type = (
+            str(self.last_result.source_type or "temporal")
+            if self.last_result is not None
+            else "temporal"
+        )
+        return {
+            "reference": self._last_reference,
+            "matrix": matrix.astype(np.float32),
+            "matches": int(len(previous_good)),
+            "inliers": inliers,
+            "ratio": ratio,
+            "rotation_deg": affine_rotation_deg(matrix),
+            "scale": final_scale,
+            "score": 4.0 + ratio * 10.0 + min(12.0, inliers * 0.25),
+            "source_type": source_type,
+            "fallback": "temporal_flow",
+        }
+
+    def _held_lock_result(self, frame, now: float):
+        """Mantém a última pose por poucos ciclos, apenas para estabilidade visual."""
+        if (
+            self.last_matrix is None
+            or self.last_result is None
+            or not self.last_result.locked
+        ):
+            return None
+        if self.consecutive_misses > F3_TRACKING_LOCK_GRACE_FRAMES:
+            return None
+        if now - float(self.last_verified_s or 0.0) > F3_TRACKING_LOCK_GRACE_S:
+            return None
+
+        aligned = cv2.warpAffine(
+            frame,
+            self.last_matrix,
+            (self.width, self.height),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT101,
+        )
+        return F3TrackingResult(
+            True,
+            aligned,
+            reference=str(self.last_result.reference or self._last_reference),
+            matches=int(self.last_result.matches),
+            inliers=int(self.last_result.inliers),
+            inlier_ratio=float(self.last_result.inlier_ratio),
+            rotation_deg=float(self.last_result.rotation_deg),
+            scale=float(self.last_result.scale),
+            reason="lock_held",
+            current_to_canonical=self.last_matrix.copy(),
+            source_type=str(self.last_result.source_type or ""),
+            evidence_current=False,
+        )
+
     def configure(self, project_name: str | None = None) -> bool:
         name = normalizar_nome_projeto_display(
             project_name or self.repository.obter_projeto_ativo()
@@ -1477,6 +1779,12 @@ class F3DisplayObjectTracker:
         self.signature = signature
         self.width = width
         self.height = height
+        self.canonical_board = deepcopy(board)
+        self.canonical_masks = [
+            converter_mascara_legada_para_editor(mask)
+            for mask in normalizar_mascaras_display(project.get("masks", []))
+            if isinstance(mask, dict)
+        ]
 
         refs: dict[str, dict] = {}
 
@@ -1663,6 +1971,7 @@ class F3DisplayObjectTracker:
                 reason="cached_transform",
                 current_to_canonical=self.last_matrix.copy(),
                 source_type=self.last_result.source_type,
+                evidence_current=True,
             )
             self.last_result = result
             self.last_frame_id = frame_id
@@ -1695,6 +2004,13 @@ class F3DisplayObjectTracker:
                 if candidate is not None:
                     candidates.append(candidate)
 
+        # Quando nenhuma referência absoluta vence, tente continuidade óptica
+        # entre o último frame confirmado e o atual, restrita ao contorno da placa.
+        if not candidates:
+            temporal = self._temporal_candidate(gray)
+            if temporal is not None:
+                candidates.append(temporal)
+
         # Câmera e suporte são fixos: se o PCB tiver poucos corners ORB, use as
         # bordas do contorno desenhado como fallback de translação. Os slots
         # 0/90/180/270 e CHECKS fornecem as orientações reais disponíveis.
@@ -1709,7 +2025,18 @@ class F3DisplayObjectTracker:
                     candidates.append(candidate)
 
         if not candidates:
+            self.consecutive_misses += 1
+            held = self._held_lock_result(frame, now)
+            if held is not None:
+                self.last_result = held
+                self.last_frame_id = frame_id
+                self.last_compute_s = now
+                return held
+
             self.last_matrix = None
+            self.last_gray = None
+            self.last_verified_s = 0.0
+            self.consecutive_misses = 0
             self._last_reference = ""
             result = F3TrackingResult(
                 False,
@@ -1719,16 +2046,22 @@ class F3DisplayObjectTracker:
                     if not orb_available
                     else "object_not_locked"
                 ),
+                evidence_current=False,
             )
             self.last_result = result
             self.last_frame_id = frame_id
             self.last_compute_s = now
             return result
 
-        best = max(candidates, key=lambda item: float(item["score"]))
+        best = max(candidates, key=self._candidate_rank)
         matrix = best["matrix"]
-        if self.last_matrix is not None and self._last_reference == best["reference"]:
-            alpha = 0.58
+        continuous, _closeness = self._matrix_continuity(matrix)
+        if self.last_matrix is not None and continuous:
+            alpha = (
+                0.72
+                if str(best.get("fallback") or "") == "temporal_flow"
+                else 0.54
+            )
             matrix = (
                 (1.0 - alpha) * self.last_matrix.astype(np.float32)
                 + alpha * matrix.astype(np.float32)
@@ -1738,6 +2071,9 @@ class F3DisplayObjectTracker:
         self._last_reference = str(best["reference"])
         self.last_compute_s = now
         self.last_frame_id = frame_id
+        self.last_gray = gray.copy()
+        self.last_verified_s = now
+        self.consecutive_misses = 0
 
         aligned = cv2.warpAffine(
             frame,
@@ -1758,10 +2094,15 @@ class F3DisplayObjectTracker:
             reason=(
                 "locked_template"
                 if str(best.get("fallback") or "") == "edge_template"
-                else "locked"
+                else (
+                    "locked_temporal"
+                    if str(best.get("fallback") or "") == "temporal_flow"
+                    else "locked"
+                )
             ),
             current_to_canonical=matrix.copy(),
             source_type=str(best.get("source_type") or ""),
+            evidence_current=True,
         )
         self.last_result = result
         return result
@@ -2029,6 +2370,8 @@ def align_frame_for_f3(app, frame):
         "scale": round(float(result.scale), 5),
         "source_type": str(result.source_type or ""),
         "reason": result.reason,
+        "evidence_current": bool(result.evidence_current),
+        "misses": int(getattr(runtime, "consecutive_misses", 0) or 0),
     }
     return (result.frame if result.locked else frame), result
 
@@ -2202,6 +2545,8 @@ def _tracking_h1_power_gate(app) -> tuple[bool, str]:
     status = getattr(app, "_display_f3_object_tracking_last_status", None)
     if not isinstance(status, dict) or not bool(status.get("locked")):
         return False, "rastreamento_sem_lock"
+    if not bool(status.get("evidence_current", False)):
+        return False, "rastreamento_lock_mantido_sem_evidencia_atual"
 
     analysis = getattr(app, "_display_auto_last_analysis", None)
     try:
@@ -2524,11 +2869,18 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 {},
             )
             if locked:
-                legend = (
-                    "LOCK • VERDE ACESO • VERMELHO APAGADO • "
-                    "AMARELO POUCA LUZ / DIVERGÊNCIA"
-                )
-                color = "#E2E8F0"
+                if bool(status.get("evidence_current", False)):
+                    legend = (
+                        "LOCK ESTÁVEL • VERDE ACESO • VERMELHO APAGADO • "
+                        "AMARELO POUCA LUZ / DIVERGÊNCIA"
+                    )
+                    color = "#E2E8F0"
+                else:
+                    legend = (
+                        "LOCK MANTIDO • confirmando novamente a placa • "
+                        "ROIs preservadas"
+                    )
+                    color = "#FDE68A"
             else:
                 reason = str(status.get("reason") or "procurando")
                 legend = f"RASTREAMENTO F3 • PROCURANDO PLACA • {reason}"
@@ -2663,6 +3015,24 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
                     return None
 
                 status = getattr(self, "_display_f3_object_tracking_last_status", {})
+                if (
+                    isinstance(status, dict)
+                    and bool(status.get("locked"))
+                    and not bool(status.get("evidence_current", False))
+                ):
+                    try:
+                        self._display_auto_set_preview_status(
+                            "RASTREAMENTO F3 • LOCK MANTIDO • confirmando evidência óptica",
+                            "#FDE68A",
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        self._reset_display_auto_stability(transition=False)
+                    except Exception:
+                        pass
+                    return None
+
                 if not isinstance(status, dict) or not bool(status.get("locked")):
                     # Depois de OK/NG/SEGREGAR o F3 PRECISA continuar enxergando
                     # o suporte vazio para fazer o handoff físico. Nesse estado,
