@@ -75,6 +75,19 @@ class DisplayF3AutoCheckPolicyTests(unittest.TestCase):
         self.assertTrue(decision["board_powered"])
         self.assertEqual("apagado_com_placa_ligada", decision["reason"])
 
+    def test_blue_parcial_marca_ng_mesmo_se_intermitencia_tolerou_matched(self):
+        decision = decidir_analise_display_f3(
+            _analysis(
+                _result("MASK_001", "on", "on", True),
+                # A camada intermitente antiga tolerava este OFF como matched=True.
+                _result("MASK_027", "on", "off", True),
+            )
+        )
+        self.assertEqual(DISPLAY_AUTO_DECISION_NG, decision["decision"])
+        self.assertTrue(decision["board_powered"])
+        self.assertEqual("apagado_com_placa_ligada", decision["reason"])
+        self.assertEqual("MASK_027", decision["failed_mask_id"])
+
     def test_low_light_on_expected_on_is_confirmed_ng_after_h1(self):
         decision = decidir_analise_display_f3(
             _analysis(_result("A", "on", "low_light", False))

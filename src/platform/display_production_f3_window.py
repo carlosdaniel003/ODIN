@@ -426,6 +426,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         failed: bool = False,
         ready: bool = True,
         intermittent: bool = False,
+        has_any_on: bool = False,
     ) -> str:
         """Estado lógico do visor fixo com cinza enquanto não há leitura."""
         current = str(classified or "").strip().lower()
@@ -443,7 +444,10 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         if bool(failed):
             return "ng"
         if intermittent and target == "on" and current == "off":
-            return "off"
+            # Fase totalmente escura do pisca: ainda não declare NG.
+            # Se qualquer outro segmento já está ON neste mesmo frame, estamos
+            # na fase acesa e este segmento faltante é defeito.
+            return "ng" if bool(has_any_on) else "off"
         if current in {"on", "off"} and current != target:
             return "ng"
         if target == "on" and current == "on":
@@ -625,6 +629,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 mask_id in failed,
                 ready=ready,
                 intermittent=bool(context.get("intermittent", False)),
+                has_any_on=bool(context.get("has_any_on")),
             )
             fill, outline, _number = self._display_readout_color(state)
             points = polygons[segment_name]

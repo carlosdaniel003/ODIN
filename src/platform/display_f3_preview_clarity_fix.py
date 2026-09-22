@@ -98,11 +98,18 @@ def estado_visual_mascara_f3(
         return DISPLAY_CHECK_STATE_ON
 
     if current == DISPLAY_CHECK_STATE_OFF:
-        if target == DISPLAY_CHECK_STATE_ON and intermittent:
+        if (
+            target == DISPLAY_CHECK_STATE_ON
+            and intermittent
+            and not has_any_on
+        ):
+            # BLUE/BT totalmente escuro ainda pode ser apenas a fase OFF do pisca.
             return DISPLAY_CHECK_STATE_OFF
         if not has_any_on:
             return None
         if target == DISPLAY_CHECK_STATE_ON:
+            # Existe outro segmento ON no mesmo frame: a fase acesa foi provada.
+            # O segmento que continuou OFF é divergência/NG.
             return "alert"
         return DISPLAY_CHECK_STATE_OFF
 
@@ -388,13 +395,42 @@ def _failed_mask_ids_from_analysis(
     ):
         return set()
 
-    return {
-        str(item.get("mask_id") or "")
+    results = [
+        item
         for item in (analysis.get("mask_results") or [])
-        if isinstance(item, dict)
-        and str(item.get("mask_id") or "")
-        and item.get("matched") is False
-    }
+        if isinstance(item, dict) and str(item.get("mask_id") or "")
+    ]
+    has_any_on = any(
+        str(item.get("classified") or "").strip().lower()
+        == DISPLAY_CHECK_STATE_ON
+        for item in results
+    )
+
+    failed = set()
+    for item in results:
+        mask_id = str(item.get("mask_id") or "")
+        expected = str(item.get("expected") or "").strip().lower()
+        classified = str(item.get("classified") or "").strip().lower()
+
+        if item.get("matched") is False:
+            failed.add(mask_id)
+            continue
+        if classified == DISPLAY_AUTO_CLASS_LOW_LIGHT:
+            failed.add(mask_id)
+            continue
+        if expected == DISPLAY_CHECK_STATE_OFF and classified == DISPLAY_CHECK_STATE_ON:
+            failed.add(mask_id)
+            continue
+        if (
+            has_any_on
+            and expected == DISPLAY_CHECK_STATE_ON
+            and classified == DISPLAY_CHECK_STATE_OFF
+        ):
+            # Mesmo que uma camada intermitente tenha marcado matched=True,
+            # OFF parcial durante a fase ON é falha visual real.
+            failed.add(mask_id)
+
+    return failed
 
 
 def _mask_snapshot_for_current_check(

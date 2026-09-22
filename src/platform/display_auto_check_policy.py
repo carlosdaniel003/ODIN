@@ -82,7 +82,29 @@ def decidir_analise_display_f3(
         for item in confident_results
     )
 
-    all_matched = all(bool(item.get("matched")) for item in results)
+    # Em CHECK intermitente, camadas ópticas podem tolerar temporariamente
+    # expected=ON/classified=OFF para atravessar a fase totalmente apagada.
+    # Essa tolerância deixa de valer assim que ESTE MESMO frame contém outro
+    # segmento ON: o display está na fase acesa e o segmento faltante é NG.
+    semantic_mismatches = [
+        item
+        for item in confident_results
+        if (
+            str(item.get("expected")) == DISPLAY_CHECK_STATE_OFF
+            and str(item.get("classified")) == DISPLAY_CHECK_STATE_ON
+        )
+        or (
+            bool(board_powered)
+            and str(item.get("expected")) == DISPLAY_CHECK_STATE_ON
+            and str(item.get("classified")) == DISPLAY_CHECK_STATE_OFF
+        )
+        or str(item.get("classified")) == DISPLAY_AUTO_CLASS_LOW_LIGHT
+    ]
+
+    all_matched = (
+        all(bool(item.get("matched")) for item in results)
+        and not semantic_mismatches
+    )
     all_confident = len(confident_results) == len(results)
 
     # O H1/primeiro CHECK só pode ser OK quando a própria leitura comprova que
@@ -118,7 +140,10 @@ def decidir_analise_display_f3(
     certain_mismatches = [
         item
         for item in confident_results
-        if not bool(item.get("matched"))
+        if (
+            not bool(item.get("matched"))
+            or item in semantic_mismatches
+        )
     ]
 
     # POUCA LUZ é uma evidência explícita de estado intermediário anormal.

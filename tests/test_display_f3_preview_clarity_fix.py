@@ -70,6 +70,26 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             )
         )
 
+    def test_blue_intermitente_parcial_destaca_segmento_apagado_com_outro_on(self):
+        self.assertEqual(
+            "alert",
+            clarity.estado_visual_mascara_f3(
+                DISPLAY_CHECK_STATE_OFF,
+                DISPLAY_CHECK_STATE_ON,
+                has_any_on=True,
+                intermittent=True,
+            ),
+        )
+        self.assertEqual(
+            DISPLAY_CHECK_STATE_OFF,
+            clarity.estado_visual_mascara_f3(
+                DISPLAY_CHECK_STATE_OFF,
+                DISPLAY_CHECK_STATE_ON,
+                has_any_on=False,
+                intermittent=True,
+            ),
+        )
+
     def test_startup_todo_apagado_nao_pinta_h1_inteiro_de_vermelho(self):
         self.assertIsNone(
             clarity.estado_visual_mascara_f3(
@@ -238,6 +258,34 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
                 analysis,
                 project_name="P1",
                 check_id="CHECK_001",
+            ),
+        )
+
+    def test_falha_intermitente_parcial_entra_no_failed_ids_mesmo_matched_true(self):
+        analysis = {
+            "project_name": "P1",
+            "check_id": "CHECK_002",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                },
+                {
+                    "mask_id": "MASK_027",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": True,
+                },
+            ],
+        }
+        self.assertEqual(
+            {"MASK_027"},
+            clarity._failed_mask_ids_from_analysis(
+                analysis,
+                project_name="P1",
+                check_id="CHECK_002",
             ),
         )
 

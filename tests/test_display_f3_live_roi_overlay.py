@@ -49,6 +49,25 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertGreater(DISPLAY_ROI_OVERLAY_ALPHA, 0.0)
         self.assertLessEqual(DISPLAY_ROI_OVERLAY_ALPHA, 0.15)
 
+    def test_visor_88_88_marca_ng_no_segmento_off_durante_fase_on_intermitente(self):
+        state = DisplayProductionF3Window._display_readout_semantic_state(
+            "off",
+            "on",
+            ready=True,
+            intermittent=True,
+            has_any_on=True,
+        )
+        self.assertEqual("ng", state)
+
+        dark_phase = DisplayProductionF3Window._display_readout_semantic_state(
+            "off",
+            "on",
+            ready=True,
+            intermittent=True,
+            has_any_on=False,
+        )
+        self.assertEqual("off", dark_phase)
+
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(
             getattr(DisplayProductionF3Window, "_odin_display_live_roi_overlay", False)
