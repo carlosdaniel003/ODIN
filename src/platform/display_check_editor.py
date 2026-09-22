@@ -324,6 +324,45 @@ class DisplayCheckManagerWindow:
             anchor="w",
         )
         self.state_summary.pack(fill=tk.X, padx=12, pady=(0, 10))
+
+        intermittent_box = tk.Frame(summary_box, bg="#0B1728")
+        intermittent_box.pack(fill=tk.X, padx=12, pady=(0, 8))
+        self.intermittent_var = tk.BooleanVar(value=False)
+        self.intermittent_toggle = tk.Checkbutton(
+            intermittent_box,
+            text="CHECK INTERMITENTE (PISCA)",
+            variable=self.intermittent_var,
+            command=self._toggle_intermittent,
+            indicatoron=False,
+            font=("Segoe UI", 9, "bold"),
+            bg="#1E293B",
+            fg="#CBD5E1",
+            selectcolor="#065F46",
+            activebackground="#334155",
+            activeforeground="#FFFFFF",
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=7,
+            cursor="hand2",
+        )
+        self.intermittent_toggle.pack(fill=tk.X)
+        self.intermittent_help = tk.Label(
+            intermittent_box,
+            text=(
+                "Ative quando os segmentos ACESO piscam naturalmente. "
+                "OFF da fase do pisca é tolerado; POUCA LUZ e segmentos "
+                "que deveriam ficar APAGADOS continuam podendo gerar NG."
+            ),
+            font=("Segoe UI", 8),
+            fg=self.MUTED,
+            bg="#0B1728",
+            justify=tk.LEFT,
+            wraplength=330,
+            anchor="w",
+        )
+        self.intermittent_help.pack(fill=tk.X, pady=(5, 0))
+
         tk.Label(
             summary_box,
             text=(
@@ -450,6 +489,8 @@ class DisplayCheckManagerWindow:
             self.check_title.configure(text="SEM CHECK")
             self.check_order.configure(text="Adicione um CHECK para continuar.")
             self.state_summary.configure(text="ACESO: 0\nAPAGADO: 0\nIGNORAR: 0")
+            self.intermittent_var.set(False)
+            self.intermittent_toggle.configure(state=tk.DISABLED)
             return
         check = self.repository.carregar_check(self.project_name, check_id)
         if check is None:
@@ -473,6 +514,45 @@ class DisplayCheckManagerWindow:
                 f"APAGADO: {counts[DISPLAY_CHECK_STATE_OFF]}\n"
                 f"IGNORAR: {counts[DISPLAY_CHECK_STATE_IGNORE]}"
             )
+        )
+        is_intermittent = bool(check.get("intermittent", False))
+        self.intermittent_var.set(is_intermittent)
+        self.intermittent_toggle.configure(
+            state=tk.NORMAL,
+            text=(
+                "CHECK INTERMITENTE (PISCA) • ATIVADO"
+                if is_intermittent
+                else "CHECK INTERMITENTE (PISCA) • DESATIVADO"
+            ),
+            bg="#065F46" if is_intermittent else "#1E293B",
+            fg="#ECFDF5" if is_intermittent else "#CBD5E1",
+        )
+
+    def _toggle_intermittent(self) -> None:
+        check_id = self._selected_id()
+        if not check_id:
+            return
+        enabled = bool(self.intermittent_var.get())
+        if self.repository.salvar_check_intermitente(
+            self.project_name,
+            check_id,
+            enabled,
+        ):
+            self.refresh(check_id)
+            self._notify_change()
+            self.status.configure(
+                text=(
+                    "CHECK INTERMITENTE ativado • ACESO pode alternar ON/OFF."
+                    if enabled
+                    else "CHECK INTERMITENTE desativado • estado fixo normal."
+                )
+            )
+            return
+        self.intermittent_var.set(not enabled)
+        messagebox.showwarning(
+            "Não foi possível salvar",
+            "Não foi possível alterar o modo intermitente deste CHECK.",
+            parent=self.window,
         )
 
     def add_check(self) -> None:

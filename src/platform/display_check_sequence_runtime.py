@@ -44,14 +44,22 @@ class DisplayCheckSequenceRuntime:
                 {
                     "id": check_id,
                     "name": nome,
+                    "intermittent": bool(check.get("intermittent", False)),
                     "order": len(resultado),
                 }
             )
         return resultado
 
     @staticmethod
-    def _assinatura(checks: list[dict]) -> tuple[tuple[str, str], ...]:
-        return tuple((str(item["id"]), str(item["name"])) for item in checks)
+    def _assinatura(checks: list[dict]) -> tuple[tuple[str, str, bool], ...]:
+        return tuple(
+            (
+                str(item["id"]),
+                str(item["name"]),
+                bool(item.get("intermittent", False)),
+            )
+            for item in checks
+        )
 
     def configurar_checks(self, checks, reiniciar: bool = False) -> bool:
         """Atualiza a sequência e reinicia a placa se a configuração mudou."""

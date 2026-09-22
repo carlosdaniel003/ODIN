@@ -19,6 +19,31 @@ DISPLAY_CHECK_STATES = (
     DISPLAY_CHECK_STATE_IGNORE,
 )
 DISPLAY_DEFAULT_CHECK_NAMES = ("H1", "BLUE", "AUX", "USB")
+DISPLAY_LEGACY_INTERMITTENT_CHECK_NAMES = frozenset({"BLUE", "BLUETOOTH", "BT"})
+
+
+def normalizar_booleano_display(valor, padrao: bool = False) -> bool:
+    if isinstance(valor, bool):
+        return valor
+    if isinstance(valor, (int, float)):
+        return bool(valor)
+    texto = str(valor or "").strip().lower()
+    if texto in {"1", "true", "sim", "yes", "on", "ativo", "ativado"}:
+        return True
+    if texto in {"0", "false", "nao", "não", "no", "off", "inativo", "desativado"}:
+        return False
+    return bool(padrao)
+
+
+def check_display_intermitente(check: dict | None) -> bool:
+    if not isinstance(check, dict):
+        return False
+    if "intermittent" in check:
+        return normalizar_booleano_display(check.get("intermittent"), False)
+    if "intermitente" in check:
+        return normalizar_booleano_display(check.get("intermitente"), False)
+    nome = normalizar_nome_check_display(check.get("name", check.get("nome")))
+    return nome in DISPLAY_LEGACY_INTERMITTENT_CHECK_NAMES
 
 
 def normalizar_nome_projeto_display(nome: str | None) -> str:
@@ -233,6 +258,7 @@ def _checks_padrao(mask_ids) -> list[dict]:
         {
             "id": f"CHECK_{indice:03d}",
             "name": nome,
+            "intermittent": nome in DISPLAY_LEGACY_INTERMITTENT_CHECK_NAMES,
             "mask_states": normalizar_estados_check_display({}, ids),
         }
         for indice, nome in enumerate(DISPLAY_DEFAULT_CHECK_NAMES, start=1)
@@ -313,6 +339,7 @@ def normalizar_checks_display(
         item = {
             "id": identificador,
             "name": nome,
+            "intermittent": check_display_intermitente(check),
             "mask_states": normalizar_estados_check_display(estados, mask_ids),
         }
         board_points = normalizar_pontos_geometria_check(
@@ -597,6 +624,7 @@ class DisplayProjectRepository:
             {
                 "id": check_id,
                 "name": nome,
+                "intermittent": False,
                 "mask_states": normalizar_estados_check_display({}, mask_ids),
             }
         )
@@ -636,6 +664,37 @@ class DisplayProjectRepository:
         if not encontrado:
             return False
         projeto["checks"] = normalizar_checks_display(checks, projeto.get("masks", []))
+        self._atualizar_timestamp(projeto)
+        self._escrever(dados)
+        return True
+
+    def salvar_check_intermitente(
+        self,
+        nome_projeto: str,
+        check_id: str,
+        intermitente: bool,
+    ) -> bool:
+        projeto_nome = normalizar_nome_projeto_display(nome_projeto)
+        identificador = str(check_id or "").strip().upper()
+        dados = self._carregar()
+        projeto = dados["projects"].get(projeto_nome)
+        if projeto is None or not identificador:
+            return False
+
+        encontrado = False
+        for check in projeto.get("checks", []):
+            if str(check.get("id", "")).upper() != identificador:
+                continue
+            check["intermittent"] = bool(intermitente)
+            encontrado = True
+            break
+        if not encontrado:
+            return False
+
+        projeto["checks"] = normalizar_checks_display(
+            projeto.get("checks", []),
+            projeto.get("masks", []),
+        )
         self._atualizar_timestamp(projeto)
         self._escrever(dados)
         return True
