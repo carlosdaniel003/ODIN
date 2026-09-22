@@ -18,7 +18,11 @@ import src.platform.display_f3_exact_check_template as exact_template
 import src.platform.display_f3_same_mask_reference_fix as same_mask
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
 import src.platform.display_live_roi_overlay as live_overlay
-from src.platform.display_mask_geometry import sincronizar_formato_mascara_display
+from src.platform.display_mask_geometry import (
+    mapear_slots_sete_segmentos_display,
+    numero_mascara_display,
+    sincronizar_formato_mascara_display,
+)
 import src.platform.display_check_presence_reference as check_presence
 import src.platform.display_f3_reference_geometry_editor as reference_geometry_editor
 import src.platform.display_f3_reference_preview_rotation as reference_preview_rotation
@@ -80,6 +84,85 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         )
         self.assertTrue(check_id)
         return name, check_id
+
+    def test_numero_visual_sempre_vem_do_mask_id_canonico(self):
+        self.assertEqual("6", numero_mascara_display("MASK_006", 99))
+        self.assertEqual("27", numero_mascara_display({"id": "MASK_027"}, 1))
+        self.assertEqual("4", numero_mascara_display("SEM_NUMERO", 4))
+
+    def test_layout_88_88_descobre_slots_pela_geometria_e_nao_pelo_numero(self):
+        def rect(mask_id, cx, cy, w=18, h=8):
+            return {
+                "id": mask_id,
+                "type": "polygon",
+                "points": [
+                    [cx - w / 2, cy - h / 2],
+                    [cx + w / 2, cy - h / 2],
+                    [cx + w / 2, cy + h / 2],
+                    [cx - w / 2, cy + h / 2],
+                ],
+            }
+
+        ids_per_digit = [
+            ["MASK_001", "MASK_002", "MASK_003", "MASK_006", "MASK_004", "MASK_005", "MASK_007"],
+            ["MASK_008", "MASK_009", "MASK_011", "MASK_010", "MASK_012", "MASK_013", "MASK_014"],
+            ["MASK_015", "MASK_016", "MASK_017", "MASK_020", "MASK_018", "MASK_019", "MASK_021"],
+            ["MASK_022", "MASK_023", "MASK_024", "MASK_027", "MASK_025", "MASK_026", "MASK_028"],
+        ]
+        slot_xy = {
+            "a": (0, 0),
+            "b": (24, 20),
+            "c": (24, 60),
+            "d": (0, 80),
+            "e": (-24, 60),
+            "f": (-24, 20),
+            "g": (0, 40),
+        }
+        masks = []
+        for digit_index, ids in enumerate(ids_per_digit):
+            cx = 100 + digit_index * 110
+            for segment_name, mask_id in zip(
+                ("a", "b", "c", "d", "e", "f", "g"),
+                ids,
+            ):
+                dx, dy = slot_xy[segment_name]
+                if segment_name in {"b", "c", "e", "f"}:
+                    masks.append(rect(mask_id, cx + dx, 100 + dy, w=8, h=22))
+                else:
+                    masks.append(rect(mask_id, cx + dx, 100 + dy, w=22, h=8))
+
+        slots = mapear_slots_sete_segmentos_display(
+            list(reversed(masks)),
+            digit_count=4,
+        )
+        self.assertEqual(28, len(slots))
+        self.assertEqual(
+            ["MASK_006", "MASK_010", "MASK_020", "MASK_027"],
+            [slots[3], slots[10], slots[17], slots[24]],
+        )
+        self.assertEqual(ids_per_digit[0], slots[0:7])
+        self.assertEqual(ids_per_digit[1], slots[7:14])
+        self.assertEqual(ids_per_digit[2], slots[14:21])
+        self.assertEqual(ids_per_digit[3], slots[21:28])
+
+    def test_check_rotacao_e_referencias_usam_mask_id_canonico(self):
+        check_source = inspect.getsource(check_editor.DisplayCheckMaskEditorWindow)
+        self.assertIn("nome_segmento_display(mask_id, index + 1)", check_source)
+        self.assertNotIn("nome_segmento_display(index)", check_source)
+
+        orientation_source = inspect.getsource(
+            tracking_ui.F3OrientationGeometryEditor
+        )
+        self.assertIn("numero_mascara_display(mask, index)", orientation_source)
+        self.assertIn("self._draw_mask_numbers()", orientation_source)
+
+        reference_source = inspect.getsource(
+            reference_geometry_editor.F3ReferenceGeometryEditor
+        )
+        self.assertIn("numero_mascara_display", inspect.getsource(
+            reference_geometry_editor._mask_display_number
+        ))
+        self.assertIn("F3OrientationGeometryEditor", reference_source)
 
     def test_check_geometry_roundtrip_is_local_to_check(self):
         with tempfile.TemporaryDirectory() as directory:

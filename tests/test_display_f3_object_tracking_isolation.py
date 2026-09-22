@@ -454,6 +454,24 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertEqual("off", state("off", "off", False, ready=True))
         self.assertEqual("neutral", state("on", "ignore", False, ready=True))
 
+    def test_display_readout_prefere_ordem_geometrica_canonica(self):
+        from src.platform.display_production_f3_window import (
+            DisplayProductionF3Window,
+        )
+        setter = inspect.getsource(
+            DisplayProductionF3Window.set_display_readout_context
+        )
+        draw = inspect.getsource(
+            DisplayProductionF3Window._draw_live_display_readout
+        )
+        self.assertIn('context.get("readout_slot_mask_ids")', setter)
+        self.assertIn('context.get("mask_slots")', draw)
+
+        context_source = inspect.getsource(preview_clarity._project_preview_context)
+        self.assertIn("mapear_slots_sete_segmentos_display", context_source)
+        self.assertIn("canonical_visual_masks", context_source)
+        self.assertIn('"readout_slot_mask_ids"', context_source)
+
     def test_display_readout_is_fixed_28_segment_88_88_canvas(self):
         from src.platform.display_production_f3_window import (
             DisplayProductionF3Window,
