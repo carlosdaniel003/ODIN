@@ -205,12 +205,31 @@ class DisplayProductionF3Mixin:
             return
 
         janela = self.display_f3_window
-        frame = getattr(self, "camera_frame_atual", None)
-        analysis = getattr(self, "_display_auto_last_analysis", None)
-        try:
-            context = self._display_auto_current_context()
-        except Exception:
-            context = None
+        pending_frame = getattr(self, "_display_f3_pending_ng_frame", None)
+        frame = (
+            pending_frame
+            if pending_frame is not None and getattr(pending_frame, "size", 0) > 0
+            else getattr(self, "camera_frame_atual", None)
+        )
+        pending_analysis = getattr(self, "_display_f3_pending_ng_analysis", None)
+        analysis = (
+            pending_analysis
+            if isinstance(pending_analysis, dict)
+            else getattr(self, "_display_auto_last_analysis", None)
+        )
+        pending_context = getattr(self, "_display_f3_pending_ng_context", None)
+        if isinstance(pending_context, dict):
+            context = pending_context
+        else:
+            try:
+                context = self._display_auto_current_context()
+            except Exception:
+                context = None
+
+        # O renderer semântico consulta _display_auto_last_analysis. Reafirmamos
+        # a mesma análise associada ao frame preservado antes de desenhar.
+        if isinstance(analysis, dict):
+            self._display_auto_last_analysis = analysis
 
         evidence_frame = None
         if frame is not None and getattr(frame, "size", 0) > 0:
@@ -241,6 +260,9 @@ class DisplayProductionF3Mixin:
             "context": deepcopy(context) if isinstance(context, dict) else None,
         }
         self._display_f3_ng_evidence_frozen = True
+        self._display_f3_pending_ng_frame = None
+        self._display_f3_pending_ng_analysis = None
+        self._display_f3_pending_ng_context = None
 
         if janela is not None:
             freeze = getattr(janela, "freeze_ng_evidence", None)

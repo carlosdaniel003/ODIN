@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from src.platform.display_auto_check_analyzer import DisplayAutomaticCheckAnalyzer
 from src.platform.display_auto_check_policy import (
     DISPLAY_AUTO_DECISION_NG,
@@ -46,6 +48,9 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_manual_entry_label = ""
         self._display_auto_intermittent_signature = None
         self._display_auto_intermittent_seen_on = set()
+        self._display_f3_pending_ng_frame = None
+        self._display_f3_pending_ng_analysis = None
+        self._display_f3_pending_ng_context = None
         super().__init__(*args, **kwargs)
         self._rebuild_display_auto_analyzer()
 
@@ -66,6 +71,9 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_last_analysis = None
         self._display_auto_intermittent_signature = None
         self._display_auto_intermittent_seen_on = set()
+        self._display_f3_pending_ng_frame = None
+        self._display_f3_pending_ng_analysis = None
+        self._display_f3_pending_ng_context = None
         self._display_auto_transition_frames = (
             self.DISPLAY_AUTO_TRANSITION_FRAMES if transition else 0
         )
@@ -593,6 +601,18 @@ class DisplayAutomaticCheckF3Mixin:
 
         self._display_auto_stable_frames = 0
         self._display_auto_last_decision = None
+
+        if not approved:
+            # Preserva exatamente a evidência que fechou o debounce. A captura
+            # pode atualizar camera_frame_atual em outra thread antes de o método
+            # de resultado montar a UI, portanto não releia "o frame mais novo".
+            try:
+                self._display_f3_pending_ng_frame = frame.copy()
+            except Exception:
+                self._display_f3_pending_ng_frame = frame
+            self._display_f3_pending_ng_analysis = deepcopy(analysis)
+            self._display_f3_pending_ng_context = deepcopy(context)
+
         event = self.registrar_resultado_check_display_f3(approved)
         event_type = str(event.get("event", ""))
         if event_type == "check_advanced":

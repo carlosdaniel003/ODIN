@@ -38,6 +38,15 @@ def _features(value: float) -> LedFeatures:
 
 
 class DisplayF3AutoCheckTests(unittest.TestCase):
+    def test_ng_preserva_frame_exato_antes_de_registrar_resultado(self):
+        source = inspect.getsource(DisplayAutomaticCheckF3Mixin._process_display_auto_check)
+        self.assertIn("_display_f3_pending_ng_frame = frame.copy()", source)
+        self.assertIn("_display_f3_pending_ng_analysis = deepcopy(analysis)", source)
+        self.assertLess(
+            source.index("_display_f3_pending_ng_frame = frame.copy()"),
+            source.index("registrar_resultado_check_display_f3(approved)"),
+        )
+
     def test_intermitente_tolera_off_de_segmento_esperado_on_mas_nao_low_light(self):
         self.assertEqual(
             (True, False, True),
