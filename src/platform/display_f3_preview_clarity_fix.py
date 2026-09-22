@@ -37,7 +37,10 @@ import numpy as np
 
 import src.platform.display_f3_strict_mask_conformity as strict_module
 import src.platform.display_live_roi_overlay as overlay_module
-from src.platform.display_mask_geometry import bbox_mascara_display
+from src.platform.display_mask_geometry import (
+    bbox_mascara_display,
+    mapear_slots_sete_segmentos_display,
+)
 from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LOW_LIGHT
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
@@ -157,6 +160,24 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         for mask in (project.get("masks") or [])
         if isinstance(mask, dict) and str(mask.get("id") or "")
     )
+    readout_slot_mask_ids = ()
+    base_resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    if base_resolution is not None:
+        try:
+            _, _, canonical_visual_masks = preparar_check_visual_display(
+                None,
+                base_resolution,
+                project.get("masks", []),
+                int(visual_rotation or 0) % 360,
+            )
+            readout_slot_mask_ids = tuple(
+                mapear_slots_sete_segmentos_display(
+                    canonical_visual_masks,
+                    digit_count=4,
+                )
+            )
+        except Exception:
+            readout_slot_mask_ids = ()
 
     # Rastreamento ativo: contorno e ROIs já estão projetados para o frame RAW
     # atual. Rotacionamos essa geometria apenas para a orientação visual escolhida
@@ -217,6 +238,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                 "board_points": tuple(visual_board),
                 "expected_states": expected,
                 "readout_mask_ids": readout_mask_ids,
+                "readout_slot_mask_ids": readout_slot_mask_ids,
                 "tracking_active": True,
                 "tracking_locked": True,
                 "tracking_reference": str(
@@ -251,6 +273,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
             "board_points": (),
             "expected_states": expected,
             "readout_mask_ids": readout_mask_ids,
+            "readout_slot_mask_ids": readout_slot_mask_ids,
             "tracking_active": True,
             "tracking_locked": False,
             "tracking_reference": "",
@@ -299,6 +322,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "board_points": (),
         "expected_states": expected,
         "readout_mask_ids": readout_mask_ids,
+        "readout_slot_mask_ids": readout_slot_mask_ids,
         "tracking_active": False,
         "tracking_locked": False,
     }
@@ -451,6 +475,9 @@ def _contexto_preview_claro(original):
         result["expected_states"] = dict(project_context["expected_states"])
         result["readout_mask_ids"] = tuple(
             project_context.get("readout_mask_ids") or ()
+        )
+        result["readout_slot_mask_ids"] = tuple(
+            project_context.get("readout_slot_mask_ids") or ()
         )
         result["tracking_active"] = bool(
             project_context.get("tracking_active")

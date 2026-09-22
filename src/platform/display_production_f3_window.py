@@ -491,8 +491,19 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                     if isinstance(mask, dict) and str(mask.get("id") or "")
                 )
 
+            canonical_slots = tuple(
+                str(mask_id)
+                for mask_id in (context.get("readout_slot_mask_ids") or ())
+                if str(mask_id)
+            )
             self._display_readout_context = {
                 "mask_ids": mask_ids,
+                "mask_slots": (
+                    canonical_slots
+                    if len(canonical_slots) == 28
+                    and len(set(canonical_slots)) == 28
+                    else ()
+                ),
                 "classifications": {
                     str(key): str(value).strip().lower()
                     for key, value in dict(
@@ -639,9 +650,15 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             )
 
     def _draw_live_display_readout(self, context: dict) -> bool:
-        slots = self._display_readout_mask_slots(
-            context.get("mask_ids") or ()
-        )
+        slots = [
+            str(mask_id)
+            for mask_id in (context.get("mask_slots") or ())
+            if str(mask_id)
+        ]
+        if len(slots) != 28 or len(set(slots)) != 28:
+            slots = self._display_readout_mask_slots(
+                context.get("mask_ids") or ()
+            )
         if len(slots) != 28:
             return False
 
