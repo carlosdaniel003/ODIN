@@ -119,6 +119,78 @@ class CameraLiveControlServiceMixin:
         )
         return aplicado, lido
 
+    def _directshow_ativo(self) -> bool:
+        backend = str(
+            getattr(self, "_backend_atual", "")
+            or getattr(self, "_backend_name", "")
+            or ""
+        ).strip().lower()
+        return "directshow" in backend
+
+    @staticmethod
+    def _candidatos_foco_directshow(valor: float) -> list[float]:
+        """Valores próximos para drivers que expõem foco em passos discretos."""
+        try:
+            solicitado = min(255.0, max(0.0, float(valor)))
+        except (TypeError, ValueError):
+            return []
+
+        candidatos = [solicitado]
+        for passo in (5.0, 10.0, 17.0):
+            base = round(solicitado / passo) * passo
+            candidatos.extend((base, base - passo, base + passo))
+
+        unicos = []
+        vistos = set()
+        for candidato in candidatos:
+            candidato = min(255.0, max(0.0, float(candidato)))
+            chave = round(candidato, 6)
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            unicos.append(candidato)
+        return unicos
+
+    def _definir_foco_manual_directshow(self, capture, valor):
+        """Fallback sem dependência externa para foco manual no DirectShow.
+
+        Fora do DirectShow retorna None. No DirectShow garante autofocus OFF,
+        tenta o valor solicitado e depois os passos discretos mais próximos.
+        A leitura de volta também confirma aplicação quando o backend retorna
+        False apesar de o dispositivo ter aceitado o valor.
+        """
+        if not self._directshow_ativo():
+            return None
+
+        foco = getattr(cv2, "CAP_PROP_FOCUS", None)
+        autofocus = getattr(cv2, "CAP_PROP_AUTOFOCUS", None)
+        if capture is None or foco is None:
+            return (False, None, None)
+
+        if autofocus is not None:
+            try:
+                capture.set(autofocus, 0.0)
+            except Exception:
+                pass
+
+        ultimo_lido = self._ler_propriedade_capture(capture, foco)
+        for candidato in self._candidatos_foco_directshow(valor):
+            try:
+                retorno = bool(capture.set(foco, float(candidato)))
+            except Exception:
+                retorno = False
+
+            lido = self._ler_propriedade_capture(capture, foco)
+            ultimo_lido = lido
+            confirmado = (
+                lido is not None
+                and abs(float(lido) - float(candidato)) <= 1.0
+            )
+            if retorno or confirmado:
+                return (True, lido, float(candidato))
+
+        return (False, ultimo_lido, None)
+
     def _propriedade_manual(self, nome: str):
         atributo = self._PROPRIEDADES_MANUAIS.get(nome)
         return getattr(cv2, atributo, None) if atributo else None

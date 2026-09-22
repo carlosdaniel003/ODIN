@@ -41,6 +41,23 @@ class VerifiedCameraControlMixin:
             )
             return
 
+        if nome == "focus" and self._directshow_ativo():
+            autofocus = getattr(cv2, "CAP_PROP_AUTOFOCUS", None)
+            if autofocus is not None:
+                try:
+                    capture.set(autofocus, 0.0)
+                except Exception:
+                    pass
+            self._status_verificado(
+                nome,
+                "manual_pronto",
+                baseline,
+                baseline,
+                False,
+                "Autofocus desligado; ajuste manual pronto para o DirectShow.",
+            )
+            return
+
         aceito, lido = self._definir_propriedade_capture(capture, propriedade, baseline)
         if not aceito:
             self._status_verificado(
@@ -71,7 +88,24 @@ class VerifiedCameraControlMixin:
             return
         solicitado = float(configuracoes.get(nome, 0.0))
         baseline = self._garantir_baseline(capture, nome)
-        aceito, lido = self._definir_propriedade_capture(capture, propriedade, solicitado)
+
+        foco_directshow = None
+        if nome == "focus":
+            foco_directshow = self._definir_foco_manual_directshow(
+                capture,
+                solicitado,
+            )
+
+        if foco_directshow is not None:
+            aceito, lido, valor_efetivo = foco_directshow
+        else:
+            aceito, lido = self._definir_propriedade_capture(
+                capture,
+                propriedade,
+                solicitado,
+            )
+            valor_efetivo = solicitado
+
         if not aceito:
             self._status_verificado(
                 nome,
@@ -91,13 +125,32 @@ class VerifiedCameraControlMixin:
             and abs(float(lido) - float(baseline)) <= 1.0
             and abs(solicitado - float(baseline)) > 1.0
         )
+        ajustado_driver = bool(
+            nome == "focus"
+            and foco_directshow is not None
+            and valor_efetivo is not None
+            and abs(float(valor_efetivo) - float(solicitado)) > 0.5
+        )
+        status = (
+            "ignorado_driver"
+            if ignorado
+            else ("ajustado_driver" if ajustado_driver else "aplicado")
+        )
+        motivo = None
+        if ignorado:
+            motivo = "O driver não confirmou mudança do valor."
+        elif ajustado_driver:
+            motivo = (
+                f"DirectShow ajustou o foco solicitado {solicitado:g} "
+                f"para o passo aceito {float(valor_efetivo):g}."
+            )
         self._status_verificado(
             nome,
-            "ignorado_driver" if ignorado else "aplicado",
+            status,
             solicitado,
             lido,
             False,
-            "O driver não confirmou mudança do valor." if ignorado else None,
+            motivo,
         )
 
 
