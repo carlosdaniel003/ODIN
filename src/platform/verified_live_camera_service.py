@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import cv2
+
 from src.platform.camera_live_control_service import CameraLiveControlServiceMixin
 from src.platform.responsive_camera_selection_installer import (
     instalar_seletor_camera_responsivo,

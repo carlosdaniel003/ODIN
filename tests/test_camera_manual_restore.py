@@ -128,9 +128,9 @@ class CameraManualRestoreTests(unittest.TestCase):
 
         self.assertEqual(0.0, service._capture.props[cv2.CAP_PROP_AUTOFOCUS])
         self.assertEqual(135.0, service._capture.props[cv2.CAP_PROP_FOCUS])
-        self.assertIn(
+        self.assertEqual(
+            "ajustado_driver",
             service._status_controles_camera["focus"]["status"],
-            {"aplicado", "ajustado_driver"},
         )
 
     def test_habilitar_foco_directshow_nao_reescreve_baseline_para_validar(self):

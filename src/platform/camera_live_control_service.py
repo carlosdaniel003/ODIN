@@ -309,17 +309,40 @@ class CameraLiveControlServiceMixin:
         except (TypeError, ValueError):
             return
 
-        aplicado, lido = self._definir_propriedade_capture(
-            capture,
-            propriedade,
-            valor,
-        )
+        foco_directshow = None
+        if nome == "focus":
+            foco_directshow = self._definir_foco_manual_directshow(
+                capture,
+                valor,
+            )
+
+        if foco_directshow is not None:
+            aplicado, lido, valor_efetivo = foco_directshow
+        else:
+            aplicado, lido = self._definir_propriedade_capture(
+                capture,
+                propriedade,
+                valor,
+            )
+            valor_efetivo = valor
+
         if lido is not None:
             with self._lock:
                 self._camera_live_valores_hardware[nome] = float(lido)
+
+        ajustado = bool(
+            nome == "focus"
+            and aplicado
+            and valor_efetivo is not None
+            and abs(float(valor_efetivo) - float(valor)) > 0.5
+        )
         self._registrar_status_controle(
             nome,
-            "aplicado" if aplicado else "nao_suportado",
+            (
+                "ajustado_driver"
+                if ajustado
+                else ("aplicado" if aplicado else "nao_suportado")
+            ),
             valor_solicitado=valor,
             valor_lido=lido,
         )
