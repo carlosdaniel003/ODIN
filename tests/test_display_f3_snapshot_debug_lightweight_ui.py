@@ -21,6 +21,21 @@ class DisplayF3SnapshotDebugLightweightUiTests(unittest.TestCase):
         self.assertIn("wraplength", source)
         self.assertIn("<Configure>", source)
 
+    def test_botoes_inferiores_ficam_em_rodape_fixo(self):
+        source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
+        self.assertIn("shell.grid_rowconfigure(1, weight=1)", source)
+        self.assertIn("shell.grid_rowconfigure(2, weight=0)", source)
+        self.assertIn("actions.grid(", source)
+        self.assertIn("actions.lift()", source)
+        self.assertNotIn("actions.pack(", source)
+
+    def test_preview_reduz_em_telas_baixas_para_preservar_rodape(self):
+        source = inspect.getsource(debug_ui._debug_preview_limits)
+        self.assertIn("screen_height <= 800", source)
+        self.assertIn("return 560, 250", source)
+        self.assertIn("screen_height <= 900", source)
+        self.assertIn("return 620, 300", source)
+
     def test_copia_nao_reentra_sincronamente_no_event_loop(self):
         source = "\n".join(
             (

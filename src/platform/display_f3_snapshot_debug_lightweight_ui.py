@@ -353,7 +353,22 @@ def _normalized_roi(roi) -> dict | None:
     return {"x": x, "y": y, "width": width, "height": height}
 
 
-def _frame_photo(frame, visual: dict | None):
+def _debug_preview_limits(widget=None) -> tuple[int, int]:
+    """Reduz a prévia em telas baixas para preservar a barra de ações."""
+    screen_height = 768
+    if widget is not None:
+        try:
+            screen_height = max(480, int(widget.winfo_screenheight()))
+        except Exception:
+            pass
+    if screen_height <= 800:
+        return 560, 250
+    if screen_height <= 900:
+        return 620, 300
+    return VISUAL_FRAME_MAX_WIDTH, VISUAL_FRAME_MAX_HEIGHT
+
+
+def _frame_photo(frame, visual: dict | None, widget=None):
     if frame is None or getattr(frame, "size", 0) == 0:
         return None
     try:
@@ -387,9 +402,10 @@ def _frame_photo(frame, visual: dict | None):
         )
 
     height, width = image.shape[:2]
+    max_width, max_height = _debug_preview_limits(widget)
     scale = min(
-        VISUAL_FRAME_MAX_WIDTH / float(width),
-        VISUAL_FRAME_MAX_HEIGHT / float(height),
+        max_width / float(width),
+        max_height / float(height),
         1.0,
     )
     target_width = max(1, int(round(width * scale)))
@@ -572,10 +588,15 @@ def _open_lightweight_snapshot_debug(window):
         pass
 
     shell = tk.Frame(top, bg=manual_module.DEBUG_BG)
-    shell.pack(fill="both", expand=True, padx=28, pady=24)
+    shell.pack(fill="both", expand=True, padx=24, pady=(18, 16))
+    shell.grid_columnconfigure(0, weight=1)
+    shell.grid_rowconfigure(0, weight=0)
+    shell.grid_rowconfigure(1, weight=1)
+    shell.grid_rowconfigure(2, weight=0)
 
+    # Cabeçalho fixo + corpo elástico + rodapé fixo.
     header = tk.Frame(shell, bg=manual_module.DEBUG_BG)
-    header.pack(fill="x")
+    header.grid(row=0, column=0, sticky="ew")
     tk.Label(
         header,
         text="DEBUG TÉCNICO • FRAME ANALISADO",
@@ -598,7 +619,14 @@ def _open_lightweight_snapshot_debug(window):
     ).pack(fill="x", pady=(4, 0))
 
     body = tk.Frame(shell, bg=manual_module.DEBUG_BG)
-    body.pack(fill="both", expand=True, pady=(20, 16))
+    body.grid(
+        row=1,
+        column=0,
+        sticky="nsew",
+        pady=(14, 10),
+    )
+    body.grid_columnconfigure(0, weight=1)
+    body.grid_rowconfigure(0, weight=1)
 
     visual = snapshot.get("visual_analysis")
     visual = visual if isinstance(visual, dict) else {}
@@ -606,7 +634,7 @@ def _open_lightweight_snapshot_debug(window):
     frozen_frame = getattr(owner, "_display_f3_manual_snapshot_frozen_frame", None)
 
     visual_area = tk.Frame(body, bg=manual_module.DEBUG_BG)
-    visual_area.pack(fill="both", expand=True)
+    visual_area.grid(row=0, column=0, sticky="nsew")
     visual_area.grid_columnconfigure(0, weight=3)
     visual_area.grid_columnconfigure(1, weight=2, minsize=330)
     visual_area.grid_rowconfigure(0, weight=1)
@@ -622,7 +650,7 @@ def _open_lightweight_snapshot_debug(window):
         anchor="w",
     ).pack(fill="x", pady=(0, 7))
 
-    photo = _frame_photo(frozen_frame, visual)
+    photo = _frame_photo(frozen_frame, visual, top)
     window._display_f3_snapshot_debug_photo = photo
     if photo is not None:
         tk.Label(
@@ -692,8 +720,12 @@ def _open_lightweight_snapshot_debug(window):
             wraplength=500,
         ).pack(fill="x", pady=(0, 7))
 
+    lower_info = tk.Frame(body, bg=manual_module.DEBUG_BG)
+    lower_info.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+    lower_info.grid_columnconfigure(0, weight=1)
+
     message = tk.Label(
-        body,
+        lower_info,
         text=DEBUG_SUMMARY,
         font=("Segoe UI", 10),
         bg=manual_module.DEBUG_BG,
@@ -713,7 +745,7 @@ def _open_lightweight_snapshot_debug(window):
     body.bind("<Configure>", fit_message, add="+")
 
     status = tk.Label(
-        body,
+        lower_info,
         text=READY_TEXT,
         font=("Segoe UI", 9, "bold"),
         bg=manual_module.DEBUG_BG,
@@ -722,8 +754,21 @@ def _open_lightweight_snapshot_debug(window):
     )
     status.pack(anchor="w", pady=(12, 0))
 
-    actions = tk.Frame(shell, bg=manual_module.DEBUG_BG)
-    actions.pack(fill="x")
+    actions = tk.Frame(
+        shell,
+        bg=manual_module.DEBUG_PANEL,
+        highlightbackground=manual_module.DEBUG_BORDER,
+        highlightthickness=1,
+    )
+    actions.grid(
+        row=2,
+        column=0,
+        sticky="ew",
+        pady=(4, 0),
+    )
+    actions.grid_columnconfigure(0, weight=0)
+    actions.grid_columnconfigure(1, weight=1)
+    actions.grid_columnconfigure(2, weight=0)
 
     copy_button = tk.Button(
         actions,
@@ -743,7 +788,13 @@ def _open_lightweight_snapshot_debug(window):
     copy_button.configure(
         command=lambda: _schedule_copy_report(window, top, status, copy_button)
     )
-    copy_button.pack(side="left")
+    copy_button.grid(
+        row=0,
+        column=0,
+        sticky="w",
+        padx=(10, 6),
+        pady=9,
+    )
 
     tk.Button(
         actions,
@@ -759,7 +810,20 @@ def _open_lightweight_snapshot_debug(window):
         padx=16,
         pady=8,
         cursor="hand2",
-    ).pack(side="right")
+    ).grid(
+        row=0,
+        column=2,
+        sticky="e",
+        padx=(6, 10),
+        pady=9,
+    )
+
+    # Garante que o rodapé permaneça acima do conteúdo mesmo em resize manual.
+    try:
+        top.update_idletasks()
+        actions.lift()
+    except Exception:
+        pass
 
     top.protocol("WM_DELETE_WINDOW", lambda: _close_debug(window))
     top.bind("<Escape>", lambda _event: _close_debug(window))
