@@ -51,8 +51,24 @@ class _FakeApp:
     def _display_auto_frame_token(self, _frame):
         return ("camera", self.camera_ultimo_frame_id)
 
-    def _display_auto_is_transient_check(self, _context):
-        return False
+    def _display_auto_is_transient_check(self, context):
+        return bool((context or {}).get("intermittent", False))
+
+    def _display_auto_update_intermittent_evidence(self, context, analysis):
+        expected = {
+            str(item.get("mask_id") or "")
+            for item in (analysis.get("mask_results") or [])
+            if isinstance(item, dict) and str(item.get("expected") or "") == "on"
+        }
+        seen = {
+            str(item.get("mask_id") or "")
+            for item in (analysis.get("mask_results") or [])
+            if isinstance(item, dict)
+            and str(item.get("expected") or "") == "on"
+            and str(item.get("classified") or "") == "on"
+            and item.get("raw_matched") is not False
+        }
+        return bool(not expected or expected.issubset(seen)), len(seen), len(expected)
 
     def registrar_resultado_check_display_f3(self, aprovado=True):
         self.registered.append(bool(aprovado))
@@ -82,6 +98,45 @@ class DisplayF3FinalCheckStabilityTests(unittest.TestCase):
         self.assertTrue(second["registered"])
         self.assertEqual(second["register_event"], "check_advanced")
         self.assertEqual(app.registered, [True])
+
+    def test_intermitente_nao_registra_enquanto_fase_acesa_nao_foi_observada(self):
+        app = _FakeApp(check_id="CHECK_002", check_name="BLUE")
+        app._context["intermittent"] = True
+        app._display_auto_last_analysis.update(
+            {
+                "intermittent": True,
+                "active_mask_count": 2,
+                "matched_mask_count": 2,
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_001",
+                        "expected": "on",
+                        "classified": "on",
+                        "matched": True,
+                        "raw_matched": True,
+                    },
+                    {
+                        "mask_id": "MASK_002",
+                        "expected": "on",
+                        "classified": "off",
+                        "matched": True,
+                        "raw_matched": False,
+                        "intermittent_tolerated": True,
+                    },
+                ],
+            }
+        )
+        result = estabilizar_check_final_f3(
+            app,
+            app._display_auto_current_context(),
+        )
+        self.assertFalse(result["counted"])
+        self.assertFalse(result["registered"])
+        self.assertEqual(
+            "intermitente_aguardando_fase_acesa",
+            result["reason"],
+        )
+        self.assertEqual([], app.registered)
 
     def test_same_camera_frame_is_never_counted_twice(self):
         app = _FakeApp()

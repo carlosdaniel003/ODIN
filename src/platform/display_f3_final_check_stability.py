@@ -170,6 +170,24 @@ def estabilizar_check_final_f3(app, context_before: dict | None) -> dict:
         _clear(app, "analise_nao_aprovada_integralmente")
         result["reason"] = "analise_nao_aprovada_integralmente"
         return result
+
+    if bool(context_after.get("intermittent", False)):
+        try:
+            temporal_ready, temporal_seen, temporal_total = (
+                app._display_auto_update_intermittent_evidence(
+                    context_after,
+                    analysis,
+                )
+            )
+        except Exception:
+            temporal_ready, temporal_seen, temporal_total = False, 0, 0
+        result["intermittent_seen_on"] = int(temporal_seen)
+        result["intermittent_expected_on"] = int(temporal_total)
+        if not temporal_ready:
+            _clear(app, "intermitente_aguardando_fase_acesa")
+            result["reason"] = "intermitente_aguardando_fase_acesa"
+            return result
+
     if not _decision_allowed(app, context_after):
         _clear(app, "autoridade_fisica_nao_liberada")
         result["reason"] = "autoridade_fisica_nao_liberada"

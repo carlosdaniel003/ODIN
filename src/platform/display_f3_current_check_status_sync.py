@@ -106,6 +106,19 @@ def sincronizar_status_check_atual_f3(app) -> bool:
     if not analise_confirma_check_atual_integralmente_f3(analysis, context):
         return False
 
+    if bool((context or {}).get("intermittent", False)):
+        try:
+            temporal_ready, _seen, _total = (
+                app._display_auto_update_intermittent_evidence(
+                    context,
+                    analysis,
+                )
+            )
+        except Exception:
+            temporal_ready = False
+        if not temporal_ready:
+            return False
+
     state = getattr(app, "_display_f3_operational_state", None)
     if not isinstance(state, dict):
         return False

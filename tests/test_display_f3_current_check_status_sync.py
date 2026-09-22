@@ -55,6 +55,22 @@ class _App:
     def _display_auto_current_context(self):
         return dict(self._context)
 
+    def _display_auto_update_intermittent_evidence(self, context, analysis):
+        expected = {
+            str(item.get("mask_id") or "")
+            for item in (analysis.get("mask_results") or [])
+            if isinstance(item, dict) and str(item.get("expected") or "") == "on"
+        }
+        seen = {
+            str(item.get("mask_id") or "")
+            for item in (analysis.get("mask_results") or [])
+            if isinstance(item, dict)
+            and str(item.get("expected") or "") == "on"
+            and str(item.get("classified") or "") == "on"
+            and item.get("raw_matched") is not False
+        }
+        return bool(not expected or expected.issubset(seen)), len(seen), len(expected)
+
 
 class DisplayF3CurrentCheckStatusSyncTests(unittest.TestCase):
     def test_usb_28_de_28_substitui_memoria_visual_blue_imediatamente(self):
@@ -70,6 +86,36 @@ class DisplayF3CurrentCheckStatusSyncTests(unittest.TestCase):
         self.assertEqual("CHECK_004", app._display_f3_physical_status_memory_check_id)
         self.assertEqual("USB", app._display_f3_physical_status_memory_check_name)
         self.assertIn("DISPLAY EM USB", app.display_f3_window.calls[-1][0])
+
+    def test_status_intermitente_nao_confirma_durante_fase_apagada_incompleta(self):
+        app = _App(check_id="CHECK_002", check_name="BLUE")
+        app._context["intermittent"] = True
+        app._display_auto_last_analysis.update(
+            {
+                "intermittent": True,
+                "active_mask_count": 2,
+                "matched_mask_count": 2,
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_001",
+                        "expected": "on",
+                        "classified": "on",
+                        "matched": True,
+                        "raw_matched": True,
+                    },
+                    {
+                        "mask_id": "MASK_002",
+                        "expected": "on",
+                        "classified": "off",
+                        "matched": True,
+                        "raw_matched": False,
+                        "intermittent_tolerated": True,
+                    },
+                ],
+            }
+        )
+        self.assertFalse(module.sincronizar_status_check_atual_f3(app))
+        self.assertEqual([], app.display_f3_window.calls)
 
     def test_regra_e_generica_para_quinto_check_futuro(self):
         app = _App(check_id="CHECK_005", check_name="SPDIF")
