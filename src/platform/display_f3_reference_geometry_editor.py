@@ -21,6 +21,7 @@ from src.platform.display_f3_tracking_orientation_ui import (
 )
 from src.platform.display_mask_geometry import (
     criar_segmento_display_por_arrasto,
+    numero_mascara_display,
     pontos_mascara_display,
 )
 
@@ -56,15 +57,8 @@ def _segment_polygon_from_drag(
 
 
 def _mask_display_number(mask: dict, fallback_index: int) -> str:
-    """Retorna a numeração humana exibida sobre a máscara no editor."""
-    mask_id = str((mask or {}).get("id") or "").strip()
-    digits = "".join(char for char in mask_id if char.isdigit())
-    if digits:
-        try:
-            return str(int(digits))
-        except ValueError:
-            pass
-    return str(max(1, int(fallback_index)))
+    """Compatibilidade: a fonte real da numeração é sempre o MASK_ID canônico."""
+    return numero_mascara_display(mask, fallback_index)
 
 
 def _next_available_mask_id(masks) -> str:
@@ -1652,7 +1646,6 @@ class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
     def render(self) -> None:
         super().render()
         self._draw_selected_mask_outline()
-        self._draw_mask_numbers()
         if self.allow_mask_creation and self.mask_draw_mode is not None:
             try:
                 self.status.configure(text=self._mask_draw_status_text())

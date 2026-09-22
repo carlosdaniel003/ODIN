@@ -12,6 +12,7 @@ import cv2
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_mask_geometry import (
     instalar_suporte_segmento_mascara_display,
+    numero_mascara_display,
     pontos_mascara_display,
     sincronizar_formato_mascara_display,
 )
@@ -48,8 +49,16 @@ def proximo_estado_check_display(estado: str | None) -> str:
     return DISPLAY_CHECK_STATE_IGNORE
 
 
-def nome_segmento_display(indice: int) -> str:
-    return f"SEG_{int(indice) + 1:02d}"
+def nome_segmento_display(mask_or_index, fallback_index: int | None = None) -> str:
+    """Nome visual derivado do MASK_ID; índice só existe como fallback legado."""
+    if isinstance(mask_or_index, int) and fallback_index is None:
+        number = str(int(mask_or_index) + 1)
+    else:
+        number = numero_mascara_display(mask_or_index, fallback_index)
+    try:
+        return f"SEG_{int(number):02d}"
+    except (TypeError, ValueError):
+        return f"SEG_{number}"
 
 
 class DisplayCheckManagerWindow:
@@ -1424,7 +1433,7 @@ class DisplayCheckMaskEditorWindow:
         )
             button = tk.Button(
                 self.segment_frame,
-                text=f"{nome_segmento_display(index)}    {label}",
+                text=f"{nome_segmento_display(mask_id, index + 1)}    {label}",
                 command=(
                     (lambda i=index: self._select_geometry_mask(i))
                     if self.geometry_mode
@@ -1635,7 +1644,10 @@ class DisplayCheckMaskEditorWindow:
         self.canvas.create_text(
             label_x,
             label_y,
-            text=f"{nome_segmento_display(index)}\n{CHECK_STATE_LABELS.get(state, 'IGNORAR')}",
+            text=(
+                f"{nome_segmento_display(mask_id, index + 1)}\n"
+                f"{CHECK_STATE_LABELS.get(state, 'IGNORAR')}"
+            ),
             fill=color,
             font=("DejaVu Sans", 8, "bold"),
             justify=tk.CENTER,

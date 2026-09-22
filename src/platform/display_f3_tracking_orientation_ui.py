@@ -39,6 +39,7 @@ from src.platform.display_f3_object_tracking import (
     transform_points,
     transformed_masks,
 )
+from src.platform.display_mask_geometry import numero_mascara_display
 from src.platform.display_project_repository import (
     normalizar_mascaras_display,
     normalizar_nome_projeto_display,
@@ -1093,6 +1094,52 @@ class F3OrientationGeometryEditor:
         except Exception:
             self._render_after = None
 
+    def _draw_mask_numbers(self) -> None:
+        """Exibe o mesmo MASK_ID canônico usado em máscaras, CHECK e presença."""
+        for index, mask in enumerate(self.masks, start=1):
+            if not isinstance(mask, dict):
+                continue
+            mask_id = str(mask.get("id") or "").strip()
+            if not mask_id:
+                continue
+
+            kind = str(mask.get("type") or "").lower()
+            if kind == "circle":
+                try:
+                    center = (
+                        float(mask.get("cx", 0)),
+                        float(mask.get("cy", 0)),
+                    )
+                except (TypeError, ValueError):
+                    continue
+            else:
+                points = _mask_points(mask)
+                if not points:
+                    continue
+                center = _points_center(points)
+
+            x, y = self._image_to_canvas(center[0], center[1])
+            label = numero_mascara_display(mask, index)
+            half_width = max(9, 5 + 4 * len(label))
+            self.canvas.create_rectangle(
+                x - half_width,
+                y - 9,
+                x + half_width,
+                y + 9,
+                fill="#07111F",
+                outline="#38BDF8",
+                width=1,
+                tags=("f3_mask_number",),
+            )
+            self.canvas.create_text(
+                x,
+                y,
+                text=label,
+                fill="#F8FAFC",
+                font=("Segoe UI", 8, "bold"),
+                tags=("f3_mask_number",),
+            )
+
     def _draw_handles(self) -> None:
         for index, point in enumerate(self.board):
             x, y = self._image_to_canvas(point[0], point[1])
@@ -1414,6 +1461,7 @@ class F3OrientationGeometryEditor:
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
         self._draw_handles()
+        self._draw_mask_numbers()
         self._draw_magnifier()
         self._draw_zoom_badge()
         self.status.configure(
