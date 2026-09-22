@@ -19,6 +19,7 @@ import cv2
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
 
 import src.platform.display_f3_manual_snapshot_debug as manual_module
+from src.platform.display_visual_rotation import preparar_frame_visual_display
 import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_visual_reference_status as visual_status_module
 from src.platform.display_f3_workspace_ui import maximizar_janela_workspace_f3
@@ -368,7 +369,13 @@ def _debug_preview_limits(widget=None) -> tuple[int, int]:
     return VISUAL_FRAME_MAX_WIDTH, VISUAL_FRAME_MAX_HEIGHT
 
 
-def _frame_photo(frame, visual: dict | None, widget=None):
+def _frame_photo(
+    frame,
+    visual: dict | None,
+    widget=None,
+    *,
+    visual_rotation: int = 0,
+):
     if frame is None or getattr(frame, "size", 0) == 0:
         return None
     try:
@@ -400,6 +407,13 @@ def _frame_photo(frame, visual: dict | None, widget=None):
             (255, 255, 255),
             3,
         )
+
+    # O snapshot é analisado sobre o frame bruto congelado, porém o operador
+    # precisa enxergar exatamente a orientação visual do F3. Rotacionamos apenas
+    # a cópia destinada à UI, depois de desenhar qualquer ROI no domínio bruto.
+    image = preparar_frame_visual_display(image, int(visual_rotation or 0))
+    if image is None or getattr(image, "size", 0) == 0:
+        return None
 
     height, width = image.shape[:2]
     max_width, max_height = _debug_preview_limits(widget)
@@ -641,16 +655,25 @@ def _open_lightweight_snapshot_debug(window):
 
     frame_column = tk.Frame(visual_area, bg=manual_module.DEBUG_BG)
     frame_column.grid(row=0, column=0, sticky="nsew", padx=(0, 22))
+    preview_rotation = int(snapshot.get("rotation", 0) or 0)
     tk.Label(
         frame_column,
-        text="FRAME CONGELADO • MESMA CÓPIA USADA NA ANÁLISE",
+        text=(
+            "FRAME CONGELADO • "
+            f"VISUAL {preview_rotation}° • MESMA CÓPIA USADA NA ANÁLISE"
+        ),
         font=("Segoe UI", 9, "bold"),
         bg=manual_module.DEBUG_BG,
         fg=manual_module.DEBUG_MUTED,
         anchor="w",
     ).pack(fill="x", pady=(0, 7))
 
-    photo = _frame_photo(frozen_frame, visual, top)
+    photo = _frame_photo(
+        frozen_frame,
+        visual,
+        top,
+        visual_rotation=preview_rotation,
+    )
     window._display_f3_snapshot_debug_photo = photo
     if photo is not None:
         tk.Label(

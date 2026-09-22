@@ -88,6 +88,17 @@ class DisplayF3SnapshotDebugLightweightUiTests(unittest.TestCase):
         self.assertIn('"uses_check_state": False', source)
         self.assertIn("F3_OPERATIONAL_PHYSICAL_MARGIN", source)
 
+    def test_preview_aplica_a_mesma_rotacao_visual_do_snapshot(self):
+        photo_source = inspect.getsource(debug_ui._frame_photo)
+        window_source = inspect.getsource(
+            debug_ui._open_lightweight_snapshot_debug
+        )
+        self.assertIn("preparar_frame_visual_display", photo_source)
+        self.assertIn("visual_rotation", photo_source)
+        self.assertIn('snapshot.get("rotation", 0)', window_source)
+        self.assertIn("visual_rotation=preview_rotation", window_source)
+        self.assertIn("VISUAL {preview_rotation}°", window_source)
+
     def test_debug_exibe_frame_e_evidencias_da_analise_visual(self):
         source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
         self.assertIn("FRAME CONGELADO • MESMA CÓPIA USADA NA ANÁLISE", source)
