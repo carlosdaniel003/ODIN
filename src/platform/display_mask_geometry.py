@@ -375,6 +375,140 @@ def bbox_mascara_display(mask: dict):
     return min(xs), min(ys), max(xs), max(ys)
 
 
+def numero_mascara_display(mask_or_id, fallback_index: int | None = None) -> str:
+    """Número humano derivado do MASK_ID canônico, nunca da posição na lista."""
+    if isinstance(mask_or_id, dict):
+        text = str(mask_or_id.get("id") or "").strip()
+    else:
+        text = str(mask_or_id or "").strip()
+
+    digits = ""
+    for char in reversed(text):
+        if char.isdigit():
+            digits = char + digits
+        elif digits:
+            break
+    if digits:
+        try:
+            return str(int(digits))
+        except ValueError:
+            pass
+    if fallback_index is not None:
+        return str(max(1, int(fallback_index)))
+    return text or "?"
+
+
+def _centro_mascara_display(mask: dict) -> tuple[float, float]:
+    x1, y1, x2, y2 = bbox_mascara_display(mask)
+    return (float(x1 + x2) / 2.0, float(y1 + y2) / 2.0)
+
+
+def mapear_slots_sete_segmentos_display(
+    masks,
+    *,
+    digit_count: int = 4,
+) -> list[str]:
+    """Mapeia a geometria visível para A,B,C,D,E,F,G de cada dígito.
+
+    A identidade é sempre o MASK_ID já criado em "Desenhar placa e máscaras".
+    A posição geométrica serve apenas para descobrir em qual barra lógica do
+    visor 88:88 aquele ID está. Nenhum MASK_ID é recriado ou renumerado.
+    """
+    expected = max(1, int(digit_count)) * 7
+    items = [
+        deepcopy(mask)
+        for mask in (masks or ())
+        if isinstance(mask, dict) and str(mask.get("id") or "").strip()
+    ]
+    if len(items) != expected:
+        return []
+
+    ids = [str(mask.get("id") or "").strip() for mask in items]
+    if len(set(ids)) != expected:
+        return []
+
+    records = []
+    for mask in items:
+        points = pontos_mascara_display(mask)
+        if points:
+            cx = sum(float(point[0]) for point in points) / len(points)
+            cy = sum(float(point[1]) for point in points) / len(points)
+        else:
+            cx, cy = _centro_mascara_display(mask)
+        records.append({"id": str(mask.get("id") or ""), "cx": float(cx), "cy": float(cy)})
+
+    mean_x = sum(item["cx"] for item in records) / len(records)
+    mean_y = sum(item["cy"] for item in records) / len(records)
+    sxx = sum((item["cx"] - mean_x) ** 2 for item in records)
+    syy = sum((item["cy"] - mean_y) ** 2 for item in records)
+    sxy = sum((item["cx"] - mean_x) * (item["cy"] - mean_y) for item in records)
+
+    angle = 0.5 * math.atan2(2.0 * sxy, sxx - syy)
+    ux, uy = math.cos(angle), math.sin(angle)
+    if abs(ux) >= abs(uy):
+        if ux < 0:
+            ux, uy = -ux, -uy
+    elif uy < 0:
+        ux, uy = -ux, -uy
+
+    vx, vy = -uy, ux
+    if vy < 0:
+        vx, vy = -vx, -vy
+
+    for item in records:
+        dx = item["cx"] - mean_x
+        dy = item["cy"] - mean_y
+        item["u"] = dx * ux + dy * uy
+        item["v"] = dx * vx + dy * vy
+
+    ordered = sorted(records, key=lambda item: (item["u"], item["v"], item["id"]))
+    groups = [ordered[index:index + 7] for index in range(0, expected, 7)]
+    if any(len(group) != 7 for group in groups):
+        return []
+
+    result: list[str] = []
+    for group in groups:
+        group_center_u = sorted(item["u"] for item in group)[3]
+        horizontal = sorted(
+            group,
+            key=lambda item: (
+                abs(item["u"] - group_center_u),
+                item["v"],
+                item["id"],
+            ),
+        )[:3]
+        horizontal_ids = {item["id"] for item in horizontal}
+        vertical = [item for item in group if item["id"] not in horizontal_ids]
+        if len(vertical) != 4:
+            return []
+
+        top, middle, bottom = sorted(
+            horizontal,
+            key=lambda item: (item["v"], item["u"], item["id"]),
+        )
+        vertical_by_height = sorted(
+            vertical,
+            key=lambda item: (item["v"], item["u"], item["id"]),
+        )
+        upper = sorted(vertical_by_height[:2], key=lambda item: (item["u"], item["id"]))
+        lower = sorted(vertical_by_height[2:], key=lambda item: (item["u"], item["id"]))
+        if len(upper) != 2 or len(lower) != 2:
+            return []
+
+        segment_map = {
+            "a": top["id"],
+            "b": upper[1]["id"],
+            "c": lower[1]["id"],
+            "d": bottom["id"],
+            "e": lower[0]["id"],
+            "f": upper[0]["id"],
+            "g": middle["id"],
+        }
+        result.extend(segment_map[name] for name in ("a", "b", "c", "d", "e", "f", "g"))
+
+    return result
+
+
 def _bbox(masks):
     items = list(masks)
     if not items:
