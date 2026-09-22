@@ -79,6 +79,21 @@ def avaliar_sonda_positiva_f3(
         }
 
     original_approved = analysis.get("approved") is True
+    intermittent_ready = True
+    intermittent_seen = 0
+    intermittent_total = 0
+    if bool((context or {}).get("intermittent", False)):
+        try:
+            intermittent_ready, intermittent_seen, intermittent_total = (
+                app._display_auto_update_intermittent_evidence(
+                    context,
+                    analysis,
+                )
+            )
+        except Exception:
+            intermittent_ready = False
+
+    probe_approved = bool(original_approved and intermittent_ready)
     exact_probe = (
         str(analysis.get("reference_authority") or "")
         == F3_EXACT_TEMPLATE_SOURCE
@@ -110,7 +125,7 @@ def avaliar_sonda_positiva_f3(
     )
 
     return {
-        "approved": bool(original_approved),
+        "approved": bool(probe_approved),
         "mode": mode,
         "on_total": len(on_results),
         "on_matched": int(on_matched),
@@ -118,7 +133,10 @@ def avaliar_sonda_positiva_f3(
         "exact_probe": bool(exact_probe),
         "fast_context": bool(fast_context),
         "original_approved": bool(original_approved),
-        "full_mask_conformity": bool(original_approved),
+        "full_mask_conformity": bool(probe_approved),
+        "intermittent_ready": bool(intermittent_ready),
+        "intermittent_seen_on": int(intermittent_seen),
+        "intermittent_expected_on": int(intermittent_total),
     }
 
 
@@ -142,7 +160,7 @@ def atualizar_estabilidade_sonda_positiva_f3(
         # Nunca sobrescrevemos analysis['approved'] nem analysis['reason'] aqui.
         # Esses dois campos pertencem ao analisador completo foto+mask_states.
         analysis["exact_all_masks_approved"] = bool(
-            evidence.get("original_approved")
+            evidence.get("approved")
         )
         analysis["positive_probe_approved"] = approved
         analysis["positive_probe_mode"] = str(evidence.get("mode") or "")

@@ -210,6 +210,18 @@ def _update_positive_probe_stability(app, context: dict | None, analysis: dict |
             str(context.get("check_id") or ""),
         )
     approved = bool(isinstance(analysis, dict) and analysis.get("approved") is True)
+    if approved and bool((context or {}).get("intermittent", False)):
+        try:
+            intermittent_ready, _seen, _total = (
+                app._display_auto_update_intermittent_evidence(
+                    context,
+                    analysis,
+                )
+            )
+        except Exception:
+            intermittent_ready = False
+        approved = bool(intermittent_ready)
+
     previous_signature = getattr(app, "_display_f3_live_probe_signature", None)
     frames = int(getattr(app, "_display_f3_live_probe_ok_frames", 0) or 0)
 

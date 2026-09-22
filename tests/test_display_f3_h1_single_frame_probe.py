@@ -185,5 +185,11 @@ class DisplayF3H1SingleFrameProbeTests(unittest.TestCase):
         self.assertNotIn("F2Automatic", source)
 
 
+    def test_intermitente_exige_fase_on_completa_antes_da_sonda_aprovar(self):
+        source = inspect.getsource(module.avaliar_sonda_positiva_f3)
+        self.assertIn("_display_auto_update_intermittent_evidence", source)
+        self.assertIn("probe_approved", source)
+        self.assertIn("intermittent_ready", source)
+
 if __name__ == "__main__":
     unittest.main()

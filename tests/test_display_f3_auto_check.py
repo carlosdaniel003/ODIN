@@ -56,7 +56,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
             avaliar_match_check_display("off", "on", intermittent=True),
         )
 
-    def test_runtime_intermitente_exige_ver_cada_segmento_on_ao_menos_uma_vez(self):
+    def test_runtime_intermitente_exige_fase_on_completa_no_mesmo_frame(self):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app._display_auto_intermittent_signature = None
         app._display_auto_intermittent_seen_on = set()
@@ -77,7 +77,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                     "confidence": 0.99,
                 },
                 {
-                    "mask_id": "MASK_002",
+                    "mask_id": "MASK_027",
                     "expected": "on",
                     "classified": "off",
                     "raw_matched": False,
@@ -92,6 +92,8 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         self.assertFalse(ready)
         self.assertEqual((1, 2), (seen, total))
 
+        # A antiga regra somaria MASK_001 do frame anterior com MASK_027 deste
+        # frame e aprovaria. A nova regra continua bloqueando.
         second = {
             "mask_results": [
                 {
@@ -102,7 +104,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                     "confidence": 0.99,
                 },
                 {
-                    "mask_id": "MASK_002",
+                    "mask_id": "MASK_027",
                     "expected": "on",
                     "classified": "on",
                     "raw_matched": True,
@@ -113,6 +115,31 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         ready, seen, total = app._display_auto_update_intermittent_evidence(
             context,
             second,
+        )
+        self.assertFalse(ready)
+        self.assertEqual((1, 2), (seen, total))
+
+        full_on = {
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "on",
+                    "raw_matched": True,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_027",
+                    "expected": "on",
+                    "classified": "on",
+                    "raw_matched": True,
+                    "confidence": 0.99,
+                },
+            ]
+        }
+        ready, seen, total = app._display_auto_update_intermittent_evidence(
+            context,
+            full_on,
         )
         self.assertTrue(ready)
         self.assertEqual((2, 2), (seen, total))

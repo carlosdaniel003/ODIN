@@ -294,7 +294,13 @@ class DisplayAutomaticCheckF3Mixin:
         context: dict,
         analysis: dict,
     ) -> tuple[bool, int, int]:
-        """Memoriza quais máscaras esperadas ON já foram vistas realmente ON."""
+        """Exige uma fase ON completa do padrão intermitente.
+
+        Não acumula segmentos isolados entre frames. Se MASK_027 nunca acender
+        junto com os demais segmentos esperados ON, o CHECK nunca ganha
+        autoridade para aprovar, mesmo que cada outro segmento tenha sido visto
+        aceso em momentos diferentes.
+        """
         if not bool(context.get("intermittent", False)):
             return True, 0, 0
 
@@ -317,10 +323,11 @@ class DisplayAutomaticCheckF3Mixin:
             if str(item.get("mask_id") or "")
             and str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
         }
-        seen = set(
-            getattr(self, "_display_auto_intermittent_seen_on", set()) or set()
-        )
+        total = len(expected_on_ids)
+        if total == 0:
+            return True, 0, 0
 
+        current_on_ids = set()
         for item in results:
             mask_id = str(item.get("mask_id") or "")
             if not mask_id or mask_id not in expected_on_ids:
@@ -334,12 +341,18 @@ class DisplayAutomaticCheckF3Mixin:
                 and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
                 and item.get("raw_matched") is not False
             ):
-                seen.add(mask_id)
+                current_on_ids.add(mask_id)
 
-        self._display_auto_intermittent_seen_on = seen
-        total = len(expected_on_ids)
-        observed = len(expected_on_ids.intersection(seen))
-        return bool(total == 0 or observed >= total), observed, total
+        full_on_phase_now = expected_on_ids.issubset(current_on_ids)
+        if full_on_phase_now:
+            # A memória só nasce de UM frame íntegro; nunca da soma de frames.
+            self._display_auto_intermittent_seen_on = set(expected_on_ids)
+
+        full_on_seen = expected_on_ids.issubset(
+            set(getattr(self, "_display_auto_intermittent_seen_on", set()) or set())
+        )
+        observed = total if full_on_seen else len(current_on_ids)
+        return bool(full_on_seen), int(observed), int(total)
 
     def _display_auto_arm_manual_entry_gate(
         self,
@@ -526,7 +539,8 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_auto_set_preview_status(
                 (
                     f"AUTO • {context['check_name']} • INTERMITENTE • "
-                    f"fase acesa {intermittent_seen}/{intermittent_total} segmento(s)"
+                    f"aguardando fase ON completa "
+                    f"{intermittent_seen}/{intermittent_total}"
                 ),
                 "#FDE68A",
             )
