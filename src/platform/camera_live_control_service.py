@@ -184,7 +184,20 @@ class CameraLiveControlServiceMixin:
                 continue
             vistos.add(chave)
             unicos.append(candidato)
-        return unicos
+
+        # Mantém o valor exato como primeira tentativa; os fallbacks seguintes
+        # são ordenados pela menor distância ao que o operador pediu.
+        if not unicos:
+            return []
+        primeiro = unicos[0]
+        restantes = sorted(
+            unicos[1:],
+            key=lambda candidato: (
+                abs(float(candidato) - solicitado),
+                float(candidato),
+            ),
+        )
+        return [primeiro, *restantes]
 
     @classmethod
     def _tolerancia_controle(cls, nome: str) -> float:
