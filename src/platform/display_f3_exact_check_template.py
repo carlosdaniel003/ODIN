@@ -13,6 +13,7 @@ import src.platform.display_reference_roi as reference_roi_module
 from src.core.roi_geometry import criar_mascaras_roi
 from src.platform.display_auto_check_analyzer import (
     DISPLAY_AUTO_CLASS_LABELS,
+    DisplayAutomaticCheckAnalyzer,
     avaliar_match_check_display,
     display_mask_to_analysis_selection,
 )
@@ -386,9 +387,13 @@ class F3ExactCheckTemplateAnalyzer:
     def __init__(self, repository) -> None:
         self.repository = repository
         self.presence_store = DisplayCheckPresenceReferenceStore(repository)
+        self.learned_state_analyzer = DisplayAutomaticCheckAnalyzer(repository)
 
     def invalidate_learning_cache(self) -> None:
-        return None
+        try:
+            self.learned_state_analyzer.invalidate_learning_cache()
+        except Exception:
+            pass
 
     @staticmethod
     def _not_ready(reason: str, **extra) -> dict:
@@ -502,6 +507,24 @@ class F3ExactCheckTemplateAnalyzer:
             if isinstance(mask, dict) and mask.get("id") is not None
         }
 
+        learned_by_id = {}
+        if intermittent:
+            try:
+                learned_analysis = self.learned_state_analyzer.analyze(
+                    frame=frame,
+                    project_name=project_name,
+                    check_id=check_id,
+                    visual_rotation=visual_rotation,
+                )
+            except Exception:
+                learned_analysis = None
+            if isinstance(learned_analysis, dict) and bool(learned_analysis.get("ready")):
+                learned_by_id = {
+                    str(item.get("mask_id") or ""): item
+                    for item in (learned_analysis.get("mask_results") or ())
+                    if isinstance(item, dict) and str(item.get("mask_id") or "")
+                }
+
         results = []
         for original_mask in active_masks:
             mask_id = str(original_mask.get("id") or "")
@@ -537,12 +560,6 @@ class F3ExactCheckTemplateAnalyzer:
                 else DISPLAY_CHECK_STATE_ON
             )
             classified = expected if template_matched else opposite
-            matched, raw_matched, intermittent_tolerated = avaliar_match_check_display(
-                expected,
-                classified,
-                intermittent=intermittent,
-            )
-
             distance_to_threshold = abs(
                 similarity - F3_EXACT_MASK_MIN_SIMILARITY
             )
@@ -550,6 +567,28 @@ class F3ExactCheckTemplateAnalyzer:
                 0.49
                 if distance_to_threshold < F3_EXACT_MASK_AMBIGUOUS_BAND
                 else min(0.99, 0.70 + (distance_to_threshold * 1.8))
+            )
+            classification_source = F3_EXACT_TEMPLATE_SOURCE
+
+            # CHECK intermitente precisa saber o estado ON/OFF instantâneo sem
+            # depender da fase em que a foto estática do CHECK foi capturada.
+            learned_item = learned_by_id.get(mask_id)
+            if isinstance(learned_item, dict):
+                learned_state = str(learned_item.get("classified") or "").strip().lower()
+                if learned_state:
+                    classified = learned_state
+                    try:
+                        confidence = float(
+                            learned_item.get("confidence", confidence) or confidence
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                    classification_source = "display_learned_state"
+
+            matched, raw_matched, intermittent_tolerated = avaliar_match_check_display(
+                expected,
+                classified,
+                intermittent=intermittent,
             )
 
             results.append(
@@ -570,6 +609,7 @@ class F3ExactCheckTemplateAnalyzer:
                     "reference_v_mean": comparison["reference_v_mean"],
                     "current_v_mean": comparison["current_v_mean"],
                     "reference_source": F3_EXACT_TEMPLATE_SOURCE,
+                    "classification_source": classification_source,
                     "reference_checks": {
                         expected: {
                             "check_id": str(check_id),
