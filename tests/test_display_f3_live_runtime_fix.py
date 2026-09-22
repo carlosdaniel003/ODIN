@@ -21,6 +21,14 @@ class _PhysicalApp:
     pass
 
 
+class _PhysicalAppWithRelease:
+    def __init__(self):
+        self.release_calls = 0
+
+    def _liberar_evidencia_ng_display_f3(self):
+        self.release_calls += 1
+
+
 class _AnalyzerFake:
     def __init__(self, repository, result):
         self.repository = repository
@@ -255,6 +263,24 @@ class DisplayF3LiveRuntimeFixTests(unittest.TestCase):
         new_board["allow_auto"] = True
         released = aplicar_gate_rearme_ciclo_f3(app, new_board)
         self.assertTrue(released["allow_auto"])
+
+    def test_empty_confirmado_libera_evidencia_ng_uma_unica_vez(self):
+        app = _PhysicalAppWithRelease()
+        armar_rearme_por_suporte_vazio_f3(app)
+
+        blocked = aplicar_gate_rearme_ciclo_f3(
+            app,
+            self._check_state("CHECK_H1", "H1"),
+        )
+        self.assertTrue(blocked["cycle_rearm_waiting"])
+        self.assertEqual(0, app.release_calls)
+
+        released = aplicar_gate_rearme_ciclo_f3(app, self._empty_state())
+        self.assertTrue(released["cycle_rearmed"])
+        self.assertEqual(1, app.release_calls)
+
+        aplicar_gate_rearme_ciclo_f3(app, self._empty_state())
+        self.assertEqual(1, app.release_calls)
 
     def test_classificacao_overlay_roda_sem_registrar_ou_alterar_debounce(self):
         repository = object()

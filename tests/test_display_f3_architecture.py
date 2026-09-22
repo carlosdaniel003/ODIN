@@ -54,6 +54,12 @@ class _FakeF3Window:
         self.visible = False
         self.waiting_calls = 0
         self.frames = []
+        self.freeze_calls = 0
+        self.release_calls = 0
+        self.waiting_new_plate_calls = 0
+        self.result_calls = []
+        self.sequence_calls = []
+        self._display_ng_evidence_frozen = False
 
     def show_waiting_camera(self):
         self.waiting_calls += 1
@@ -65,8 +71,28 @@ class _FakeF3Window:
         self.visible = False
 
     def update_camera_preview(self, frame):
+        if self._display_ng_evidence_frozen:
+            return True
         self.frames.append(frame)
         return True
+
+    def freeze_ng_evidence(self):
+        self.freeze_calls += 1
+        self._display_ng_evidence_frozen = True
+
+    def release_ng_evidence(self):
+        self.release_calls += 1
+        self._display_ng_evidence_frozen = False
+
+    def show_waiting_new_plate(self, snapshot=None):
+        self.waiting_new_plate_calls += 1
+        self.sequence_calls.append(dict(snapshot or {}))
+
+    def show_plate_result(self, is_ok, snapshot, discarded=False):
+        self.result_calls.append((bool(is_ok), bool(discarded), dict(snapshot or {})))
+
+    def set_check_sequence(self, snapshot):
+        self.sequence_calls.append(dict(snapshot or {}))
 
 
 class _FakeEngine:
@@ -297,6 +323,72 @@ class DisplayF3ArchitectureTests(unittest.TestCase):
         self.assertEqual(antes, self._snapshot_f2(app))
         self.assertEqual(0, app.camera_start_calls)
         self.assertEqual(0, app.camera_stop_calls)
+
+    def test_ng_congela_frame_fecha_ciclo_e_nao_contabiliza_duas_vezes(self):
+        app = _FakeApp()
+        app.display_f3_ativo = True
+        app.display_check_runtime.configurar_checks(
+            [
+                {"id": "CHECK_H1", "name": "H1"},
+                {"id": "CHECK_BLUE", "name": "BLUE", "intermittent": True},
+            ]
+        )
+        app.display_check_runtime.registrar_resultado_check(True)
+        app._display_auto_last_analysis = {
+            "ready": True,
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "CHECK_BLUE",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_027",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                }
+            ],
+        }
+
+        event = app.registrar_resultado_check_display_f3(False)
+
+        self.assertEqual("plate_ng", event["event"])
+        self.assertTrue(app._display_f3_ng_evidence_frozen)
+        self.assertEqual(1, app.display_check_runtime.total)
+        self.assertEqual(1, app.display_check_runtime.ng)
+        self.assertEqual(1, app.display_f3_window.freeze_calls)
+        self.assertEqual(1, len(app.display_f3_window.frames))
+
+        # O loop continua existindo, mas não substitui a imagem congelada.
+        app._atualizar_preview_display_f3()
+        self.assertEqual(1, len(app.display_f3_window.frames))
+
+        # A tecla/botão DESCARTAR não pode contar a mesma placa novamente.
+        self.assertIsNone(app.descartar_placa_display_f3())
+        self.assertEqual(1, app.display_check_runtime.total)
+        self.assertEqual(1, app.display_check_runtime.ng)
+
+    def test_evidencia_ng_so_volta_ao_vivo_quando_rearme_a_libera(self):
+        app = _FakeApp()
+        app.display_f3_ativo = True
+        app.display_check_runtime.configurar_checks(
+            [{"id": "CHECK_H1", "name": "H1"}]
+        )
+        app._display_auto_last_analysis = {
+            "ready": True,
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "CHECK_H1",
+            "mask_results": [],
+        }
+        app.registrar_resultado_check_display_f3(False)
+        frozen_frames = len(app.display_f3_window.frames)
+
+        app._liberar_evidencia_ng_display_f3()
+
+        self.assertFalse(app._display_f3_ng_evidence_frozen)
+        self.assertEqual(1, app.display_f3_window.release_calls)
+        self.assertEqual(1, app.display_f3_window.waiting_new_plate_calls)
+
+        app._atualizar_preview_display_f3()
+        self.assertEqual(frozen_frames + 1, len(app.display_f3_window.frames))
 
     def test_fechar_f3_cancela_somente_timer_f3_e_nao_para_camera(self):
         app = _FakeApp()

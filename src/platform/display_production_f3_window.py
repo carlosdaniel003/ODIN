@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import tkinter as tk
 from collections.abc import Callable
 
@@ -51,6 +52,9 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self._camera_ready = False
         self._camera_detail = "Aguardando câmera"
         self._waiting_camera_ui_active = False
+        self._display_ng_evidence_frozen = False
+        self._display_readout_frozen = False
+        self._display_frozen_readout_context = None
         self._check_snapshot: dict = {
             "checks": [],
             "current_check": None,
@@ -483,6 +487,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
 
     def set_display_readout_context(self, context: dict | None) -> None:
         """Recebe estados das máscaras; a geometria física NÃO entra no visor."""
+        if bool(getattr(self, "_display_readout_frozen", False)):
+            return
         if not isinstance(context, dict):
             self._display_readout_context = None
         else:
@@ -797,6 +803,70 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         x += digit_width + digit_gap
         self._draw_seven_segment_digit(x, y, digit_width, digit_height, digits[3])
 
+    def freeze_ng_evidence(self) -> None:
+        """Mantém câmera e visor exatamente na evidência que fechou o NG."""
+        self._display_ng_evidence_frozen = True
+        self._display_readout_frozen = True
+        self._display_frozen_readout_context = deepcopy(
+            getattr(self, "_display_readout_context", None)
+        )
+        if isinstance(self._display_frozen_readout_context, dict):
+            self._display_readout_context = deepcopy(
+                self._display_frozen_readout_context
+            )
+            self._redraw_display_readout()
+
+        button = getattr(self, "discard_button", None)
+        if button is not None:
+            try:
+                button.configure(state="disabled")
+            except Exception:
+                pass
+        self.set_preview_status(
+            "NG CONFIRMADO • frame congelado • RETIRE A PLACA DO SUPORTE",
+            "#FCA5A5",
+        )
+
+    def release_ng_evidence(self) -> None:
+        """Destrava a apresentação depois da retirada física confirmada."""
+        self._display_ng_evidence_frozen = False
+        self._display_readout_frozen = False
+        self._display_frozen_readout_context = None
+        self._display_readout_context = None
+        self._redraw_display_readout()
+
+        button = getattr(self, "discard_button", None)
+        if button is not None:
+            try:
+                button.configure(state="normal")
+            except Exception:
+                pass
+
+    def show_waiting_new_plate(self, snapshot: dict | None = None) -> None:
+        """Estado exibido após EMPTY: evidência liberada e próximo ciclo armado."""
+        self._waiting_camera_ui_active = False
+        self._check_snapshot = dict(snapshot or self._check_snapshot or {})
+        self._set_counters(
+            int(self._check_snapshot.get("total", 0) or 0),
+            int(self._check_snapshot.get("ok", 0) or 0),
+            int(self._check_snapshot.get("ng", 0) or 0),
+        )
+        self._render_check_cards(self._check_snapshot)
+        self._set_state(
+            background=self.COLOR_WAITING_AFTER_NG,
+            foreground="#FFFFFF",
+            status="COLOQUE OUTRA PLACA",
+            detail=(
+                "Suporte vazio confirmado • a nova análise iniciará "
+                "automaticamente quando a próxima placa entrar."
+            ),
+        )
+        self.status_label.configure(font=("DejaVu Sans", 24, "bold"))
+        self.set_preview_status(
+            "AUTO • suporte vazio confirmado • aguardando NOVA PLACA",
+            "#FDE68A",
+        )
+
     def set_display_readout(self, value: str = "88:88") -> None:
         """Fallback/manual: mostra um 88:88 neutro fora do contexto automático."""
         text = str(value or "88:88").strip()
@@ -926,6 +996,24 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self._set_counters(total, ok_count, ng_count)
         self._render_check_cards(self._check_snapshot)
 
+        if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+            self._waiting_camera_ui_active = False
+            self._set_state(
+                background=self.COLOR_WAITING_AFTER_NG,
+                foreground="#FFFFFF",
+                status="PLACA NG\nRETIRE A PLACA",
+                detail=(
+                    "Frame e visor congelados na evidência do NG • "
+                    "o ciclo só rearma após PLACA FORA DO SUPORTE."
+                ),
+            )
+            self.status_label.configure(
+                font=("DejaVu Sans", 22, "bold"),
+                height=2,
+                pady=0,
+            )
+            return
+
         checks = list(self._check_snapshot.get("checks", []) or [])
         current = self._check_snapshot.get("current_check")
         if not checks or not isinstance(current, dict):
@@ -989,12 +1077,23 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             )
         else:
             self._render_check_cards(self._check_snapshot)
+            frozen_ng = bool(
+                getattr(self, "_display_ng_evidence_frozen", False)
+                and not discarded
+            )
             self._set_state(
                 background=self.COLOR_NG,
                 foreground="#FFFFFF",
-                status="PLACA DESCARTADA" if discarded else "PLACA NG",
+                status=(
+                    "PLACA DESCARTADA"
+                    if discarded
+                    else ("PLACA NG • RETIRE A PLACA" if frozen_ng else "PLACA NG")
+                ),
                 detail=(
-                    "CHECKS reiniciados. A próxima placa começará pelo primeiro CHECK."
+                    "NG confirmado no frame exibido • câmera e visor permanecerão "
+                    "congelados até a placa sair do suporte."
+                    if frozen_ng
+                    else "CHECKS reiniciados. A próxima placa começará pelo primeiro CHECK."
                 ),
             )
         self.status_label.configure(font=("DejaVu Sans", 28, "bold"))
@@ -1031,6 +1130,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
 
     def update_camera_preview(self, frame, visual_rotation: int = 0) -> bool:
         """Renderiza apenas uma cópia visual, sem tocar em câmera ou F2."""
+        if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+            return True
         if frame is None or getattr(frame, "size", 0) == 0:
             self.show_waiting_camera()
             return False

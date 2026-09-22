@@ -253,6 +253,13 @@ def aplicar_gate_rearme_ciclo_f3(app, state: dict) -> dict:
                     pass
             except Exception:
                 pass
+
+        release_ng = getattr(app, "_liberar_evidencia_ng_display_f3", None)
+        if callable(release_ng):
+            try:
+                release_ng()
+            except Exception:
+                pass
         return result
 
     # Mesmo que a placa analisada continue mostrando exatamente H1/BLUE/etc.,

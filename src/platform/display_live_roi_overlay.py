@@ -317,6 +317,10 @@ def instalar_overlay_rois_ao_vivo_display_f3() -> None:
     original_update = cls.update_camera_preview
 
     def update_camera_preview(self, frame, visual_rotation: int = 0) -> bool:
+        if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+            # A aquisição física continua fora da janela, mas o canvas permanece
+            # exatamente no frame que confirmou o NG.
+            return True
         if frame is None or getattr(frame, "size", 0) == 0:
             return original_update(self, frame, visual_rotation=visual_rotation)
 

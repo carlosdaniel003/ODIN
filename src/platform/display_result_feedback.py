@@ -379,6 +379,15 @@ def instalar_feedback_resultado_display_f3() -> None:
         data = dict(snapshot or {})
         checks = list(data.get("checks", []) or [])
         current = data.get("current_check")
+
+        if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+            aplicar_tema_visual_display_f3(
+                self,
+                "ng_waiting",
+                snapshot=data,
+            )
+            return
+
         feedback = obter_feedback_espera_display_f3(data)
 
         if (

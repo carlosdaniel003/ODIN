@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import tkinter as tk
 
 from src.platform.display_check_sequence_runtime import DisplayCheckSequenceRuntime
@@ -34,6 +35,11 @@ class DisplayProductionF3Mixin:
         self.display_f3_ativo = False
         self.display_f3_after_id = None
         self.display_f3_result_after_id = None
+        # Evidência terminal de NG: o canvas/visor congelam no frame que
+        # efetivamente fechou o debounce de reprovação. A câmera física continua
+        # capturando em camera_frame_atual apenas para detectar retirada/EMPTY.
+        self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_snapshot = None
         self.display_project_repository: DisplayProjectRepository | None = None
         self.display_check_runtime = DisplayCheckSequenceRuntime()
         self._display_project_config_window: DisplayProjectConfigWindow | None = None
@@ -193,6 +199,87 @@ class DisplayProductionF3Mixin:
         except Exception:
             pass
 
+    def _congelar_evidencia_ng_display_f3(self) -> None:
+        """Congela a evidência visual do NG sem parar a aquisição da câmera."""
+        if bool(getattr(self, "_display_f3_ng_evidence_frozen", False)):
+            return
+
+        janela = self.display_f3_window
+        frame = getattr(self, "camera_frame_atual", None)
+        analysis = getattr(self, "_display_auto_last_analysis", None)
+        try:
+            context = self._display_auto_current_context()
+        except Exception:
+            context = None
+
+        evidence_frame = None
+        if frame is not None and getattr(frame, "size", 0) > 0:
+            try:
+                evidence_frame = frame.copy()
+            except Exception:
+                evidence_frame = frame
+
+        # Ainda estamos no CHECK que falhou. Forçamos um último render antes de
+        # o runtime voltar ao H1, garantindo que câmera e visor recebam exatamente
+        # as classificações/cores do frame responsável pelo NG.
+        if janela is not None and evidence_frame is not None:
+            try:
+                janela.update_camera_preview(
+                    evidence_frame,
+                    visual_rotation=self._obter_rotacao_visual_display_f3(),
+                )
+            except TypeError:
+                try:
+                    janela.update_camera_preview(evidence_frame)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        self._display_f3_ng_evidence_snapshot = {
+            "analysis": deepcopy(analysis) if isinstance(analysis, dict) else None,
+            "context": deepcopy(context) if isinstance(context, dict) else None,
+        }
+        self._display_f3_ng_evidence_frozen = True
+
+        if janela is not None:
+            freeze = getattr(janela, "freeze_ng_evidence", None)
+            if callable(freeze):
+                try:
+                    freeze()
+                except Exception:
+                    pass
+
+    def _liberar_evidencia_ng_display_f3(self) -> None:
+        """Libera câmera/visor somente depois que EMPTY foi confirmado."""
+        if not bool(getattr(self, "_display_f3_ng_evidence_frozen", False)):
+            return
+
+        self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_snapshot = None
+        self._cancelar_resultado_display_f3()
+
+        janela = self.display_f3_window
+        if janela is None:
+            return
+
+        release = getattr(janela, "release_ng_evidence", None)
+        if callable(release):
+            try:
+                release()
+            except Exception:
+                pass
+
+        # EMPTY já foi confirmado: agora sim a interface pode pedir outra placa.
+        show_waiting = getattr(janela, "show_waiting_new_plate", None)
+        if callable(show_waiting):
+            try:
+                show_waiting(self.display_check_runtime.snapshot())
+                return
+            except Exception:
+                pass
+        self._renderizar_fluxo_checks_display_f3()
+
     def _cancelar_resultado_display_f3(self) -> None:
         if self.display_f3_result_after_id is None:
             return
@@ -219,6 +306,11 @@ class DisplayProductionF3Mixin:
 
     def registrar_resultado_check_display_f3(self, aprovado: bool = True) -> dict:
         """Entrada oficial para a futura detecção automática do Display."""
+        if not bool(aprovado):
+            # Precisa ocorrer antes de registrar o evento: registrar NG reinicia o
+            # runtime no H1, e perderíamos o CHECK/cores que realmente falharam.
+            self._congelar_evidencia_ng_display_f3()
+
         evento = self.display_check_runtime.registrar_resultado_check(aprovado)
         janela = self.display_f3_window
         tipo = str(evento.get("event", ""))
@@ -252,6 +344,13 @@ class DisplayProductionF3Mixin:
         """Tecla/botão 1: soma TOTAL+NG e reinicia no primeiro CHECK."""
         if not self.display_f3_ativo:
             return None
+        if (
+            bool(getattr(self, "_display_f3_ng_evidence_frozen", False))
+            or bool(getattr(self, "_display_f3_waiting_empty_rearm", False))
+            or bool(getattr(self, "_display_f3_waiting_new_board_after_empty", False))
+        ):
+            # O ciclo já terminou. Impede TOTAL/NG duplicado pela tecla 1.
+            return None
         snapshot_atual = self.display_check_runtime.snapshot()
         if not snapshot_atual.get("checks"):
             return None
@@ -270,6 +369,15 @@ class DisplayProductionF3Mixin:
     def _ativar_tela_producao_display_f3(self) -> bool:
         self.display_f3_ativo = True
         self._cancelar_resultado_display_f3()
+        self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_snapshot = None
+        janela_existente = self.display_f3_window
+        release = getattr(janela_existente, "release_ng_evidence", None)
+        if callable(release):
+            try:
+                release()
+            except Exception:
+                pass
         self._atualizar_resumo_projeto_display_f3()
         self.display_check_runtime.reiniciar_placa()
         janela = self.display_f3_window
@@ -336,6 +444,15 @@ class DisplayProductionF3Mixin:
         self.display_f3_ativo = False
         self.display_check_runtime.reiniciar_placa()
         self._cancelar_resultado_display_f3()
+        self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_snapshot = None
+        janela_atual = self.display_f3_window
+        release = getattr(janela_atual, "release_ng_evidence", None)
+        if callable(release):
+            try:
+                release()
+            except Exception:
+                pass
 
         if self.display_f3_after_id is not None:
             try:
@@ -390,7 +507,10 @@ class DisplayProductionF3Mixin:
 
         janela = self.display_f3_window
         frame = getattr(self, "camera_frame_atual", None)
-        if janela is not None:
+        freeze_visual = bool(
+            getattr(self, "_display_f3_ng_evidence_frozen", False)
+        )
+        if janela is not None and not freeze_visual:
             try:
                 janela.update_camera_preview(
                     frame,
