@@ -50,6 +50,18 @@ class DisplayF3CheckSequenceRuntimeTests(unittest.TestCase):
         self.runtime = DisplayCheckSequenceRuntime()
         self.runtime.configurar_checks(CHECKS)
 
+    def test_runtime_preserva_flag_intermitente_no_snapshot(self):
+        runtime = DisplayCheckSequenceRuntime()
+        runtime.configurar_checks(
+            [
+                {"id": "CHECK_001", "name": "H1", "intermittent": False},
+                {"id": "CHECK_002", "name": "BLUE", "intermittent": True},
+            ]
+        )
+        self.assertFalse(runtime.snapshot()["current_check"]["intermittent"])
+        runtime.registrar_resultado_check(True)
+        self.assertTrue(runtime.snapshot()["current_check"]["intermittent"])
+
     def test_inicia_aguardando_primeiro_check(self):
         snapshot = self.runtime.snapshot()
         self.assertEqual("H1", snapshot["current_check"]["name"])

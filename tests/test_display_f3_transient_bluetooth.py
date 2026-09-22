@@ -24,6 +24,18 @@ class DisplayF3TransientBluetoothTests(unittest.TestCase):
                 )
             )
 
+    def test_flag_intermitente_explicitamente_desativada_supera_nome_blue(self):
+        self.assertFalse(
+            DisplayAutomaticCheckF3Mixin._display_auto_is_transient_check(
+                {"check_name": "BLUE", "intermittent": False}
+            )
+        )
+        self.assertTrue(
+            DisplayAutomaticCheckF3Mixin._display_auto_is_transient_check(
+                {"check_name": "AUX", "intermittent": True}
+            )
+        )
+
     def test_blue_and_usb_require_manual_transition_after_success(self):
         for name in ("BLUETOOTH", "BLUE", "BT", "CHECK BLUE", "USB", "CHECK USB"):
             self.assertTrue(

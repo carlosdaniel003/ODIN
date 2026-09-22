@@ -837,6 +837,7 @@ def renderizar_preview_claro_display_f3(frame, context):
                 classified,
                 expected,
                 has_any_on=has_any_on,
+                intermittent=bool(context.get("intermittent", False)),
             )
             if mask_id in failed_mask_ids and has_any_on:
                 presentation = "alert"
@@ -885,6 +886,7 @@ def renderizar_preview_claro_display_f3(frame, context):
             classifications.get(mask_id),
             expected_states.get(mask_id),
             has_any_on=has_any_on,
+            intermittent=bool(context.get("intermittent", False)),
         )
         if mask_id in failed_mask_ids and has_any_on:
             presentation = "alert"

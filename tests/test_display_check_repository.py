@@ -50,6 +50,50 @@ class DisplayCheckRepositoryTests(unittest.TestCase):
                 [check["id"] for check in checks],
             )
 
+    def test_blue_padrao_e_migracao_legada_sao_intermitentes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = DisplayProjectRepository(Path(temp_dir) / "display.json")
+            repository.adicionar_projeto("DISPLAY A", (640, 480))
+            checks = repository.listar_checks("DISPLAY A")
+            blue = next(check for check in checks if check["name"] == "BLUE")
+            h1 = next(check for check in checks if check["name"] == "H1")
+            self.assertTrue(blue["intermittent"])
+            self.assertFalse(h1["intermittent"])
+
+    def test_toggle_intermitente_persiste_e_false_tem_prioridade_sobre_nome_blue(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "display.json"
+            repository = DisplayProjectRepository(config_file)
+            repository.adicionar_projeto("DISPLAY A", (640, 480))
+            blue = next(
+                check
+                for check in repository.listar_checks("DISPLAY A")
+                if check["name"] == "BLUE"
+            )
+            self.assertTrue(
+                repository.salvar_check_intermitente(
+                    "DISPLAY A",
+                    blue["id"],
+                    False,
+                )
+            )
+            reopened = DisplayProjectRepository(config_file)
+            saved = reopened.carregar_check("DISPLAY A", blue["id"])
+            self.assertFalse(saved["intermittent"])
+
+            novo = repository.adicionar_check("DISPLAY A", "PISCA TESTE")
+            self.assertTrue(
+                repository.salvar_check_intermitente(
+                    "DISPLAY A",
+                    novo,
+                    True,
+                )
+            )
+            self.assertTrue(
+                DisplayProjectRepository(config_file)
+                .carregar_check("DISPLAY A", novo)["intermittent"]
+            )
+
     def test_salvar_mascaras_adiciona_estado_ignorar_em_todos_os_checks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = DisplayProjectRepository(Path(temp_dir) / "display.json")

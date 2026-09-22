@@ -60,6 +60,13 @@ def _repository(root: Path):
 
 
 class DisplayF3ExactCheckTemplateTests(unittest.TestCase):
+    def test_analisador_exato_intermitente_mantem_classificador_on_off_separado_da_foto(self):
+        source = inspect.getsource(F3ExactCheckTemplateAnalyzer)
+        self.assertIn("learned_state_analyzer", source)
+        self.assertIn("classification_source", source)
+        self.assertIn("intermittent_tolerated", source)
+        self.assertIn("avaliar_match_check_display", source)
+
     def test_current_check_photo_alone_is_enough_to_approve_same_scene(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

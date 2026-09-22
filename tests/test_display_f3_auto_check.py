@@ -14,6 +14,7 @@ from src.platform.display_auto_check_analyzer import (
     DISPLAY_AUTO_CLASS_LOW_LIGHT,
     DisplayAutomaticCheckAnalyzer,
     DisplayLearnedStateClassifier,
+    avaliar_match_check_display,
     display_mask_to_analysis_selection,
 )
 from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
@@ -37,6 +38,85 @@ def _features(value: float) -> LedFeatures:
 
 
 class DisplayF3AutoCheckTests(unittest.TestCase):
+    def test_intermitente_tolera_off_de_segmento_esperado_on_mas_nao_low_light(self):
+        self.assertEqual(
+            (True, False, True),
+            avaliar_match_check_display("on", "off", intermittent=True),
+        )
+        self.assertEqual(
+            (True, True, False),
+            avaliar_match_check_display("on", "on", intermittent=True),
+        )
+        self.assertEqual(
+            (False, False, False),
+            avaliar_match_check_display("on", "low_light", intermittent=True),
+        )
+        self.assertEqual(
+            (False, False, False),
+            avaliar_match_check_display("off", "on", intermittent=True),
+        )
+
+    def test_runtime_intermitente_exige_ver_cada_segmento_on_ao_menos_uma_vez(self):
+        app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
+        app._display_auto_intermittent_signature = None
+        app._display_auto_intermittent_seen_on = set()
+        context = {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "intermittent": True,
+        }
+
+        first = {
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "on",
+                    "raw_matched": True,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_002",
+                    "expected": "on",
+                    "classified": "off",
+                    "raw_matched": False,
+                    "confidence": 0.99,
+                },
+            ]
+        }
+        ready, seen, total = app._display_auto_update_intermittent_evidence(
+            context,
+            first,
+        )
+        self.assertFalse(ready)
+        self.assertEqual((1, 2), (seen, total))
+
+        second = {
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "off",
+                    "raw_matched": False,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_002",
+                    "expected": "on",
+                    "classified": "on",
+                    "raw_matched": True,
+                    "confidence": 0.99,
+                },
+            ]
+        }
+        ready, seen, total = app._display_auto_update_intermittent_evidence(
+            context,
+            second,
+        )
+        self.assertTrue(ready)
+        self.assertEqual((2, 2), (seen, total))
+
     def test_classifier_uses_three_learned_states(self):
         classifier = DisplayLearnedStateClassifier(
             learned_on=_features(220),
