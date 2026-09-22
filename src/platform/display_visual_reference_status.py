@@ -645,6 +645,8 @@ def _set_visual_reference_status(
     board_text: str,
     board_color: str,
 ) -> None:
+    if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+        return
     display_label = getattr(self, "visual_reference_state_label", None)
     board_label = getattr(self, "board_reference_state_label", None)
     if display_label is not None:

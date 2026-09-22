@@ -115,6 +115,15 @@ class DisplayF3ResultFeedbackTests(unittest.TestCase):
         self.assertNotEqual(neutral["camera_surround_bg"], ng["camera_surround_bg"])
         self.assertNotEqual(ok["camera_surround_bg"], ng["camera_surround_bg"])
 
+    def test_tema_ng_preserva_status_e_cards_do_frame_congelado(self):
+        import inspect
+        from src.platform import display_result_feedback as feedback_module
+
+        source = inspect.getsource(feedback_module.aplicar_tema_visual_display_f3)
+        self.assertIn("_display_ng_evidence_frozen", source)
+        self.assertIn("_display_frozen_check_snapshot", source)
+        self.assertIn("restore_frozen_analysis_statuses", source)
+
     def test_f3_window_received_feedback_extension(self):
         self.assertTrue(DisplayProductionF3Window._odin_display_result_feedback)
         self.assertTrue(DisplayProductionF3Window._odin_display_full_result_theme)

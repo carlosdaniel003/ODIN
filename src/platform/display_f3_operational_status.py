@@ -302,6 +302,8 @@ def _build_visual_analysis_state(self, frame, project_name: str) -> dict:
 
 
 def _set_operational_reference_status(self, text: str, color: str) -> None:
+    if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+        return
     label = getattr(self, "operational_reference_state_label", None)
     if label is None:
         return
@@ -310,6 +312,8 @@ def _set_operational_reference_status(self, text: str, color: str) -> None:
 
 
 def _set_visual_analysis_status(self, text: str, color: str) -> None:
+    if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+        return
     label = getattr(self, "visual_analysis_state_label", None)
     if label is None:
         return

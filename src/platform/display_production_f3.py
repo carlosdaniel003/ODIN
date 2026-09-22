@@ -238,9 +238,41 @@ class DisplayProductionF3Mixin:
             except Exception:
                 evidence_frame = frame
 
-        # Ainda estamos no CHECK que falhou. Forçamos um último render antes de
-        # o runtime voltar ao H1, garantindo que câmera e visor recebam exatamente
-        # as classificações/cores do frame responsável pelo NG.
+        # Ainda estamos no CHECK que falhou. Publicamos também o resumo de
+        # máscaras usando analysis+context preservados deste MESMO frame. O
+        # wrapper normal de status roda depois do processo automático e seria
+        # tarde demais: nesse ponto o runtime já teria voltado internamente ao H1.
+        if janela is not None and isinstance(analysis, dict) and isinstance(context, dict):
+            try:
+                from src.platform.display_f3_mask_status import (
+                    formatar_status_mascaras_f3,
+                )
+
+                mask_text, mask_color = formatar_status_mascaras_f3(
+                    analysis,
+                    context,
+                )
+                janela.set_mask_analysis_status(mask_text, mask_color)
+                self._display_f3_mask_status_snapshot = {
+                    "text": mask_text,
+                    "color": mask_color,
+                    "check_id": str(context.get("check_id") or ""),
+                    "check_name": str(context.get("check_name") or ""),
+                    "ready": bool(analysis.get("ready")),
+                    "approved": analysis.get("approved"),
+                    "matched_mask_count": int(
+                        analysis.get("matched_mask_count", 0) or 0
+                    ),
+                    "active_mask_count": int(
+                        analysis.get("active_mask_count", 0) or 0
+                    ),
+                }
+            except Exception:
+                pass
+
+        # Forçamos um último render antes de o runtime voltar ao H1, garantindo
+        # que câmera e visor recebam exatamente as classificações/cores do frame
+        # responsável pelo NG.
         if janela is not None and evidence_frame is not None:
             try:
                 janela.update_camera_preview(
@@ -255,9 +287,20 @@ class DisplayProductionF3Mixin:
             except Exception:
                 pass
 
+        state = getattr(self, "_display_f3_operational_state", None)
+        if janela is not None and isinstance(state, dict):
+            try:
+                janela.set_operational_reference_status(
+                    str(state.get("text") or "IDENTIFICANDO..."),
+                    str(state.get("color") or "#FDE68A"),
+                )
+            except Exception:
+                pass
+
         self._display_f3_ng_evidence_snapshot = {
             "analysis": deepcopy(analysis) if isinstance(analysis, dict) else None,
             "context": deepcopy(context) if isinstance(context, dict) else None,
+            "operational_state": deepcopy(state) if isinstance(state, dict) else None,
         }
         self._display_f3_ng_evidence_frozen = True
         self._display_f3_pending_ng_frame = None

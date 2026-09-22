@@ -327,11 +327,17 @@ def aplicar_tema_visual_display_f3(
         bg=tema["preview_bg"],
         fg=tema["muted"],
     )
-    _configure(
-        window.preview_status,
-        bg=tema["preview_bg"],
-        fg=tema["muted"],
-    )
+    if bool(getattr(window, "_display_ng_evidence_frozen", False)):
+        _configure(
+            window.preview_status,
+            bg=tema["preview_bg"],
+        )
+    else:
+        _configure(
+            window.preview_status,
+            bg=tema["preview_bg"],
+            fg=tema["muted"],
+        )
     _configure(
         window.preview_canvas,
         bg=tema["camera_surround_bg"],
@@ -343,12 +349,25 @@ def aplicar_tema_visual_display_f3(
         fg=tema["muted"],
     )
 
+    effective_snapshot = snapshot
+    if bool(getattr(window, "_display_ng_evidence_frozen", False)):
+        frozen_snapshot = getattr(window, "_display_frozen_check_snapshot", None)
+        if isinstance(frozen_snapshot, dict):
+            effective_snapshot = frozen_snapshot
+
     _estilizar_cards_checks(
         window,
-        snapshot=snapshot,
+        snapshot=effective_snapshot,
         tema=tema,
         force_all_completed=force_all_completed,
     )
+
+    restore = getattr(window, "restore_frozen_analysis_statuses", None)
+    if callable(restore):
+        try:
+            restore()
+        except Exception:
+            pass
 
     try:
         window.root.update_idletasks()

@@ -114,6 +114,8 @@ def formatar_status_mascaras_f3(
 
 
 def _set_mask_analysis_status(self, text: str, color: str) -> None:
+    if bool(getattr(self, "_display_ng_evidence_frozen", False)):
+        return
     label = getattr(self, "mask_analysis_state_label", None)
     if label is None:
         return

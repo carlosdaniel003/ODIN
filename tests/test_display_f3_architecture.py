@@ -324,6 +324,17 @@ class DisplayF3ArchitectureTests(unittest.TestCase):
         self.assertEqual(0, app.camera_start_calls)
         self.assertEqual(0, app.camera_stop_calls)
 
+    def test_ng_congela_tambem_status_e_check_que_falhou(self):
+        source = inspect.getsource(DisplayProductionF3Window.freeze_ng_evidence)
+        sequence_source = inspect.getsource(DisplayProductionF3Window.set_check_sequence)
+        preview_source = inspect.getsource(DisplayProductionF3Window.set_preview_status)
+
+        self.assertIn("_capture_analysis_statuses", source)
+        self.assertIn("_display_frozen_check_snapshot", source)
+        self.assertIn("restore_frozen_analysis_statuses", source)
+        self.assertIn("_display_frozen_check_snapshot", sequence_source)
+        self.assertIn("_display_ng_evidence_frozen", preview_source)
+
     def test_ng_congela_frame_fecha_ciclo_e_nao_contabiliza_duas_vezes(self):
         app = _FakeApp()
         app.display_f3_ativo = True
