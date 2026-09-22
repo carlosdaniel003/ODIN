@@ -83,6 +83,7 @@ def estado_visual_mascara_f3(
     expected: str | None,
     *,
     has_any_on: bool,
+    intermittent: bool = False,
 ) -> str | None:
     """Converte classificação+gabarito em somente verde/vermelho/amarelo."""
     current = str(classified or "").strip().lower()
@@ -97,6 +98,8 @@ def estado_visual_mascara_f3(
         return DISPLAY_CHECK_STATE_ON
 
     if current == DISPLAY_CHECK_STATE_OFF:
+        if target == DISPLAY_CHECK_STATE_ON and intermittent:
+            return DISPLAY_CHECK_STATE_OFF
         if not has_any_on:
             return None
         if target == DISPLAY_CHECK_STATE_ON:
@@ -237,6 +240,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                 "masks": tuple(visual_masks),
                 "board_points": tuple(visual_board),
                 "expected_states": expected,
+                "intermittent": bool(check.get("intermittent", False)),
                 "readout_mask_ids": readout_mask_ids,
                 "readout_slot_mask_ids": readout_slot_mask_ids,
                 "tracking_active": True,
@@ -272,6 +276,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
             "masks": (),
             "board_points": (),
             "expected_states": expected,
+            "intermittent": bool(check.get("intermittent", False)),
             "readout_mask_ids": readout_mask_ids,
             "readout_slot_mask_ids": readout_slot_mask_ids,
             "tracking_active": True,
@@ -321,6 +326,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "masks": tuple(visual_masks),
         "board_points": (),
         "expected_states": expected,
+        "intermittent": bool(check.get("intermittent", False)),
         "readout_mask_ids": readout_mask_ids,
         "readout_slot_mask_ids": readout_slot_mask_ids,
         "tracking_active": False,
@@ -473,6 +479,7 @@ def _contexto_preview_claro(original):
         result["masks"] = project_context["masks"]
         result["board_points"] = tuple(project_context.get("board_points") or ())
         result["expected_states"] = dict(project_context["expected_states"])
+        result["intermittent"] = bool(project_context.get("intermittent", False))
         result["readout_mask_ids"] = tuple(
             project_context.get("readout_mask_ids") or ()
         )
@@ -783,6 +790,7 @@ def renderizar_preview_claro_display_f3(frame, context):
             classifications.get(mask_id),
             expected_states.get(mask_id),
             has_any_on=has_any_on,
+            intermittent=bool(context.get("intermittent", False)),
         )
 
         # matched=False é a evidência direta de divergência. Só ativamos o

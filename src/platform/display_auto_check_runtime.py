@@ -44,6 +44,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_last_analysis = None
         self._display_auto_manual_entry_signature = None
         self._display_auto_manual_entry_label = ""
+        self._display_auto_intermittent_signature = None
+        self._display_auto_intermittent_seen_on = set()
         super().__init__(*args, **kwargs)
         self._rebuild_display_auto_analyzer()
 
@@ -62,6 +64,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_stable_frames = 0
         self._display_auto_last_frame_token = None
         self._display_auto_last_analysis = None
+        self._display_auto_intermittent_signature = None
+        self._display_auto_intermittent_seen_on = set()
         self._display_auto_transition_frames = (
             self.DISPLAY_AUTO_TRANSITION_FRAMES if transition else 0
         )
@@ -151,6 +155,7 @@ class DisplayAutomaticCheckF3Mixin:
             "project_name": str(project_name),
             "check_id": check_id,
             "check_name": str(current.get("name") or check_id),
+            "intermittent": bool(current.get("intermittent", False)),
             "current_index": current_index,
         }
 
@@ -169,7 +174,9 @@ class DisplayAutomaticCheckF3Mixin:
 
     @classmethod
     def _display_auto_is_transient_check(cls, context: dict) -> bool:
-        """Bluetooth/BLUE é momentâneo: uma aparição correta já é suficiente."""
+        """CHECK intermitente usa confirmação rápida após evidência temporal."""
+        if "intermittent" in context:
+            return bool(context.get("intermittent"))
         name = str(context.get("check_name") or "").strip().upper()
         normalized = " ".join(name.replace("-", " ").replace("_", " ").split())
         if normalized in cls.DISPLAY_AUTO_TRANSIENT_CHECK_NAMES:
@@ -194,7 +201,9 @@ class DisplayAutomaticCheckF3Mixin:
         """
         if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
             return False
-        if analysis.get("approved") is True:
+        if analysis.get("approved") is True and not bool(
+            analysis.get("intermittent", False)
+        ):
             return True
 
         results = [
@@ -280,6 +289,58 @@ class DisplayAutomaticCheckF3Mixin:
                 return True
         return False
 
+    def _display_auto_update_intermittent_evidence(
+        self,
+        context: dict,
+        analysis: dict,
+    ) -> tuple[bool, int, int]:
+        """Memoriza quais máscaras esperadas ON já foram vistas realmente ON."""
+        if not bool(context.get("intermittent", False)):
+            return True, 0, 0
+
+        signature = (
+            str(context.get("project_name") or ""),
+            str(context.get("check_id") or ""),
+        )
+        if getattr(self, "_display_auto_intermittent_signature", None) != signature:
+            self._display_auto_intermittent_signature = signature
+            self._display_auto_intermittent_seen_on = set()
+
+        results = [
+            item
+            for item in (analysis.get("mask_results") or ())
+            if isinstance(item, dict)
+        ]
+        expected_on_ids = {
+            str(item.get("mask_id") or "")
+            for item in results
+            if str(item.get("mask_id") or "")
+            and str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+        }
+        seen = set(
+            getattr(self, "_display_auto_intermittent_seen_on", set()) or set()
+        )
+
+        for item in results:
+            mask_id = str(item.get("mask_id") or "")
+            if not mask_id or mask_id not in expected_on_ids:
+                continue
+            try:
+                confidence = float(item.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if (
+                confidence >= DISPLAY_AUTO_MIN_CONFIDENCE
+                and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
+                and item.get("raw_matched") is not False
+            ):
+                seen.add(mask_id)
+
+        self._display_auto_intermittent_seen_on = seen
+        total = len(expected_on_ids)
+        observed = len(expected_on_ids.intersection(seen))
+        return bool(total == 0 or observed >= total), observed, total
+
     def _display_auto_arm_manual_entry_gate(
         self,
         context: dict,
@@ -362,6 +423,10 @@ class DisplayAutomaticCheckF3Mixin:
 
         if signature != self._display_auto_signature:
             self._display_auto_signature = signature
+            self._display_auto_intermittent_signature = (
+                signature if bool(context.get("intermittent", False)) else None
+            )
+            self._display_auto_intermittent_seen_on = set()
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
             # H1 e Bluetooth são transitórios. Um CHECK protegido pelo botão
@@ -438,11 +503,34 @@ class DisplayAutomaticCheckF3Mixin:
                 return
             self._display_auto_clear_manual_entry_gate()
 
+        intermittent_ready, intermittent_seen, intermittent_total = (
+            self._display_auto_update_intermittent_evidence(
+                context,
+                analysis,
+            )
+        )
+
         policy = decidir_analise_display_f3(
             analysis,
             reference_gate=reference_gate,
         )
         decision = str(policy.get("decision") or DISPLAY_AUTO_DECISION_SEARCHING)
+
+        if (
+            bool(context.get("intermittent", False))
+            and decision == DISPLAY_AUTO_DECISION_OK
+            and not intermittent_ready
+        ):
+            self._display_auto_last_decision = None
+            self._display_auto_stable_frames = 0
+            self._display_auto_set_preview_status(
+                (
+                    f"AUTO • {context['check_name']} • INTERMITENTE • "
+                    f"fase acesa {intermittent_seen}/{intermittent_total} segmento(s)"
+                ),
+                "#FDE68A",
+            )
+            return
 
         if decision == DISPLAY_AUTO_DECISION_SEARCHING:
             self._display_auto_last_decision = None

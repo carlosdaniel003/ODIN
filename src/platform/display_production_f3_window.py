@@ -425,6 +425,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         expected: str | None,
         failed: bool = False,
         ready: bool = True,
+        intermittent: bool = False,
     ) -> str:
         """Estado lógico do visor fixo com cinza enquanto não há leitura."""
         current = str(classified or "").strip().lower()
@@ -441,6 +442,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             return "neutral"
         if bool(failed):
             return "ng"
+        if intermittent and target == "on" and current == "off":
+            return "off"
         if current in {"on", "off"} and current != target:
             return "ng"
         if target == "on" and current == "on":
@@ -522,6 +525,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                     if str(mask_id)
                 },
                 "has_any_on": bool(context.get("has_any_on")),
+                "intermittent": bool(context.get("intermittent", False)),
                 "power_confirmed": bool(context.get("power_confirmed")),
                 "power_off_confirmed": bool(
                     context.get("power_off_confirmed")
@@ -620,6 +624,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 expected_states.get(mask_id),
                 mask_id in failed,
                 ready=ready,
+                intermittent=bool(context.get("intermittent", False)),
             )
             fill, outline, _number = self._display_readout_color(state)
             points = polygons[segment_name]

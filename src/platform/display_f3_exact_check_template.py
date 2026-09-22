@@ -13,6 +13,7 @@ import src.platform.display_reference_roi as reference_roi_module
 from src.core.roi_geometry import criar_mascaras_roi
 from src.platform.display_auto_check_analyzer import (
     DISPLAY_AUTO_CLASS_LABELS,
+    avaliar_match_check_display,
     display_mask_to_analysis_selection,
 )
 from src.platform.display_check_presence_reference import (
@@ -449,6 +450,7 @@ class F3ExactCheckTemplateAnalyzer:
         check = self.repository.carregar_check(project_name, check_id)
         if check is None:
             return self._not_ready("check_display_inexistente")
+        intermittent = bool(check.get("intermittent", False))
 
         master_resolution = normalizar_resolucao_display(
             project.get("master_resolution")
@@ -528,13 +530,18 @@ class F3ExactCheckTemplateAnalyzer:
                 return self._not_ready("mascara_fora_do_frame", mask_id=mask_id)
 
             similarity = float(comparison["similarity"])
-            matched = similarity >= F3_EXACT_MASK_MIN_SIMILARITY
+            template_matched = similarity >= F3_EXACT_MASK_MIN_SIMILARITY
             opposite = (
                 DISPLAY_CHECK_STATE_OFF
                 if expected == DISPLAY_CHECK_STATE_ON
                 else DISPLAY_CHECK_STATE_ON
             )
-            classified = expected if matched else opposite
+            classified = expected if template_matched else opposite
+            matched, raw_matched, intermittent_tolerated = avaliar_match_check_display(
+                expected,
+                classified,
+                intermittent=intermittent,
+            )
 
             distance_to_threshold = abs(
                 similarity - F3_EXACT_MASK_MIN_SIMILARITY
@@ -553,6 +560,8 @@ class F3ExactCheckTemplateAnalyzer:
                     "classified": classified,
                     "classified_label": DISPLAY_AUTO_CLASS_LABELS[classified],
                     "matched": bool(matched),
+                    "raw_matched": bool(raw_matched),
+                    "intermittent_tolerated": bool(intermittent_tolerated),
                     "confidence": round(float(confidence), 4),
                     "template_similarity": round(similarity, 4),
                     "template_threshold": F3_EXACT_MASK_MIN_SIMILARITY,
@@ -588,6 +597,7 @@ class F3ExactCheckTemplateAnalyzer:
             "project_name": str(project_name),
             "check_id": str(check_id),
             "check_name": str(check.get("name") or check_id),
+            "intermittent": bool(intermittent),
             "mask_results": results,
             "active_mask_count": len(results),
             "matched_mask_count": sum(

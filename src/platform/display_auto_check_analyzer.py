@@ -226,6 +226,28 @@ def display_mask_to_analysis_selection(mask: dict) -> LedSelection:
     raise ValueError(f"Máscara {mask_id} possui tipo não suportado.")
 
 
+def avaliar_match_check_display(
+    expected: str | None,
+    classified: str | None,
+    *,
+    intermittent: bool = False,
+) -> tuple[bool, bool, bool]:
+    """Retorna (matched, raw_matched, intermittent_tolerated).
+
+    Em CHECK intermitente, somente o OFF temporário de uma máscara esperada ON
+    é tolerado. LOW_LIGHT e ON em máscara esperada OFF continuam divergências.
+    """
+    target = str(expected or "").strip().lower()
+    current = str(classified or "").strip().lower()
+    raw_matched = current == target
+    tolerated = bool(
+        intermittent
+        and target == DISPLAY_CHECK_STATE_ON
+        and current == DISPLAY_CHECK_STATE_OFF
+    )
+    return bool(raw_matched or tolerated), bool(raw_matched), bool(tolerated)
+
+
 class DisplayAutomaticCheckAnalyzer:
     """Analisa somente Projeto Display, CHECK atual e aprendizado Display."""
 
@@ -302,6 +324,7 @@ class DisplayAutomaticCheckAnalyzer:
         check = self.repository.carregar_check(project_name, check_id)
         if check is None:
             return self._not_ready("check_display_inexistente")
+        intermittent = bool(check.get("intermittent", False))
 
         master_resolution = normalizar_resolucao_display(
             project.get("master_resolution")
@@ -406,7 +429,11 @@ class DisplayAutomaticCheckAnalyzer:
                 features,
                 selection=selection,
             )
-            matched = classification.state == expected
+            matched, raw_matched, intermittent_tolerated = avaliar_match_check_display(
+                expected,
+                classification.state,
+                intermittent=intermittent,
+            )
             results.append(
                 {
                     "mask_id": mask_id,
@@ -415,6 +442,8 @@ class DisplayAutomaticCheckAnalyzer:
                     "classified": classification.state,
                     "classified_label": classification.label,
                     "matched": bool(matched),
+                    "raw_matched": bool(raw_matched),
+                    "intermittent_tolerated": bool(intermittent_tolerated),
                     "confidence": classification.confidence,
                     "distances": classification.distances,
                     "features": features.to_dict(),
@@ -429,6 +458,7 @@ class DisplayAutomaticCheckAnalyzer:
             "project_name": str(project_name),
             "check_id": str(check_id),
             "check_name": str(check.get("name") or check_id),
+            "intermittent": bool(intermittent),
             "mask_results": results,
             "active_mask_count": len(results),
             "matched_mask_count": sum(1 for item in results if item["matched"]),
