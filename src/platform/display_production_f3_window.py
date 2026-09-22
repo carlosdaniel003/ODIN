@@ -430,12 +430,13 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         current = str(classified or "").strip().lower()
         target = str(expected or "").strip().lower()
 
-        # POUCA LUZ já é uma anomalia visual por si só, mesmo antes de o H1
-        # conseguir estabelecer autoridade completa de energia.
-        if current == "low_light":
-            return "ng"
+        # Sem autoridade de energia, o visor não julga segmentos. A placa
+        # desligada precisa aparecer 100% cinza, mesmo que a leitura bruta tenha
+        # falsos ON/LOW_LIGHT por reflexo, contraste ou ruído.
         if not bool(ready):
             return "neutral"
+        if current == "low_light":
+            return "ng"
         if target not in {"on", "off"}:
             return "neutral"
         if bool(failed):
@@ -511,6 +512,12 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 },
                 "has_any_on": bool(context.get("has_any_on")),
                 "power_confirmed": bool(context.get("power_confirmed")),
+                "power_off_confirmed": bool(
+                    context.get("power_off_confirmed")
+                ),
+                "energy_state": str(
+                    context.get("energy_state") or ""
+                ).strip().lower(),
             }
         self._redraw_display_readout()
 
@@ -529,14 +536,19 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             return
 
         half = height / 2.0
+        # Cada dígito possui seu próprio "anel" de rótulos. As laterais usam
+        # uma margem maior para impedir que, por exemplo, 2/3 de um dígito
+        # encostem em 12/13 do próximo.
+        side_gutter = 8.0
+        vertical_gutter = 5.0
         placements = {
-            "a": (x + width / 2.0, y - 3.0, "s"),
-            "b": (x + width + 4.0, y + half * 0.50, "w"),
-            "c": (x + width + 4.0, y + half * 1.50, "w"),
-            "d": (x + width / 2.0, y + height + 3.0, "n"),
-            "e": (x - 4.0, y + half * 1.50, "e"),
-            "f": (x - 4.0, y + half * 0.50, "e"),
-            "g": (x + width / 2.0, y + half + 4.0, "n"),
+            "a": (x + width / 2.0, y - vertical_gutter, "s"),
+            "b": (x + width + side_gutter, y + half * 0.42, "w"),
+            "c": (x + width + side_gutter, y + half * 1.58, "w"),
+            "d": (x + width / 2.0, y + height + vertical_gutter, "n"),
+            "e": (x - side_gutter, y + half * 1.58, "e"),
+            "f": (x - side_gutter, y + half * 0.42, "e"),
+            "g": (x + width / 2.0, y + half + vertical_gutter, "n"),
         }
         px, py, anchor = placements.get(
             segment_name,
@@ -639,9 +651,11 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
 
         digit_height = min(72.0, max(58.0, height - 30.0))
         digit_width = digit_height * 0.52
-        digit_gap = 18.0
-        colon_width = 22.0
-        group_gap = 16.0
+        # Espaço reservado também para os números laterais de dois dígitos
+        # adjacentes. Evita sobreposição 2/3 ↔ 12/13 e 16/17 ↔ 26/27.
+        digit_gap = 44.0
+        colon_width = 24.0
+        group_gap = 34.0
         total_width = (
             digit_width * 4.0
             + digit_gap * 2.0
@@ -653,9 +667,14 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
 
         # Sem energia/leitura válida: tudo CINZA. Após confirmação, o CHECK
         # corrente passa a comandar verde, verde escuro ou vermelho NG.
+        energy_state = str(
+            context.get("energy_state") or ""
+        ).strip().lower()
+        off_confirmed = bool(context.get("power_off_confirmed"))
         ready = bool(
             context.get("power_confirmed")
-            or context.get("has_any_on")
+            and not off_confirmed
+            and energy_state != "off"
         )
 
         x = start_x

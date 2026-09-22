@@ -2877,6 +2877,15 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         isinstance(energy, dict)
                         and energy.get("powered_confirmed") is True
                     )
+                    semantic_context["power_off_confirmed"] = bool(
+                        isinstance(energy, dict)
+                        and energy.get("off_confirmed") is True
+                    )
+                    semantic_context["energy_state"] = (
+                        str(energy.get("energy_state") or "").strip().lower()
+                        if isinstance(energy, dict)
+                        else ""
+                    )
                     try:
                         self_window.set_display_readout_context(
                             semantic_context

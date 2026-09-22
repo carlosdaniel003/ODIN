@@ -484,6 +484,15 @@ def _contexto_preview_claro(original):
             isinstance(energy, dict)
             and energy.get("powered_confirmed") is True
         )
+        result["power_off_confirmed"] = bool(
+            isinstance(energy, dict)
+            and energy.get("off_confirmed") is True
+        )
+        result["energy_state"] = (
+            str(energy.get("energy_state") or "").strip().lower()
+            if isinstance(energy, dict)
+            else ""
+        )
         try:
             window.set_display_readout_context(result)
         except (AttributeError, TypeError):

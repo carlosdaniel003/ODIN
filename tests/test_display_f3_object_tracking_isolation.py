@@ -444,6 +444,8 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
         state = DisplayProductionF3Window._display_readout_semantic_state
         self.assertEqual("neutral", state("off", "on", False, ready=False))
+        self.assertEqual("neutral", state("on", "off", True, ready=False))
+        self.assertEqual("neutral", state("low_light", "on", True, ready=False))
         self.assertEqual("ng", state("low_light", "on", False, ready=True))
         self.assertEqual("ng", state("off", "on", False, ready=True))
         self.assertEqual("ng", state("on", "off", False, ready=True))
@@ -491,6 +493,42 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn('"b":', number_source)
         self.assertIn('"g":', number_source)
 
+    def test_display_readout_board_off_has_absolute_gray_priority(self):
+        from src.platform.display_production_f3_window import (
+            DisplayProductionF3Window,
+        )
+        source = inspect.getsource(
+            DisplayProductionF3Window._draw_live_display_readout
+        )
+        self.assertIn('context.get("power_confirmed")', source)
+        self.assertIn('context.get("power_off_confirmed")', source)
+        self.assertIn('energy_state != "off"', source)
+        self.assertNotIn('or context.get("has_any_on")', source)
+
+        semantic = inspect.getsource(
+            DisplayProductionF3Window._display_readout_semantic_state
+        )
+        self.assertLess(
+            semantic.index("if not bool(ready)"),
+            semantic.index('if current == "low_light"'),
+        )
+
+    def test_display_readout_reserves_space_between_numbered_digits(self):
+        from src.platform.display_production_f3_window import (
+            DisplayProductionF3Window,
+        )
+        source = inspect.getsource(
+            DisplayProductionF3Window._draw_live_display_readout
+        )
+        self.assertIn("digit_gap = 44.0", source)
+        self.assertIn("group_gap = 34.0", source)
+
+        labels = inspect.getsource(
+            DisplayProductionF3Window._draw_fixed_segment_number
+        )
+        self.assertIn("side_gutter = 8.0", labels)
+        self.assertIn("vertical_gutter = 5.0", labels)
+
     def test_display_readout_palette_is_green_dark_green_gray_and_red(self):
         from src.platform.display_production_f3_window import (
             DisplayProductionF3Window,
@@ -502,6 +540,8 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
 
         clarity_source = inspect.getsource(preview_clarity._contexto_preview_claro)
         self.assertIn('result["power_confirmed"]', clarity_source)
+        self.assertIn('result["power_off_confirmed"]', clarity_source)
+        self.assertIn('result["energy_state"]', clarity_source)
         self.assertIn('result["readout_mask_ids"]', clarity_source)
 
     def test_tracking_preview_uses_semantic_mask_renderer_instead_of_cyan_only(self):
