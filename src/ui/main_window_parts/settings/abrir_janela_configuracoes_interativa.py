@@ -177,6 +177,11 @@ def _adicionar_controles_avancados(
 
     nomes_status = {
         "aplicado": "Aplicado",
+        "manual_pronto": "Pronto para ajuste",
+        "manual_disponivel": "Manual disponível",
+        "restaurado": "Restaurado",
+        "ignorado_driver": "Driver não confirmou este valor",
+        "ajustado_driver": "Limitado ao passo aceito pelo driver",
         "nao_suportado": "Não suportado",
         "padrao_driver": "Padrão do driver",
         "aguardando_camera": "Aguardando câmera",

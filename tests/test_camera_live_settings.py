@@ -1,6 +1,7 @@
 import inspect
 import unittest
 
+from src.platform.camera_advanced_config import normalizar_controles_avancados
 from src.platform.camera_live_settings import CameraLiveSettingsMixin
 from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
 from src.platform.reference_project_sets import ProjectReferenceSetsMixin
@@ -58,6 +59,118 @@ class CameraLiveSettingsTests(unittest.TestCase):
         fonte = inspect.getsource(CameraLiveSettingsMixin.abrir_configuracoes)
         self.assertIn("super().abrir_configuracoes()", fonte)
         self.assertIn("abrir_janela_configuracoes", fonte)
+
+    def test_tela_camera_completa_serializa_todos_os_ajustes(self):
+        base = {}
+        variaveis = {
+            "_resolution_label": _VarFake("Personalizada"),
+            "_width": _VarFake(2560),
+            "_height": _VarFake(1440),
+            "_fps_label": _VarFake("30"),
+            "_format_label": _VarFake("MJPG"),
+            "_rotation_label": _VarFake("180°"),
+            "pan_enabled": _VarFake(True),
+            "pan": _VarFake(10),
+            "tilt_enabled": _VarFake(True),
+            "tilt": _VarFake(-10),
+            "contrast_enabled": _VarFake(True),
+            "contrast": _VarFake(137),
+            "sharpness_enabled": _VarFake(True),
+            "sharpness": _VarFake(138),
+            "saturation_enabled": _VarFake(True),
+            "saturation": _VarFake(139),
+            "exposure_auto": _VarFake(False),
+            "exposure_enabled": _VarFake(True),
+            "exposure": _VarFake(-5),
+            "gain_enabled": _VarFake(True),
+            "gain": _VarFake(35),
+            "focus_auto": _VarFake(False),
+            "focus_enabled": _VarFake(True),
+            "focus": _VarFake(135),
+            "white_balance_auto": _VarFake(False),
+            "white_balance_enabled": _VarFake(True),
+            "white_balance": _VarFake(4400),
+            "brightness_enabled": _VarFake(True),
+            "brightness": _VarFake(140),
+            "gamma_enabled": _VarFake(True),
+            "gamma": _VarFake(105),
+        }
+
+        configuracoes = construir_configuracoes_camera_ao_vivo(
+            base,
+            variaveis,
+        )
+
+        esperado = {
+            "resolution_mode": "custom",
+            "width": 2560,
+            "height": 1440,
+            "fps_mode": "manual",
+            "fps": 30,
+            "format": "MJPG",
+            "rotation": 180,
+            "pan_enabled": True,
+            "pan": 10.0,
+            "tilt_enabled": True,
+            "tilt": -10.0,
+            "contrast_enabled": True,
+            "contrast": 137.0,
+            "sharpness_enabled": True,
+            "sharpness": 138.0,
+            "saturation_enabled": True,
+            "saturation": 139.0,
+            "exposure_auto": False,
+            "exposure_enabled": True,
+            "exposure": -5.0,
+            "gain_enabled": True,
+            "gain": 35.0,
+            "focus_auto": False,
+            "focus_enabled": True,
+            "focus": 135.0,
+            "white_balance_auto": False,
+            "white_balance_enabled": True,
+            "white_balance": 4400.0,
+            "brightness_enabled": True,
+            "brightness": 140.0,
+            "gamma_enabled": True,
+            "gamma": 105.0,
+        }
+        for chave, valor in esperado.items():
+            self.assertEqual(valor, configuracoes[chave], chave)
+
+    def test_normalizacao_avancada_preserva_auto_manual_e_limites(self):
+        resultado = normalizar_controles_avancados(
+            {},
+            {
+                "exposure_auto": False,
+                "exposure_enabled": True,
+                "exposure": -5,
+                "gain_enabled": True,
+                "gain": 9999,
+                "focus_auto": False,
+                "focus_enabled": True,
+                "focus": 135,
+                "white_balance_auto": False,
+                "white_balance_enabled": True,
+                "white_balance": 4400,
+                "brightness_enabled": True,
+                "brightness": -100,
+                "gamma_enabled": True,
+                "gamma": 105,
+            },
+        )
+
+        self.assertFalse(resultado["exposure_auto"])
+        self.assertTrue(resultado["exposure_enabled"])
+        self.assertEqual(-5.0, resultado["exposure"])
+        self.assertTrue(resultado["gain_enabled"])
+        self.assertLessEqual(resultado["gain"], 255.0)
+        self.assertFalse(resultado["focus_auto"])
+        self.assertEqual(135.0, resultado["focus"])
+        self.assertFalse(resultado["white_balance_auto"])
+        self.assertEqual(4400.0, resultado["white_balance"])
+        self.assertGreaterEqual(resultado["brightness"], 0.0)
+        self.assertEqual(105.0, resultado["gamma"])
 
     def test_foco_manual_e_montado_imediatamente(self):
         base = {"focus_auto": True, "focus_enabled": False, "focus": 0.0}

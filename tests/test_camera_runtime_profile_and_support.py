@@ -98,6 +98,26 @@ class CameraRuntimeProfileAndSupportTests(unittest.TestCase):
             VerifiedCameraControlMixin._aplicar_valor_manual,
         )
 
+    def test_todos_controles_visiveis_possuem_propriedade_opencv_mapeada(self):
+        service = _ServicoVerificadoFake()
+        for nome, atributo in service._PROPRIEDADES_MANUAIS.items():
+            self.assertTrue(hasattr(cv2, atributo), nome)
+            self.assertIsNotNone(service._propriedade_manual(nome), nome)
+
+        for chave, (_manual, _status, atributo) in service._CONTROLES_AUTOMATICOS.items():
+            self.assertTrue(hasattr(cv2, atributo), chave)
+
+    def test_tentativa_recusada_nao_e_equivalente_a_sem_suporte(self):
+        fonte = __import__(
+            "inspect"
+        ).getsource(VerifiedCameraControlMixin._aplicar_valor_manual)
+        self.assertIn('"ignorado_driver"', fonte)
+        self.assertIn("bloqueado", fonte)
+        self.assertNotIn(
+            '"O driver recusou o novo valor."',
+            fonte,
+        )
+
     def test_habilitar_manual_nao_bloqueia_por_reescrita_do_baseline(self):
         service = _ServicoVerificadoFake()
         service._aplicar_habilitacao_manual(
