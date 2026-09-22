@@ -24,6 +24,8 @@ _STATUS_AMIGAVEL = {
     "automatico": "Automático",
     "aplicado": "Aplicado ao vivo",
     "nao_suportado": "Não suportado pelo driver",
+    "ignorado_driver": "Driver não confirmou este valor",
+    "ajustado_driver": "Limitado ao passo aceito pelo driver",
     "padrao_driver": "Padrão do driver",
     "padrao_driver_windows": "Padrão do Windows",
 }

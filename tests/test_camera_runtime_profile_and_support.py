@@ -98,7 +98,7 @@ class CameraRuntimeProfileAndSupportTests(unittest.TestCase):
             VerifiedCameraControlMixin._aplicar_valor_manual,
         )
 
-    def test_foco_e_bloqueado_quando_driver_recusa_escrita(self):
+    def test_habilitar_manual_nao_bloqueia_por_reescrita_do_baseline(self):
         service = _ServicoVerificadoFake()
         service._aplicar_habilitacao_manual(
             service._capture,
@@ -106,9 +106,8 @@ class CameraRuntimeProfileAndSupportTests(unittest.TestCase):
             True,
         )
         status = service._status_controles_camera["focus"]
-        self.assertEqual("nao_suportado", status["status"])
-        self.assertTrue(status["bloqueado"])
-        self.assertIn("recusou", status["motivo"].lower())
+        self.assertEqual("manual_pronto", status["status"])
+        self.assertFalse(status["bloqueado"])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,8 @@ _CONTROLES_AUTOMATICOS = {
 _NOMES_STATUS = {
     "aplicado": "Aplicado ao vivo",
     "nao_suportado": "Não suportado",
+    "ignorado_driver": "Driver não confirmou este valor",
+    "ajustado_driver": "Limitado ao passo aceito pelo driver",
     "padrao_driver": "Padrão do driver",
     "padrao_driver_windows": "Padrão do Windows",
     "aguardando_camera": "Aguardando câmera",

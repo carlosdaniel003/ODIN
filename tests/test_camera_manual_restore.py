@@ -25,6 +25,79 @@ class CaptureFake:
         return True
 
 
+class DirectShowAdvancedCaptureFake:
+    """Simula propriedades avançadas com passos e retornos DirectShow imperfeitos."""
+
+    MANUAL_PROPS = {
+        cv2.CAP_PROP_PAN: 0.0,
+        cv2.CAP_PROP_TILT: 0.0,
+        cv2.CAP_PROP_CONTRAST: 100.0,
+        cv2.CAP_PROP_SHARPNESS: 100.0,
+        cv2.CAP_PROP_SATURATION: 100.0,
+        cv2.CAP_PROP_EXPOSURE: -6.0,
+        cv2.CAP_PROP_GAIN: 20.0,
+        cv2.CAP_PROP_FOCUS: 100.0,
+        cv2.CAP_PROP_WB_TEMPERATURE: 4500.0,
+        cv2.CAP_PROP_BRIGHTNESS: 120.0,
+        cv2.CAP_PROP_GAMMA: 100.0,
+    }
+
+    AUTO_PROPS = {
+        cv2.CAP_PROP_AUTO_EXPOSURE: 0.75,
+        cv2.CAP_PROP_AUTOFOCUS: 1.0,
+        cv2.CAP_PROP_AUTO_WB: 1.0,
+    }
+
+    STEPS = {
+        cv2.CAP_PROP_FOCUS: 5,
+        cv2.CAP_PROP_WB_TEMPERATURE: 100,
+        cv2.CAP_PROP_GAIN: 5,
+        cv2.CAP_PROP_BRIGHTNESS: 5,
+        cv2.CAP_PROP_CONTRAST: 5,
+        cv2.CAP_PROP_SHARPNESS: 5,
+        cv2.CAP_PROP_SATURATION: 5,
+        cv2.CAP_PROP_GAMMA: 5,
+        cv2.CAP_PROP_PAN: 5,
+        cv2.CAP_PROP_TILT: 5,
+        cv2.CAP_PROP_EXPOSURE: 1,
+    }
+
+    def __init__(self):
+        self.props = dict(self.MANUAL_PROPS)
+        self.props.update(self.AUTO_PROPS)
+        self.sets = []
+
+    def get(self, prop):
+        return self.props.get(prop, 0.0)
+
+    def set(self, prop, value):
+        value = float(value)
+        self.sets.append((prop, value))
+
+        if prop in self.AUTO_PROPS:
+            # Simula backend que aplica, mas devolve False.
+            self.props[prop] = value
+            return False
+
+        if prop not in self.MANUAL_PROPS:
+            return False
+
+        if prop == cv2.CAP_PROP_FOCUS and self.props[cv2.CAP_PROP_AUTOFOCUS] != 0.0:
+            return False
+        if prop == cv2.CAP_PROP_EXPOSURE and self.props[cv2.CAP_PROP_AUTO_EXPOSURE] not in (0.0, 0.25, 1.0):
+            return False
+        if prop == cv2.CAP_PROP_WB_TEMPERATURE and self.props[cv2.CAP_PROP_AUTO_WB] != 0.0:
+            return False
+
+        step = int(self.STEPS[prop])
+        if int(round(value)) % step != 0:
+            return False
+
+        # Também retorna False mesmo aplicando, para exercitar confirmação por get().
+        self.props[prop] = value
+        return False
+
+
 class DirectShowFocusCaptureFake:
     def __init__(self):
         self.props = {
@@ -155,6 +228,112 @@ class CameraManualRestoreTests(unittest.TestCase):
         self.assertEqual(
             "manual_pronto",
             service._status_controles_camera["focus"]["status"],
+        )
+
+    def test_todos_controles_avancados_habilitam_sem_escrita_de_probe(self):
+        service = ServiceFake()
+        service._capture = DirectShowAdvancedCaptureFake()
+
+        for nome in service._PROPRIEDADES_MANUAIS:
+            service._capture.sets.clear()
+            service._aplicar_habilitacao_manual(
+                service._capture,
+                nome,
+                True,
+            )
+            self.assertEqual(
+                "manual_pronto",
+                service._status_controles_camera[nome]["status"],
+                nome,
+            )
+            propriedade = service._propriedade_manual(nome)
+            writes = [
+                item for item in service._capture.sets
+                if item[0] == propriedade
+            ]
+            self.assertEqual([], writes, nome)
+
+    def test_todos_controles_avancados_confirmam_por_readback_e_passo(self):
+        service = ServiceFake()
+        service._capture = DirectShowAdvancedCaptureFake()
+
+        # Desliga automáticos antes dos três controles acoplados.
+        for chave in ("focus_auto", "exposure_auto", "white_balance_auto"):
+            service._aplicar_automatico(service._capture, chave, False)
+
+        solicitados = {
+            "pan": 7.0,
+            "tilt": 7.0,
+            "contrast": 137.0,
+            "sharpness": 137.0,
+            "saturation": 137.0,
+            "exposure": -5.0,
+            "gain": 37.0,
+            "focus": 137.0,
+            "white_balance": 4370.0,
+            "brightness": 137.0,
+            "gamma": 137.0,
+        }
+
+        for nome, valor in solicitados.items():
+            service._configuracoes_camera = {
+                f"{nome}_enabled": True,
+                nome: valor,
+            }
+            service._aplicar_valor_manual(
+                service._capture,
+                nome,
+                service._configuracoes_camera,
+            )
+            self.assertIn(
+                service._status_controles_camera[nome]["status"],
+                {"aplicado", "ajustado_driver"},
+                nome,
+            )
+
+        self.assertEqual(135.0, service._capture.props[cv2.CAP_PROP_FOCUS])
+        self.assertEqual(35.0, service._capture.props[cv2.CAP_PROP_GAIN])
+        self.assertEqual(4400.0, service._capture.props[cv2.CAP_PROP_WB_TEMPERATURE])
+
+    def test_automaticos_nao_sao_falsamente_marcados_sem_suporte_quando_set_retorna_false(self):
+        service = ServiceFake()
+        service._capture = DirectShowAdvancedCaptureFake()
+
+        cases = (
+            ("focus_auto", "autofocus"),
+            ("exposure_auto", "auto_exposure"),
+            ("white_balance_auto", "auto_white_balance"),
+        )
+        for chave, status_key in cases:
+            service._aplicar_automatico(service._capture, chave, True)
+            self.assertEqual(
+                "aplicado",
+                service._status_controles_camera[status_key]["status"],
+                chave,
+            )
+            service._aplicar_automatico(service._capture, chave, False)
+            self.assertEqual(
+                "aplicado",
+                service._status_controles_camera[status_key]["status"],
+                chave,
+            )
+
+    def test_valor_recusado_nao_bloqueia_controle_como_nao_suportado(self):
+        service = ServiceFake()
+        service._capture = DirectShowAdvancedCaptureFake()
+        service._capture.set = lambda prop, value: False
+        service._configuracoes_camera = {
+            "gain_enabled": True,
+            "gain": 199.0,
+        }
+        service._aplicar_valor_manual(
+            service._capture,
+            "gain",
+            service._configuracoes_camera,
+        )
+        self.assertEqual(
+            "ignorado_driver",
+            service._status_controles_camera["gain"]["status"],
         )
 
     def test_autofocus_e_enviado_ao_driver(self):

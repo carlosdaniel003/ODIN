@@ -31,6 +31,26 @@ class CameraLiveControlServiceMixin:
         "gamma": "CAP_PROP_GAMMA",
     }
 
+    _PASSOS_DIRECTSHOW = {
+        "pan": (1.0, 5.0, 10.0),
+        "tilt": (1.0, 5.0, 10.0),
+        "contrast": (1.0, 5.0, 10.0),
+        "sharpness": (1.0, 5.0, 10.0),
+        "saturation": (1.0, 5.0, 10.0),
+        "exposure": (1.0,),
+        "gain": (1.0, 5.0, 10.0),
+        "focus": (5.0, 10.0, 17.0),
+        "white_balance": (10.0, 50.0, 100.0),
+        "brightness": (1.0, 5.0, 10.0),
+        "gamma": (1.0, 5.0, 10.0),
+    }
+
+    _TOLERANCIA_CONTROLE = {
+        "white_balance": 25.0,
+        "focus": 1.0,
+        "exposure": 0.26,
+    }
+
     _CONTROLES_AUTOMATICOS = {
         "exposure_auto": (
             "exposure",
@@ -127,23 +147,38 @@ class CameraLiveControlServiceMixin:
         ).strip().lower()
         return "directshow" in backend
 
-    @staticmethod
-    def _candidatos_foco_directshow(valor: float) -> list[float]:
-        """Valores próximos para drivers que expõem foco em passos discretos."""
+    @classmethod
+    def _candidatos_controle_directshow(
+        cls,
+        nome: str,
+        valor: float,
+    ) -> list[float]:
+        """Gera valores próximos respeitando controles DirectShow discretos."""
         try:
-            solicitado = min(255.0, max(0.0, float(valor)))
+            solicitado = float(valor)
         except (TypeError, ValueError):
             return []
 
+        if nome == "focus":
+            solicitado = min(255.0, max(0.0, solicitado))
+
         candidatos = [solicitado]
-        for passo in (5.0, 10.0, 17.0):
+        arredondado = float(round(solicitado))
+        candidatos.append(arredondado)
+
+        for passo in cls._PASSOS_DIRECTSHOW.get(nome, (1.0,)):
+            passo = float(passo)
+            if passo <= 0:
+                continue
             base = round(solicitado / passo) * passo
             candidatos.extend((base, base - passo, base + passo))
 
         unicos = []
         vistos = set()
         for candidato in candidatos:
-            candidato = min(255.0, max(0.0, float(candidato)))
+            candidato = float(candidato)
+            if nome == "focus":
+                candidato = min(255.0, max(0.0, candidato))
             chave = round(candidato, 6)
             if chave in vistos:
                 continue
@@ -151,45 +186,147 @@ class CameraLiveControlServiceMixin:
             unicos.append(candidato)
         return unicos
 
-    def _definir_foco_manual_directshow(self, capture, valor):
-        """Fallback sem dependência externa para foco manual no DirectShow.
+    @classmethod
+    def _tolerancia_controle(cls, nome: str) -> float:
+        return float(cls._TOLERANCIA_CONTROLE.get(nome, 1.0))
 
-        Fora do DirectShow retorna None. No DirectShow garante autofocus OFF,
-        tenta o valor solicitado e depois os passos discretos mais próximos.
-        A leitura de volta também confirma aplicação quando o backend retorna
-        False apesar de o dispositivo ter aceitado o valor.
+    def _definir_controle_manual_confirmado(
+        self,
+        capture,
+        nome: str,
+        valor,
+    ):
+        """Aplica controle manual com confirmação por leitura do hardware.
+
+        No DirectShow, uma escrita False não prova ausência de suporte. O
+        dispositivo pode aceitar apenas passos discretos ou até aplicar o valor
+        apesar do retorno False. Retorna:
+            (confirmado, valor_lido, valor_efetivo, ajustado_pelo_driver)
         """
-        if not self._directshow_ativo():
-            return None
+        propriedade = self._propriedade_manual(nome)
+        if capture is None or propriedade is None:
+            return (False, None, None, False)
 
-        foco = getattr(cv2, "CAP_PROP_FOCUS", None)
-        autofocus = getattr(cv2, "CAP_PROP_AUTOFOCUS", None)
-        if capture is None or foco is None:
-            return (False, None, None)
+        if nome == "focus" and self._directshow_ativo():
+            autofocus = getattr(cv2, "CAP_PROP_AUTOFOCUS", None)
+            if autofocus is not None:
+                try:
+                    capture.set(autofocus, 0.0)
+                except Exception:
+                    pass
 
-        if autofocus is not None:
+        try:
+            solicitado = float(valor)
+        except (TypeError, ValueError):
+            return (False, None, None, False)
+
+        antes = self._ler_propriedade_capture(capture, propriedade)
+        candidatos = (
+            self._candidatos_controle_directshow(nome, solicitado)
+            if self._directshow_ativo()
+            else [solicitado]
+        )
+        tolerancia = self._tolerancia_controle(nome)
+        ultimo_lido = antes
+
+        for candidato in candidatos:
             try:
-                capture.set(autofocus, 0.0)
-            except Exception:
-                pass
-
-        ultimo_lido = self._ler_propriedade_capture(capture, foco)
-        for candidato in self._candidatos_foco_directshow(valor):
-            try:
-                retorno = bool(capture.set(foco, float(candidato)))
+                retorno = bool(capture.set(propriedade, float(candidato)))
             except Exception:
                 retorno = False
 
-            lido = self._ler_propriedade_capture(capture, foco)
+            lido = self._ler_propriedade_capture(capture, propriedade)
             ultimo_lido = lido
-            confirmado = (
+            confirmou_alvo = (
                 lido is not None
-                and abs(float(lido) - float(candidato)) <= 1.0
+                and abs(float(lido) - float(candidato)) <= tolerancia
             )
-            if retorno or confirmado:
-                return (True, lido, float(candidato))
+            mudou_hardware = (
+                lido is not None
+                and antes is not None
+                and abs(float(lido) - float(antes)) > tolerancia
+            )
+            if retorno or confirmou_alvo or mudou_hardware:
+                efetivo = float(lido) if lido is not None else float(candidato)
+                ajustado = abs(efetivo - solicitado) > tolerancia
+                return (True, lido, efetivo, bool(ajustado))
 
-        return (False, ultimo_lido, None)
+        return (False, ultimo_lido, None, False)
+
+    def _definir_foco_manual_directshow(self, capture, valor):
+        """Compatibilidade com chamadas existentes do fallback de foco."""
+        if not self._directshow_ativo():
+            return None
+        confirmado, lido, efetivo, _ajustado = (
+            self._definir_controle_manual_confirmado(
+                capture,
+                "focus",
+                valor,
+            )
+        )
+        return (confirmado, lido, efetivo)
+
+    def _candidatos_automaticos(self, chave: str, automatico: bool) -> list[float]:
+        preferido = self._valor_controle_automatico(chave, automatico)
+        candidatos = [float(preferido)]
+        if self._directshow_ativo():
+            if chave == "exposure_auto":
+                candidatos.extend(
+                    (0.75, 1.0, 3.0) if automatico else (0.25, 0.0)
+                )
+            else:
+                candidatos.extend((1.0,) if automatico else (0.0,))
+
+        resultado = []
+        vistos = set()
+        for valor in candidatos:
+            chave_valor = round(float(valor), 6)
+            if chave_valor in vistos:
+                continue
+            vistos.add(chave_valor)
+            resultado.append(float(valor))
+        return resultado
+
+    def _definir_automatico_confirmado(
+        self,
+        capture,
+        chave: str,
+        automatico: bool,
+    ):
+        _nome_manual, _nome_status, atributo = self._CONTROLES_AUTOMATICOS[chave]
+        propriedade = getattr(cv2, atributo, None)
+        if capture is None or propriedade is None:
+            return (False, None, None, True)
+
+        antes = self._ler_propriedade_capture(capture, propriedade)
+        candidatos = self._candidatos_automaticos(chave, automatico)
+        ultimo_lido = antes
+
+        for candidato in candidatos:
+            try:
+                retorno = bool(capture.set(propriedade, float(candidato)))
+            except Exception:
+                retorno = False
+            lido = self._ler_propriedade_capture(capture, propriedade)
+            ultimo_lido = lido
+
+            ja_estava = (
+                antes is not None
+                and abs(float(antes) - float(candidato)) <= 0.01
+            )
+            confirmou = (
+                lido is not None
+                and abs(float(lido) - float(candidato)) <= 0.01
+            )
+            mudou = (
+                lido is not None
+                and antes is not None
+                and abs(float(lido) - float(antes)) > 0.01
+            )
+            if retorno or confirmou or ja_estava or mudou:
+                return (True, lido, float(candidato), False)
+
+        return (False, ultimo_lido, None, False)
 
     def _propriedade_manual(self, nome: str):
         atributo = self._PROPRIEDADES_MANUAIS.get(nome)
@@ -274,17 +411,19 @@ class CameraLiveControlServiceMixin:
             )
             return
 
-        aplicado, lido = self._definir_propriedade_capture(
-            capture,
-            propriedade,
-            baseline,
+        aplicado, lido, _efetivo, _ajustado = (
+            self._definir_controle_manual_confirmado(
+                capture,
+                nome,
+                baseline,
+            )
         )
         if lido is not None:
             with self._lock:
                 self._camera_live_valores_hardware[nome] = float(lido)
         self._registrar_status_controle(
             nome,
-            "restaurado" if aplicado else "nao_suportado",
+            "restaurado" if aplicado else "ignorado_driver",
             valor_solicitado=baseline,
             valor_lido=lido,
         )
@@ -309,39 +448,24 @@ class CameraLiveControlServiceMixin:
         except (TypeError, ValueError):
             return
 
-        foco_directshow = None
-        if nome == "focus":
-            foco_directshow = self._definir_foco_manual_directshow(
+        aplicado, lido, valor_efetivo, ajustado = (
+            self._definir_controle_manual_confirmado(
                 capture,
+                nome,
                 valor,
             )
-
-        if foco_directshow is not None:
-            aplicado, lido, valor_efetivo = foco_directshow
-        else:
-            aplicado, lido = self._definir_propriedade_capture(
-                capture,
-                propriedade,
-                valor,
-            )
-            valor_efetivo = valor
+        )
 
         if lido is not None:
             with self._lock:
                 self._camera_live_valores_hardware[nome] = float(lido)
 
-        ajustado = bool(
-            nome == "focus"
-            and aplicado
-            and valor_efetivo is not None
-            and abs(float(valor_efetivo) - float(valor)) > 0.5
-        )
         self._registrar_status_controle(
             nome,
             (
                 "ajustado_driver"
-                if ajustado
-                else ("aplicado" if aplicado else "nao_suportado")
+                if aplicado and ajustado
+                else ("aplicado" if aplicado else "ignorado_driver")
             ),
             valor_solicitado=valor,
             valor_lido=lido,
@@ -356,26 +480,47 @@ class CameraLiveControlServiceMixin:
         nome_manual, nome_status, atributo = self._CONTROLES_AUTOMATICOS[chave]
         propriedade = getattr(cv2, atributo, None)
         valor = self._valor_controle_automatico(chave, automatico)
-        aplicado, lido = self._definir_propriedade_capture(
-            capture,
-            propriedade,
-            valor,
-        )
 
-        status = "automatico" if automatico else "manual_disponivel"
-        if not aplicado:
-            status = "nao_suportado"
+        if propriedade is None:
+            aplicado, lido, valor_efetivo, ausente = (
+                False,
+                None,
+                None,
+                True,
+            )
+        else:
+            aplicado, lido, valor_efetivo, ausente = (
+                self._definir_automatico_confirmado(
+                    capture,
+                    chave,
+                    automatico,
+                )
+            )
+
+        if ausente:
+            status_auto = "nao_suportado"
+            status_manual = "nao_suportado"
+        elif aplicado:
+            status_auto = "aplicado"
+            status_manual = "automatico" if automatico else "manual_disponivel"
+        else:
+            # Uma escrita recusada não prova falta de suporte; mantém o controle
+            # disponível para novas tentativas/valores.
+            status_auto = "ignorado_driver"
+            status_manual = "ignorado_driver"
 
         self._registrar_status_controle(
             nome_status,
-            "aplicado" if aplicado else "nao_suportado",
+            status_auto,
             valor_solicitado=valor,
             valor_lido=lido,
         )
         self._registrar_status_controle(
             nome_manual,
-            status,
-            valor_solicitado=valor,
+            status_manual,
+            valor_solicitado=(
+                valor if valor_efetivo is None else valor_efetivo
+            ),
             valor_lido=self._capturar_valor_hardware(capture, nome_manual),
         )
 

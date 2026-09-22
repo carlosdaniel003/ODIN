@@ -33,16 +33,20 @@ class VerifiedCameraControlMixin:
             )
 
         propriedade = self._propriedade_manual(nome)
-        baseline = self._garantir_baseline(capture, nome)
-        if propriedade is None or baseline is None:
+        if propriedade is None:
             self._status_verificado(
                 nome,
                 "nao_suportado",
                 bloqueado=True,
-                motivo="O driver não oferece leitura segura para este controle.",
+                motivo="OpenCV/backend não expõe esta propriedade.",
             )
             return
 
+        baseline = self._garantir_baseline(capture, nome)
+
+        # Habilitar manual não escreve o baseline para "testar" suporte. Essa
+        # escrita era a origem dos falsos negativos. O teste real acontece no
+        # primeiro movimento do slider e é confirmado por leitura do hardware.
         if nome == "focus" and self._directshow_ativo():
             autofocus = getattr(cv2, "CAP_PROP_AUTOFOCUS", None)
             if autofocus is not None:
@@ -50,35 +54,19 @@ class VerifiedCameraControlMixin:
                     capture.set(autofocus, 0.0)
                 except Exception:
                     pass
-            self._status_verificado(
-                nome,
-                "manual_pronto",
-                baseline,
-                baseline,
-                False,
-                "Autofocus desligado; ajuste manual pronto para o DirectShow.",
-            )
-            return
-
-        aceito, lido = self._definir_propriedade_capture(capture, propriedade, baseline)
-        if not aceito:
-            self._status_verificado(
-                nome,
-                "nao_suportado",
-                baseline,
-                lido,
-                True,
-                "O driver recusou este controle; o ajuste foi bloqueado.",
-            )
-            return
 
         self._status_verificado(
             nome,
             "manual_pronto",
             baseline,
-            baseline if lido is None else lido,
+            baseline,
             False,
-            "Controle aceito pelo driver.",
+            (
+                "Leitura inicial indisponível; suporte será confirmado "
+                "no primeiro ajuste."
+                if baseline is None
+                else "Controle disponível; aguardando ajuste manual."
+            ),
         )
 
     def _aplicar_valor_manual(self, capture, nome: str, configuracoes: dict) -> None:
@@ -90,48 +78,38 @@ class VerifiedCameraControlMixin:
             return
         solicitado = float(configuracoes.get(nome, 0.0))
         baseline = self._garantir_baseline(capture, nome)
-
-        foco_directshow = None
-        if nome == "focus":
-            foco_directshow = self._definir_foco_manual_directshow(
+        aceito, lido, valor_efetivo, ajustado_driver = (
+            self._definir_controle_manual_confirmado(
                 capture,
+                nome,
                 solicitado,
             )
+        )
 
-        if foco_directshow is not None:
-            aceito, lido, valor_efetivo = foco_directshow
-        else:
-            aceito, lido = self._definir_propriedade_capture(
-                capture,
-                propriedade,
-                solicitado,
-            )
-            valor_efetivo = solicitado
+        if lido is not None:
+            with self._lock:
+                self._camera_live_valores_hardware[nome] = float(lido)
 
         if not aceito:
             self._status_verificado(
                 nome,
-                "nao_suportado",
+                "ignorado_driver",
                 solicitado,
                 lido,
-                True,
-                "O driver recusou o novo valor.",
+                False,
+                (
+                    "O driver não confirmou este valor. O controle permanece "
+                    "habilitado para tentar outro valor."
+                ),
             )
             return
-        if lido is not None:
-            with self._lock:
-                self._camera_live_valores_hardware[nome] = float(lido)
+
+        tolerancia = self._tolerancia_controle(nome)
         ignorado = (
             lido is not None
             and baseline is not None
-            and abs(float(lido) - float(baseline)) <= 1.0
-            and abs(solicitado - float(baseline)) > 1.0
-        )
-        ajustado_driver = bool(
-            nome == "focus"
-            and foco_directshow is not None
-            and valor_efetivo is not None
-            and abs(float(valor_efetivo) - float(solicitado)) > 0.5
+            and abs(float(lido) - float(baseline)) <= tolerancia
+            and abs(solicitado - float(baseline)) > tolerancia
         )
         status = (
             "ignorado_driver"
@@ -141,10 +119,11 @@ class VerifiedCameraControlMixin:
         motivo = None
         if ignorado:
             motivo = "O driver não confirmou mudança do valor."
-        elif ajustado_driver:
+        elif ajustado_driver and valor_efetivo is not None:
             motivo = (
-                f"DirectShow ajustou o foco solicitado {solicitado:g} "
-                f"para o passo aceito {float(valor_efetivo):g}."
+                f"DirectShow aplicou o passo suportado "
+                f"{float(valor_efetivo):g} para o valor solicitado "
+                f"{solicitado:g}."
             )
         self._status_verificado(
             nome,
