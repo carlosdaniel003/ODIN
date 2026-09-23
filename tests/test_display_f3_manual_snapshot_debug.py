@@ -117,6 +117,24 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn('"live_camera_ignored": evidence is not None', source)
         self.assertIn("runtime_value(", source)
 
+    def test_estado_visual_e_runtime_sao_capturados_antes_da_analise_pesada(self):
+        source = inspect.getsource(
+            snapshot_module.capturar_snapshot_debug_display_f3
+        )
+        visual_pos = source.index('snapshot["visual_state"] = _window_visual_state(app)')
+        runtime_pos = source.index('snapshot["runtime_at_click"] = _runtime_state_at_frame(app)')
+        analyses_pos = source.index('snapshot["check_analyses"] = _run_check_analyses(')
+        self.assertLess(visual_pos, analyses_pos)
+        self.assertLess(runtime_pos, analyses_pos)
+
+    def test_snapshot_inclui_contexto_overlay_e_configuracao_camera(self):
+        source = inspect.getsource(
+            snapshot_module.capturar_snapshot_debug_display_f3
+        )
+        self.assertIn("montar_contexto_overlay_snapshot_display_f3", source)
+        self.assertIn('snapshot["overlay_context"]', source)
+        self.assertIn('snapshot["camera_settings_at_frame"]', source)
+
     def test_relatorio_identifica_frame_por_hash_e_declara_snapshot_estatico(self):
         frame = np.arange(60, dtype=np.uint8).reshape(4, 5, 3)
         stats = snapshot_module._frame_statistics(frame)

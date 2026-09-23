@@ -346,6 +346,19 @@ class DisplayProductionF3Mixin:
                 except Exception:
                     pass
 
+            visual_snapshot = getattr(
+                janela,
+                "snapshot_debug_visual_state",
+                None,
+            )
+            if callable(visual_snapshot):
+                try:
+                    self._display_f3_ng_evidence_snapshot["visual_state"] = (
+                        visual_snapshot()
+                    )
+                except Exception:
+                    pass
+
     def _liberar_evidencia_ng_display_f3(self) -> None:
         """Libera câmera/visor somente depois que EMPTY foi confirmado."""
         if not bool(getattr(self, "_display_f3_ng_evidence_frozen", False)):

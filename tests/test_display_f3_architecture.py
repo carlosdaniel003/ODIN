@@ -335,6 +335,13 @@ class DisplayF3ArchitectureTests(unittest.TestCase):
         self.assertIn("_display_frozen_check_snapshot", sequence_source)
         self.assertIn("_display_ng_evidence_frozen", preview_source)
 
+    def test_ng_anexa_estado_visual_da_janela_a_evidencia(self):
+        source = inspect.getsource(
+            DisplayProductionF3Mixin._congelar_evidencia_ng_display_f3
+        )
+        self.assertIn("snapshot_debug_visual_state", source)
+        self.assertIn('["visual_state"]', source)
+
     def test_ng_preserva_copia_bruta_para_debug_ate_retirada_da_placa(self):
         source_freeze = inspect.getsource(
             DisplayProductionF3Mixin._congelar_evidencia_ng_display_f3

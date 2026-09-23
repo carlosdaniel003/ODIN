@@ -813,6 +813,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             return {
                 "text": str(label.cget("text")),
                 "fg": str(label.cget("fg")),
+                "bg": str(label.cget("bg")),
             }
         except Exception:
             return None
@@ -833,6 +834,48 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             if isinstance(value, dict):
                 captured[name] = value
         return captured
+
+    def snapshot_debug_visual_state(self) -> dict:
+        """Cópia leve do que o operador vê no F3 naquele instante."""
+        frozen = bool(getattr(self, "_display_ng_evidence_frozen", False))
+        statuses = (
+            deepcopy(getattr(self, "_display_frozen_analysis_statuses", {}) or {})
+            if frozen
+            else self._capture_analysis_statuses()
+        )
+        readout = (
+            deepcopy(getattr(self, "_display_frozen_readout_context", None))
+            if frozen
+            else deepcopy(getattr(self, "_display_readout_context", None))
+        )
+        check_snapshot = (
+            deepcopy(getattr(self, "_display_frozen_check_snapshot", None))
+            if frozen
+            else deepcopy(getattr(self, "_check_snapshot", None))
+        )
+
+        main_status = {
+            "status": self._status_label_snapshot(
+                getattr(self, "status_label", None)
+            ),
+            "detail": self._status_label_snapshot(
+                getattr(self, "detail_label", None)
+            ),
+        }
+        return {
+            "frozen_ng": frozen,
+            "statuses": statuses,
+            "main_status": main_status,
+            "readout_context": readout,
+            "check_snapshot": check_snapshot,
+            "readout_palette": {
+                "on": self.DISPLAY_READOUT_ACTIVE,
+                "off": self.DISPLAY_READOUT_OFF,
+                "neutral": self.DISPLAY_READOUT_INACTIVE,
+                "ng": self.DISPLAY_READOUT_NG,
+                "ng_outline": self.DISPLAY_READOUT_NG_OUTLINE,
+            },
+        }
 
     def restore_frozen_analysis_statuses(self) -> None:
         """Reaplica texto/cor do frame NG contra qualquer repaint de tema."""

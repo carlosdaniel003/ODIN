@@ -154,6 +154,84 @@ def _overlay_context(window, visual_rotation: int):
     }
 
 
+def montar_contexto_overlay_snapshot_display_f3(
+    repository,
+    project_name: str,
+    check_id: str,
+    analysis: dict | None,
+    visual_rotation: int,
+) -> dict | None:
+    """Monta o mesmo contexto de máscaras/cores usado pela câmera F3 ao vivo.
+
+    É propositalmente stateless: DEBUG e evidência NG podem reconstruir o overlay
+    do frame congelado mesmo depois que o runtime interno já voltou ao H1.
+    """
+    if repository is None or not project_name or not check_id:
+        return None
+    try:
+        project = repository.carregar_projeto(str(project_name))
+    except Exception:
+        project = None
+    if not isinstance(project, dict):
+        return None
+
+    resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    if resolution is None:
+        return None
+
+    check = next(
+        (
+            item
+            for item in (project.get("checks", []) or [])
+            if isinstance(item, dict)
+            and str(item.get("id") or "") == str(check_id)
+        ),
+        None,
+    )
+    if not isinstance(check, dict):
+        return None
+
+    states = (
+        check.get("mask_states", {})
+        if isinstance(check.get("mask_states"), dict)
+        else {}
+    )
+    effective_masks = mascaras_geometria_check_display(project, check)
+    active_masks = [
+        deepcopy(mask)
+        for mask in effective_masks
+        if isinstance(mask, dict)
+        and states.get(str(mask.get("id")))
+        in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
+    ]
+
+    _, visual_resolution, visual_masks = preparar_check_visual_display(
+        None,
+        resolution,
+        active_masks,
+        _normalizar_rotacao(visual_rotation),
+    )
+    classifications = {}
+    if isinstance(analysis, dict):
+        for item in analysis.get("mask_results", []) or []:
+            if not isinstance(item, dict):
+                continue
+            mask_id = str(item.get("mask_id") or "")
+            if mask_id:
+                classifications[mask_id] = str(
+                    item.get("classified") or "unknown"
+                )
+
+    return {
+        "resolution": tuple(visual_resolution),
+        "masks": tuple(deepcopy(visual_masks)),
+        "classifications": classifications,
+        "project_name": str(project_name),
+        "check_id": str(check_id),
+        "visual_rotation": _normalizar_rotacao(visual_rotation),
+    }
+
+
 def _scaled_polygon(mask: dict, sx: float, sy: float):
     kind = str(mask.get("type") or "").lower()
     if kind == "polygon":

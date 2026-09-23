@@ -109,6 +109,148 @@ def _current_context(app):
     return _safe_deepcopy(value) if isinstance(value, dict) else None
 
 
+def _window_visual_state(app) -> dict:
+    evidence = _ng_evidence_snapshot(app)
+    if evidence is not None:
+        value = evidence.get("visual_state")
+        if isinstance(value, dict):
+            return _safe_deepcopy(value)
+
+    window = getattr(app, "display_f3_window", None)
+    getter = getattr(window, "snapshot_debug_visual_state", None)
+    if callable(getter):
+        try:
+            value = getter()
+        except Exception:
+            value = None
+        if isinstance(value, dict):
+            return _safe_deepcopy(value)
+    return {}
+
+
+def _runtime_state_at_frame(app) -> dict:
+    evidence = _ng_evidence_snapshot(app)
+    if evidence is not None:
+        runtime_debug = (
+            evidence.get("runtime_debug")
+            if isinstance(evidence.get("runtime_debug"), dict)
+            else {}
+        )
+        return {
+            "display_f3_active": bool(getattr(app, "display_f3_ativo", False)),
+            "diagnostic_source": "ng_evidence_frozen",
+            "ng_evidence_frozen": True,
+            "live_camera_ignored": True,
+            "camera_frame_id": evidence.get("frame_id"),
+            "logical_context": _current_context(app),
+            "operational_state": _safe_deepcopy(
+                evidence.get("operational_state")
+            ),
+            "last_auto_analysis": _safe_deepcopy(evidence.get("analysis")),
+            "sequence": _safe_deepcopy(evidence.get("sequence")),
+            "last_decision": _safe_deepcopy(runtime_debug.get("last_decision")),
+            "stable_frames": _safe_deepcopy(runtime_debug.get("stable_frames")),
+            "required_stable_frames": _safe_deepcopy(
+                runtime_debug.get("required_stable_frames")
+            ),
+            "transition_frames": _safe_deepcopy(
+                runtime_debug.get("transition_frames")
+            ),
+            "physical_stable_key": _safe_deepcopy(
+                runtime_debug.get("physical_stable_key")
+            ),
+            "physical_pending_key": _safe_deepcopy(
+                runtime_debug.get("physical_pending_key")
+            ),
+            "physical_pending_frames": _safe_deepcopy(
+                runtime_debug.get("physical_pending_frames")
+            ),
+            "unknown_off_pending_frames": _safe_deepcopy(
+                runtime_debug.get("unknown_off_pending_frames")
+            ),
+            "manual_entry_signature": _safe_deepcopy(
+                runtime_debug.get("manual_entry_signature")
+            ),
+            "manual_entry_label": _safe_deepcopy(
+                runtime_debug.get("manual_entry_label")
+            ),
+            "waiting_empty_rearm": _safe_deepcopy(
+                runtime_debug.get("waiting_empty_rearm")
+            ),
+        }
+
+    try:
+        sequence = app.display_check_runtime.snapshot()
+    except Exception:
+        sequence = None
+    return {
+        "display_f3_active": bool(getattr(app, "display_f3_ativo", False)),
+        "diagnostic_source": "live_camera_at_analyze_click",
+        "ng_evidence_frozen": False,
+        "live_camera_ignored": False,
+        "camera_frame_id": getattr(app, "camera_ultimo_frame_id", None),
+        "logical_context": _current_context(app),
+        "operational_state": _safe_deepcopy(
+            getattr(app, "_display_f3_operational_state", None)
+        ),
+        "last_auto_analysis": _safe_deepcopy(
+            getattr(app, "_display_auto_last_analysis", None)
+        ),
+        "sequence": _safe_deepcopy(sequence),
+        "last_decision": _safe_deepcopy(
+            getattr(app, "_display_auto_last_decision", None)
+        ),
+        "stable_frames": _safe_deepcopy(
+            getattr(app, "_display_auto_stable_frames", None)
+        ),
+        "required_stable_frames": None,
+        "transition_frames": _safe_deepcopy(
+            getattr(app, "_display_auto_transition_frames", None)
+        ),
+        "physical_stable_key": _safe_deepcopy(
+            getattr(app, "_display_f3_physical_stable_key", None)
+        ),
+        "physical_pending_key": _safe_deepcopy(
+            getattr(app, "_display_f3_physical_pending_key", None)
+        ),
+        "physical_pending_frames": _safe_deepcopy(
+            getattr(app, "_display_f3_physical_pending_frames", None)
+        ),
+        "unknown_off_pending_frames": _safe_deepcopy(
+            getattr(app, "_display_f3_unknown_off_pending_frames", None)
+        ),
+        "manual_entry_signature": _safe_deepcopy(
+            getattr(app, "_display_auto_manual_entry_signature", None)
+        ),
+        "manual_entry_label": _safe_deepcopy(
+            getattr(app, "_display_auto_manual_entry_label", None)
+        ),
+        "waiting_empty_rearm": _safe_deepcopy(
+            getattr(app, "_display_auto_waiting_empty_rearm", None)
+        ),
+    }
+
+
+def _camera_settings_at_frame(app) -> dict:
+    """Ajuda a correlacionar foco/exposição/ganho/WB com o mesmo frame."""
+    return {
+        "backend": str(
+            getattr(app, "_backend_atual", "")
+            or getattr(app, "_backend_name", "")
+            or ""
+        ),
+        "configured": _safe_deepcopy(
+            getattr(app, "_configuracoes_camera", None)
+        ),
+        "hardware_values": _safe_deepcopy(
+            getattr(app, "_camera_live_valores_hardware", None)
+        ),
+        "control_status": _safe_deepcopy(
+            getattr(app, "_status_controles_camera", None)
+        ),
+    }
+
+
 def _freeze_current_frame(app):
     """Seleciona a fonte autoritativa e devolve uma cópia imutável para o DEBUG.
 
@@ -582,6 +724,12 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
     snapshot["rotation"] = _rotation(app)
     snapshot["logical_context"] = _current_context(app)
 
+    # Tudo abaixo é capturado AGORA, antes de análises custosas. Assim textos,
+    # cores, visor e contexto pertencem ao mesmo instante do frame.
+    snapshot["runtime_at_click"] = _runtime_state_at_frame(app)
+    snapshot["visual_state"] = _window_visual_state(app)
+    snapshot["camera_settings_at_frame"] = _camera_settings_at_frame(app)
+
     repository = getattr(app, "display_project_repository", None)
     if repository is None:
         snapshot["errors"].append("repository_display_indisponivel")
@@ -636,94 +784,28 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         int(snapshot["rotation"]),
     )
 
-    evidence = _ng_evidence_snapshot(app)
-    if evidence is not None:
-        runtime_state = evidence.get("operational_state")
-        runtime_analysis = evidence.get("analysis")
-        sequence = evidence.get("sequence")
-        runtime_frame_id = evidence.get("frame_id")
-        runtime_debug = (
-            evidence.get("runtime_debug")
-            if isinstance(evidence.get("runtime_debug"), dict)
-            else {}
+    try:
+        from src.platform.display_live_roi_overlay import (
+            montar_contexto_overlay_snapshot_display_f3,
         )
-        diagnostic_source = "ng_evidence_frozen"
-    else:
-        runtime_state = getattr(app, "_display_f3_operational_state", None)
-        runtime_analysis = getattr(app, "_display_auto_last_analysis", None)
-        try:
-            sequence = app.display_check_runtime.snapshot()
-        except Exception:
-            sequence = None
-        runtime_frame_id = getattr(app, "camera_ultimo_frame_id", None)
-        runtime_debug = None
-        diagnostic_source = "live_camera_at_analyze_click"
 
-    def runtime_value(key: str, attribute: str):
-        if isinstance(runtime_debug, dict):
-            return _safe_deepcopy(runtime_debug.get(key))
-        return _safe_deepcopy(getattr(app, attribute, None))
-
-    snapshot["runtime_at_click"] = {
-        "display_f3_active": bool(getattr(app, "display_f3_ativo", False)),
-        "diagnostic_source": diagnostic_source,
-        "ng_evidence_frozen": evidence is not None,
-        "live_camera_ignored": evidence is not None,
-        "camera_frame_id": runtime_frame_id,
-        "logical_context": _current_context(app),
-        "operational_state": _safe_deepcopy(runtime_state)
-        if isinstance(runtime_state, dict)
-        else runtime_state,
-        "last_auto_analysis": _safe_deepcopy(runtime_analysis)
-        if isinstance(runtime_analysis, dict)
-        else runtime_analysis,
-        "sequence": _safe_deepcopy(sequence),
-        "last_decision": runtime_value(
-            "last_decision",
-            "_display_auto_last_decision",
-        ),
-        "stable_frames": runtime_value(
-            "stable_frames",
-            "_display_auto_stable_frames",
-        ),
-        "required_stable_frames": (
-            runtime_value("required_stable_frames", "_display_auto_stable_frames")
-            if evidence is not None
-            else None
-        ),
-        "transition_frames": runtime_value(
-            "transition_frames",
-            "_display_auto_transition_frames",
-        ),
-        "physical_stable_key": runtime_value(
-            "physical_stable_key",
-            "_display_f3_physical_stable_key",
-        ),
-        "physical_pending_key": runtime_value(
-            "physical_pending_key",
-            "_display_f3_physical_pending_key",
-        ),
-        "physical_pending_frames": runtime_value(
-            "physical_pending_frames",
-            "_display_f3_physical_pending_frames",
-        ),
-        "unknown_off_pending_frames": runtime_value(
-            "unknown_off_pending_frames",
-            "_display_f3_unknown_off_pending_frames",
-        ),
-        "manual_entry_signature": runtime_value(
-            "manual_entry_signature",
-            "_display_auto_manual_entry_signature",
-        ),
-        "manual_entry_label": runtime_value(
-            "manual_entry_label",
-            "_display_auto_manual_entry_label",
-        ),
-        "waiting_empty_rearm": runtime_value(
-            "waiting_empty_rearm",
-            "_display_auto_waiting_empty_rearm",
-        ),
-    }
+        runtime_analysis = (
+            snapshot.get("runtime_at_click", {}).get("last_auto_analysis")
+        )
+        logical_context = snapshot.get("logical_context") or {}
+        overlay_context = montar_contexto_overlay_snapshot_display_f3(
+            repository,
+            project_name,
+            str(logical_context.get("check_id") or ""),
+            runtime_analysis if isinstance(runtime_analysis, dict) else None,
+            int(snapshot.get("rotation", 0) or 0),
+        )
+    except Exception as exc:
+        overlay_context = None
+        snapshot["errors"].append(
+            f"overlay_snapshot:{type(exc).__name__}:{exc}"
+        )
+    snapshot["overlay_context"] = _safe_deepcopy(overlay_context)
 
     snapshot["report_ready"] = True
     # O frame bruto não é persistido na estrutura textual; o hash identifica a
