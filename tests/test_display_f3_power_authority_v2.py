@@ -238,6 +238,115 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         self.assertTrue(result["allow_auto"])
         self.assertTrue(result[contract_module.F3_DECISION_ALLOWED_KEY])
 
+    def test_tracking_usa_frame_bruto_como_autoridade_de_energia(self):
+        class _Frame:
+            size = 1
+
+        class _TrackingApp(_FakeApp):
+            camera_ultimo_frame_id = 292
+            camera_service = object()
+            _display_f3_tracking_instance_frame_prepared = True
+
+            @staticmethod
+            def _display_auto_frame_token(frame):
+                return ("object", id(frame))
+
+            @staticmethod
+            def _obter_rotacao_visual_display_f3():
+                return 180
+
+        app = _TrackingApp()
+        raw_frame = _Frame()
+        aligned_frame = _Frame()
+        app._display_f3_tracking_raw_authority_frame = raw_frame
+        context = {"check_id": "CHECK_001", "check_name": "H1"}
+
+        off_analysis = {
+            "ready": True,
+            "approved": False,
+            "active_mask_count": 1,
+            "matched_mask_count": 0,
+            "mask_results": [
+                _row("MASK_008", classified="off", matched=False),
+            ],
+        }
+
+        with patch.object(
+            power_v2,
+            "_run_raw_current_check_analysis",
+            return_value=off_analysis,
+        ) as raw_analysis, patch.object(
+            power_v2,
+            "_secondary_full_pixel_details",
+            return_value={},
+        ) as secondary:
+            result = power_v2.avaliar_evidencia_energia_unificada_display_f3(
+                app,
+                aligned_frame,
+                "CM_500_L",
+                context,
+            )
+
+        self.assertTrue(result["off_confirmed"])
+        self.assertFalse(result["powered_confirmed"])
+        self.assertEqual(
+            "tracking_raw_authority_frame",
+            result["authority_frame_source"],
+        )
+        self.assertTrue(result["tracking_aligned_frame_ignored_for_energy"])
+        self.assertIs(raw_frame, raw_analysis.call_args.args[1])
+        self.assertIs(raw_frame, secondary.call_args.args[1])
+
+    def test_sem_override_de_tracking_energia_usa_frame_recebido(self):
+        class _Frame:
+            size = 1
+
+        class _PlainApp(_FakeApp):
+            camera_ultimo_frame_id = 293
+            camera_service = object()
+
+            @staticmethod
+            def _display_auto_frame_token(frame):
+                return ("object", id(frame))
+
+            @staticmethod
+            def _obter_rotacao_visual_display_f3():
+                return 0
+
+        app = _PlainApp()
+        frame = _Frame()
+        context = {"check_id": "CHECK_001", "check_name": "H1"}
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "active_mask_count": 1,
+            "matched_mask_count": 1,
+            "mask_results": [
+                _row("MASK_008", classified="on", matched=True),
+            ],
+        }
+
+        with patch.object(
+            power_v2,
+            "_run_raw_current_check_analysis",
+            return_value=analysis,
+        ) as raw_analysis, patch.object(
+            power_v2,
+            "_secondary_full_pixel_details",
+            return_value={},
+        ):
+            result = power_v2.avaliar_evidencia_energia_unificada_display_f3(
+                app,
+                frame,
+                "CM_500_L",
+                context,
+            )
+
+        self.assertTrue(result["powered_confirmed"])
+        self.assertEqual("pipeline_frame", result["authority_frame_source"])
+        self.assertFalse(result["tracking_aligned_frame_ignored_for_energy"])
+        self.assertIs(frame, raw_analysis.call_args.args[1])
+
     def test_cache_nao_reutiliza_energia_de_outro_frame_com_mesmo_camera_id(self):
         class _Frame:
             size = 1

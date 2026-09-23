@@ -72,6 +72,44 @@ def _safe_float(value, default=0.0) -> float:
         return float(default)
 
 
+def _energy_authority_frame(app, frame):
+    """Usa o frame fisico bruto para energia quando o tracker faz warp.
+
+    O rastreamento pode substituir temporariamente camera_frame_atual por uma
+    imagem alinhada a foto do CHECK para julgar conformidade. Esse warp e util
+    para o CHECK, mas nao pode virar prova fisica de que um LED acendeu.
+    """
+    candidates = []
+
+    if bool(getattr(app, "_display_f3_tracking_instance_frame_prepared", False)):
+        candidates.append(
+            (
+                "tracking_raw_authority_frame",
+                getattr(app, "_display_f3_tracking_raw_authority_frame", None),
+            )
+        )
+
+    try:
+        override_depth = int(
+            getattr(app, "_display_f3_tracking_frame_override_depth", 0) or 0
+        )
+    except (TypeError, ValueError):
+        override_depth = 0
+    if override_depth > 0:
+        candidates.append(
+            (
+                "tracking_raw_preview_frame",
+                getattr(app, "_display_f3_tracking_raw_preview_frame", None),
+            )
+        )
+
+    for source, candidate in candidates:
+        if _valid_image(candidate):
+            return candidate, source
+
+    return frame, "pipeline_frame"
+
+
 def _frame_token(app, frame):
     """Identifica a imagem real, não apenas o contador lógico da câmera.
 
@@ -368,7 +406,8 @@ def avaliar_evidencia_energia_unificada_display_f3(
     project_name: str,
     context: dict | None,
 ) -> dict:
-    if not isinstance(context, dict) or not _valid_image(frame):
+    authority_frame, authority_frame_source = _energy_authority_frame(app, frame)
+    if not isinstance(context, dict) or not _valid_image(authority_frame):
         return {
             "available": False,
             "source": F3_UNIFIED_POWER_SOURCE,
@@ -376,21 +415,41 @@ def avaliar_evidencia_energia_unificada_display_f3(
             "powered_confirmed": False,
             "off_confirmed": False,
             "reason": "frame_ou_contexto_ausente",
+            "authority_frame_source": authority_frame_source,
         }
 
     check_id = str(context.get("check_id") or "")
-    cache_key = (str(project_name or ""), check_id, _frame_token(app, frame))
+    cache_key = (
+        str(project_name or ""),
+        check_id,
+        authority_frame_source,
+        _frame_token(app, authority_frame),
+    )
     cached = getattr(app, "_display_f3_unified_power_cache", None)
     if isinstance(cached, dict) and cached.get("key") == cache_key:
         return deepcopy(cached.get("value"))
 
-    raw = _run_raw_current_check_analysis(app, frame, project_name, context)
-    secondary = _secondary_full_pixel_details(app, frame, project_name, context)
+    raw = _run_raw_current_check_analysis(
+        app,
+        authority_frame,
+        project_name,
+        context,
+    )
+    secondary = _secondary_full_pixel_details(
+        app,
+        authority_frame,
+        project_name,
+        context,
+    )
     evidence = resumir_energia_por_analise_bruta_f3(raw, secondary)
     evidence["project_name"] = str(project_name or "")
     evidence["check_id"] = check_id
     evidence["same_mask_comparison"] = True
     evidence["same_visual_rotation"] = True
+    evidence["authority_frame_source"] = authority_frame_source
+    evidence["tracking_aligned_frame_ignored_for_energy"] = bool(
+        authority_frame is not frame
+    )
     try:
         evidence["visual_rotation"] = int(app._obter_rotacao_visual_display_f3()) % 360
     except Exception:
@@ -685,7 +744,8 @@ def _install_raw_overlay_reuse() -> None:
     def raw(app, frame, context: dict):
         project_name = str((context or {}).get("project_name") or "")
         check_id = str((context or {}).get("check_id") or "")
-        signature = (project_name, check_id, _frame_token(app, frame))
+        authority_frame, authority_frame_source = _energy_authority_frame(app, frame)
+        signature = (project_name, check_id, _frame_token(app, authority_frame))
         cached = getattr(app, "_display_f3_unified_raw_analysis", None)
         if (
             getattr(app, "_display_f3_unified_raw_cache_signature", None) == signature
@@ -695,10 +755,11 @@ def _install_raw_overlay_reuse() -> None:
             analysis["decision_authority"] = False
             analysis["raw_diagnostic_only"] = True
             analysis["blocked_by_power_gate"] = True
+            analysis["authority_frame_source"] = authority_frame_source
             app._display_auto_last_analysis = deepcopy(analysis)
             app._display_f3_power_blocked_raw_analysis = deepcopy(analysis)
             return analysis
-        return previous_raw(app, frame, context)
+        return previous_raw(app, authority_frame, context)
 
     power_module._raw_analysis_for_overlay = raw
     power_module._display_f3_unified_raw_overlay_reuse_installed = True
