@@ -220,6 +220,7 @@ class DisplayProductionF3Mixin:
             else getattr(self, "_display_auto_last_analysis", None)
         )
         pending_context = getattr(self, "_display_f3_pending_ng_context", None)
+        pending_runtime = getattr(self, "_display_f3_pending_ng_runtime", None)
         if isinstance(pending_context, dict):
             context = pending_context
         else:
@@ -326,12 +327,16 @@ class DisplayProductionF3Mixin:
             "sequence": deepcopy(sequence_at_ng)
             if isinstance(sequence_at_ng, dict)
             else sequence_at_ng,
+            "runtime_debug": deepcopy(pending_runtime)
+            if isinstance(pending_runtime, dict)
+            else None,
         }
         self._display_f3_ng_evidence_frozen = True
         self._display_f3_pending_ng_frame = None
         self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
+        self._display_f3_pending_ng_runtime = None
 
         if janela is not None:
             freeze = getattr(janela, "freeze_ng_evidence", None)

@@ -108,6 +108,15 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertTrue(np.all(frozen == 25))
         self.assertTrue(np.all(app.camera_frame_atual == 200))
 
+    def test_runtime_do_debug_ng_usa_telemetria_congelada(self):
+        source = inspect.getsource(
+            snapshot_module.capturar_snapshot_debug_display_f3
+        )
+        self.assertIn('evidence.get("runtime_debug")', source)
+        self.assertIn('diagnostic_source = "ng_evidence_frozen"', source)
+        self.assertIn('"live_camera_ignored": evidence is not None', source)
+        self.assertIn("runtime_value(", source)
+
     def test_relatorio_identifica_frame_por_hash_e_declara_snapshot_estatico(self):
         frame = np.arange(60, dtype=np.uint8).reshape(4, 5, 3)
         stats = snapshot_module._frame_statistics(frame)

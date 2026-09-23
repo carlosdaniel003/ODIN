@@ -642,6 +642,11 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         runtime_analysis = evidence.get("analysis")
         sequence = evidence.get("sequence")
         runtime_frame_id = evidence.get("frame_id")
+        runtime_debug = (
+            evidence.get("runtime_debug")
+            if isinstance(evidence.get("runtime_debug"), dict)
+            else {}
+        )
         diagnostic_source = "ng_evidence_frozen"
     else:
         runtime_state = getattr(app, "_display_f3_operational_state", None)
@@ -651,7 +656,13 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         except Exception:
             sequence = None
         runtime_frame_id = getattr(app, "camera_ultimo_frame_id", None)
+        runtime_debug = None
         diagnostic_source = "live_camera_at_analyze_click"
+
+    def runtime_value(key: str, attribute: str):
+        if isinstance(runtime_debug, dict):
+            return _safe_deepcopy(runtime_debug.get(key))
+        return _safe_deepcopy(getattr(app, attribute, None))
 
     snapshot["runtime_at_click"] = {
         "display_f3_active": bool(getattr(app, "display_f3_ativo", False)),
@@ -667,18 +678,51 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         if isinstance(runtime_analysis, dict)
         else runtime_analysis,
         "sequence": _safe_deepcopy(sequence),
-        "last_decision": getattr(app, "_display_auto_last_decision", None),
-        "stable_frames": getattr(app, "_display_auto_stable_frames", None),
-        "transition_frames": getattr(app, "_display_auto_transition_frames", None),
-        "physical_stable_key": getattr(app, "_display_f3_physical_stable_key", None),
-        "physical_pending_key": getattr(app, "_display_f3_physical_pending_key", None),
-        "physical_pending_frames": getattr(app, "_display_f3_physical_pending_frames", None),
-        "unknown_off_pending_frames": getattr(app, "_display_f3_unknown_off_pending_frames", None),
-        "manual_entry_signature": _safe_deepcopy(
-            getattr(app, "_display_auto_manual_entry_signature", None)
+        "last_decision": runtime_value(
+            "last_decision",
+            "_display_auto_last_decision",
         ),
-        "manual_entry_label": getattr(app, "_display_auto_manual_entry_label", None),
-        "waiting_empty_rearm": getattr(app, "_display_auto_waiting_empty_rearm", None),
+        "stable_frames": runtime_value(
+            "stable_frames",
+            "_display_auto_stable_frames",
+        ),
+        "required_stable_frames": (
+            runtime_value("required_stable_frames", "_display_auto_stable_frames")
+            if evidence is not None
+            else None
+        ),
+        "transition_frames": runtime_value(
+            "transition_frames",
+            "_display_auto_transition_frames",
+        ),
+        "physical_stable_key": runtime_value(
+            "physical_stable_key",
+            "_display_f3_physical_stable_key",
+        ),
+        "physical_pending_key": runtime_value(
+            "physical_pending_key",
+            "_display_f3_physical_pending_key",
+        ),
+        "physical_pending_frames": runtime_value(
+            "physical_pending_frames",
+            "_display_f3_physical_pending_frames",
+        ),
+        "unknown_off_pending_frames": runtime_value(
+            "unknown_off_pending_frames",
+            "_display_f3_unknown_off_pending_frames",
+        ),
+        "manual_entry_signature": runtime_value(
+            "manual_entry_signature",
+            "_display_auto_manual_entry_signature",
+        ),
+        "manual_entry_label": runtime_value(
+            "manual_entry_label",
+            "_display_auto_manual_entry_label",
+        ),
+        "waiting_empty_rearm": runtime_value(
+            "waiting_empty_rearm",
+            "_display_auto_waiting_empty_rearm",
+        ),
     }
 
     snapshot["report_ready"] = True

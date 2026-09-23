@@ -52,6 +52,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
+        self._display_f3_pending_ng_runtime = None
         super().__init__(*args, **kwargs)
         self._rebuild_display_auto_analyzer()
 
@@ -76,6 +77,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
+        self._display_f3_pending_ng_runtime = None
         self._display_auto_transition_frames = (
             self.DISPLAY_AUTO_TRANSITION_FRAMES if transition else 0
         )
@@ -600,6 +602,51 @@ class DisplayAutomaticCheckF3Mixin:
 
         if self._display_auto_stable_frames < required:
             return
+
+        if not approved:
+            self._display_f3_pending_ng_runtime = {
+                "last_decision": False,
+                "stable_frames": int(self._display_auto_stable_frames),
+                "required_stable_frames": int(required),
+                "transition_frames": int(self._display_auto_transition_frames),
+                "physical_stable_key": getattr(
+                    self,
+                    "_display_f3_physical_stable_key",
+                    None,
+                ),
+                "physical_pending_key": getattr(
+                    self,
+                    "_display_f3_physical_pending_key",
+                    None,
+                ),
+                "physical_pending_frames": getattr(
+                    self,
+                    "_display_f3_physical_pending_frames",
+                    None,
+                ),
+                "unknown_off_pending_frames": getattr(
+                    self,
+                    "_display_f3_unknown_off_pending_frames",
+                    None,
+                ),
+                "manual_entry_signature": deepcopy(
+                    getattr(
+                        self,
+                        "_display_auto_manual_entry_signature",
+                        None,
+                    )
+                ),
+                "manual_entry_label": getattr(
+                    self,
+                    "_display_auto_manual_entry_label",
+                    None,
+                ),
+                "waiting_empty_rearm": getattr(
+                    self,
+                    "_display_auto_waiting_empty_rearm",
+                    None,
+                ),
+            }
 
         self._display_auto_stable_frames = 0
         self._display_auto_last_decision = None
