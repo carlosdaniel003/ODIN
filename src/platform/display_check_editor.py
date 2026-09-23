@@ -14,6 +14,7 @@ from src.platform.display_mask_geometry import (
     instalar_suporte_segmento_mascara_display,
     numero_mascara_display,
     pontos_mascara_display,
+    sincronizar_colecao_mascaras_display,
     sincronizar_formato_mascara_display,
 )
 from src.platform.display_project_repository import (
@@ -750,21 +751,20 @@ class DisplayCheckMaskEditorWindow:
         self.master_width, self.master_height = resolution
         base_masks = normalizar_mascaras_display(deepcopy(masks or []))
         overrides = mask_overrides if isinstance(mask_overrides, dict) else {}
-        self.masks = []
-        for mask in base_masks:
-            mask_id = str(mask.get("id") or "")
-            override = overrides.get(mask_id)
-            normalized_override = (
-                normalizar_mascaras_display(
-                    [{**deepcopy(override), "id": mask_id}]
-                )
-                if isinstance(override, dict)
-                else []
-            )
-            local = normalized_override[0] if normalized_override else mask
-            self.masks.append(
-                sincronizar_formato_mascara_display(mask, local)
-            )
+
+        # O CHECK pode ter sido salvo quando a máscara principal ainda tinha
+        # outro tipo. "Máscaras" define sempre o formato atual; o CHECK conserva
+        # somente sua pose/posição local.
+        self.masks = sincronizar_colecao_mascaras_display(
+            base_masks,
+            overrides,
+            somente_ids_locais=False,
+        )
+        self._canonical_masks_by_id = {
+            str(mask.get("id") or ""): deepcopy(mask)
+            for mask in base_masks
+            if str(mask.get("id") or "")
+        }
         self.mask_ids = [str(mask["id"]) for mask in self.masks]
         self.states = normalizar_estados_check_display(
             check.get("mask_states", {}),
@@ -1743,6 +1743,17 @@ class DisplayCheckMaskEditorWindow:
                 )
                 return
             self._finish_redraw_board_geometry()
+        # AJUSTAR GEOMETRIA nunca ganha autoridade para trocar o tipo da
+        # máscara principal. Reaplica o formato canônico antes de persistir.
+        canonical = list(
+            getattr(self, "_canonical_masks_by_id", {}).values()
+        )
+        if canonical:
+            self.masks = sincronizar_colecao_mascaras_display(
+                canonical,
+                self.masks,
+                somente_ids_locais=False,
+            )
         states = normalizar_estados_check_display(self.states, self.mask_ids)
         if not self.geometry_only and self.on_save is not None:
             self.on_save(deepcopy(states))

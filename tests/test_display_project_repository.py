@@ -140,6 +140,61 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
         ]
         self.assertEqual(masks, normalizar_mascaras_display(masks))
 
+    def test_trocar_mascara_de_circulo_para_pontos_migra_geometria_do_check(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = DisplayProjectRepository(Path(temp_dir) / "display.json")
+            repository.adicionar_projeto("DISPLAY A", (800, 480))
+            repository.salvar_mascaras(
+                "DISPLAY A",
+                [{
+                    "id": "MASK_027",
+                    "type": "circle",
+                    "cx": 100,
+                    "cy": 100,
+                    "radius": 20,
+                }],
+            )
+            check_id = repository.listar_checks("DISPLAY A")[0]["id"]
+            repository.salvar_geometria_check(
+                "DISPLAY A",
+                check_id,
+                [[0, 0], [799, 0], [799, 479], [0, 479]],
+                {
+                    "MASK_027": {
+                        "id": "MASK_027",
+                        "type": "circle",
+                        "cx": 310,
+                        "cy": 210,
+                        "radius": 30,
+                    }
+                },
+            )
+
+            repository.salvar_mascaras(
+                "DISPLAY A",
+                [{
+                    "id": "MASK_027",
+                    "type": "polygon",
+                    "points": [
+                        [80, 90],
+                        [120, 90],
+                        [130, 100],
+                        [120, 110],
+                        [80, 110],
+                        [70, 100],
+                    ],
+                }],
+            )
+
+            check = repository.carregar_check("DISPLAY A", check_id)
+            migrated = check["mask_overrides_reference"]["MASK_027"]
+            self.assertEqual("polygon", migrated["type"])
+            self.assertEqual(6, len(migrated["points"]))
+            cx = sum(point[0] for point in migrated["points"]) / 6.0
+            cy = sum(point[1] for point in migrated["points"]) / 6.0
+            self.assertAlmostEqual(310.0, cx, delta=1.0)
+            self.assertAlmostEqual(210.0, cy, delta=1.0)
+
     def test_renomear_e_remover_nao_mistura_conteudo_de_outros_projetos(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = DisplayProjectRepository(Path(temp_dir) / "display.json")

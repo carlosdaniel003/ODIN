@@ -347,6 +347,54 @@ def sincronizar_formato_mascara_display(
     return deepcopy(base)
 
 
+def sincronizar_colecao_mascaras_display(
+    mascaras_base,
+    geometrias_locais,
+    *,
+    somente_ids_locais: bool = False,
+) -> list[dict]:
+    """Reconcilia geometrias locais com o formato atual das máscaras do projeto.
+
+    O ID liga as duas geometrias. A máscara canônica define tipo/topologia
+    (círculo, segmento, polígono e quantidade de vértices). A geometria local
+    fornece a pose já ajustada naquela referência ou CHECK.
+
+    somente_ids_locais=True preserva coleções completas como masks_reference:
+    IDs ausentes continuam ausentes (exclusão local).
+    """
+    bases = [
+        converter_mascara_legada_para_editor(deepcopy(mask))
+        for mask in (mascaras_base or [])
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    ]
+    locais = {}
+    source = (
+        geometrias_locais.values()
+        if isinstance(geometrias_locais, dict)
+        else (geometrias_locais or [])
+    )
+    for raw in source:
+        if not isinstance(raw, dict):
+            continue
+        mask_id = str(raw.get("id") or "")
+        if mask_id:
+            locais[mask_id] = deepcopy(raw)
+
+    resultado = []
+    for base in bases:
+        mask_id = str(base.get("id") or "")
+        local = locais.get(mask_id)
+        if local is None:
+            if somente_ids_locais:
+                continue
+            resultado.append(deepcopy(base))
+            continue
+        synced = sincronizar_formato_mascara_display(base, local)
+        synced["id"] = mask_id
+        resultado.append(synced)
+    return resultado
+
+
 def mascara_display_contem_ponto(mask: dict, x, y) -> bool:
     kind = str(mask.get("type", "")).lower()
     if kind == "circle":

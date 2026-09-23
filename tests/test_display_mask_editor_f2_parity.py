@@ -216,6 +216,65 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
         self.assertEqual("polygon", stretched["type"])
         self.assertEqual(32, len(stretched["points"]))
 
+    def test_colecao_local_antiga_adota_formato_atual_da_mascara_principal(self):
+        from src.platform.display_mask_geometry import (
+            sincronizar_colecao_mascaras_display,
+        )
+
+        canonical = [{
+            "id": "MASK_027",
+            "type": "polygon",
+            "points": [
+                [80, 90],
+                [120, 90],
+                [130, 100],
+                [120, 110],
+                [80, 110],
+                [70, 100],
+            ],
+        }]
+        stale = [{
+            "id": "MASK_027",
+            "type": "circle",
+            "cx": 300,
+            "cy": 220,
+            "radius": 30,
+        }]
+
+        result = sincronizar_colecao_mascaras_display(canonical, stale)
+        self.assertEqual(1, len(result))
+        self.assertEqual("MASK_027", result[0]["id"])
+        self.assertEqual("polygon", result[0]["type"])
+        self.assertEqual(6, len(result[0]["points"]))
+
+    def test_masks_reference_preserva_exclusao_mas_forca_formato_canonico(self):
+        from src.platform.display_mask_geometry import (
+            sincronizar_colecao_mascaras_display,
+        )
+
+        canonical = [
+            {"id": "MASK_001", "type": "circle", "cx": 10, "cy": 10, "radius": 5},
+            {
+                "id": "MASK_027",
+                "type": "polygon",
+                "points": [[0, 0], [20, 0], [20, 10], [0, 10]],
+            },
+        ]
+        stale_full = [{
+            "id": "MASK_027",
+            "type": "circle",
+            "cx": 200,
+            "cy": 100,
+            "radius": 12,
+        }]
+        result = sincronizar_colecao_mascaras_display(
+            canonical,
+            stale_full,
+            somente_ids_locais=True,
+        )
+        self.assertEqual(["MASK_027"], [item["id"] for item in result])
+        self.assertEqual("polygon", result[0]["type"])
+
     def test_editor_f3_referencia_tem_pan_exclusao_e_numeracao_visual(self):
         module = __import__(
             "src.platform.display_f3_reference_geometry_editor",
