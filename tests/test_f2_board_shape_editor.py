@@ -92,6 +92,19 @@ class F2BoardShapeEditorTests(unittest.TestCase):
         self.assertEqual("BOARD_002", result[0].id)
         self.assertTrue(result[0].eh_segmento_livre)
 
+    def test_redesenhar_placa_nao_recoloca_contorno_salvo_no_canvas(self):
+        import src.platform.f2_board_shape_editor as module
+
+        source = inspect.getsource(module.abrir_editor_contorno_placa_f2)
+        self.assertIn('"original_rois": _copiar_lista_leds(contorno_atual)', source)
+        self.assertIn('"working_rois": []', source)
+        self.assertIn('"redraw_session": True', source)
+        self.assertIn("_definir_rois_trabalho_editor_placa(app, [])", source)
+        self.assertNotIn(
+            "_definir_rois_trabalho_editor_placa(app, contorno_atual)",
+            source,
+        )
+
     def test_editor_defaults_to_point_by_point_and_uses_dedicated_working_set(self):
         import src.platform.f2_board_shape_editor as module
 

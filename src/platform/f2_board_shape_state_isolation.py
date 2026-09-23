@@ -209,11 +209,11 @@ def abrir_editor_contorno_placa_f2_isolado(controller, slot: str, settings_windo
         getattr(app, "leds_selecionados", []),
     )
 
-    # "Desenhar placa" é uma sessão de REDESENHO. O contorno salvo permanece no
-    # JSON até um novo SALVAR concluir com sucesso, mas o canvas começa limpo para
-    # que a geometria antiga não fique embaixo da nova nem seja salva novamente
-    # por engano.
-    contexto["original_rois"] = _copiar_rois(atuais)
+    # O editor base já preserva o contorno anterior antes de limpar o canvas.
+    # Mantemos compatibilidade caso esta camada seja aplicada sobre uma versão
+    # mais antiga do editor.
+    if "original_rois" not in contexto:
+        contexto["original_rois"] = _copiar_rois(atuais)
     contexto["redraw_session"] = True
     _definir_rois_editor(app, [])
 

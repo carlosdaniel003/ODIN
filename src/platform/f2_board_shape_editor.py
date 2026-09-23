@@ -405,7 +405,12 @@ def abrir_editor_contorno_placa_f2(controller, slot: str, settings_window) -> No
         "width": int(largura),
         "height": int(altura),
         "snapshot": snapshot,
-        "working_rois": _copiar_lista_leds(contorno_atual),
+        # "Desenhar placa" significa redesenhar. A geometria antiga permanece
+        # persistida como fallback até o novo SALVAR concluir, mas não participa
+        # do canvas nem da coleção que será gravada.
+        "original_rois": _copiar_lista_leds(contorno_atual),
+        "working_rois": [],
+        "redraw_session": True,
     }
 
     if bool(getattr(app, "camera_ativa", False)):
@@ -415,7 +420,7 @@ def abrir_editor_contorno_placa_f2(controller, slot: str, settings_window) -> No
     app.caminho_imagem_atual = caminho
     app.altura_original = int(altura)
     app.largura_original = int(largura)
-    _definir_rois_trabalho_editor_placa(app, contorno_atual)
+    _definir_rois_trabalho_editor_placa(app, [])
     app.modo_atual = F2_BOARD_SHAPE_EDIT_MODE
 
     view = getattr(app, "view", None)
