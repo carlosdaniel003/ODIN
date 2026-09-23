@@ -162,6 +162,47 @@ class DisplayF3PhysicalTransitionAuthorityTests(unittest.TestCase):
             result["reason"],
         )
 
+    def test_check_defeituoso_pode_entrar_fisicamente_e_depois_gerar_ng(self):
+        app = _App()
+        defective_aux = {
+            "ready": True,
+            "approved": False,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_003",
+            "check_name": "AUX",
+        }
+
+        self.assertTrue(
+            authority._analysis_matches_current_context(app, defective_aux)
+        )
+
+        with patch.object(
+            authority,
+            "avaliar_entrada_fisica_check_f3",
+            return_value={
+                "available": True,
+                "confirmed": True,
+                "reason": "transicao_fisica_confirmada",
+                "previous_check_name": "USB",
+                "current_check_name": "AUX",
+            },
+        ):
+            evidence = authority.avaliar_entrada_fisica_check_f3(app)
+            self.assertTrue(evidence["confirmed"])
+
+    def test_analise_de_outro_check_nao_libera_gate_de_entrada(self):
+        app = _App()
+        wrong = {
+            "ready": True,
+            "approved": True,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_004",
+            "check_name": "USB",
+        }
+        self.assertFalse(
+            authority._analysis_matches_current_context(app, wrong)
+        )
+
     def test_registro_final_e_vetado_quando_transicao_fisica_nao_confirmou(self):
         app = _App()
         with patch.object(

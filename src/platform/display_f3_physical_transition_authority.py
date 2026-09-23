@@ -192,7 +192,13 @@ def avaliar_entrada_fisica_check_f3(
     }
 
 
-def _approved_analysis_for_context(app, analysis: dict | None) -> bool:
+def _analysis_matches_current_context(app, analysis: dict | None) -> bool:
+    """A leitura pode ser OK ou NG; só precisa pertencer ao CHECK atual.
+
+    A chegada física ao CHECK é independente da conformidade. Exigir
+    analysis['approved'] == True aqui impediria um AUX realmente defeituoso de
+    entrar no estado AUX e, consequentemente, de gerar NG.
+    """
     if not isinstance(analysis, dict):
         return False
     ctx = _context(app)
@@ -200,7 +206,6 @@ def _approved_analysis_for_context(app, analysis: dict | None) -> bool:
         return False
     return bool(
         analysis.get("ready")
-        and analysis.get("approved") is True
         and str(analysis.get("project_name") or "")
         == str(ctx.get("project_name") or "")
         and str(analysis.get("check_id") or "")
@@ -214,9 +219,10 @@ def _install_manual_entry_gate() -> None:
         return
 
     def has_manual_entry_evidence(self, analysis: dict) -> bool:
-        # Conformidade do alvo continua obrigatória, mas agora ela NÃO basta.
-        # O frame também precisa provar que deixou o CHECK anterior.
-        if not _approved_analysis_for_context(self, analysis):
+        # A análise só precisa ser uma leitura válida do CHECK atual. A decisão
+        # OK/NG vem DEPOIS que a transição física foi confirmada; assim um CHECK
+        # defeituoso pode entrar fisicamente e então ser reprovado corretamente.
+        if not _analysis_matches_current_context(self, analysis):
             return False
 
         evidence = avaliar_entrada_fisica_check_f3(
