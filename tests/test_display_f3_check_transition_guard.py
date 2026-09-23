@@ -186,6 +186,38 @@ class DisplayF3CheckTransitionGuardTests(unittest.TestCase):
         self.assertTrue(evidence["current_preferred"])
         self.assertLess(evidence["current_error"], evidence["last_error"])
 
+    def test_transicao_relativa_funciona_mesmo_com_scores_absolutos_abaixo_do_threshold(self):
+        blue, usb = self._references()
+        matcher = _FakeMatcher()
+
+        evidence = avaliar_preferencia_transicao_referencias_f3(
+            matcher,
+            usb,
+            {"image": blue, "score": 0.65, "threshold": 0.72},
+            {"image": usb, "score": 0.61, "threshold": 0.72},
+        )
+
+        self.assertTrue(evidence["available"])
+        self.assertFalse(evidence["current_matched"])
+        self.assertTrue(evidence["relative_preferred"])
+        self.assertTrue(evidence["current_preferred"])
+        self.assertLess(evidence["current_error"], evidence["last_error"])
+
+    def test_frame_ainda_no_check_anterior_bloqueia_destino_mesmo_com_score_proximo(self):
+        blue, usb = self._references()
+        matcher = _FakeMatcher()
+
+        evidence = avaliar_preferencia_transicao_referencias_f3(
+            matcher,
+            blue,
+            {"image": blue, "score": 0.65, "threshold": 0.72},
+            {"image": usb, "score": 0.64, "threshold": 0.72},
+        )
+
+        self.assertTrue(evidence["available"])
+        self.assertFalse(evidence["current_preferred"])
+        self.assertGreater(evidence["current_error"], evidence["last_error"])
+
     def test_transicao_exige_frames_consecutivos_antes_de_promover(self):
         pending_id = ""
         pending_frames = 0

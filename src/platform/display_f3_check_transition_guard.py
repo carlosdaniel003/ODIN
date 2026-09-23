@@ -106,13 +106,17 @@ def avaliar_preferencia_transicao_referencias_f3(
     minimum_pixels = max(32, int(reference_delta.size * 0.002))
 
     if different_pixels < minimum_pixels:
+        # Transição é uma comparação RELATIVA entre o CHECK anterior e o atual.
+        # O threshold absoluto continua útil como diagnóstico, mas não pode
+        # impedir a decisão quando ambas as fotos ficam abaixo de 0.72 por foco,
+        # exposição, tracking ou pequenas mudanças globais da câmera.
+        relative_preferred = bool(
+            current_score
+            >= last_score + F3_CHECK_TRANSITION_GLOBAL_SCORE_MARGIN
+        )
         preferred = bool(
-            current_matched
-            and (
-                not last_matched
-                or current_score
-                >= last_score + F3_CHECK_TRANSITION_GLOBAL_SCORE_MARGIN
-            )
+            relative_preferred
+            or (current_matched and not last_matched)
         )
         return {
             "current_preferred": preferred,
@@ -120,6 +124,9 @@ def avaliar_preferencia_transicao_referencias_f3(
             "mode": "global_fallback",
             "current_score": current_score,
             "last_score": last_score,
+            "current_matched": bool(current_matched),
+            "last_matched": bool(last_matched),
+            "relative_preferred": bool(relative_preferred),
             "different_pixels": different_pixels,
         }
 
@@ -133,22 +140,113 @@ def avaliar_preferencia_transicao_referencias_f3(
     else:
         error_ratio = current_error / last_error
 
-    preferred = bool(
-        current_matched
-        and current_error + F3_CHECK_TRANSITION_ERROR_MARGIN < last_error
+    # Nas regiões que REALMENTE mudam entre os dois CHECKS, a foto atual
+    # precisa parecer inequivocamente mais com o destino do que com a função
+    # anterior. Isto é independente do score absoluto da cena inteira.
+    relative_preferred = bool(
+        current_error + F3_CHECK_TRANSITION_ERROR_MARGIN < last_error
         and error_ratio <= F3_CHECK_TRANSITION_ERROR_RATIO
     )
+    preferred = bool(relative_preferred)
     return {
         "current_preferred": preferred,
         "available": True,
         "mode": "difference_mask",
         "current_score": current_score,
         "last_score": last_score,
+        "current_matched": bool(current_matched),
+        "last_matched": bool(last_matched),
+        "relative_preferred": bool(relative_preferred),
         "current_error": current_error,
         "last_error": last_error,
         "error_ratio": error_ratio,
         "different_pixels": different_pixels,
     }
+
+
+def avaliar_transicao_fisica_checks_f3(
+    app,
+    frame,
+    project_name: str,
+    previous_check_id: str,
+    current_check_id: str,
+) -> dict:
+    """Compara o frame real somente entre o CHECK anterior e o CHECK esperado.
+
+    Esta é uma autoridade de ENTRADA no CHECK, não de conformidade. Energia
+    ligada prova apenas que o display está energizado; ela não prova que a função
+    lógica seguinte já apareceu. Por isso USB não pode liberar AUX, por exemplo,
+    até a imagem atual preferir fisicamente AUX nas regiões que diferenciam as
+    duas referências.
+    """
+    previous_id = str(previous_check_id or "").strip()
+    current_id = str(current_check_id or "").strip()
+    if not previous_id or not current_id or previous_id == current_id:
+        return {
+            "available": False,
+            "current_preferred": False,
+            "reason": "checks_transicao_invalidos",
+            "previous_check_id": previous_id,
+            "current_check_id": current_id,
+        }
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return {
+            "available": False,
+            "current_preferred": False,
+            "reason": "frame_ausente",
+            "previous_check_id": previous_id,
+            "current_check_id": current_id,
+        }
+
+    repository = getattr(app, "display_project_repository", None)
+    if repository is None:
+        return {
+            "available": False,
+            "current_preferred": False,
+            "reason": "repositorio_ausente",
+            "previous_check_id": previous_id,
+            "current_check_id": current_id,
+        }
+
+    matcher = getattr(app, "_display_f3_operational_matcher", None)
+    if matcher is None or getattr(matcher, "repository", None) is not repository:
+        matcher = operational_module.DisplayVisualReferenceMatcher(repository)
+        app._display_f3_operational_matcher = matcher
+
+    previous_metadata = matcher.check_store.get(project_name, previous_id)
+    current_metadata = matcher.check_store.get(project_name, current_id)
+    if not isinstance(previous_metadata, dict) or not isinstance(current_metadata, dict):
+        return {
+            "available": False,
+            "current_preferred": False,
+            "reason": "referencias_transicao_incompletas",
+            "previous_check_id": previous_id,
+            "current_check_id": current_id,
+        }
+
+    current_small = visual_status_module._small_image(frame)
+    evidence = avaliar_preferencia_transicao_referencias_f3(
+        matcher,
+        current_small,
+        previous_metadata,
+        current_metadata,
+    )
+    result = dict(evidence) if isinstance(evidence, dict) else {}
+    result.update(
+        {
+            "source": "f3_previous_to_current_check_physical_transition",
+            "previous_check_id": previous_id,
+            "current_check_id": current_id,
+            "project_name": str(project_name or ""),
+        }
+    )
+    if not result.get("available"):
+        result.setdefault("reason", "comparacao_transicao_indisponivel")
+    elif result.get("current_preferred"):
+        result["reason"] = "frame_prefere_check_atual_ao_anterior"
+    else:
+        result["reason"] = "frame_ainda_nao_prefere_check_atual"
+    return result
 
 
 def decidir_transicao_estavel_f3(

@@ -38,6 +38,35 @@ class DisplayF3H1ToBluetoothGateTests(unittest.TestCase):
         )
         self.assertEqual("BLUETOOTH", app._display_auto_manual_entry_label)
 
+    def test_qualquer_avanco_logico_arma_gate_fisico_do_proximo_check(self):
+        app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
+        app._display_auto_manual_entry_signature = None
+        app._display_auto_manual_entry_label = ""
+
+        context = {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_003",
+            "check_name": "AUX",
+            "current_index": 3,
+        }
+        event = {
+            "event": "check_advanced",
+            "snapshot": {
+                "current_check": {
+                    "id": "CHECK_005",
+                    "name": "HDMI",
+                }
+            },
+        }
+
+        app._display_auto_arm_manual_entry_gate(context, event)
+
+        self.assertEqual(
+            ("DISPLAY A", "CHECK_005"),
+            app._display_auto_manual_entry_signature,
+        )
+        self.assertEqual("HDMI", app._display_auto_manual_entry_label)
+
     def test_bluetooth_cannot_ng_while_display_is_still_physically_in_h1(self):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app.display_f3_ativo = True

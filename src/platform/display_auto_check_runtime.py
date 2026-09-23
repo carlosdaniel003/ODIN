@@ -371,15 +371,11 @@ class DisplayAutomaticCheckF3Mixin:
         context: dict,
         event: dict,
     ) -> None:
-        # O H1 também precisa aguardar a mudança física até o Bluetooth.
-        # Para os demais passos, mantemos a regra já existente BLUE→USB e USB→AUX.
-        requires_gate = (
-            self._display_auto_is_reference_gate(context)
-            or self._display_auto_requires_manual_transition_after(
-                str(context.get("check_name") or "")
-            )
-        )
-        if not requires_gate:
+        # Todo avanço lógico precisa aguardar a chegada FÍSICA ao CHECK seguinte.
+        # A regra deixa de depender de nomes fixos como BLUE/USB/AUX e também
+        # protege CHECKS futuros. O gate será liberado pela autoridade relativa
+        # CHECK anterior -> CHECK atual instalada no bootstrap final.
+        if str((event or {}).get("event") or "") != "check_advanced":
             self._display_auto_clear_manual_entry_gate()
             return
 
@@ -673,6 +669,20 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_auto_arm_manual_entry_gate(context, event)
             self._display_auto_signature = None
             self._display_auto_transition_frames = self.DISPLAY_AUTO_TRANSITION_FRAMES
+        elif (
+            event_type == "physical_transition_blocked"
+            and str(event.get("blocked_by") or "")
+            == "physical_transition_not_confirmed"
+        ):
+            # A análise pode ter ficado 100% conforme antes da função física real.
+            # Nesse caso voltamos explicitamente ao gate de entrada do MESMO CHECK
+            # em vez de iniciar outra tentativa de aprovação escondida.
+            self._display_auto_manual_entry_signature = signature
+            self._display_auto_manual_entry_label = str(
+                context.get("check_name") or context.get("check_id") or ""
+            )
+            self._display_auto_signature = None
+            self._reset_display_auto_stability(transition=False)
         else:
             self._display_auto_clear_manual_entry_gate()
             self._reset_display_auto_stability()
