@@ -132,7 +132,20 @@ def avaliar_entrada_fisica_check_f3(
     if isinstance(state, dict):
         kind = str(state.get("kind") or "").strip().lower()
         physical_id = str(state.get("check_id") or "").strip()
-        if kind == "check" and physical_id and physical_id == current_id:
+        # Não confundir "CHECK promovido pelas próprias máscaras" com uma
+        # identificação física independente. Esse era justamente o bypass que
+        # permitia o destino lógico validar a si próprio antes da transição real.
+        mask_promoted = bool(
+            state.get("mask_confirmed_physical_state")
+            or str(state.get("source") or "")
+            == "f3_current_check_confirmed_by_live_masks"
+        )
+        if (
+            kind == "check"
+            and physical_id
+            and physical_id == current_id
+            and not mask_promoted
+        ):
             return {
                 "source": F3_PHYSICAL_TRANSITION_AUTHORITY_SOURCE,
                 "available": True,

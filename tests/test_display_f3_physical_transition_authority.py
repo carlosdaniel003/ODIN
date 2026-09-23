@@ -125,6 +125,33 @@ class DisplayF3PhysicalTransitionAuthorityTests(unittest.TestCase):
             result["reason"],
         )
 
+    def test_check_promovido_pelas_proprias_mascaras_nao_bypassa_transicao(self):
+        app = _App()
+        app._display_f3_operational_state = {
+            "kind": "check",
+            "check_id": "CHECK_003",
+            "check_name": "AUX",
+            "physical_matches_expected_check": True,
+            "mask_confirmed_physical_state": True,
+            "source": "f3_current_check_confirmed_by_live_masks",
+        }
+        with patch.object(
+            authority,
+            "avaliar_transicao_fisica_checks_f3",
+            return_value={
+                "available": True,
+                "current_preferred": False,
+                "reason": "frame_ainda_nao_prefere_check_atual",
+            },
+        ):
+            result = authority.avaliar_entrada_fisica_check_f3(app)
+
+        self.assertFalse(result["confirmed"])
+        self.assertEqual(
+            "frame_ainda_nao_prefere_check_atual",
+            result["reason"],
+        )
+
     def test_primeiro_check_nao_exige_transicao_anterior(self):
         app = _App()
         app.display_check_runtime = _Runtime(current_index=0)
