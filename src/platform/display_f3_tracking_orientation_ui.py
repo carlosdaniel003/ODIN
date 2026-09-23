@@ -39,7 +39,10 @@ from src.platform.display_f3_object_tracking import (
     transform_points,
     transformed_masks,
 )
-from src.platform.display_mask_geometry import numero_mascara_display
+from src.platform.display_mask_geometry import (
+    numero_mascara_display,
+    sincronizar_colecao_mascaras_display,
+)
 from src.platform.display_project_repository import (
     normalizar_mascaras_display,
     normalizar_nome_projeto_display,
@@ -2191,6 +2194,14 @@ def _build_tracking_config_class(base_cls):
                 masks = transformed_masks(project, matrix)
 
             def save_geometry(board_points, edited_masks) -> bool:
+                # O slot angular pode mover/rotacionar as máscaras, mas não
+                # perpetua um tipo antigo. O formato vem sempre de "Máscaras".
+                reference_canonical = transformed_masks(project, matrix)
+                edited_masks = sincronizar_colecao_mascaras_display(
+                    reference_canonical,
+                    edited_masks or [],
+                    somente_ids_locais=True,
+                )
                 overrides = {
                     str(mask.get("id") or ""): _normalize_mask_override(mask)
                     for mask in (edited_masks or [])

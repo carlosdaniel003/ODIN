@@ -38,6 +38,7 @@ from src.platform.display_mask_geometry import (
     bbox_mascara_display,
     converter_mascara_legada_para_editor,
     pontos_mascara_display,
+    sincronizar_colecao_mascaras_display,
     sincronizar_formato_mascara_display,
 )
 from src.platform.display_project_repository import (
@@ -669,12 +670,18 @@ def _reference_masks_from_metadata(
 ) -> list[dict]:
     value = metadata if isinstance(metadata, dict) else {}
     if "masks_reference" in value:
-        result = []
+        local_masks = []
         for raw in value.get("masks_reference", []) or []:
             normalized = _normalize_mask_override(raw)
             if normalized is not None:
-                result.append(converter_mascara_legada_para_editor(normalized))
-        return result
+                local_masks.append(
+                    converter_mascara_legada_para_editor(normalized)
+                )
+        return sincronizar_colecao_mascaras_display(
+            project.get("masks", []) or [],
+            local_masks,
+            somente_ids_locais=True,
+        )
     return _reference_masks_from_overrides(
         project,
         value.get("mask_overrides_reference", {}),
@@ -904,15 +911,20 @@ def reference_geometry(
     if not board:
         board = transform_points(canonical_board_points(project, store), matrix)
 
+    defaults = transformed_masks(project, matrix)
+
     if isinstance(current, dict) and "masks_reference" in current:
-        masks = []
+        local_masks = []
         for raw in current.get("masks_reference", []) or []:
             normalized = _normalize_mask_override(raw)
             if normalized is not None:
-                masks.append(normalized)
+                local_masks.append(normalized)
+        masks = sincronizar_colecao_mascaras_display(
+            defaults,
+            local_masks,
+            somente_ids_locais=True,
+        )
         return board, masks
-
-    defaults = transformed_masks(project, matrix)
     overrides = (current or {}).get("mask_overrides_reference", {})
     if not isinstance(overrides, dict):
         overrides = {}

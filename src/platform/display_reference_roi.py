@@ -24,6 +24,7 @@ import src.platform.display_visual_reference_status as visual_module
 from src.platform.display_mask_geometry import (
     converter_mascara_legada_para_editor,
     pontos_mascara_display,
+    sincronizar_colecao_mascaras_display,
 )
 from src.platform.display_project_repository import (
     normalizar_mascaras_display,
@@ -156,9 +157,12 @@ def _decorate_metadata(repository, project_name: str, metadata: dict | None):
     resolution, masks, signature = _project_mask_context(repository, project_name)
     result = deepcopy(metadata)
     result.pop("roi", None)
+    canonical_masks = list(masks)
     if "masks_reference" in result:
-        masks = normalizar_mascaras_display(
-            deepcopy(result.get("masks_reference", []))
+        masks = sincronizar_colecao_mascaras_display(
+            canonical_masks,
+            deepcopy(result.get("masks_reference", [])),
+            somente_ids_locais=True,
         )
         signature = _mask_signature(masks)
     else:
@@ -168,13 +172,11 @@ def _decorate_metadata(repository, project_name: str, metadata: dict | None):
             else {}
         )
         if overrides:
-            masks = [
-                deepcopy(overrides.get(str(mask.get("id") or "")))
-                if isinstance(overrides.get(str(mask.get("id") or "")), dict)
-                else deepcopy(mask)
-                for mask in masks
-                if isinstance(mask, dict)
-            ]
+            masks = sincronizar_colecao_mascaras_display(
+                canonical_masks,
+                overrides,
+                somente_ids_locais=False,
+            )
             signature = _mask_signature(masks)
     result["_display_master_resolution"] = tuple(resolution) if resolution else None
     result["_display_mask_regions"] = masks

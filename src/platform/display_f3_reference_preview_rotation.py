@@ -19,6 +19,9 @@ import tkinter as tk
 import src.platform.display_check_presence_reference as check_module
 import src.platform.display_reference_roi as roi_module
 import src.platform.display_visual_reference_status as visual_module
+from src.platform.display_mask_geometry import (
+    sincronizar_colecao_mascaras_display,
+)
 from src.platform.display_project_repository import (
     normalizar_mascaras_display,
     normalizar_resolucao_display,
@@ -116,9 +119,16 @@ def _metadata_com_mascaras_do_projeto(
         return result
 
     resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    canonical_masks = [
+        deepcopy(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict) and mask.get("id") is not None
+    ]
     if "masks_reference" in result:
-        masks = normalizar_mascaras_display(
-            deepcopy(result.get("masks_reference", []))
+        masks = sincronizar_colecao_mascaras_display(
+            canonical_masks,
+            deepcopy(result.get("masks_reference", [])),
+            somente_ids_locais=True,
         )
     else:
         overrides = (
@@ -126,17 +136,11 @@ def _metadata_com_mascaras_do_projeto(
             if isinstance(result.get("mask_overrides_reference"), dict)
             else {}
         )
-        masks = []
-        for mask in (project.get("masks", []) or []):
-            if not isinstance(mask, dict) or mask.get("id") is None:
-                continue
-            mask_id = str(mask.get("id"))
-            override = overrides.get(mask_id)
-            masks.append(
-                deepcopy(override)
-                if isinstance(override, dict)
-                else deepcopy(mask)
-            )
+        masks = sincronizar_colecao_mascaras_display(
+            canonical_masks,
+            overrides,
+            somente_ids_locais=False,
+        )
     if resolution is not None:
         result["_display_master_resolution"] = tuple(resolution)
     result["_display_mask_regions"] = masks
