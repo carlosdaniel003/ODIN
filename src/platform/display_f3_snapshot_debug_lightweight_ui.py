@@ -19,6 +19,7 @@ import cv2
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
 
 import src.platform.display_f3_manual_snapshot_debug as manual_module
+import src.platform.display_live_roi_overlay as overlay_module
 from src.platform.display_visual_rotation import preparar_frame_visual_display
 import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_visual_reference_status as visual_status_module
@@ -46,6 +47,15 @@ COPY_FEEDBACK_RESET_MS = 1800
 READY_TEXT = "RELATÓRIO PRONTO PARA CÓPIA"
 VISUAL_FRAME_MAX_WIDTH = 640
 VISUAL_FRAME_MAX_HEIGHT = 340
+
+STATUS_TITLES = {
+    "preview_status": "PREVIEW",
+    "operational_reference_state_label": "ESTADO OPERACIONAL",
+    "mask_analysis_state_label": "MÁSCARAS",
+    "visual_analysis_state_label": "ANÁLISE VISUAL",
+    "visual_reference_state_label": "REFERÊNCIA VISUAL",
+    "board_reference_state_label": "PRESENÇA DA PLACA",
+}
 
 
 def _safe_float(value, default=None):
@@ -375,6 +385,7 @@ def _frame_photo(
     widget=None,
     *,
     visual_rotation: int = 0,
+    overlay_context: dict | None = None,
 ):
     if frame is None or getattr(frame, "size", 0) == 0:
         return None
@@ -394,7 +405,7 @@ def _frame_photo(
     candidate_key = data.get("selected_reference") or data.get("best_reference")
     candidate = (data.get("candidates") or {}).get(candidate_key)
     roi = _normalized_roi((candidate or {}).get("roi"))
-    if roi is not None:
+    if overlay_context is None and roi is not None:
         height, width = image.shape[:2]
         x1 = int(round(roi["x"] * width))
         y1 = int(round(roi["y"] * height))
@@ -414,6 +425,15 @@ def _frame_photo(
     image = preparar_frame_visual_display(image, int(visual_rotation or 0))
     if image is None or getattr(image, "size", 0) == 0:
         return None
+
+    if isinstance(overlay_context, dict):
+        try:
+            image = overlay_module.renderizar_overlay_rois_display_f3(
+                image,
+                overlay_context,
+            )
+        except Exception:
+            pass
 
     height, width = image.shape[:2]
     max_width, max_height = _debug_preview_limits(widget)
@@ -435,6 +455,168 @@ def _frame_photo(
     if not ok:
         return None
     return tk.PhotoImage(data=base64.b64encode(buffer).decode("ascii"))
+
+
+def _snapshot_status_rows(visual_state: dict | None) -> list[tuple[str, dict]]:
+    data = visual_state if isinstance(visual_state, dict) else {}
+    statuses = data.get("statuses")
+    if not isinstance(statuses, dict):
+        return []
+    rows = []
+    for key, title in STATUS_TITLES.items():
+        value = statuses.get(key)
+        if isinstance(value, dict) and str(value.get("text") or "").strip():
+            rows.append((title, value))
+    return rows
+
+
+def _readout_color(state: str) -> tuple[str, str, str]:
+    cls = DisplayProductionF3Window
+    if state == "ng":
+        return (
+            cls.DISPLAY_READOUT_NG,
+            cls.DISPLAY_READOUT_NG_OUTLINE,
+            cls.DISPLAY_READOUT_NUMBER_NG,
+        )
+    if state == "on":
+        return (
+            cls.DISPLAY_READOUT_ACTIVE,
+            "#86EFAC",
+            cls.DISPLAY_READOUT_NUMBER,
+        )
+    if state == "off":
+        return (
+            cls.DISPLAY_READOUT_OFF,
+            "#166534",
+            cls.DISPLAY_READOUT_NUMBER,
+        )
+    return (
+        cls.DISPLAY_READOUT_INACTIVE,
+        cls.DISPLAY_READOUT_INACTIVE_OUTLINE,
+        cls.DISPLAY_READOUT_NUMBER,
+    )
+
+
+def _draw_debug_readout(canvas, context: dict | None) -> bool:
+    """Replica uma vez o visor 88:88 do snapshot; não cria timers."""
+    if not isinstance(context, dict):
+        canvas.create_text(
+            210,
+            48,
+            text="VISOR SEM SNAPSHOT",
+            fill=manual_module.DEBUG_MUTED,
+            font=("DejaVu Sans", 9, "bold"),
+        )
+        return False
+
+    slots = [
+        str(mask_id)
+        for mask_id in (context.get("mask_slots") or ())
+        if str(mask_id)
+    ]
+    if len(slots) != 28 or len(set(slots)) != 28:
+        slots = DisplayProductionF3Window._display_readout_mask_slots(
+            context.get("mask_ids") or ()
+        )
+    if len(slots) != 28:
+        return False
+
+    width = 420.0
+    height = 96.0
+    digit_height = 66.0
+    digit_width = digit_height * 0.52
+    digit_gap = 40.0
+    colon_width = 22.0
+    group_gap = 26.0
+    total_width = (
+        digit_width * 4.0
+        + digit_gap * 2.0
+        + group_gap * 2.0
+        + colon_width
+    )
+    start_x = (width - total_width) / 2.0
+    y = (height - digit_height) / 2.0
+
+    energy_state = str(context.get("energy_state") or "").strip().lower()
+    ready = bool(
+        context.get("power_confirmed")
+        and not bool(context.get("power_off_confirmed"))
+        and energy_state != "off"
+    )
+    classifications = dict(context.get("classifications") or {})
+    expected_states = dict(context.get("expected_states") or {})
+    failed = {
+        str(mask_id)
+        for mask_id in (context.get("failed_mask_ids") or ())
+        if str(mask_id)
+    }
+
+    def draw_digit(x, ids):
+        thickness = max(5.0, min(digit_width, digit_height) * 0.105)
+        polygons = DisplayProductionF3Window._seven_segment_points(
+            x, y, digit_width, digit_height, thickness
+        )
+        for segment_name, mask_id in zip(
+            ("a", "b", "c", "d", "e", "f", "g"),
+            ids,
+        ):
+            state = DisplayProductionF3Window._display_readout_semantic_state(
+                classifications.get(mask_id),
+                expected_states.get(mask_id),
+                mask_id in failed,
+                ready=ready,
+                intermittent=bool(context.get("intermittent", False)),
+                has_any_on=bool(context.get("has_any_on")),
+            )
+            fill, outline, number_color = _readout_color(state)
+            points = polygons[segment_name]
+            if state == "ng":
+                canvas.create_polygon(
+                    points,
+                    fill="",
+                    outline=DisplayProductionF3Window.DISPLAY_READOUT_NG_OUTLINE,
+                    width=3,
+                )
+            canvas.create_polygon(
+                points,
+                fill=fill,
+                outline=outline,
+                width=2 if state == "ng" else 1,
+            )
+            label = DisplayProductionF3Window._display_readout_mask_number(mask_id)
+            if label:
+                xs = points[0::2]
+                ys = points[1::2]
+                canvas.create_text(
+                    sum(xs) / len(xs),
+                    sum(ys) / len(ys),
+                    text=label,
+                    fill=number_color,
+                    font=("DejaVu Sans", 5, "bold"),
+                )
+
+    x = start_x
+    draw_digit(x, slots[0:7])
+    x += digit_width + digit_gap
+    draw_digit(x, slots[7:14])
+    x += digit_width + group_gap
+
+    colon_x = x + colon_width / 2.0
+    for cy in (y + digit_height * 0.36, y + digit_height * 0.66):
+        canvas.create_oval(
+            colon_x - 2.5,
+            cy - 2.5,
+            colon_x + 2.5,
+            cy + 2.5,
+            fill=DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE,
+            outline=DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE_OUTLINE,
+        )
+
+    x += colon_width + group_gap
+    draw_digit(x, slots[14:21])
+    x += digit_width + digit_gap
+    draw_digit(x, slots[21:28])
+    return True
 
 
 def _candidate_line(visual: dict, key: str, fallback: str) -> str:
@@ -679,6 +861,11 @@ def _open_lightweight_snapshot_debug(window):
         visual,
         top,
         visual_rotation=preview_rotation,
+        overlay_context=(
+            snapshot.get("overlay_context")
+            if isinstance(snapshot.get("overlay_context"), dict)
+            else None
+        ),
     )
     window._display_f3_snapshot_debug_photo = photo
     if photo is not None:
@@ -699,8 +886,81 @@ def _open_lightweight_snapshot_debug(window):
             anchor="w",
         ).pack(fill="x", pady=(30, 0))
 
+    visual_state = (
+        snapshot.get("visual_state")
+        if isinstance(snapshot.get("visual_state"), dict)
+        else {}
+    )
+    readout_context = (
+        visual_state.get("readout_context")
+        if isinstance(visual_state.get("readout_context"), dict)
+        else None
+    )
+    tk.Label(
+        frame_column,
+        text="VISOR DO DISPLAY • SNAPSHOT DO MESMO FRAME",
+        font=("Segoe UI", 9, "bold"),
+        bg=manual_module.DEBUG_BG,
+        fg=manual_module.DEBUG_MUTED,
+        anchor="w",
+    ).pack(fill="x", pady=(10, 5))
+    readout_canvas = tk.Canvas(
+        frame_column,
+        bg=DisplayProductionF3Window.DISPLAY_READOUT_SCREEN,
+        highlightbackground=DisplayProductionF3Window.DISPLAY_READOUT_BORDER,
+        highlightthickness=1,
+        bd=0,
+        width=420,
+        height=96,
+    )
+    readout_canvas.pack(anchor="nw")
+    _draw_debug_readout(readout_canvas, readout_context)
+
     info_column = tk.Frame(visual_area, bg=manual_module.DEBUG_BG)
     info_column.grid(row=0, column=1, sticky="nsew")
+    tk.Label(
+        info_column,
+        text="STATUS DO FRAME • TEXTO E COR CONGELADOS",
+        font=("Segoe UI", 9, "bold"),
+        bg=manual_module.DEBUG_BG,
+        fg=manual_module.DEBUG_MUTED,
+        anchor="w",
+    ).pack(fill="x", pady=(0, 5))
+
+    status_rows = _snapshot_status_rows(visual_state)
+    if status_rows:
+        status_box = tk.Frame(info_column, bg=manual_module.DEBUG_BG)
+        status_box.pack(fill="x", pady=(0, 9))
+        for title, value in status_rows:
+            row_bg = str(value.get("bg") or manual_module.DEBUG_PANEL)
+            row_fg = str(value.get("fg") or manual_module.DEBUG_TEXT)
+            row = tk.Frame(
+                status_box,
+                bg=row_bg,
+                highlightbackground=manual_module.DEBUG_BORDER,
+                highlightthickness=1,
+            )
+            row.pack(fill="x", pady=(0, 3))
+            tk.Label(
+                row,
+                text=f"{title}: {value.get('text', '--')}",
+                font=("Segoe UI", 8, "bold"),
+                bg=row_bg,
+                fg=row_fg,
+                anchor="w",
+                justify="left",
+                wraplength=490,
+            ).pack(fill="x", padx=7, pady=4)
+    else:
+        tk.Label(
+            info_column,
+            text="STATUS DO FRAME NÃO DISPONÍVEIS",
+            font=("Segoe UI", 8, "bold"),
+            bg=manual_module.DEBUG_BG,
+            fg=manual_module.DEBUG_MUTED,
+            anchor="w",
+        ).pack(fill="x", pady=(0, 9))
+
     tk.Label(
         info_column,
         text="ANÁLISE VISUAL • SOMENTE DIAGNÓSTICO",
