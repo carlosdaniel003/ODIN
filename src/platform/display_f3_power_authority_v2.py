@@ -73,10 +73,28 @@ def _safe_float(value, default=0.0) -> float:
 
 
 def _frame_token(app, frame):
+    """Identifica a imagem real, não apenas o contador lógico da câmera.
+
+    O contador camera_ultimo_frame_id pode voltar a valores já usados depois
+    de reiniciar/reconfigurar a câmera. O DEBUG também congela uma cópia do frame
+    mantendo o mesmo contador. Se o cache usar somente esse ID, uma evidência
+    POWERED antiga pode ser reaproveitada sobre uma imagem fisicamente OFF.
+
+    Mantemos o token lógico para rastreabilidade, mas acrescentamos a identidade
+    da instância da câmera e do ndarray recebido. Assim o cache só é reutilizado
+    quando a chamada aponta literalmente para o mesmo frame em memória.
+    """
     try:
-        return app._display_auto_frame_token(frame)
+        logical_token = app._display_auto_frame_token(frame)
     except Exception:
-        return ("object", id(frame))
+        logical_token = ("object", id(frame))
+
+    camera_service = getattr(app, "camera_service", None)
+    return (
+        logical_token,
+        ("camera_service", id(camera_service) if camera_service is not None else None),
+        ("frame_object", id(frame)),
+    )
 
 
 def _analysis_matches_context(analysis: dict | None, project_name: str, check_id: str) -> bool:
