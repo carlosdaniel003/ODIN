@@ -248,6 +248,17 @@ def _rois_trabalho_editor_placa(app) -> list[LedSelection]:
     contexto = _contexto_editor_placa_ativo(app)
     if contexto is None:
         return []
+
+    # A camada de isolamento do F2 mantém uma coleção dedicada para impedir a
+    # câmera de republicar as ROIs dos LEDs dentro deste editor. Ela é a fonte
+    # mais recente quando existe. Sincronizamos o contexto legado para que o
+    # salvamento nunca volte a ler o contorno antigo.
+    dedicadas = getattr(app, "_f2_board_shape_editor_rois", None)
+    if dedicadas is not None:
+        validas = _filtrar_rois_contorno_placa(dedicadas)
+        contexto["working_rois"] = _copiar_lista_leds(validas)
+        return _copiar_lista_leds(validas)
+
     return _filtrar_rois_contorno_placa(contexto.get("working_rois", []))
 
 
@@ -257,6 +268,12 @@ def _definir_rois_trabalho_editor_placa(app, rois) -> list[LedSelection]:
         return []
     validos = _filtrar_rois_contorno_placa(rois)
     contexto["working_rois"] = _copiar_lista_leds(validos)
+
+    # Se a camada dedicada já estiver ativa, mantenha as duas autoridades
+    # sincronizadas. Isso elimina o caso "desenhei novo / salvou o antigo".
+    if hasattr(app, "_f2_board_shape_editor_rois"):
+        app._f2_board_shape_editor_rois = _copiar_lista_leds(validos)
+
     # O canvas legado ainda lê este atributo; ele é apenas um espelho visual.
     app.leds_selecionados = _copiar_lista_leds(validos)
     app.resultados_led_atual = []

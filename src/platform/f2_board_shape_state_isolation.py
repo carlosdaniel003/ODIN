@@ -134,14 +134,41 @@ def carregar_contorno_placa_leds_isolado(
 
 
 def _definir_rois_editor(app, rois) -> None:
+    # O projeto F2 possui exatamente UM contorno físico. FreeformSegmentDrawing
+    # cria a nova forma anexando-a à coleção existente; portanto filtramos aqui
+    # e mantemos apenas o último polígono válido: o recém-desenhado substitui o
+    # anterior imediatamente.
+    filtrar = getattr(
+        board_shape_editor,
+        "_filtrar_rois_contorno_placa",
+        None,
+    )
+    if callable(filtrar):
+        try:
+            rois = filtrar(rois)
+        except Exception:
+            pass
+
     dedicadas = _copiar_rois(rois)
     setattr(app, _EDITOR_ROIS_ATTR, dedicadas)
+
+    contexto = _contexto_placa(app)
+    if isinstance(contexto, dict):
+        contexto["working_rois"] = _copiar_rois(dedicadas)
+
     app.leds_selecionados = _copiar_rois(dedicadas)
     app.resultados_led_atual = []
 
 
 def _rois_editor(app) -> list[LedSelection]:
-    return _copiar_rois(getattr(app, _EDITOR_ROIS_ATTR, []) or ())
+    dedicadas = getattr(app, _EDITOR_ROIS_ATTR, None)
+    if dedicadas is not None:
+        return _copiar_rois(dedicadas or ())
+
+    contexto = _contexto_placa(app)
+    if isinstance(contexto, dict):
+        return _copiar_rois(contexto.get("working_rois", []) or ())
+    return []
 
 
 def _sincronizar_espelho_editor(app) -> list[LedSelection]:
@@ -181,7 +208,14 @@ def abrir_editor_contorno_placa_f2_isolado(controller, slot: str, settings_windo
         str(contexto.get("project") or ""),
         getattr(app, "leds_selecionados", []),
     )
-    _definir_rois_editor(app, atuais)
+
+    # "Desenhar placa" é uma sessão de REDESENHO. O contorno salvo permanece no
+    # JSON até um novo SALVAR concluir com sucesso, mas o canvas começa limpo para
+    # que a geometria antiga não fique embaixo da nova nem seja salva novamente
+    # por engano.
+    contexto["original_rois"] = _copiar_rois(atuais)
+    contexto["redraw_session"] = True
+    _definir_rois_editor(app, [])
 
     imagem = getattr(app, "imagem_original", None)
     if imagem is not None and getattr(imagem, "size", 0):

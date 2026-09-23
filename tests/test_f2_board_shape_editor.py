@@ -131,6 +131,29 @@ class F2BoardShapeEditorTests(unittest.TestCase):
 
         self.assertIsNotNone(_contexto_editor_placa_ativo(App()))
 
+    def test_working_rois_prefere_estado_dedicado_mais_recente(self):
+        import src.platform.f2_board_shape_editor as module
+
+        antigo = LedSelection.from_dict(self._polygon_dict())
+        novo_data = self._polygon_dict()
+        novo_data["id"] = "BOARD_NOVO"
+        novo_data["centro_x"] = 280
+        novo = LedSelection.from_dict(novo_data)
+
+        class App:
+            _f2_board_shape_edit_context = {
+                "working_rois": [antigo],
+            }
+            _f2_board_shape_editor_rois = [novo]
+
+        result = module._rois_trabalho_editor_placa(App())
+        self.assertEqual(1, len(result))
+        self.assertEqual("BOARD_NOVO", result[0].id)
+        self.assertEqual(
+            "BOARD_NOVO",
+            App._f2_board_shape_edit_context["working_rois"][0].id,
+        )
+
     def test_save_reads_working_rois_not_global_led_selection(self):
         import src.platform.f2_board_shape_editor as module
 

@@ -63,6 +63,43 @@ class F2BoardShapeStateIsolationTests(unittest.TestCase):
         self.assertEqual(1, len(result))
         self.assertTrue(getattr(result[0], "pontos_segmento_livre", None))
 
+    def test_novo_contorno_substitui_antigo_e_sincroniza_working_rois(self):
+        antigo = criar_segmento_livre_por_pontos(
+            [(10, 10), (90, 10), (90, 70), (10, 70)],
+            id_roi="BOARD_ANTIGO",
+        )
+        novo = criar_segmento_livre_por_pontos(
+            [(20, 20), (120, 20), (120, 90), (20, 90)],
+            id_roi="BOARD_NOVO",
+        )
+        app = _App()
+        app._f2_board_shape_edit_context = {
+            "project": "TESTE",
+            "working_rois": [antigo],
+        }
+
+        _definir_rois_editor(app, [antigo, novo])
+
+        dedicadas = _rois_editor(app)
+        self.assertEqual(1, len(dedicadas))
+        self.assertEqual("BOARD_NOVO", dedicadas[0].id)
+        self.assertEqual(
+            "BOARD_NOVO",
+            app._f2_board_shape_edit_context["working_rois"][0].id,
+        )
+        self.assertEqual("BOARD_NOVO", app.leds_selecionados[0].id)
+
+    def test_sessao_de_redesenho_abre_canvas_sem_contorno_antigo(self):
+        import inspect
+        import src.platform.f2_board_shape_state_isolation as module
+
+        source = inspect.getsource(
+            module.abrir_editor_contorno_placa_f2_isolado
+        )
+        self.assertIn('contexto["original_rois"]', source)
+        self.assertIn('contexto["redraw_session"] = True', source)
+        self.assertIn("_definir_rois_editor(app, [])", source)
+
     def test_estado_dedicado_nao_e_substituido_pelo_espelho_global(self):
         app = _App()
         board = criar_segmento_livre_por_pontos(
