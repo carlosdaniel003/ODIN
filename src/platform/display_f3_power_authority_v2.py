@@ -52,6 +52,13 @@ from src.platform.display_visual_rotation import preparar_check_visual_display
 F3_UNIFIED_POWER_SOURCE = "f3_unified_current_check_mask_power_authority"
 F3_POWER_PRIMARY_SOURCE = "current_check_raw_mask_analysis"
 F3_POWER_SECONDARY_SOURCE = "same_mask_full_pixel_bgr_s_v_guard"
+F3_POWER_VOTE_POLICY = "strict_majority_of_expected_on_masks"
+
+
+def _required_consensus_votes(expected_count: int) -> int:
+    """Maioria estrita: ruído isolado nunca prova nem remove energia."""
+    expected = max(0, int(expected_count or 0))
+    return (expected // 2) + 1 if expected > 0 else 0
 
 
 def _valid_image(frame) -> bool:
@@ -281,8 +288,28 @@ def resumir_energia_por_analise_bruta_f3(
         )
 
     expected = len(expected_on_rows)
-    powered_confirmed = bool(powered_votes >= 1)
-    off_confirmed = bool(expected > 0 and off_votes == expected and len(details) == expected)
+    required_votes = _required_consensus_votes(expected)
+    analysis_ready = bool(data.get("ready"))
+    complete_vote_set = bool(expected > 0 and len(details) == expected)
+
+    # Não basta UMA máscara dizer ON. Depois de redesenhar/recalibrar referências,
+    # pequenas diferenças ópticas podem produzir 1-3 falsos positivos em H1.
+    # Energia e OFF usam a mesma maioria estrita sobre as máscaras que o CHECK
+    # espera acesas. Empate/mistura insuficiente permanece UNCONFIRMED e, portanto,
+    # não colore overlay/visor nem libera julgamento produtivo.
+    powered_confirmed = bool(
+        analysis_ready
+        and complete_vote_set
+        and required_votes > 0
+        and powered_votes >= required_votes
+    )
+    off_confirmed = bool(
+        analysis_ready
+        and complete_vote_set
+        and required_votes > 0
+        and off_votes >= required_votes
+    )
+
     if powered_confirmed:
         energy_state = power_module.F3_POWER_STATE_POWERED
     elif off_confirmed:
@@ -299,8 +326,12 @@ def resumir_energia_por_analise_bruta_f3(
         "energy_state": energy_state,
         "powered_confirmed": powered_confirmed,
         "off_confirmed": off_confirmed,
-        "all_expected_on_off": off_confirmed,
+        "all_expected_on_off": bool(
+            expected > 0 and off_votes == expected and complete_vote_set
+        ),
         "expected_on_mask_count": expected,
+        "required_consensus_votes": int(required_votes),
+        "vote_policy": F3_POWER_VOTE_POLICY,
         "powered_votes": int(powered_votes),
         "off_votes": int(off_votes),
         "tie_votes": int(uncertain_votes),

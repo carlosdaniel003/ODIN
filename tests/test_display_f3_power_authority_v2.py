@@ -58,6 +58,89 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         self.assertEqual(power_v2.F3_POWER_PRIMARY_SOURCE, result["primary_authority"])
         self.assertFalse(result["legacy_power_evidence_used"])
 
+    def test_tres_on_de_sete_nao_provam_energia_por_ruido_parcial(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "active_mask_count": 28,
+            "matched_mask_count": 24,
+            "mask_results": [
+                _row("MASK_008", classified="on", matched=True),
+                _row("MASK_009", classified="on", matched=True),
+                _row("MASK_012", classified="on", matched=True),
+                _row("MASK_013", classified="off", matched=False),
+                _row("MASK_014", classified="off", matched=False),
+                _row("MASK_017", classified="unknown", matched=False, confidence=0.10),
+                _row("MASK_021", classified="unknown", matched=False, confidence=0.10),
+            ],
+        }
+
+        result = power_v2.resumir_energia_por_analise_bruta_f3(analysis, {})
+
+        self.assertEqual(4, result["required_consensus_votes"])
+        self.assertEqual(3, result["powered_votes"])
+        self.assertEqual(2, result["off_votes"])
+        self.assertEqual(2, result["tie_votes"])
+        self.assertFalse(result["powered_confirmed"])
+        self.assertFalse(result["off_confirmed"])
+        self.assertEqual(
+            legacy_power.F3_POWER_STATE_UNCONFIRMED,
+            result["energy_state"],
+        )
+
+    def test_quatro_off_de_sete_confirmam_desligado_mesmo_com_dois_falsos_on(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "active_mask_count": 28,
+            "matched_mask_count": 23,
+            "mask_results": [
+                _row("MASK_008", classified="off", matched=False),
+                _row("MASK_009", classified="off", matched=False),
+                _row("MASK_012", classified="off", matched=False),
+                _row("MASK_013", classified="off", matched=False),
+                _row("MASK_014", classified="on", matched=True),
+                _row("MASK_017", classified="on", matched=True),
+                _row("MASK_021", classified="unknown", matched=False, confidence=0.10),
+            ],
+        }
+
+        result = power_v2.resumir_energia_por_analise_bruta_f3(analysis, {})
+
+        self.assertEqual(4, result["required_consensus_votes"])
+        self.assertEqual(2, result["powered_votes"])
+        self.assertEqual(4, result["off_votes"])
+        self.assertTrue(result["off_confirmed"])
+        self.assertFalse(result["powered_confirmed"])
+        self.assertEqual(legacy_power.F3_POWER_STATE_OFF, result["energy_state"])
+
+    def test_quatro_on_de_sete_sao_maioria_para_abrir_gate_sem_aprovar_check(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "active_mask_count": 28,
+            "matched_mask_count": 25,
+            "mask_results": [
+                _row("MASK_008", classified="on", matched=True),
+                _row("MASK_009", classified="on", matched=True),
+                _row("MASK_012", classified="on", matched=True),
+                _row("MASK_013", classified="on", matched=True),
+                _row("MASK_014", classified="off", matched=False),
+                _row("MASK_017", classified="off", matched=False),
+                _row("MASK_021", classified="unknown", matched=False, confidence=0.10),
+            ],
+        }
+
+        result = power_v2.resumir_energia_por_analise_bruta_f3(analysis, {})
+
+        self.assertTrue(result["powered_confirmed"])
+        self.assertFalse(result["off_confirmed"])
+        self.assertEqual(
+            legacy_power.F3_POWER_STATE_POWERED,
+            result["energy_state"],
+        )
+        self.assertFalse(analysis["approved"])
+
     def test_todos_os_on_esperados_classificados_off_confirmam_display_desligado(self):
         analysis = {
             "ready": True,
