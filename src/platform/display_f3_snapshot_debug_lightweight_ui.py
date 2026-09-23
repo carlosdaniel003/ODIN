@@ -38,7 +38,8 @@ DEBUG_SUMMARY = (
     "O debug técnico contém o snapshot congelado do frame analisado, a análise "
     "visual informativa da placa, dados da captura, estado físico, scores das "
     "referências, CHECK lógico, configuração das máscaras, comparação com os "
-    "gabaritos, aprendizado ACESO/APAGADO e evidências de energia. O conteúdo "
+    "gabaritos, aprendizado ACESO/APAGADO, status/cores, visor 88:88, overlay "
+    "das máscaras e evidências de energia. O conteúdo "
     "completo não é renderizado nesta tela para evitar lentidão. Use COPIAR DEBUG "
     "para enviá-lo ao suporte."
 )
@@ -335,13 +336,21 @@ def _install_visual_analysis_snapshot_extension() -> None:
 
     def report(snapshot):
         base = original_report(snapshot)
-        block = _visual_report_block(snapshot)
-        if not block:
+        blocks = [
+            block
+            for block in (
+                _visual_report_block(snapshot),
+                _visual_state_report_block(snapshot),
+            )
+            if block
+        ]
+        if not blocks:
             return base
+        extra = "\n\n".join(blocks)
         marker = "\nCole este bloco inteiro na conversa/chamado de debug do Display F3."
         if marker in base:
-            return base.replace(marker, f"\n\n{block}\n{marker}", 1)
-        return f"{base}\n\n{block}"
+            return base.replace(marker, f"\n\n{extra}\n{marker}", 1)
+        return f"{base}\n\n{extra}"
 
     manual_module._freeze_current_frame = freeze
     manual_module.capturar_snapshot_debug_display_f3 = capture
@@ -459,14 +468,24 @@ def _frame_photo(
 
 def _snapshot_status_rows(visual_state: dict | None) -> list[tuple[str, dict]]:
     data = visual_state if isinstance(visual_state, dict) else {}
-    statuses = data.get("statuses")
-    if not isinstance(statuses, dict):
-        return []
     rows = []
-    for key, title in STATUS_TITLES.items():
-        value = statuses.get(key)
-        if isinstance(value, dict) and str(value.get("text") or "").strip():
-            rows.append((title, value))
+
+    main = data.get("main_status")
+    if isinstance(main, dict):
+        for key, title in (
+            ("status", "STATUS PRINCIPAL"),
+            ("detail", "DETALHE"),
+        ):
+            value = main.get(key)
+            if isinstance(value, dict) and str(value.get("text") or "").strip():
+                rows.append((title, value))
+
+    statuses = data.get("statuses")
+    if isinstance(statuses, dict):
+        for key, title in STATUS_TITLES.items():
+            value = statuses.get(key)
+            if isinstance(value, dict) and str(value.get("text") or "").strip():
+                rows.append((title, value))
     return rows
 
 
@@ -617,6 +636,75 @@ def _draw_debug_readout(canvas, context: dict | None) -> bool:
     x += digit_width + digit_gap
     draw_digit(x, slots[21:28])
     return True
+
+
+def _visual_state_report_block(snapshot: dict) -> str:
+    visual_state = snapshot.get("visual_state")
+    if not isinstance(visual_state, dict):
+        return ""
+
+    lines = ["[ESTADO VISUAL CONGELADO - MESMO FRAME]"]
+    lines.append(
+        f"frozen_ng={visual_state.get('frozen_ng', False)}"
+    )
+    for title, value in _snapshot_status_rows(visual_state):
+        lines.append(
+            f"status {title} | text={value.get('text', '--')} | "
+            f"fg={value.get('fg', '--')} | bg={value.get('bg', '--')}"
+        )
+
+    readout = visual_state.get("readout_context")
+    if isinstance(readout, dict):
+        lines.append(
+            "visor | "
+            f"power_confirmed={readout.get('power_confirmed')} | "
+            f"power_off_confirmed={readout.get('power_off_confirmed')} | "
+            f"energy={readout.get('energy_state')} | "
+            f"failed={sorted(readout.get('failed_mask_ids') or ())}"
+        )
+        lines.append(
+            f"visor_classifications={readout.get('classifications', {})}"
+        )
+        lines.append(
+            f"visor_expected={readout.get('expected_states', {})}"
+        )
+
+    overlay = snapshot.get("overlay_context")
+    if isinstance(overlay, dict):
+        lines.append(
+            "overlay_camera | "
+            f"check_id={overlay.get('check_id', '--')} | "
+            f"rotation={overlay.get('visual_rotation', '--')} | "
+            f"classifications={overlay.get('classifications', {})}"
+        )
+
+    camera = snapshot.get("camera_settings_at_frame")
+    if isinstance(camera, dict):
+        lines.append(f"camera_backend={camera.get('backend', '--')}")
+        configured = camera.get("configured")
+        hardware = camera.get("hardware_values")
+        statuses = camera.get("control_status")
+        for key in ("focus", "exposure", "gain", "white_balance"):
+            configured_value = (
+                configured.get(key)
+                if isinstance(configured, dict)
+                else None
+            )
+            hardware_value = (
+                hardware.get(key)
+                if isinstance(hardware, dict)
+                else None
+            )
+            control_value = (
+                statuses.get(key)
+                if isinstance(statuses, dict)
+                else None
+            )
+            lines.append(
+                f"camera_{key} | configured={configured_value} | "
+                f"hardware={hardware_value} | status={control_value}"
+            )
+    return "\n".join(lines)
 
 
 def _candidate_line(visual: dict, key: str, fallback: str) -> str:

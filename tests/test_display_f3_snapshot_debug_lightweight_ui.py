@@ -99,6 +99,50 @@ class DisplayF3SnapshotDebugLightweightUiTests(unittest.TestCase):
         self.assertIn("visual_rotation=preview_rotation", window_source)
         self.assertIn("VISUAL {preview_rotation}°", window_source)
 
+    def test_preview_do_debug_reproduz_overlay_congelado_sem_camera_ao_vivo(self):
+        source = inspect.getsource(debug_ui._frame_photo)
+        self.assertIn("overlay_context", source)
+        self.assertIn("renderizar_overlay_rois_display_f3", source)
+        self.assertNotIn("camera_frame_atual", source)
+
+    def test_debug_exibe_status_com_cores_e_visor_do_snapshot(self):
+        source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
+        self.assertIn("STATUS DO FRAME • TEXTO E COR CONGELADOS", source)
+        self.assertIn('value.get("fg")', source)
+        self.assertIn('value.get("bg")', source)
+        self.assertIn("VISOR DO DISPLAY • SNAPSHOT DO MESMO FRAME", source)
+        self.assertIn("_draw_debug_readout", source)
+
+    def test_status_snapshot_inclui_principal_detalhe_e_tecnicos(self):
+        source = inspect.getsource(debug_ui._snapshot_status_rows)
+        self.assertIn("STATUS PRINCIPAL", source)
+        self.assertIn("DETALHE", source)
+        self.assertIn("STATUS_TITLES", source)
+
+    def test_visor_debug_usa_mesma_semantica_e_paleta_do_visor_f3(self):
+        source = inspect.getsource(debug_ui._draw_debug_readout)
+        self.assertIn("_display_readout_semantic_state", source)
+        self.assertIn("_display_readout_mask_slots", source)
+        colors = inspect.getsource(debug_ui._readout_color)
+        self.assertIn("DISPLAY_READOUT_NG", colors)
+        self.assertIn("DISPLAY_READOUT_ACTIVE", colors)
+
+    def test_relatorio_copiado_inclui_estado_visual_e_camera_do_frame(self):
+        source = inspect.getsource(debug_ui._visual_state_report_block)
+        self.assertIn("[ESTADO VISUAL CONGELADO - MESMO FRAME]", source)
+        self.assertIn("visor_classifications", source)
+        self.assertIn("overlay_camera", source)
+        self.assertIn("camera_focus", source)
+        self.assertIn("camera_exposure", source)
+        self.assertIn("camera_gain", source)
+        self.assertIn("camera_white_balance", source)
+
+    def test_abertura_do_debug_nao_cria_loop_de_atualizacao_visual(self):
+        source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
+        self.assertNotIn("camera_frame_atual", source)
+        self.assertNotIn("update_camera_preview", source)
+        self.assertNotIn("renderizar_preview_claro_display_f3", source)
+
     def test_debug_exibe_frame_e_evidencias_da_analise_visual(self):
         source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
         self.assertIn("FRAME CONGELADO • MESMA CÓPIA USADA NA ANÁLISE", source)
