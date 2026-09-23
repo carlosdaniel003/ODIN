@@ -117,6 +117,39 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         self.assertIn("VERMELHO: APAGADO", clarity.F3_PREVIEW_CLEAR_LEGEND)
         self.assertIn("AMARELO FORTE", clarity.F3_PREVIEW_CLEAR_LEGEND)
 
+    def test_renderer_produtivo_ignora_falso_on_sem_energia_confirmada(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        context = {
+            "resolution": (100, 100),
+            "masks": (
+                {
+                    "id": "MASK_001",
+                    "type": "segment",
+                    "cx": 50,
+                    "cy": 50,
+                    "width": 30,
+                    "height": 12,
+                    "angle": 0.0,
+                },
+            ),
+            "classifications": {"MASK_001": "on"},
+            "expected_states": {"MASK_001": "on"},
+            "failed_mask_ids": ("MASK_001",),
+            "has_any_on": True,
+            "power_confirmed": False,
+            "power_off_confirmed": False,
+            "energy_state": "unconfirmed",
+        }
+
+        rendered = clarity.renderizar_preview_claro_display_f3(frame, context)
+
+        self.assertEqual(0, int(rendered.sum()))
+
+    def test_guia_de_tracking_sem_energia_e_cinza_neutra(self):
+        b, g, r = clarity.F3_PREVIEW_TRACKING_GUIDE_BGR
+        self.assertLess(abs(int(b) - int(g)), 30)
+        self.assertLess(abs(int(g) - int(r)), 30)
+
     def test_renderer_realmente_altera_pixels_quando_mascara_tem_classificacao(self):
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
         context = {

@@ -62,9 +62,11 @@ F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 2
 # sem cobrir visualmente o segmento defeituoso.
 F3_PREVIEW_ALERT_ALPHA = 0.10
 F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 3
-F3_PREVIEW_TRACKING_GUIDE_BGR = (248, 189, 56)  # ciano #38BDF8 em BGR
+# Guia neutra: sem energia confirmada não deve existir nenhuma cor semântica
+# capaz de sugerir ACESO/APAGADO/NG. #64748B em BGR.
+F3_PREVIEW_TRACKING_GUIDE_BGR = (139, 116, 100)
 F3_PREVIEW_TRACKING_GUIDE_THICKNESS = 1
-F3_PREVIEW_STARTUP_NUMBER_BGR = (240, 232, 226)  # branco frio #E2E8F0
+F3_PREVIEW_STARTUP_NUMBER_BGR = (203, 213, 225)  # cinza claro neutro
 
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
@@ -736,11 +738,36 @@ def renderizar_preview_claro_display_f3(frame, context):
         if str(mask_id)
     )
 
+    # Defesa final no renderer. O contexto produtivo sempre publica a autoridade
+    # de energia; nesse caso, classificações brutas não podem gerar cor antes de
+    # a energia estar realmente confirmada. Contextos legados/testes que não
+    # possuem essas chaves mantêm o comportamento histórico.
+    energy_gate_declared = any(
+        key in context
+        for key in (
+            "power_confirmed",
+            "power_off_confirmed",
+            "energy_state",
+        )
+    )
+    energy_state = str(context.get("energy_state") or "").strip().lower()
+    semantic_power_ready = bool(
+        context.get("power_confirmed")
+        and not bool(context.get("power_off_confirmed"))
+        and energy_state != "off"
+    )
+    if energy_gate_declared and not semantic_power_ready:
+        classifications = {}
+        failed_mask_ids = set()
+
     has_any_on = bool(
-        context.get("has_any_on")
-        or any(
-            state == DISPLAY_CHECK_STATE_ON
-            for state in classifications.values()
+        (not energy_gate_declared or semantic_power_ready)
+        and (
+            context.get("has_any_on")
+            or any(
+                state == DISPLAY_CHECK_STATE_ON
+                for state in classifications.values()
+            )
         )
     )
 
