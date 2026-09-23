@@ -784,27 +784,57 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         int(snapshot["rotation"]),
     )
 
-    try:
-        from src.platform.display_live_roi_overlay import (
-            montar_contexto_overlay_snapshot_display_f3,
-        )
+    visual_state = snapshot.get("visual_state")
+    overlay_context = (
+        _safe_deepcopy(visual_state.get("overlay_context"))
+        if isinstance(visual_state, dict)
+        and isinstance(visual_state.get("overlay_context"), dict)
+        else None
+    )
+    if overlay_context is None:
+        try:
+            from src.platform.display_live_roi_overlay import (
+                montar_contexto_overlay_snapshot_display_f3,
+            )
 
-        runtime_analysis = (
-            snapshot.get("runtime_at_click", {}).get("last_auto_analysis")
-        )
-        logical_context = snapshot.get("logical_context") or {}
-        overlay_context = montar_contexto_overlay_snapshot_display_f3(
-            repository,
-            project_name,
-            str(logical_context.get("check_id") or ""),
-            runtime_analysis if isinstance(runtime_analysis, dict) else None,
-            int(snapshot.get("rotation", 0) or 0),
-        )
-    except Exception as exc:
-        overlay_context = None
-        snapshot["errors"].append(
-            f"overlay_snapshot:{type(exc).__name__}:{exc}"
-        )
+            runtime_analysis = (
+                snapshot.get("runtime_at_click", {}).get("last_auto_analysis")
+            )
+            logical_context = snapshot.get("logical_context") or {}
+            overlay_context = montar_contexto_overlay_snapshot_display_f3(
+                repository,
+                project_name,
+                str(logical_context.get("check_id") or ""),
+                runtime_analysis if isinstance(runtime_analysis, dict) else None,
+                int(snapshot.get("rotation", 0) or 0),
+            )
+        except Exception as exc:
+            overlay_context = None
+            snapshot["errors"].append(
+                f"overlay_snapshot:{type(exc).__name__}:{exc}"
+            )
+
+    # Completa o contexto com a semântica exata que alimentou o visor. O
+    # renderer final do F3 usa esses campos para mismatch/NG/energia.
+    readout = (
+        visual_state.get("readout_context")
+        if isinstance(visual_state, dict)
+        and isinstance(visual_state.get("readout_context"), dict)
+        else {}
+    )
+    if isinstance(overlay_context, dict):
+        overlay_context = dict(overlay_context)
+        for key in (
+            "expected_states",
+            "failed_mask_ids",
+            "has_any_on",
+            "intermittent",
+            "power_confirmed",
+            "power_off_confirmed",
+            "energy_state",
+        ):
+            if key in readout:
+                overlay_context[key] = _safe_deepcopy(readout.get(key))
     snapshot["overlay_context"] = _safe_deepcopy(overlay_context)
 
     snapshot["report_ready"] = True

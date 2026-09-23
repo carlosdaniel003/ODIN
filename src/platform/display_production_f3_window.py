@@ -57,6 +57,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self._display_frozen_readout_context = None
         self._display_frozen_analysis_statuses = {}
         self._display_frozen_check_snapshot = None
+        self._display_last_overlay_context = None
+        self._display_frozen_overlay_context = None
         self._check_snapshot: dict = {
             "checks": [],
             "current_check": None,
@@ -853,6 +855,11 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             if frozen
             else deepcopy(getattr(self, "_check_snapshot", None))
         )
+        overlay_context = (
+            deepcopy(getattr(self, "_display_frozen_overlay_context", None))
+            if frozen
+            else deepcopy(getattr(self, "_display_last_overlay_context", None))
+        )
 
         main_status = {
             "status": self._status_label_snapshot(
@@ -868,6 +875,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             "main_status": main_status,
             "readout_context": readout,
             "check_snapshot": check_snapshot,
+            "overlay_context": overlay_context,
             "readout_palette": {
                 "on": self.DISPLAY_READOUT_ACTIVE,
                 "off": self.DISPLAY_READOUT_OFF,
@@ -909,6 +917,9 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self._display_frozen_check_snapshot = deepcopy(
             getattr(self, "_check_snapshot", None)
         )
+        self._display_frozen_overlay_context = deepcopy(
+            getattr(self, "_display_last_overlay_context", None)
+        )
         self._display_ng_evidence_frozen = True
         self._display_readout_frozen = True
         self._display_frozen_readout_context = deepcopy(
@@ -938,6 +949,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         self._display_frozen_readout_context = None
         self._display_frozen_analysis_statuses = {}
         self._display_frozen_check_snapshot = None
+        self._display_frozen_overlay_context = None
         self._display_readout_context = None
         self._redraw_display_readout()
 

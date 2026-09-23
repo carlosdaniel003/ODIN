@@ -409,6 +409,10 @@ def instalar_overlay_rois_ao_vivo_display_f3() -> None:
             return original_update(self, frame, visual_rotation=visual_rotation)
 
         context = _overlay_context(self, rotation)
+        try:
+            self._display_last_overlay_context = deepcopy(context)
+        except Exception:
+            self._display_last_overlay_context = context
         decorated = renderizar_overlay_rois_display_f3(visual_frame, context)
 
         if self.preview_legend.cget("text") != DISPLAY_ROI_OVERLAY_LEGEND:
