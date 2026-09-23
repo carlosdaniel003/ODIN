@@ -623,9 +623,15 @@ def _open_lightweight_snapshot_debug(window):
     snapshot = getattr(window, "_display_f3_manual_snapshot", {}) or {}
     frame_id = (snapshot.get("capture") or {}).get("frame_id", "--")
     sha = (snapshot.get("frame") or {}).get("sha256_24", "--")
+    capture_source = str((snapshot.get("capture") or {}).get("source") or "")
+    source_text = (
+        "EVIDÊNCIA NG CONGELADA • câmera ao vivo ignorada"
+        if capture_source == "ng_evidence_frozen"
+        else "conteúdo congelado no clique em ANALISAR"
+    )
     tk.Label(
         header,
-        text=f"Frame {frame_id} • hash {sha} • conteúdo congelado no clique em ANALISAR",
+        text=f"Frame {frame_id} • hash {sha} • {source_text}",
         font=("Segoe UI", 10),
         bg=manual_module.DEBUG_BG,
         fg=manual_module.DEBUG_MUTED,

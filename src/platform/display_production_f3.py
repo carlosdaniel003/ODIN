@@ -39,6 +39,7 @@ class DisplayProductionF3Mixin:
         # efetivamente fechou o debounce de reprovação. A câmera física continua
         # capturando em camera_frame_atual apenas para detectar retirada/EMPTY.
         self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_frame = None
         self._display_f3_ng_evidence_snapshot = None
         self.display_project_repository: DisplayProjectRepository | None = None
         self.display_check_runtime = DisplayCheckSequenceRuntime()
@@ -211,6 +212,7 @@ class DisplayProductionF3Mixin:
             if pending_frame is not None and getattr(pending_frame, "size", 0) > 0
             else getattr(self, "camera_frame_atual", None)
         )
+        pending_frame_id = getattr(self, "_display_f3_pending_ng_frame_id", None)
         pending_analysis = getattr(self, "_display_f3_pending_ng_analysis", None)
         analysis = (
             pending_analysis
@@ -297,13 +299,37 @@ class DisplayProductionF3Mixin:
             except Exception:
                 pass
 
+        try:
+            sequence_at_ng = self.display_check_runtime.snapshot()
+        except Exception:
+            sequence_at_ng = None
+
+        try:
+            evidence_rotation = int(self._obter_rotacao_visual_display_f3())
+        except Exception:
+            evidence_rotation = 0
+
+        if evidence_frame is not None and getattr(evidence_frame, "size", 0) > 0:
+            try:
+                self._display_f3_ng_evidence_frame = evidence_frame.copy()
+            except Exception:
+                self._display_f3_ng_evidence_frame = evidence_frame
+        else:
+            self._display_f3_ng_evidence_frame = None
+
         self._display_f3_ng_evidence_snapshot = {
+            "frame_id": pending_frame_id,
+            "rotation": evidence_rotation,
             "analysis": deepcopy(analysis) if isinstance(analysis, dict) else None,
             "context": deepcopy(context) if isinstance(context, dict) else None,
             "operational_state": deepcopy(state) if isinstance(state, dict) else None,
+            "sequence": deepcopy(sequence_at_ng)
+            if isinstance(sequence_at_ng, dict)
+            else sequence_at_ng,
         }
         self._display_f3_ng_evidence_frozen = True
         self._display_f3_pending_ng_frame = None
+        self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
 
@@ -321,6 +347,7 @@ class DisplayProductionF3Mixin:
             return
 
         self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_frame = None
         self._display_f3_ng_evidence_snapshot = None
         self._cancelar_resultado_display_f3()
 
@@ -435,6 +462,7 @@ class DisplayProductionF3Mixin:
         self.display_f3_ativo = True
         self._cancelar_resultado_display_f3()
         self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_frame = None
         self._display_f3_ng_evidence_snapshot = None
         janela_existente = self.display_f3_window
         release = getattr(janela_existente, "release_ng_evidence", None)
@@ -510,6 +538,7 @@ class DisplayProductionF3Mixin:
         self.display_check_runtime.reiniciar_placa()
         self._cancelar_resultado_display_f3()
         self._display_f3_ng_evidence_frozen = False
+        self._display_f3_ng_evidence_frame = None
         self._display_f3_ng_evidence_snapshot = None
         janela_atual = self.display_f3_window
         release = getattr(janela_atual, "release_ng_evidence", None)

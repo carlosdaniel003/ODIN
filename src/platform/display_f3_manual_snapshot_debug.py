@@ -73,16 +73,35 @@ def _safe_deepcopy(value):
         return value
 
 
+def _ng_evidence_snapshot(app) -> dict | None:
+    if not bool(getattr(app, "_display_f3_ng_evidence_frozen", False)):
+        return None
+    value = getattr(app, "_display_f3_ng_evidence_snapshot", None)
+    return value if isinstance(value, dict) else {}
+
+
 def _rotation(app) -> int:
-    try:
-        value = int(app._obter_rotacao_visual_display_f3())
-    except Exception:
-        value = int(getattr(app, "visual_rotation", 0) or 0)
+    evidence = _ng_evidence_snapshot(app)
+    if evidence is not None:
+        try:
+            value = int(evidence.get("rotation", 0) or 0)
+        except Exception:
+            value = 0
+    else:
+        try:
+            value = int(app._obter_rotacao_visual_display_f3())
+        except Exception:
+            value = int(getattr(app, "visual_rotation", 0) or 0)
     value %= 360
     return value if value in (0, 90, 180, 270) else 0
 
 
 def _current_context(app):
+    evidence = _ng_evidence_snapshot(app)
+    if evidence is not None:
+        value = evidence.get("context")
+        return _safe_deepcopy(value) if isinstance(value, dict) else None
+
     try:
         value = app._display_auto_current_context()
     except Exception:
@@ -91,6 +110,44 @@ def _current_context(app):
 
 
 def _freeze_current_frame(app):
+    """Seleciona a fonte autoritativa e devolve uma cópia imutável para o DEBUG.
+
+    Durante NG congelado, a câmera ao vivo é deliberadamente ignorada. Ela
+    continua rodando somente para o gate de PLACA FORA DO SUPORTE.
+    """
+    evidence = _ng_evidence_snapshot(app)
+    if evidence is not None:
+        source = getattr(app, "_display_f3_ng_evidence_frame", None)
+        frame_id = evidence.get("frame_id")
+        if source is None or getattr(source, "size", 0) == 0:
+            return None, {
+                "attempts": [],
+                "frame_id": frame_id,
+                "stable_frame_id": True,
+                "reason": "ng_evidence_frame_missing",
+                "source": "ng_evidence_frozen",
+                "live_camera_ignored": True,
+            }
+        try:
+            frozen = source.copy()
+        except Exception:
+            frozen = np.array(source, copy=True)
+        return frozen, {
+            "attempts": [
+                {
+                    "attempt": 1,
+                    "frame_id_before": frame_id,
+                    "frame_id_after": frame_id,
+                    "stable": True,
+                }
+            ],
+            "frame_id": frame_id,
+            "stable_frame_id": True,
+            "reason": "ok",
+            "source": "ng_evidence_frozen",
+            "live_camera_ignored": True,
+        }
+
     """Copia um frame coerente e registra se o id da câmera mudou na captura."""
     attempts = []
     frozen = None
@@ -128,6 +185,8 @@ def _freeze_current_frame(app):
         "frame_id": selected_frame_id,
         "stable_frame_id": bool(attempts and attempts[-1].get("stable")),
         "reason": "ok",
+        "source": "live_camera_at_analyze_click",
+        "live_camera_ignored": False,
     }
 
 
@@ -514,7 +573,8 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         "errors": [],
     }
     if frame is None or getattr(frame, "size", 0) == 0:
-        snapshot["errors"].append("camera_sem_frame")
+        reason = str((capture or {}).get("reason") or "camera_sem_frame")
+        snapshot["errors"].append(reason)
         snapshot["report_ready"] = False
         return snapshot
 
@@ -576,15 +636,29 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         int(snapshot["rotation"]),
     )
 
-    runtime_state = getattr(app, "_display_f3_operational_state", None)
-    runtime_analysis = getattr(app, "_display_auto_last_analysis", None)
-    try:
-        sequence = app.display_check_runtime.snapshot()
-    except Exception:
-        sequence = None
+    evidence = _ng_evidence_snapshot(app)
+    if evidence is not None:
+        runtime_state = evidence.get("operational_state")
+        runtime_analysis = evidence.get("analysis")
+        sequence = evidence.get("sequence")
+        runtime_frame_id = evidence.get("frame_id")
+        diagnostic_source = "ng_evidence_frozen"
+    else:
+        runtime_state = getattr(app, "_display_f3_operational_state", None)
+        runtime_analysis = getattr(app, "_display_auto_last_analysis", None)
+        try:
+            sequence = app.display_check_runtime.snapshot()
+        except Exception:
+            sequence = None
+        runtime_frame_id = getattr(app, "camera_ultimo_frame_id", None)
+        diagnostic_source = "live_camera_at_analyze_click"
+
     snapshot["runtime_at_click"] = {
         "display_f3_active": bool(getattr(app, "display_f3_ativo", False)),
-        "camera_frame_id": getattr(app, "camera_ultimo_frame_id", None),
+        "diagnostic_source": diagnostic_source,
+        "ng_evidence_frozen": evidence is not None,
+        "live_camera_ignored": evidence is not None,
+        "camera_frame_id": runtime_frame_id,
         "logical_context": _current_context(app),
         "operational_state": _safe_deepcopy(runtime_state)
         if isinstance(runtime_state, dict)
@@ -697,12 +771,20 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
         f"config_file={snapshot.get('config_file', '--')}",
         f"frame_id={((snapshot.get('capture') or {}).get('frame_id', '--'))}",
         f"frame_id_estavel={_yes_no((snapshot.get('capture') or {}).get('stable_frame_id'))}",
+        f"frame_source={((snapshot.get('capture') or {}).get('source', '--'))}",
+        f"live_camera_ignored={_yes_no((snapshot.get('capture') or {}).get('live_camera_ignored'))}",
         f"visual_rotation={snapshot.get('rotation', '--')}",
         f"frame_sha256_24={((snapshot.get('frame') or {}).get('sha256_24', '--'))}",
         "",
         "IMPORTANTE: todos os cálculos [FRAME], [REFERÊNCIAS], [ESTADO FÍSICO],",
-        "[CHECKS] e [MÁSCARAS] abaixo foram executados sobre a MESMA cópia congelada",
-        "do frame capturado ao clicar em ANALISAR. Abrir DEBUG TÉCNICO não recalcula nada.",
+        "[CHECKS] e [MÁSCARAS] abaixo foram executados sobre a MESMA cópia congelada.",
+        (
+            "Com NG congelado, essa cópia é o FRAME EXATO QUE ATESTOU O NG; a câmera "
+            "ao vivo usada para detectar PLACA FORA DO SUPORTE é ignorada pelo DEBUG."
+            if ((snapshot.get("capture") or {}).get("source") == "ng_evidence_frozen")
+            else "Sem NG congelado, a cópia é o frame capturado ao clicar em ANALISAR."
+        ),
+        "Abrir DEBUG TÉCNICO não recalcula nada.",
         "",
     ]
 

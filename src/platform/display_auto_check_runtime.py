@@ -49,6 +49,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_signature = None
         self._display_auto_intermittent_seen_on = set()
         self._display_f3_pending_ng_frame = None
+        self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
         super().__init__(*args, **kwargs)
@@ -72,6 +73,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_signature = None
         self._display_auto_intermittent_seen_on = set()
         self._display_f3_pending_ng_frame = None
+        self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
         self._display_auto_transition_frames = (
@@ -610,6 +612,11 @@ class DisplayAutomaticCheckF3Mixin:
                 self._display_f3_pending_ng_frame = frame.copy()
             except Exception:
                 self._display_f3_pending_ng_frame = frame
+            self._display_f3_pending_ng_frame_id = getattr(
+                self,
+                "camera_ultimo_frame_id",
+                None,
+            )
             self._display_f3_pending_ng_analysis = deepcopy(analysis)
             self._display_f3_pending_ng_context = deepcopy(context)
 

@@ -335,6 +335,20 @@ class DisplayF3ArchitectureTests(unittest.TestCase):
         self.assertIn("_display_frozen_check_snapshot", sequence_source)
         self.assertIn("_display_ng_evidence_frozen", preview_source)
 
+    def test_ng_preserva_copia_bruta_para_debug_ate_retirada_da_placa(self):
+        source_freeze = inspect.getsource(
+            DisplayProductionF3Mixin._congelar_evidencia_ng_display_f3
+        )
+        source_release = inspect.getsource(
+            DisplayProductionF3Mixin._liberar_evidencia_ng_display_f3
+        )
+
+        self.assertIn("_display_f3_ng_evidence_frame", source_freeze)
+        self.assertIn('"frame_id": pending_frame_id', source_freeze)
+        self.assertIn('"rotation": evidence_rotation', source_freeze)
+        self.assertIn('"sequence":', source_freeze)
+        self.assertIn("_display_f3_ng_evidence_frame = None", source_release)
+
     def test_ng_congela_frame_fecha_ciclo_e_nao_contabiliza_duas_vezes(self):
         app = _FakeApp()
         app.display_f3_ativo = True

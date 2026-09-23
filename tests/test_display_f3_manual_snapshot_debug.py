@@ -48,6 +48,54 @@ class _FakeWindow:
 
 
 class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
+    def test_ng_congelado_usa_frame_e_contexto_da_evidencia_e_ignora_live(self):
+        app = _FrameApp()
+        app.camera_frame_atual[:] = 220
+        app.camera_ultimo_frame_id = 99
+        app._display_f3_ng_evidence_frozen = True
+        app._display_f3_ng_evidence_frame = np.full(
+            (4, 6, 3),
+            37,
+            dtype=np.uint8,
+        )
+        app._display_f3_ng_evidence_snapshot = {
+            "frame_id": 77,
+            "rotation": 180,
+            "context": {
+                "project_name": "DISPLAY",
+                "check_id": "CHECK_BLUE",
+                "check_name": "BLUE",
+                "intermittent": True,
+                "current_index": 1,
+            },
+        }
+
+        frozen, capture = snapshot_module._freeze_current_frame(app)
+
+        self.assertTrue(np.all(frozen == 37))
+        self.assertEqual(77, capture["frame_id"])
+        self.assertEqual("ng_evidence_frozen", capture["source"])
+        self.assertTrue(capture["live_camera_ignored"])
+        self.assertEqual("CHECK_BLUE", snapshot_module._current_context(app)["check_id"])
+        self.assertEqual(180, snapshot_module._rotation(app))
+        self.assertTrue(np.all(app.camera_frame_atual == 220))
+
+    def test_ng_congelado_sem_copia_nao_cai_para_camera_ao_vivo(self):
+        app = _FrameApp()
+        app._display_f3_ng_evidence_frozen = True
+        app._display_f3_ng_evidence_frame = None
+        app._display_f3_ng_evidence_snapshot = {
+            "frame_id": 77,
+            "context": {"check_id": "CHECK_BLUE"},
+        }
+
+        frozen, capture = snapshot_module._freeze_current_frame(app)
+
+        self.assertIsNone(frozen)
+        self.assertEqual("ng_evidence_frame_missing", capture["reason"])
+        self.assertEqual("ng_evidence_frozen", capture["source"])
+        self.assertTrue(capture["live_camera_ignored"])
+
     def test_frame_e_copiado_no_instante_do_analisar(self):
         app = _FrameApp()
         frozen, capture = snapshot_module._freeze_current_frame(app)
