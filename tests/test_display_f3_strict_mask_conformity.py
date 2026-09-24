@@ -12,6 +12,7 @@ from src.platform.display_f3_same_mask_reference_fix import (
 )
 from src.platform.display_f3_strict_mask_conformity import (
     F3StrictMaskConformityAnalyzer,
+    _failure_items,
     F3_STRICT_MASK_AUTHORITY,
     filtrar_aprendizado_sem_check_atual_f3,
     resumir_falhas_mascaras_f3,
@@ -232,13 +233,39 @@ class DisplayF3StrictMaskConformityTests(TestCase):
             source,
         )
 
-    def test_overlay_e_status_expoem_a_mascara_ng(self):
+    def test_ui_estrita_respeita_somente_falha_efetiva(self):
+        analysis = {
+            "effective_classifications": {
+                "MASK_010": "on",
+                "MASK_027": "off",
+            },
+            "effective_failed_mask_ids": ("MASK_027",),
+            "mask_results": [
+                {
+                    "mask_id": "MASK_010",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                },
+                {
+                    "mask_id": "MASK_027",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                },
+            ],
+        }
+        failures = _failure_items(analysis)
+        self.assertEqual({"MASK_027"}, set(failures))
+        self.assertNotIn("MASK_010", failures)
+
+    def test_camada_estrita_nao_desenha_segundo_overlay(self):
         source = Path(
             "src/platform/display_f3_strict_mask_conformity.py"
         ).read_text(encoding="utf-8")
-        self.assertIn('f"NG {mask_id}"', source)
-        self.assertIn('f" • FALHA {first_id}: {expected}→{classified}"', source)
-        self.assertIn("AZUL FORTE: MÁSCARA NG", source)
+        self.assertNotIn('f"NG {mask_id}"', source)
+        self.assertIn("effective_failed_mask_ids", source)
+        self.assertIn('suffix = f" • FALHA {first_id}"', source)
 
     def test_modulo_estrito_nao_depende_do_f2(self):
         source = Path(
