@@ -171,6 +171,12 @@ def _runtime_state_at_frame(app) -> dict:
             "check_geometry_refinement": _safe_deepcopy(
                 runtime_debug.get("check_geometry_refinement")
             ),
+            "object_tracking": _safe_deepcopy(
+                runtime_debug.get("object_tracking")
+            ),
+            "tracking_rescue": _safe_deepcopy(
+                runtime_debug.get("tracking_rescue")
+            ),
             "live_performance": _safe_deepcopy(
                 runtime_debug.get("live_performance")
             ),
@@ -230,6 +236,12 @@ def _runtime_state_at_frame(app) -> dict:
         ),
         "check_geometry_refinement": _safe_deepcopy(
             getattr(app, "_display_f3_check_geometry_refinement", None)
+        ),
+        "object_tracking": _safe_deepcopy(
+            getattr(app, "_display_f3_object_tracking_last_status", None)
+        ),
+        "tracking_rescue": _safe_deepcopy(
+            getattr(app, "_display_f3_tracking_rescue_debug", None)
         ),
         "live_performance": _safe_deepcopy(
             getattr(app, "_display_f3_live_performance", None)
