@@ -524,7 +524,9 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 "classifications": {
                     str(key): str(value).strip().lower()
                     for key, value in dict(
-                        context.get("classifications") or {}
+                        context.get("effective_classifications")
+                        or context.get("classifications")
+                        or {}
                     ).items()
                 },
                 "expected_states": {
@@ -535,9 +537,19 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 },
                 "failed_mask_ids": {
                     str(mask_id)
-                    for mask_id in (context.get("failed_mask_ids") or ())
+                    for mask_id in (
+                        (
+                            context.get("effective_failed_mask_ids")
+                            if "effective_failed_mask_ids" in context
+                            else context.get("failed_mask_ids")
+                        )
+                        or ()
+                    )
                     if str(mask_id)
                 },
+                "ui_mask_authority": str(
+                    context.get("ui_mask_authority") or ""
+                ),
                 "has_any_on": bool(context.get("has_any_on")),
                 "intermittent": bool(context.get("intermittent", False)),
                 "power_confirmed": bool(context.get("power_confirmed")),
