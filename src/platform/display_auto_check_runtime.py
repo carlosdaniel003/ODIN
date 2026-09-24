@@ -12,10 +12,39 @@ from src.platform.display_auto_check_policy import (
     DISPLAY_AUTO_MIN_CONFIDENCE,
     decidir_analise_display_f3,
 )
+from src.platform.display_mask_geometry import (
+    mapear_slots_sete_segmentos_display,
+)
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
+    mascaras_geometria_check_display,
 )
+
+
+F3_SEVEN_SEGMENT_GLYPHS = {
+    frozenset("abcdef"): "0",
+    frozenset("bc"): "1",
+    frozenset("abdeg"): "2",
+    frozenset("abcdg"): "3",
+    frozenset("bcfg"): "4",
+    frozenset("acdfg"): "5",
+    frozenset("acdefg"): "6",
+    frozenset("abc"): "7",
+    frozenset("abcdefg"): "8",
+    frozenset("abcdfg"): "9",
+    frozenset("abcefg"): "A",
+    # Em 7 segmentos o B é representado como 'b': C,D,E,F,G.
+    frozenset("cdefg"): "B",
+    frozenset("adef"): "C",
+    frozenset("bcdeg"): "D",
+    frozenset("adefg"): "E",
+    frozenset("aefg"): "F",
+    frozenset("bcefg"): "H",
+    frozenset("def"): "L",
+    frozenset("abefg"): "P",
+    frozenset("bcdef"): "U",
+}
 
 
 class DisplayAutomaticCheckF3Mixin:
@@ -456,6 +485,120 @@ class DisplayAutomaticCheckF3Mixin:
         analysis["ui_mask_authority"] = "effective_mask_results_v1"
         return analysis
 
+    @staticmethod
+    def _display_auto_decode_4x7_signature(
+        slot_ids,
+        states: dict[str, str],
+    ) -> str:
+        if len(tuple(slot_ids or ())) != 28:
+            return ""
+        ids = tuple(str(mask_id) for mask_id in slot_ids)
+        chars = []
+        segment_names = "abcdefg"
+        for start in range(0, 28, 7):
+            group = ids[start:start + 7]
+            values = [
+                str(states.get(mask_id) or "").strip().lower()
+                for mask_id in group
+            ]
+            if any(
+                value not in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
+                for value in values
+            ):
+                chars.append("?")
+                continue
+            active = frozenset(
+                segment_names[index]
+                for index, value in enumerate(values)
+                if value == DISPLAY_CHECK_STATE_ON
+            )
+            chars.append(F3_SEVEN_SEGMENT_GLYPHS.get(active, "?"))
+        return "".join(chars)
+
+    def _display_auto_publish_segment_signature(
+        self,
+        context: dict,
+        analysis: dict,
+    ) -> dict:
+        """Diagnóstico estrutural 4x7; não altera a decisão OK/NG.
+
+        A decisão continua máscara por máscara. A assinatura apenas traduz a
+        mesma evidência para algo legível: BLUE esperado, BLUF observado etc.
+        """
+        if not isinstance(context, dict) or not isinstance(analysis, dict):
+            return analysis
+
+        repository = getattr(self, "display_project_repository", None)
+        if repository is None:
+            return analysis
+        project_name = str(context.get("project_name") or "")
+        check_id = str(context.get("check_id") or "")
+        try:
+            project = repository.carregar_projeto(project_name)
+            check = repository.carregar_check(project_name, check_id)
+        except Exception:
+            return analysis
+        if not isinstance(project, dict) or not isinstance(check, dict):
+            return analysis
+
+        masks = mascaras_geometria_check_display(project, check)
+        slots = mapear_slots_sete_segmentos_display(masks, digit_count=4)
+        if len(slots) != 28:
+            return analysis
+
+        rows = [
+            item
+            for item in (analysis.get("mask_results") or ())
+            if isinstance(item, dict) and str(item.get("mask_id") or "")
+        ]
+        expected_states = {
+            str(item.get("mask_id")): str(item.get("expected") or "")
+            .strip()
+            .lower()
+            for item in rows
+        }
+        observed_states = {
+            str(mask_id): str(state or "").strip().lower()
+            for mask_id, state in dict(
+                analysis.get("effective_classifications") or {}
+            ).items()
+        }
+
+        expected_word = self._display_auto_decode_4x7_signature(
+            slots,
+            expected_states,
+        )
+        observed_word = self._display_auto_decode_4x7_signature(
+            slots,
+            observed_states,
+        )
+        if not expected_word and not observed_word:
+            return analysis
+
+        failed_ids = tuple(
+            str(mask_id)
+            for mask_id in (
+                analysis.get("effective_failed_mask_ids") or ()
+            )
+            if str(mask_id)
+        )
+        analysis["segment_signature"] = {
+            "decoder": "deterministic_4x7_segments",
+            "slot_mask_ids": tuple(slots),
+            "expected": expected_word,
+            "observed": observed_word,
+            "matches": bool(
+                expected_word
+                and observed_word
+                and "?" not in expected_word
+                and "?" not in observed_word
+                and expected_word == observed_word
+            ),
+            "failed_mask_ids": failed_ids,
+            "decision_authority": False,
+        }
+        return analysis
+
     def _display_auto_observe_intermittent_phase(
         self,
         context: dict,
@@ -832,6 +975,10 @@ class DisplayAutomaticCheckF3Mixin:
 
         analysis = self._display_auto_publish_effective_ui_authority(
             analysis
+        )
+        analysis = self._display_auto_publish_segment_signature(
+            context,
+            analysis,
         )
         self._display_auto_last_analysis = analysis
 
