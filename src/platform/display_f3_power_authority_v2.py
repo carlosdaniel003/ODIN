@@ -147,10 +147,28 @@ def _frame_token(app, frame):
 def _energy_live_mask_context(app, frame, project: dict, visual_rotation: int):
     """Retorna frame + máscaras no MESMO espaço físico usado para energia.
 
-    Com tracking, as máscaras já foram projetadas para o frame RAW atual. Sem
-    tracking, aplicamos apenas a rotação visual cardinal do projeto.
+    Se o rastreamento está habilitado, a geometria móvel é obrigatória. Cair
+    silenciosamente para a geometria fixa quando o tracker perdeu o lock faria
+    ROIs lerem outra região da imagem e poderia declarar todos os segmentos OFF.
     """
     geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    tracking_status = getattr(
+        app,
+        "_display_f3_object_tracking_last_status",
+        None,
+    )
+    tracking_requested = bool(
+        getattr(app, "_display_f3_object_tracking_enabled", False)
+        or (
+            isinstance(tracking_status, dict)
+            and tracking_status.get("enabled") is True
+        )
+    )
+    if tracking_requested and not (
+        isinstance(geometry, dict) and bool(geometry.get("locked"))
+    ):
+        return None, {}, "tracking_not_locked", ""
+
     if isinstance(geometry, dict) and bool(geometry.get("locked")):
         resolution = geometry.get("resolution")
         try:
@@ -306,7 +324,16 @@ def _generic_live_mask_energy(
         rotation,
     )
     if not _valid_image(live_frame) or not live_masks:
-        return {"available": False, "reason": "geometria_live_indisponivel"}
+        return {
+            "available": False,
+            "reason": (
+                str(geometry_source or "")
+                if str(geometry_source or "")
+                else "geometria_live_indisponivel"
+            ),
+            "mask_geometry_source": str(geometry_source or ""),
+            "mask_geometry_space": str(geometry_space or ""),
+        }
 
     minimum_on, required_powered = _minimum_powered_votes_from_checks(
         repository,
@@ -739,9 +766,34 @@ def avaliar_evidencia_energia_unificada_display_f3(
         context,
     )
 
-    # Compatibilidade fail-safe para projetos antigos que ainda não possuem
-    # pares ON/OFF da mesma máscara em suas fotos de CHECK.
-    if not bool(isinstance(evidence, dict) and evidence.get("available")):
+    # Sem LOCK, nenhuma ROI fixa pode ganhar autoridade. A câmera continua
+    # procurando a placa, mas energia fica INDETERMINADA em vez de "28 OFF".
+    tracking_blocked = bool(
+        isinstance(evidence, dict)
+        and str(evidence.get("reason") or "") == "tracking_not_locked"
+    )
+    if tracking_blocked:
+        evidence = {
+            "available": False,
+            "source": F3_UNIFIED_POWER_SOURCE,
+            "primary_authority": F3_POWER_PRIMARY_SOURCE,
+            "secondary_guard": F3_POWER_SECONDARY_SOURCE,
+            "legacy_power_evidence_used": False,
+            "energy_state": power_module.F3_POWER_STATE_UNCONFIRMED,
+            "powered_confirmed": False,
+            "off_confirmed": False,
+            "logical_check_independent": True,
+            "energy_scope": "tracking_lock_required",
+            "reason": "tracking_not_locked",
+            "powered_votes": 0,
+            "off_votes": 0,
+            "tie_votes": 0,
+            "valid_votes": 0,
+            "raw_analysis_ready": False,
+            "details": [],
+        }
+    # Compatibilidade fail-safe para projetos antigos sem pares ON/OFF locais.
+    elif not bool(isinstance(evidence, dict) and evidence.get("available")):
         raw = _run_raw_current_check_analysis(
             app,
             authority_frame,
