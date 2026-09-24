@@ -2715,6 +2715,36 @@ def _tracking_h1_power_gate(app) -> tuple[bool, str]:
     return True, "h1_ligado_confirmado"
 
 
+def _fit_live_preview_before_overlay(frame, window):
+    """Reduz o frame ao tamanho realmente visível antes de desenhar 28 ROIs.
+
+    O renderer semântico já escala máscaras pela resolução do contexto, portanto
+    não há perda de precisão visual ao desenhar no frame reduzido. A análise
+    produtiva continua usando o frame RAW em resolução total.
+    """
+    if not _valid_frame(frame):
+        return frame
+    try:
+        frame_h, frame_w = frame.shape[:2]
+        canvas_w, canvas_h = window._get_canvas_size()
+        scale = min(
+            max(1, int(canvas_w)) / float(frame_w),
+            max(1, int(canvas_h)) / float(frame_h),
+            1.0,
+        )
+        if scale >= 0.995:
+            return frame
+        target_w = max(1, int(round(frame_w * scale)))
+        target_h = max(1, int(round(frame_h * scale)))
+        return cv2.resize(
+            frame,
+            (target_w, target_h),
+            interpolation=cv2.INTER_AREA,
+        )
+    except Exception:
+        return frame
+
+
 def _draw_tracking_geometry_visual(
     frame,
     geometry: dict | None,
@@ -2843,37 +2873,57 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             )
         )
         analysis_frame = None
+        heavy_due = True
+        due_fn = getattr(self, "_display_auto_analysis_due_now", None)
+        if callable(due_fn):
+            try:
+                heavy_due = bool(due_fn())
+            except Exception:
+                heavy_due = True
+
+        # Sem pose anterior, o primeiro frame precisa localizar a placa
+        # imediatamente. Depois disso, os frames intermediários só fazem preview.
+        if getattr(self, "_display_f3_tracking_result", None) is None:
+            heavy_due = True
 
         if use_tracking and _valid_frame(raw):
+            # Autoridade RAW é atualizada em TODOS os frames para que o preview
+            # nunca mostre uma imagem antiga.
             self._display_f3_tracking_raw_authority_frame = raw
-            _aligned, result = align_frame_for_f3(self, raw)
-            self._display_f3_tracking_result = result
-            _update_tracking_live_geometry(self, raw, result)
-            locked = bool(result is not None and result.locked)
-            if locked:
-                aligned_check, _matrix = _analysis_alignment_for_current_check(
-                    self,
-                    raw,
-                    result,
-                )
-                if _valid_frame(aligned_check):
-                    analysis_frame = aligned_check
-            self._display_f3_tracking_analysis_frame = analysis_frame
+
+            if heavy_due:
+                _aligned, result = align_frame_for_f3(self, raw)
+                self._display_f3_tracking_result = result
+                _update_tracking_live_geometry(self, raw, result)
+                locked = bool(result is not None and result.locked)
+                if locked:
+                    aligned_check, _matrix = _analysis_alignment_for_current_check(
+                        self,
+                        raw,
+                        result,
+                    )
+                    if _valid_frame(aligned_check):
+                        analysis_frame = aligned_check
+                self._display_f3_tracking_analysis_frame = analysis_frame
         elif use_tracking:
             self._display_f3_tracking_live_geometry = None
             self._display_f3_tracking_analysis_frame = None
 
-        # A câmera que o operador vê vem do frame bruto de autoridade; somente o
-        # pipeline interno recebe a imagem alinhada ao CHECK. Assim o tracking é
-        # efetivo mesmo se wrappers históricos da MRO não delegarem como esperado.
+        # Frames entre análises são exclusivamente de exibição. Isso é o que
+        # desacopla FPS visual de ORB/RANSAC/classificação.
+        self._display_f3_skip_auto_analysis_this_preview = bool(
+            use_tracking and not heavy_due
+        )
+
         previous_frame = getattr(self, "camera_frame_atual", None)
-        if use_tracking and _valid_frame(analysis_frame):
+        if use_tracking and heavy_due and _valid_frame(analysis_frame):
             self.camera_frame_atual = analysis_frame
         self._display_f3_tracking_instance_frame_prepared = bool(use_tracking)
         try:
             return previous_preview()
         finally:
             self._display_f3_tracking_instance_frame_prepared = False
+            self._display_f3_skip_auto_analysis_this_preview = False
             if use_tracking and _valid_frame(raw):
                 self.camera_frame_atual = raw
             else:
@@ -2930,6 +2980,10 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 visual = preparar_frame_visual_display(
                     source,
                     int(visual_rotation or 0) % 360,
+                )
+                visual = _fit_live_preview_before_overlay(
+                    visual,
+                    self_window,
                 )
                 semantic_context = _project_preview_context(
                     self_window,
@@ -3027,14 +3081,21 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 )
             except Exception:
                 pass
-            h, w = decorated.shape[:2]
+            preview_h, preview_w = decorated.shape[:2]
             rendered = self_window.update_preview(decorated, leds=())
             if rendered:
                 try:
+                    raw_h, raw_w = source.shape[:2]
+                    rotation = int(visual_rotation or 0) % 360
+                    camera_w, camera_h = (
+                        (raw_h, raw_w)
+                        if rotation in (90, 270)
+                        else (raw_w, raw_h)
+                    )
                     self_window.show_camera_ready(
-                        int(w),
-                        int(h),
-                        int(visual_rotation or 0) % 360,
+                        int(camera_w),
+                        int(camera_h),
+                        rotation,
                     )
                 except Exception:
                     pass

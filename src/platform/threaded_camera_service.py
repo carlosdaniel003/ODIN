@@ -263,7 +263,9 @@ class ThreadedRaspberryPi3CameraService(RaspberryPi3CameraService):
                 pass
 
         try:
-            capture.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+            # O serviço já drena a câmera continuamente em thread própria.
+            # Buffer 1 evita apresentar frames antigos quando a UI sofre pico de CPU.
+            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception:
             pass
 

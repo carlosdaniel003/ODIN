@@ -19,7 +19,7 @@ from src.ui.main_window import ODINView
 
 RAIO_MAXIMO_LED_PX = MAX_RADIUS_PX
 INDICE_CAMERA_PADRAO = 0
-INTERVALO_CAMERA_MS = 45
+INTERVALO_CAMERA_MS = 16
 INTERVALO_RENDERIZACOES_CAMERA_MS = 250
 TEMPO_RESULTADO_CAMERA_MS = 3000
 CAMERA_LARGURA_DESEJADA = 1280
@@ -806,47 +806,55 @@ class ODINApp:
             self.camera_frame_atual = snapshot.frame
 
             if not self.camera_em_pausa_analise:
-                self.imagem_original = snapshot.frame.copy()
                 self.caminho_imagem_atual = "camera_usb"
                 self.altura_original, self.largura_original = (
-                    self.imagem_original.shape[:2]
+                    snapshot.frame.shape[:2]
                 )
 
-                if self.leds_manuais_camera:
-                    self.leds_selecionados = [
-                        LedSelection(
-                            id=led.id,
-                            centro_x=led.centro_x,
-                            centro_y=led.centro_y,
-                            raio=led.raio,
-                        )
-                        for led in self.leds_manuais_camera
-                    ]
-                    self.view.selecao_manual_camera_visivel = True
-                elif (
-                    self.guias_leds_fixos_visiveis
-                    and self.leds_fixos_configurados
-                ):
-                    self.leds_selecionados = (
-                        self.adaptar_leds_fixos_para_frame_camera(
-                            self.leds_fixos_configurados
-                        )
-                    )
-                    self.view.selecao_manual_camera_visivel = False
+                if bool(getattr(self, "display_f3_ativo", False)):
+                    # A janela principal está atrás do workspace F3. Redesenhá-la
+                    # em 1920x1080 a cada frame duplicava resize/canvas/PhotoImage
+                    # sem qualquer benefício visual. Mantemos apenas a referência
+                    # atual para compatibilidade e deixamos o F3 renderizar.
+                    self.imagem_original = snapshot.frame
+                    self.resultados_led_atual = []
                 else:
-                    self.leds_selecionados = []
-                    self.view.selecao_manual_camera_visivel = False
+                    self.imagem_original = snapshot.frame.copy()
 
-                self.resultados_led_atual = []
+                    if self.leds_manuais_camera:
+                        self.leds_selecionados = [
+                            LedSelection(
+                                id=led.id,
+                                centro_x=led.centro_x,
+                                centro_y=led.centro_y,
+                                raio=led.raio,
+                            )
+                            for led in self.leds_manuais_camera
+                        ]
+                        self.view.selecao_manual_camera_visivel = True
+                    elif (
+                        self.guias_leds_fixos_visiveis
+                        and self.leds_fixos_configurados
+                    ):
+                        self.leds_selecionados = (
+                            self.adaptar_leds_fixos_para_frame_camera(
+                                self.leds_fixos_configurados
+                            )
+                        )
+                        self.view.selecao_manual_camera_visivel = False
+                    else:
+                        self.leds_selecionados = []
+                        self.view.selecao_manual_camera_visivel = False
 
-                self.view.preparar_imagem_para_exibicao(
-                    self.imagem_original
-                )
-                self.view.desenhar_canvas(
-                    self.leds_selecionados,
-                    self.resultados_led_atual,
-                )
-                self.atualizar_renderizacoes_camera_se_necessario()
+                    self.resultados_led_atual = []
+                    self.view.preparar_imagem_para_exibicao(
+                        self.imagem_original
+                    )
+                    self.view.desenhar_canvas(
+                        self.leds_selecionados,
+                        self.resultados_led_atual,
+                    )
+                    self.atualizar_renderizacoes_camera_se_necessario()
 
         self.agendar_proximo_frame_camera()
 

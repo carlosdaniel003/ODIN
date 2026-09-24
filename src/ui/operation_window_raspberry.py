@@ -513,25 +513,46 @@ class RaspberryOperationWindow:
             if render_width < frame_width or render_height < frame_height
             else cv2.INTER_LINEAR
         )
-        preview = cv2.resize(
-            frame,
-            (render_width, render_height),
-            interpolation=interpolation,
-        )
+        if (render_width, render_height) == (frame_width, frame_height):
+            preview = frame
+        else:
+            preview = cv2.resize(
+                frame,
+                (render_width, render_height),
+                interpolation=interpolation,
+            )
         image_tk = self._create_preview_image(preview)
         if image_tk is None:
             self.set_preview_status("Falha ao renderizar prévia", "#FCA5A5")
             return False
 
         self._preview_tk = image_tk
-        self.preview_canvas.delete("all")
-        self._preview_image_item = self.preview_canvas.create_image(
-            offset_x,
-            offset_y,
-            image=image_tk,
-            anchor=tk.NW,
-            tags=("preview_image",),
-        )
+        # Reutiliza o item do canvas: apagar e recriar a imagem inteira em todo
+        # frame aumenta trabalho do Tcl/Tk e piora a sensação de atraso.
+        self.preview_canvas.delete("preview_guide")
+        updated = False
+        if self._preview_image_item is not None:
+            try:
+                self.preview_canvas.itemconfigure(
+                    self._preview_image_item,
+                    image=image_tk,
+                )
+                self.preview_canvas.coords(
+                    self._preview_image_item,
+                    offset_x,
+                    offset_y,
+                )
+                updated = True
+            except tk.TclError:
+                self._preview_image_item = None
+        if not updated:
+            self._preview_image_item = self.preview_canvas.create_image(
+                offset_x,
+                offset_y,
+                image=image_tk,
+                anchor=tk.NW,
+                tags=("preview_image",),
+            )
         self._draw_guides(
             leds=self._latest_leds,
             frame_width=frame_width,

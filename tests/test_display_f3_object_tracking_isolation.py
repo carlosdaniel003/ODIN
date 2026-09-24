@@ -316,6 +316,42 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 (got_points, expected_points),
             )
 
+    def test_preview_live_e_reduzido_antes_do_overlay_sem_mudar_aspecto(self):
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
+        class _Window:
+            @staticmethod
+            def _get_canvas_size():
+                return (640, 480)
+
+        preview = tracking._fit_live_preview_before_overlay(
+            frame,
+            _Window(),
+        )
+        self.assertEqual((360, 640, 3), preview.shape)
+
+    def test_preview_e_analise_tem_cadencias_separadas(self):
+        self.assertLess(
+            auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_PREVIEW_INTERVAL_MS,
+            auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_ANALYSIS_INTERVAL_MS,
+        )
+        self.assertLessEqual(
+            auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_PREVIEW_INTERVAL_MS,
+            20,
+        )
+        self.assertGreaterEqual(
+            auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_ANALYSIS_INTERVAL_MS,
+            70,
+        )
+
+    def test_instancia_final_pula_orb_nos_frames_exclusivos_de_preview(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("_display_auto_analysis_due_now", source)
+        self.assertIn("_display_f3_skip_auto_analysis_this_preview", source)
+        self.assertIn("if heavy_due:", source)
+
     def test_cached_lock_never_promotes_held_pose_to_current_evidence(self):
         source = inspect.getsource(tracking.F3DisplayObjectTracker.align)
         self.assertIn(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import time
 
 from src.platform.display_auto_check_analyzer import DisplayAutomaticCheckAnalyzer
 from src.platform.display_auto_check_policy import (
@@ -21,7 +22,13 @@ class DisplayAutomaticCheckF3Mixin:
 
     # Sobrescreve apenas o intervalo do F3 automático pelo MRO. O F2 não usa
     # este mixin e mantém seu próprio ritmo de captura/renderização.
-    DISPLAY_F3_PREVIEW_INTERVAL_MS = 45
+    # Preview fluido é independente da visão pesada. 16 ms deixa o Tk buscar o
+    # frame mais recente com baixa latência; a câmera continua limitada pelo FPS
+    # físico configurado (normalmente 30 FPS).
+    DISPLAY_F3_PREVIEW_INTERVAL_MS = 16
+    # ORB/contorno/classificação não precisam rodar 30 vezes por segundo. ~11 Hz
+    # mantém resposta rápida dos CHECKS sem segurar cada repaint da câmera.
+    DISPLAY_F3_ANALYSIS_INTERVAL_MS = 90
 
     # H1 precisa ser rápido, mas ainda exige dois frames consecutivos. Bluetooth
     # é um evento transitório/piscante e é confirmado na primeira leitura OK.
@@ -44,6 +51,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_transition_frames = self.DISPLAY_AUTO_TRANSITION_FRAMES
         self._display_auto_last_frame_token = None
         self._display_auto_last_analysis = None
+        self._display_auto_last_process_s = 0.0
         self._display_auto_manual_entry_signature = None
         self._display_auto_manual_entry_label = ""
         self._display_auto_intermittent_signature = None
@@ -687,6 +695,25 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_auto_clear_manual_entry_gate()
             self._reset_display_auto_stability()
 
+    def _display_auto_analysis_due_now(self, now: float | None = None) -> bool:
+        if bool(getattr(self, "_display_f3_skip_auto_analysis_this_preview", False)):
+            return False
+        current = time.monotonic() if now is None else float(now)
+        previous = float(getattr(self, "_display_auto_last_process_s", 0.0) or 0.0)
+        if previous <= 0.0:
+            return True
+        return (
+            (current - previous) * 1000.0
+            >= float(self.DISPLAY_F3_ANALYSIS_INTERVAL_MS)
+        )
+
     def _atualizar_preview_display_f3(self) -> None:
+        # O repaint vem sempre primeiro. A câmera não espera o motor de análise.
         super()._atualizar_preview_display_f3()
+
+        now = time.monotonic()
+        if not self._display_auto_analysis_due_now(now):
+            return
+
+        self._display_auto_last_process_s = now
         self._process_display_auto_check()
