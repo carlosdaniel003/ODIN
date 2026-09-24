@@ -944,35 +944,50 @@ def _open_lightweight_snapshot_debug(window):
         anchor="w",
     ).pack(fill="x", pady=(0, 7))
 
-    photo = _frame_photo(
-        frozen_frame,
-        visual,
-        top,
-        visual_rotation=preview_rotation,
-        overlay_context=(
-            snapshot.get("overlay_context")
-            if isinstance(snapshot.get("overlay_context"), dict)
-            else None
-        ),
+    preview_label = tk.Label(
+        frame_column,
+        text="CARREGANDO PRÉVIA DO FRAME...",
+        font=("Segoe UI", 10, "bold"),
+        bg="#020617",
+        fg=manual_module.DEBUG_MUTED,
+        bd=0,
+        anchor="center",
+        padx=12,
+        pady=24,
     )
-    window._display_f3_snapshot_debug_photo = photo
-    if photo is not None:
-        tk.Label(
-            frame_column,
-            image=photo,
-            bg="#020617",
-            bd=0,
-            anchor="nw",
-        ).pack(anchor="nw")
-    else:
-        tk.Label(
-            frame_column,
-            text="PRÉVIA DO FRAME NÃO DISPONÍVEL",
-            font=("Segoe UI", 11, "bold"),
-            bg=manual_module.DEBUG_BG,
-            fg=manual_module.DEBUG_MUTED,
-            anchor="w",
-        ).pack(fill="x", pady=(30, 0))
+    preview_label.pack(fill="both", expand=True)
+    window._display_f3_snapshot_debug_photo = None
+
+    def render_preview_after_paint():
+        photo = _frame_photo(
+            frozen_frame,
+            visual,
+            top,
+            visual_rotation=preview_rotation,
+            overlay_context=(
+                snapshot.get("overlay_context")
+                if isinstance(snapshot.get("overlay_context"), dict)
+                else None
+            ),
+        )
+        window._display_f3_snapshot_debug_photo = photo
+        try:
+            if photo is not None:
+                preview_label.configure(image=photo, text="")
+            else:
+                preview_label.configure(
+                    image="",
+                    text="PRÉVIA DO FRAME NÃO DISPONÍVEL",
+                )
+        except Exception:
+            pass
+
+    try:
+        # Primeiro abre/pinta a janela; a conversão 1920x1080 -> PhotoImage vem
+        # logo depois e não atrasa a sensação de abertura do DEBUG.
+        top.after(18, render_preview_after_paint)
+    except Exception:
+        render_preview_after_paint()
 
     visual_state = (
         snapshot.get("visual_state")

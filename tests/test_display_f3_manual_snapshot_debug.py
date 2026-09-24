@@ -294,6 +294,45 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertEqual(2, window._display_f3_manual_snapshot_serial)
         self.assertEqual(2, window.closed)
 
+    def test_handler_real_move_diagnostico_para_worker(self):
+        source = inspect.getsource(snapshot_module._capture_from_window)
+        self.assertIn("_prepare_async_snapshot_seed(app)", source)
+        self.assertIn("threading.Thread(", source)
+        self.assertIn('name="ODIN-F3-DebugSnapshot"', source)
+        self.assertIn("root.after(1, start_worker)", source)
+
+    def test_seed_async_congela_estado_antes_do_worker(self):
+        app = _FrameApp()
+        app._display_f3_ng_evidence_frozen = False
+        with patch.object(
+            snapshot_module,
+            "_runtime_state_at_frame",
+            return_value={"last_auto_analysis": {"check_id": "CHECK_001"}},
+        ), patch.object(
+            snapshot_module,
+            "_window_visual_state",
+            return_value={"statuses": {}},
+        ), patch.object(
+            snapshot_module,
+            "_camera_settings_at_frame",
+            return_value={"focus": 22},
+        ), patch.object(
+            snapshot_module,
+            "_current_context",
+            return_value={"check_id": "CHECK_001", "check_name": "H1"},
+        ), patch.object(
+            snapshot_module,
+            "_rotation",
+            return_value=180,
+        ):
+            seed = snapshot_module._prepare_async_snapshot_seed(app)
+
+        self.assertEqual(41, seed["capture"]["frame_id"])
+        self.assertEqual(180, seed["rotation"])
+        self.assertEqual("CHECK_001", seed["logical_context"]["check_id"])
+        self.assertEqual(22, seed["camera_settings_at_frame"]["focus"])
+        self.assertTrue(np.array_equal(seed["frame"], app.camera_frame_atual))
+
     def test_interface_remove_debug_antigo_e_toggle_off(self):
         source = inspect.getsource(snapshot_module._install_window_controls)
         self.assertIn('_destroy_widget(self, "technical_debug_button")', source)
