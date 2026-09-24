@@ -12,6 +12,10 @@ from src.models.led_features import LedFeatures
 from src.platform.display_check_presence_reference import (
     DisplayCheckPresenceReferenceStore,
 )
+from src.platform.display_visual_reference_status import (
+    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+    DisplayProjectPresenceReferenceStore,
+)
 from src.platform.display_f3_same_mask_reference_fix import (
     F3_CHECK_PHOTO_LEARNING_SOURCE,
     F3_CHECK_PHOTO_MIN_CONFIDENCE,
@@ -233,6 +237,116 @@ class DisplayF3SameMaskReferenceFixTests(unittest.TestCase):
             self.assertEqual(2, blue["matched_mask_count"])
             self.assertEqual(F3_CHECK_PHOTO_LEARNING_SOURCE, blue["reference_authority"])
             self.assertEqual(2, blue["same_mask_reference_used_count"])
+
+    def test_board_off_completa_par_local_para_mascara_sempre_acesa(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repository, masks, checks = _project_with_two_masks(root)
+            first_id = str(checks[0]["id"])
+            second_id = str(checks[1]["id"])
+
+            # MASK_001 fica ON em todos os CHECKS: antes desta correção ela não
+            # possuía OFF local e caía no class_pool de outra máscara.
+            self.assertTrue(
+                repository.salvar_estados_check(
+                    "DISPLAY A",
+                    first_id,
+                    {"MASK_001": "on", "MASK_002": "off"},
+                )
+            )
+            self.assertTrue(
+                repository.salvar_estados_check(
+                    "DISPLAY A",
+                    second_id,
+                    {"MASK_001": "on", "MASK_002": "on"},
+                )
+            )
+
+            check_store = DisplayCheckPresenceReferenceStore(repository)
+            first_frame = _frame(220, 35)
+            second_frame = _frame(220, 220)
+            check_store.capture(
+                "DISPLAY A",
+                first_id,
+                first_frame,
+                (120, 80),
+            )
+            check_store.capture(
+                "DISPLAY A",
+                second_id,
+                second_frame,
+                (120, 80),
+            )
+
+            project_store = DisplayProjectPresenceReferenceStore(repository)
+            board_off = _frame(35, 35)
+            self.assertIsNotNone(
+                project_store.capture(
+                    "DISPLAY A",
+                    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    board_off,
+                    (120, 80),
+                )
+            )
+            self.assertTrue(
+                project_store.save_geometry(
+                    "DISPLAY A",
+                    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    [],
+                    masks,
+                )
+            )
+
+            analyzer = F3SameMaskReferenceAnalyzer(repository)
+            project = repository.carregar_projeto("DISPLAY A")
+            learning = analyzer._build_check_photo_learning(
+                "DISPLAY A",
+                project,
+                masks,
+                0,
+            )
+
+            profile = learning["by_mask"]["MASK_001"]
+            self.assertEqual(2, len(profile["on"]))
+            self.assertEqual(1, len(profile["off"]))
+            self.assertEqual(
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                profile["sources"]["off"][0]["reference_kind"],
+            )
+            self.assertEqual(2, learning["board_off_sample_count"])
+
+            on_refs, off_refs, source, context = analyzer._references_for_mask(
+                "MASK_001",
+                learning,
+            )
+            self.assertEqual(F3_SAME_MASK_REFERENCE_SOURCE, source)
+            self.assertTrue(context["complete_local_pair"])
+            self.assertEqual(2, len(on_refs))
+            self.assertEqual(1, len(off_refs))
+
+            result = analyzer.analyze(
+                first_frame,
+                "DISPLAY A",
+                first_id,
+                0,
+            )
+            mask_1 = next(
+                item
+                for item in result["mask_results"]
+                if item["mask_id"] == "MASK_001"
+            )
+            self.assertEqual("on", mask_1["classified"])
+            self.assertTrue(mask_1["matched"])
+            self.assertEqual(
+                F3_SAME_MASK_REFERENCE_SOURCE,
+                mask_1["reference_source"],
+            )
+            self.assertEqual(
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                mask_1["reference_checks"]["off"]["reference_kind"],
+            )
+            self.assertTrue(result["board_off_reference_configured"])
+            self.assertEqual(2, result["board_off_same_mask_sample_count"])
 
     def test_missing_same_mask_state_uses_other_labeled_check_masks(self):
         with tempfile.TemporaryDirectory() as temp:

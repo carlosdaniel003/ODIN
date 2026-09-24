@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import cv2
@@ -18,19 +19,30 @@ from src.platform.display_check_presence_reference import (
     DisplayCheckPresenceReferenceStore,
     avaliar_referencia_presenca_display,
 )
+from src.platform.display_mask_geometry import (
+    sincronizar_formato_mascara_display,
+)
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
     mascaras_geometria_check_display,
+    normalizar_mascaras_display,
     normalizar_resolucao_display,
+)
+from src.platform.display_visual_reference_status import (
+    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+    DisplayProjectPresenceReferenceStore,
 )
 from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
-# As fotos salvas em Gerenciar CHECKS passam a ser o aprendizado principal e
-# suficiente do F3. Cada máscara marcada ACESO/APAGADO na foto real do CHECK
-# vira uma amostra rotulada automaticamente.
+# As fotos salvas em Gerenciar CHECKS são o aprendizado positivo/funcional do
+# F3. Cada máscara marcada ACESO/APAGADO na foto real do CHECK vira uma amostra
+# rotulada automaticamente. A foto "PLACA DESLIGADA NO SUPORTE" acrescenta uma
+# referência OFF da MESMA máscara física. Isso elimina o fallback entre máscaras
+# para segmentos que ficam ON em todos os CHECKS (ex.: um segmento comum a H1,
+# BLUE, USB e AUX).
 F3_SAME_MASK_REFERENCE_SOURCE = "f3_check_photos_same_mask"
 F3_STATE_SAMPLE_FALLBACK_SOURCE = "f3_check_photos_class_pool"
 F3_CHECK_PHOTO_LEARNING_SOURCE = "f3_check_photos_learning"
@@ -217,6 +229,9 @@ class F3SameMaskReferenceAnalyzer:
     def __init__(self, repository) -> None:
         self.repository = repository
         self.presence_store = DisplayCheckPresenceReferenceStore(repository)
+        self.project_presence_store = DisplayProjectPresenceReferenceStore(
+            repository
+        )
         self._check_photo_cache_key = None
         self._check_photo_cache = None
 
@@ -271,11 +286,37 @@ class F3SameMaskReferenceAnalyzer:
                 (check_id, states_signature, image_signature)
             )
 
+        board_off_metadata = self.project_presence_store.get(
+            project_name,
+            DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+        )
+        board_off_image_signature = ("", 0, 0)
+        board_off_geometry_signature = ""
+        if isinstance(board_off_metadata, dict):
+            path = Path(str(board_off_metadata.get("image_path") or ""))
+            try:
+                stat = path.stat()
+                board_off_image_signature = (
+                    str(path),
+                    int(stat.st_mtime_ns),
+                    int(stat.st_size),
+                )
+            except OSError:
+                board_off_image_signature = (str(path), 0, 0)
+            board_off_geometry_signature = repr(
+                (
+                    board_off_metadata.get("masks_reference", []),
+                    board_off_metadata.get("mask_overrides_reference", {}),
+                )
+            )
+
         return (
             str(project_name),
             int(visual_rotation),
             str(project.get("updated_at") or ""),
             tuple(checks_signature),
+            board_off_image_signature,
+            board_off_geometry_signature,
         )
 
     def _check_reference_context(
@@ -314,6 +355,78 @@ class F3SameMaskReferenceAnalyzer:
         )
         if not reference_masks:
             reference_masks = list(masks or [])
+
+        visual_frame, _visual_resolution, visual_masks = preparar_check_visual_display(
+            image,
+            master_resolution,
+            reference_masks,
+            visual_rotation,
+        )
+        if visual_frame is None or getattr(visual_frame, "size", 0) == 0:
+            return None, {}, True
+
+        mask_by_id = {
+            str(mask.get("id")): mask
+            for mask in visual_masks
+            if isinstance(mask, dict) and mask.get("id") is not None
+        }
+        return visual_frame, mask_by_id, True
+
+    def _board_off_reference_context(
+        self,
+        project_name: str,
+        project: dict,
+        masks: list[dict],
+        visual_rotation: int,
+    ) -> tuple[object | None, dict[str, dict], bool]:
+        """Carrega a placa desligada como OFF da própria máscara física.
+
+        Somente geometria explicitamente salva sobre a foto de placa desligada é
+        aceita. Não projetamos coordenadas canônicas por suposição, porque um
+        deslocamento de poucos pixels é suficiente para contaminar um segmento.
+        """
+        metadata = self.project_presence_store.get(
+            project_name,
+            DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+        )
+        if not isinstance(metadata, dict):
+            return None, {}, False
+
+        path = Path(str(metadata.get("image_path") or ""))
+        image = cv2.imread(str(path), cv2.IMREAD_COLOR) if path.is_file() else None
+        if image is None or getattr(image, "size", 0) == 0:
+            return None, {}, True
+
+        master_resolution = normalizar_resolucao_display(
+            project.get("master_resolution")
+        )
+        if master_resolution is None:
+            return None, {}, True
+
+        reference_masks = []
+        if "masks_reference" in metadata:
+            reference_masks = normalizar_mascaras_display(
+                deepcopy(metadata.get("masks_reference", []))
+            )
+        if not reference_masks:
+            overrides = metadata.get("mask_overrides_reference", {})
+            if isinstance(overrides, dict):
+                for base in masks or ():
+                    if not isinstance(base, dict):
+                        continue
+                    mask_id = str(base.get("id") or "")
+                    raw = overrides.get(mask_id)
+                    if not isinstance(raw, dict):
+                        continue
+                    item = sincronizar_formato_mascara_display(
+                        deepcopy(base),
+                        deepcopy(raw),
+                    )
+                    item["id"] = mask_id
+                    reference_masks.append(item)
+
+        if not reference_masks:
+            return None, {}, True
 
         visual_frame, _visual_resolution, visual_masks = preparar_check_visual_display(
             image,
@@ -421,12 +534,54 @@ class F3SameMaskReferenceAnalyzer:
                 state_sources[state].append(source)
                 sample_count += 1
 
+        board_off_frame, board_off_masks, board_off_configured = (
+            self._board_off_reference_context(
+                project_name,
+                project,
+                masks,
+                visual_rotation,
+            )
+        )
+        board_off_sample_count = 0
+        if board_off_frame is not None:
+            for mask_id, profile in by_mask.items():
+                visual_mask = board_off_masks.get(mask_id)
+                if visual_mask is None:
+                    continue
+                try:
+                    selection = display_mask_to_analysis_selection(visual_mask)
+                    features = extrair_features_selecao(
+                        board_off_frame,
+                        selection,
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if int(getattr(features, "area_pixels", 0) or 0) <= 0:
+                    continue
+
+                # Importante: a referência de placa desligada entra SOMENTE no
+                # perfil local da mesma máscara. Não alimenta o pool global OFF,
+                # pois o objetivo é justamente impedir comparação cruzada entre
+                # segmentos fisicamente diferentes.
+                source = {
+                    "check_id": "BOARD_OFF",
+                    "check_name": "PLACA DESLIGADA NO SUPORTE",
+                    "reference_kind": DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    "mask_id": mask_id,
+                    "state": DISPLAY_CHECK_STATE_OFF,
+                }
+                profile[DISPLAY_CHECK_STATE_OFF].append(features)
+                profile["sources"][DISPLAY_CHECK_STATE_OFF].append(source)
+                board_off_sample_count += 1
+
         return {
             "by_mask": by_mask,
             "by_state": by_state,
             "state_sources": state_sources,
             "photo_count": int(photo_count),
             "sample_count": int(sample_count),
+            "board_off_reference_configured": bool(board_off_configured),
+            "board_off_sample_count": int(board_off_sample_count),
         }
 
     def _check_photo_learning(
@@ -492,9 +647,9 @@ class F3SameMaskReferenceAnalyzer:
                 },
             )
 
-        # Quando a mesma máscara nunca apareceu nos dois estados, o estado
-        # faltante vem de OUTRAS máscaras rotuladas nas próprias fotos dos CHECKS.
-        # Não existe qualquer retorno ao bloco manual Referências e aprendizado.
+        # Depois de incorporar a placa desligada como OFF local, este fallback
+        # fica restrito principalmente a máscaras que nunca possuem exemplo ON
+        # próprio em nenhum CHECK. Não existe retorno ao bloco manual.
         on_references = local_on or global_on
         off_references = local_off or global_off
         return (
@@ -797,6 +952,12 @@ class F3SameMaskReferenceAnalyzer:
             "check_photo_sample_count": int(learning.get("sample_count", 0) or 0),
             "check_photo_on_sample_count": len(on_samples),
             "check_photo_off_sample_count": len(off_samples),
+            "board_off_reference_configured": bool(
+                learning.get("board_off_reference_configured", False)
+            ),
+            "board_off_same_mask_sample_count": int(
+                learning.get("board_off_sample_count", 0) or 0
+            ),
             "same_mask_reference_pair_count": int(local_pair_count),
             "same_mask_reference_used_count": int(local_used_count),
             "check_photo_pool_fallback_used_count": int(pool_fallback_count),
