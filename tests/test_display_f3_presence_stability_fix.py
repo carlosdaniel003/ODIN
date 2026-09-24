@@ -45,6 +45,30 @@ class DisplayF3PresenceStabilityTests(unittest.TestCase):
         self.assertTrue(result["board_present"])
         self.assertEqual("melhor_cena_com_placa_supera_empty", result["reason"])
 
+    def test_estabilidade_nao_descarta_presenca_relativa_da_camera_refocada(self):
+        state = {
+            "kind": "unknown",
+            "reference_scores": {
+                "check:CHECK_001": 0.5377,
+                "off": 0.5351,
+                "check:CHECK_002": 0.5250,
+                "check:CHECK_003": 0.5210,
+                "check:CHECK_004": 0.5065,
+                "empty": 0.3901,
+            },
+        }
+
+        result = presence_module.avaliar_presenca_melhor_ocupado_f3(state)
+
+        self.assertTrue(result["board_present"])
+        self.assertTrue(result["presence_confirmed"])
+        self.assertEqual(
+            "relative_board_strong_separation",
+            result["decision_mode"],
+        )
+        self.assertEqual("check:CHECK_001", result["best_occupied_reference"])
+        self.assertAlmostEqual(0.1476, result["occupied_over_empty_margin"], places=4)
+
     def test_empty_explicito_vence_imediatamente(self):
         state = {
             "kind": "empty",
