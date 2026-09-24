@@ -140,17 +140,51 @@ def _overlay_context(window, visual_rotation: int):
 
     classifications = {}
     if classification_valid:
-        for item in analysis.get("mask_results", []) or []:
-            if not isinstance(item, dict):
-                continue
-            mask_id = str(item.get("mask_id") or "")
-            if mask_id:
-                classifications[mask_id] = str(item.get("classified") or "unknown")
+        effective = analysis.get("effective_classifications")
+        if isinstance(effective, dict):
+            classifications = {
+                str(mask_id): str(state or "unknown").strip().lower()
+                for mask_id, state in effective.items()
+                if str(mask_id)
+            }
+        else:
+            for item in analysis.get("mask_results", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                mask_id = str(item.get("mask_id") or "")
+                if mask_id:
+                    classifications[mask_id] = str(
+                        item.get("classified") or "unknown"
+                    )
 
     return {
         "resolution": getattr(window, "_display_roi_overlay_resolution", None),
         "masks": getattr(window, "_display_roi_overlay_masks", ()),
         "classifications": classifications,
+        "effective_classifications": dict(classifications),
+        "failed_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    analysis.get("effective_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if classification_valid else (),
+        "effective_failed_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    analysis.get("effective_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if classification_valid else (),
+        "ui_mask_authority": (
+            str(analysis.get("ui_mask_authority") or "")
+            if classification_valid
+            else ""
+        ),
     }
 
 
@@ -213,19 +247,51 @@ def montar_contexto_overlay_snapshot_display_f3(
     )
     classifications = {}
     if isinstance(analysis, dict):
-        for item in analysis.get("mask_results", []) or []:
-            if not isinstance(item, dict):
-                continue
-            mask_id = str(item.get("mask_id") or "")
-            if mask_id:
-                classifications[mask_id] = str(
-                    item.get("classified") or "unknown"
-                )
+        effective = analysis.get("effective_classifications")
+        if isinstance(effective, dict):
+            classifications = {
+                str(mask_id): str(state or "unknown").strip().lower()
+                for mask_id, state in effective.items()
+                if str(mask_id)
+            }
+        else:
+            for item in analysis.get("mask_results", []) or []:
+                if not isinstance(item, dict):
+                    continue
+                mask_id = str(item.get("mask_id") or "")
+                if mask_id:
+                    classifications[mask_id] = str(
+                        item.get("classified") or "unknown"
+                    )
 
     return {
         "resolution": tuple(visual_resolution),
         "masks": tuple(deepcopy(visual_masks)),
         "classifications": classifications,
+        "effective_classifications": dict(classifications),
+        "failed_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    (analysis or {}).get("effective_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if isinstance(analysis, dict) else (),
+        "effective_failed_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    (analysis or {}).get("effective_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if isinstance(analysis, dict) else (),
+        "ui_mask_authority": (
+            str((analysis or {}).get("ui_mask_authority") or "")
+            if isinstance(analysis, dict)
+            else ""
+        ),
         "project_name": str(project_name),
         "check_id": str(check_id),
         "visual_rotation": _normalizar_rotacao(visual_rotation),
