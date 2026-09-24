@@ -979,6 +979,181 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertFalse(hasattr(result, "powered_confirmed"))
         self.assertFalse(hasattr(result, "off_confirmed"))
 
+    @staticmethod
+    def _rich_tracking_reference():
+        image = np.zeros((240, 320, 3), dtype=np.uint8)
+        cv2.rectangle(image, (65, 50), (255, 190), (210, 210, 210), 3)
+        cv2.line(image, (80, 70), (235, 165), (180, 180, 180), 4)
+        cv2.line(image, (82, 170), (230, 72), (150, 150, 150), 3)
+        cv2.circle(image, (120, 105), 24, (255, 255, 255), 3)
+        cv2.circle(image, (205, 135), 17, (190, 190, 190), 3)
+        cv2.putText(
+            image,
+            "CM500",
+            (105, 155),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (245, 245, 245),
+            2,
+            cv2.LINE_AA,
+        )
+        board = [[65, 50], [255, 50], [255, 190], [65, 190]]
+        return image, board
+
+    def test_reference_bank_adds_akaze_for_absolute_reacquisition(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            tracker.width = 320
+            tracker.height = 240
+            reference, board = self._rich_tracking_reference()
+            mask = tracking.build_tracking_mask(320, 240, board, [])
+            refs = {}
+            tracker._add_reference(
+                refs,
+                key="ref",
+                image=reference,
+                tracking_mask=mask,
+                reference_to_canonical=np.asarray(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    dtype=np.float32,
+                ),
+                angle=0.0,
+                real_orientation=False,
+                source_type="board_off",
+                board_points=board,
+            )
+
+            self.assertIn("ref", refs)
+            self.assertIn("akaze_descriptors", refs["ref"])
+            self.assertIn("akaze_canonical_points", refs["ref"])
+            self.assertIsNotNone(refs["ref"]["akaze_descriptors"])
+            self.assertGreaterEqual(
+                len(refs["ref"]["akaze_canonical_points"]),
+                tracking.F3_TRACKING_AKAZE_MIN_MATCHES,
+            )
+
+    def test_adaptive_template_reacquires_rotated_scaled_board(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            tracker.width = 320
+            tracker.height = 240
+            reference, board = self._rich_tracking_reference()
+            mask = tracking.build_tracking_mask(320, 240, board, [])
+            refs = {}
+            tracker._add_reference(
+                refs,
+                key="board_off",
+                image=reference,
+                tracking_mask=mask,
+                reference_to_canonical=np.asarray(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    dtype=np.float32,
+                ),
+                angle=0.0,
+                real_orientation=False,
+                source_type="board_off",
+                board_points=board,
+            )
+            tracker.references = refs
+
+            known = cv2.getRotationMatrix2D(
+                (160.0, 120.0),
+                12.0,
+                1.10,
+            ).astype(np.float32)
+            known[0, 2] += 18.0
+            known[1, 2] -= 8.0
+            current = cv2.warpAffine(
+                reference,
+                known,
+                (320, 240),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+            )
+            gray = tracker._gray(current)
+            current_edges = cv2.Canny(gray, 45, 135)
+
+            candidate = tracker._adaptive_template_candidate(
+                current_edges,
+                "board_off",
+                min_score=0.24,
+            )
+
+            self.assertIsNotNone(candidate)
+            self.assertEqual(
+                "adaptive_edge_template",
+                candidate.get("fallback"),
+            )
+            canonical_center = np.asarray(
+                [[[160.0, 120.0]]],
+                dtype=np.float32,
+            )
+            current_center = cv2.transform(
+                canonical_center,
+                known,
+            )
+            recovered = cv2.transform(
+                current_center,
+                np.asarray(
+                    candidate["matrix"],
+                    dtype=np.float32,
+                ).reshape(2, 3),
+            )
+            error = float(
+                np.linalg.norm(
+                    recovered.reshape(2)
+                    - canonical_center.reshape(2)
+                )
+            )
+            self.assertLess(error, 12.0)
+
+    def test_tracking_loss_invalidates_stale_mask_and_power_authority(self):
+        app = SimpleNamespace(
+            _display_auto_last_analysis={"approved": True},
+            _display_f3_tracking_analysis_frame=object(),
+            _display_f3_power_authority_status={
+                "board_present": True,
+                "presence": {"presence_confirmed": True},
+                "energy": {
+                    "energy_state": "powered",
+                    "powered_confirmed": True,
+                },
+                "decision_allowed": True,
+            },
+            _display_f3_operational_state={
+                "kind": "powered",
+                "text": "PLACA NO SUPORTE • LIGADA",
+                "allow_auto": True,
+            },
+        )
+
+        tracking._invalidate_spatial_authority_after_tracking_loss(
+            app,
+            "object_not_locked",
+        )
+
+        self.assertIsNone(app._display_auto_last_analysis)
+        self.assertIsNone(app._display_f3_tracking_analysis_frame)
+        status = app._display_f3_power_authority_status
+        self.assertFalse(status["decision_allowed"])
+        self.assertFalse(status["energy"]["powered_confirmed"])
+        self.assertFalse(status["energy"]["off_confirmed"])
+        self.assertEqual("unconfirmed", status["energy"]["energy_state"])
+        self.assertEqual("object_not_locked", status["reason"])
+        self.assertEqual(
+            "unknown",
+            app._display_f3_operational_state["kind"],
+        )
+        self.assertFalse(
+            app._display_f3_operational_state["allow_auto"]
+        )
+
     def test_final_instance_authority_bypasses_historical_f3_wrappers(self):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3
