@@ -76,6 +76,34 @@ class DisplayF3RelativePresenceTests(unittest.TestCase):
         )
         self.assertEqual(F3_RELATIVE_BOARD_PRESENCE_SOURCE, result["source"])
 
+    def test_debug_camera_rebaixada_refocada_confirma_placa_por_margem_relativa(self):
+        # Snapshot 24/09/2026: todos os scores absolutos caíram após reposicionar
+        # e refocar a câmera, mas a cena com placa continua claramente acima do
+        # suporte vazio.
+        state = {
+            "kind": "unknown",
+            "reference_scores": {
+                "check:CHECK_001": 0.5377,
+                "off": 0.5351,
+                "check:CHECK_002": 0.5250,
+                "check:CHECK_003": 0.5210,
+                "check:CHECK_004": 0.5065,
+                "empty": 0.3901,
+            },
+        }
+
+        result = avaliar_presenca_relativa_f3(state)
+
+        self.assertTrue(result["presence_confirmed"])
+        self.assertTrue(result["board_present"])
+        self.assertFalse(result["empty_confirmed"])
+        self.assertEqual("check:CHECK_001", result["best_board_reference"])
+        self.assertAlmostEqual(0.1476, result["board_over_empty_margin"], places=4)
+        self.assertEqual(
+            "relative_board_strong_separation",
+            result["decision_mode"],
+        )
+
     def test_presenca_global_nao_depende_apenas_da_referencia_off(self):
         state = self._restart_with_board_debug_state()
         legacy = {
