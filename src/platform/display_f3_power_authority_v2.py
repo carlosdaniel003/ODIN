@@ -36,23 +36,32 @@ import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_f3_physical_learning_policy as physical_policy_module
 import src.platform.display_f3_power_authority as power_module
 import src.platform.display_f3_runtime_contract_fix as contract_module
-from src.platform.display_auto_check_analyzer import display_mask_to_analysis_selection
+from src.core.feature_extractor import extrair_features_selecao
+from src.platform.display_auto_check_analyzer import (
+    DISPLAY_AUTO_CLASS_LOW_LIGHT,
+    display_mask_to_analysis_selection,
+)
 from src.platform.display_auto_check_policy import DISPLAY_AUTO_MIN_CONFIDENCE
 from src.platform.display_check_presence_reference import DisplayCheckPresenceReferenceStore
 from src.platform.display_f3_check_photo_learning import F3CheckPhotoLearningAnalyzer
+import src.platform.display_f3_same_mask_reference_fix as same_mask_module
 from src.platform.display_f3_exact_check_template import (
     F3_EXACT_MASK_AMBIGUOUS_BAND,
     comparar_mascara_com_gabarito_f3,
     _resize_visual_frame,
 )
-from src.platform.display_project_repository import DISPLAY_CHECK_STATE_ON, normalizar_resolucao_display
+from src.platform.display_project_repository import (
+    DISPLAY_CHECK_STATE_OFF,
+    DISPLAY_CHECK_STATE_ON,
+    normalizar_resolucao_display,
+)
 from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
-F3_UNIFIED_POWER_SOURCE = "f3_unified_current_check_mask_power_authority"
-F3_POWER_PRIMARY_SOURCE = "current_check_raw_mask_analysis"
-F3_POWER_SECONDARY_SOURCE = "same_mask_full_pixel_bgr_s_v_guard"
-F3_POWER_VOTE_POLICY = "strict_majority_of_expected_on_masks"
+F3_UNIFIED_POWER_SOURCE = "f3_unified_live_mask_power_authority"
+F3_POWER_PRIMARY_SOURCE = "same_physical_mask_on_off_learning"
+F3_POWER_SECONDARY_SOURCE = "current_check_full_pixel_guard_fallback"
+F3_POWER_VOTE_POLICY = "minimum_configured_check_majority_across_live_masks"
 
 
 def _required_consensus_votes(expected_count: int) -> int:
@@ -133,6 +142,292 @@ def _frame_token(app, frame):
         ("camera_service", id(camera_service) if camera_service is not None else None),
         ("frame_object", id(frame)),
     )
+
+
+def _energy_live_mask_context(app, frame, project: dict, visual_rotation: int):
+    """Retorna frame + máscaras no MESMO espaço físico usado para energia.
+
+    Com tracking, as máscaras já foram projetadas para o frame RAW atual. Sem
+    tracking, aplicamos apenas a rotação visual cardinal do projeto.
+    """
+    geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    if isinstance(geometry, dict) and bool(geometry.get("locked")):
+        resolution = geometry.get("resolution")
+        try:
+            frame_h, frame_w = frame.shape[:2]
+        except Exception:
+            frame_h = frame_w = 0
+        if (
+            isinstance(resolution, (list, tuple))
+            and len(resolution) >= 2
+            and int(resolution[0]) == int(frame_w)
+            and int(resolution[1]) == int(frame_h)
+        ):
+            masks = {
+                str(mask.get("id") or ""): deepcopy(mask)
+                for mask in (geometry.get("masks") or ())
+                if isinstance(mask, dict) and str(mask.get("id") or "")
+            }
+            if masks:
+                return (
+                    frame,
+                    masks,
+                    "tracking_live_geometry_raw",
+                    str(geometry.get("geometry_space") or ""),
+                )
+
+    resolution = normalizar_resolucao_display(project.get("master_resolution"))
+    if resolution is None:
+        return None, {}, "unavailable", ""
+
+    project_masks = [
+        deepcopy(mask)
+        for mask in (project.get("masks") or ())
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    ]
+    visual_frame, visual_resolution, visual_masks = preparar_check_visual_display(
+        frame,
+        resolution,
+        project_masks,
+        int(visual_rotation or 0) % 360,
+    )
+    visual_frame = _resize_visual_frame(visual_frame, visual_resolution)
+    if not _valid_image(visual_frame):
+        return None, {}, "unavailable", ""
+
+    masks = {
+        str(mask.get("id") or ""): mask
+        for mask in visual_masks
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    }
+    return visual_frame, masks, "project_visual_geometry", "project"
+
+
+def _minimum_powered_votes_from_checks(repository, project_name: str, pair_ids: set[str]):
+    """Menor padrão energizado configurado, limitado a máscaras discriminantes."""
+    counts = []
+    try:
+        checks = repository.listar_checks(project_name)
+    except Exception:
+        checks = []
+
+    for check in checks or ():
+        if not isinstance(check, dict):
+            continue
+        states = (
+            check.get("mask_states", {})
+            if isinstance(check.get("mask_states"), dict)
+            else {}
+        )
+        count = sum(
+            1
+            for mask_id in pair_ids
+            if str(states.get(mask_id) or "") == DISPLAY_CHECK_STATE_ON
+        )
+        if count > 0:
+            counts.append(int(count))
+
+    if not counts:
+        return 0, 0
+    minimum = min(counts)
+    return int(minimum), int(_required_consensus_votes(minimum))
+
+
+def _generic_live_mask_energy(
+    app,
+    frame,
+    project_name: str,
+    context: dict,
+) -> dict:
+    """Decide somente se existe energia, sem perguntar qual CHECK está ativo.
+
+    Cada máscara física é comparada com exemplos ON e OFF da PRÓPRIA máscara,
+    extraídos das fotos reais dos CHECKS. Só máscaras que possuem o par local
+    ON+OFF participam da autoridade de energia; fallback entre máscaras não
+    pode energizar a placa.
+    """
+    repository = getattr(app, "display_project_repository", None)
+    if repository is None or not _valid_image(frame):
+        return {"available": False, "reason": "repository_ou_frame_ausente"}
+
+    try:
+        project = repository.carregar_projeto(project_name)
+    except Exception:
+        project = None
+    if not isinstance(project, dict):
+        return {"available": False, "reason": "projeto_display_inexistente"}
+
+    try:
+        rotation = int(app._obter_rotacao_visual_display_f3()) % 360
+    except Exception:
+        rotation = 0
+
+    analyzer = getattr(app, "_display_f3_generic_power_analyzer", None)
+    if (
+        analyzer is None
+        or getattr(analyzer, "repository", None) is not repository
+        or not isinstance(analyzer, same_mask_module.F3SameMaskReferenceAnalyzer)
+    ):
+        analyzer = same_mask_module.F3SameMaskReferenceAnalyzer(repository)
+        app._display_f3_generic_power_analyzer = analyzer
+
+    project_masks = [
+        mask
+        for mask in (project.get("masks") or ())
+        if isinstance(mask, dict) and str(mask.get("id") or "")
+    ]
+    try:
+        learning = analyzer._check_photo_learning(
+            project_name,
+            project,
+            project_masks,
+            rotation,
+        )
+    except Exception:
+        return {"available": False, "reason": "aprendizado_fotos_checks_indisponivel"}
+
+    by_mask = learning.get("by_mask", {}) if isinstance(learning, dict) else {}
+    local_pairs = {}
+    for mask_id, profile in (by_mask.items() if isinstance(by_mask, dict) else ()):
+        if not isinstance(profile, dict):
+            continue
+        on_refs = list(profile.get(DISPLAY_CHECK_STATE_ON, []) or ())
+        off_refs = list(profile.get(DISPLAY_CHECK_STATE_OFF, []) or ())
+        if on_refs and off_refs:
+            local_pairs[str(mask_id)] = (on_refs, off_refs)
+
+    if not local_pairs:
+        return {"available": False, "reason": "sem_pares_locais_on_off"}
+
+    live_frame, live_masks, geometry_source, geometry_space = _energy_live_mask_context(
+        app,
+        frame,
+        project,
+        rotation,
+    )
+    if not _valid_image(live_frame) or not live_masks:
+        return {"available": False, "reason": "geometria_live_indisponivel"}
+
+    minimum_on, required_powered = _minimum_powered_votes_from_checks(
+        repository,
+        project_name,
+        set(local_pairs),
+    )
+    if required_powered <= 0:
+        return {"available": False, "reason": "checks_sem_on_discriminante"}
+
+    powered_votes = 0
+    off_votes = 0
+    tie_votes = 0
+    details = []
+    classifications = {}
+
+    for mask_id, (on_refs, off_refs) in local_pairs.items():
+        visual_mask = live_masks.get(mask_id)
+        if not isinstance(visual_mask, dict):
+            continue
+        try:
+            selection = display_mask_to_analysis_selection(visual_mask)
+            features = extrair_features_selecao(live_frame, selection)
+        except (TypeError, ValueError):
+            continue
+        if int(getattr(features, "area_pixels", 0) or 0) <= 0:
+            continue
+
+        try:
+            classified = same_mask_module.classificar_mascara_por_referencias_locais_f3(
+                current=features,
+                on_references=on_refs,
+                off_references=off_refs,
+                detect_low_light=True,
+            )
+        except Exception:
+            classified = None
+        if not isinstance(classified, dict):
+            continue
+
+        state = str(classified.get("state") or "").strip().lower()
+        confidence = _safe_float(classified.get("confidence"))
+        confident = confidence >= DISPLAY_AUTO_MIN_CONFIDENCE
+        vote = "tie"
+        if confident and state in (DISPLAY_CHECK_STATE_ON, DISPLAY_AUTO_CLASS_LOW_LIGHT):
+            powered_votes += 1
+            vote = "powered"
+        elif confident and state == DISPLAY_CHECK_STATE_OFF:
+            off_votes += 1
+            vote = "off"
+        else:
+            tie_votes += 1
+
+        classifications[mask_id] = state
+        details.append(
+            {
+                "mask_id": mask_id,
+                "classified": state,
+                "confidence": round(confidence, 4),
+                "winner": vote,
+                "distances": deepcopy(classified.get("distances") or {}),
+                "reference_separation": classified.get("reference_separation"),
+                "reference_source": classified.get("reference_source"),
+                "local_on_reference_count": len(on_refs),
+                "local_off_reference_count": len(off_refs),
+            }
+        )
+
+    valid_votes = int(powered_votes + off_votes)
+    powered_confirmed = bool(
+        required_powered > 0 and powered_votes >= required_powered
+    )
+    off_confirmed = bool(
+        not powered_confirmed
+        and physical_policy_module.decidir_placa_desligada_por_votos_mascaras_f3(
+            off_votes=off_votes,
+            powered_votes=powered_votes,
+            valid_votes=valid_votes,
+        )
+    )
+
+    if powered_confirmed:
+        energy_state = power_module.F3_POWER_STATE_POWERED
+    elif off_confirmed:
+        energy_state = power_module.F3_POWER_STATE_OFF
+    else:
+        energy_state = power_module.F3_POWER_STATE_UNCONFIRMED
+
+    return {
+        "available": bool(details),
+        "source": F3_UNIFIED_POWER_SOURCE,
+        "primary_authority": F3_POWER_PRIMARY_SOURCE,
+        "secondary_guard": F3_POWER_SECONDARY_SOURCE,
+        "legacy_power_evidence_used": False,
+        "energy_state": energy_state,
+        "powered_confirmed": powered_confirmed,
+        "off_confirmed": off_confirmed,
+        "logical_check_independent": True,
+        "energy_scope": "all_discriminative_live_masks",
+        "vote_policy": F3_POWER_VOTE_POLICY,
+        "evaluated_mask_count": len(details),
+        "same_mask_pair_count": len(local_pairs),
+        "minimum_discriminative_on_count": int(minimum_on),
+        "required_powered_votes": int(required_powered),
+        # Compatibilidade com consumidores históricos do gate/debug.
+        "expected_on_mask_count": int(minimum_on),
+        "required_consensus_votes": int(required_powered),
+        "powered_votes": int(powered_votes),
+        "off_votes": int(off_votes),
+        "tie_votes": int(tie_votes),
+        "valid_votes": int(valid_votes),
+        "raw_analysis_ready": bool(details),
+        "raw_analysis_approved": None,
+        "raw_analysis_matched_mask_count": 0,
+        "raw_analysis_active_mask_count": len(details),
+        "mask_classifications": classifications,
+        "mask_geometry_source": geometry_source,
+        "mask_geometry_space": geometry_space,
+        "check_id": str((context or {}).get("check_id") or ""),
+        "project_name": str(project_name or ""),
+        "details": details,
+    }
 
 
 def _analysis_matches_context(analysis: dict | None, project_name: str, check_id: str) -> bool:
@@ -419,29 +714,52 @@ def avaliar_evidencia_energia_unificada_display_f3(
         }
 
     check_id = str(context.get("check_id") or "")
+    geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    geometry_token = (
+        id(geometry),
+        str((geometry or {}).get("geometry_space") or "")
+        if isinstance(geometry, dict)
+        else "",
+    )
     cache_key = (
         str(project_name or ""),
         check_id,
         authority_frame_source,
         _frame_token(app, authority_frame),
+        geometry_token,
     )
     cached = getattr(app, "_display_f3_unified_power_cache", None)
     if isinstance(cached, dict) and cached.get("key") == cache_key:
         return deepcopy(cached.get("value"))
 
-    raw = _run_raw_current_check_analysis(
+    evidence = _generic_live_mask_energy(
         app,
         authority_frame,
         project_name,
         context,
     )
-    secondary = _secondary_full_pixel_details(
-        app,
-        authority_frame,
-        project_name,
-        context,
-    )
-    evidence = resumir_energia_por_analise_bruta_f3(raw, secondary)
+
+    # Compatibilidade fail-safe para projetos antigos que ainda não possuem
+    # pares ON/OFF da mesma máscara em suas fotos de CHECK.
+    if not bool(isinstance(evidence, dict) and evidence.get("available")):
+        raw = _run_raw_current_check_analysis(
+            app,
+            authority_frame,
+            project_name,
+            context,
+        )
+        secondary = _secondary_full_pixel_details(
+            app,
+            authority_frame,
+            project_name,
+            context,
+        )
+        fallback = resumir_energia_por_analise_bruta_f3(raw, secondary)
+        fallback["logical_check_independent"] = False
+        fallback["energy_scope"] = "current_check_fallback"
+        fallback["fallback_reason"] = str((evidence or {}).get("reason") or "")
+        evidence = fallback
+
     evidence["project_name"] = str(project_name or "")
     evidence["check_id"] = check_id
     evidence["same_mask_comparison"] = True
@@ -534,12 +852,12 @@ def aplicar_autoridade_energia_unificada_ao_estado_f3(
                 "text": f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}",
                 "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["check"],
                 "allow_auto": True,
-                "physical_state_key": "check:powered_by_current_mask_analysis",
+                "physical_state_key": "powered:live_same_mask_learning",
                 "expected_check_id": check_id,
                 "physical_matches_expected_check": False,
                 "powered_board_confirmed": True,
                 "power_gate_blocked": False,
-                "power_gate_reason": "segmento_aceso_confirmado_pela_analise_bruta",
+                "power_gate_reason": "energia_confirmada_pelas_mascaras_fisicas_live",
                 contract_module.F3_DECISION_ALLOWED_KEY: True,
                 contract_module.F3_MASK_LIVE_KEY: True,
             }
@@ -728,7 +1046,8 @@ def _install_debug_power_summary_v2() -> None:
         insert_at = 7 if len(lines) >= 7 else len(lines)
         lines[insert_at:insert_at] = [
             f"FONTE ÚNICA DE ENERGIA: {F3_POWER_PRIMARY_SOURCE}",
-            f"PROTEÇÃO OFF↔ON: {F3_POWER_SECONDARY_SOURCE}",
+            "ESCOPO DA ENERGIA: TODAS AS MÁSCARAS FÍSICAS DISCRIMINANTES • INDEPENDENTE DO CHECK LÓGICO",
+            f"FALLBACK LEGADO: {F3_POWER_SECONDARY_SOURCE}",
         ]
         return "\n".join(lines)
 

@@ -11,6 +11,7 @@ import src.platform.display_f3_check_photo_learning as learning_module
 import src.platform.display_f3_strict_mask_conformity as strict_module
 from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 from src.platform.display_check_presence_reference import DisplayCheckPresenceReferenceStore
+from src.platform.display_f3_same_mask_reference_fix import F3SameMaskReferenceAnalyzer
 from src.platform.display_f3_check_photo_learning import (
     F3_CHECK_PHOTO_LEARNING_AUTHORITY,
     F3_CHECK_PHOTO_LEARNING_SOURCE,
@@ -108,9 +109,9 @@ class DisplayF3CheckPhotoLearningTests(unittest.TestCase):
         import src.platform.display_f3_live_runtime_fix as live_runtime_module
         import src.platform.display_f3_live_diagnostic_trace as trace_module
 
-        self.assertIs(runtime_module.DisplayAutomaticCheckAnalyzer, F3CheckPhotoLearningAnalyzer)
-        self.assertIs(live_runtime_module.DisplayAutomaticCheckAnalyzer, F3CheckPhotoLearningAnalyzer)
-        self.assertIs(trace_module.F3ExactCheckTemplateAnalyzer, F3CheckPhotoLearningAnalyzer)
+        self.assertIs(runtime_module.DisplayAutomaticCheckAnalyzer, F3SameMaskReferenceAnalyzer)
+        self.assertIs(live_runtime_module.DisplayAutomaticCheckAnalyzer, F3SameMaskReferenceAnalyzer)
+        self.assertIs(trace_module.F3ExactCheckTemplateAnalyzer, F3SameMaskReferenceAnalyzer)
 
     def test_final_authority_is_installed_after_historical_strict_layer(self):
         source = inspect.getsource(RaspberryPi3ProductionApp.__init__)

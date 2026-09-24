@@ -238,6 +238,121 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         self.assertTrue(result["allow_auto"])
         self.assertTrue(result[contract_module.F3_DECISION_ALLOWED_KEY])
 
+    def test_energia_generica_independe_do_check_logico_atual(self):
+        generic = {
+            "available": True,
+            "source": power_v2.F3_UNIFIED_POWER_SOURCE,
+            "energy_state": legacy_power.F3_POWER_STATE_POWERED,
+            "powered_confirmed": True,
+            "off_confirmed": False,
+            "logical_check_independent": True,
+            "energy_scope": "all_discriminative_live_masks",
+            "minimum_discriminative_on_count": 4,
+            "required_powered_votes": 3,
+            "expected_on_mask_count": 4,
+            "powered_votes": 9,
+            "off_votes": 10,
+            "tie_votes": 1,
+            "valid_votes": 19,
+            "raw_analysis_ready": True,
+            "details": [],
+        }
+
+        class _Frame:
+            size = 1
+
+        class _App(_FakeApp):
+            camera_service = object()
+
+            @staticmethod
+            def _display_auto_frame_token(frame):
+                return ("object", id(frame))
+
+            @staticmethod
+            def _obter_rotacao_visual_display_f3():
+                return 180
+
+        app = _App()
+        frame = _Frame()
+        context = {
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_001",
+            "check_name": "H1",
+        }
+
+        with patch.object(
+            power_v2,
+            "_generic_live_mask_energy",
+            return_value=generic,
+        ), patch.object(
+            power_v2,
+            "_run_raw_current_check_analysis",
+        ) as legacy_raw:
+            result = power_v2.avaliar_evidencia_energia_unificada_display_f3(
+                app,
+                frame,
+                "CM_500_L",
+                context,
+            )
+
+        self.assertTrue(result["powered_confirmed"])
+        self.assertTrue(result["logical_check_independent"])
+        self.assertEqual("CHECK_001", result["check_id"])
+        self.assertEqual(3, result["required_powered_votes"])
+        legacy_raw.assert_not_called()
+
+    def test_energia_generica_indisponivel_cai_no_fallback_do_check_atual(self):
+        class _Frame:
+            size = 1
+
+        class _App(_FakeApp):
+            camera_service = object()
+
+            @staticmethod
+            def _display_auto_frame_token(frame):
+                return ("object", id(frame))
+
+            @staticmethod
+            def _obter_rotacao_visual_display_f3():
+                return 0
+
+        app = _App()
+        frame = _Frame()
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "active_mask_count": 1,
+            "matched_mask_count": 1,
+            "mask_results": [
+                _row("MASK_008", classified="on", matched=True),
+            ],
+        }
+
+        with patch.object(
+            power_v2,
+            "_generic_live_mask_energy",
+            return_value={"available": False, "reason": "sem_pares_locais_on_off"},
+        ), patch.object(
+            power_v2,
+            "_run_raw_current_check_analysis",
+            return_value=analysis,
+        ), patch.object(
+            power_v2,
+            "_secondary_full_pixel_details",
+            return_value={},
+        ):
+            result = power_v2.avaliar_evidencia_energia_unificada_display_f3(
+                app,
+                frame,
+                "DISPLAY A",
+                {"check_id": "CHECK_001", "check_name": "H1"},
+            )
+
+        self.assertTrue(result["powered_confirmed"])
+        self.assertFalse(result["logical_check_independent"])
+        self.assertEqual("current_check_fallback", result["energy_scope"])
+        self.assertEqual("sem_pares_locais_on_off", result["fallback_reason"])
+
     def test_tracking_usa_frame_bruto_como_autoridade_de_energia(self):
         class _Frame:
             size = 1
@@ -272,6 +387,10 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         }
 
         with patch.object(
+            power_v2,
+            "_generic_live_mask_energy",
+            return_value={"available": False, "reason": "teste_fallback"},
+        ), patch.object(
             power_v2,
             "_run_raw_current_check_analysis",
             return_value=off_analysis,
@@ -327,6 +446,10 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         }
 
         with patch.object(
+            power_v2,
+            "_generic_live_mask_energy",
+            return_value={"available": False, "reason": "teste_fallback"},
+        ), patch.object(
             power_v2,
             "_run_raw_current_check_analysis",
             return_value=analysis,
@@ -389,6 +512,10 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
 
         with patch.object(
             power_v2,
+            "_generic_live_mask_energy",
+            return_value={"available": False, "reason": "teste_fallback"},
+        ), patch.object(
+            power_v2,
             "_run_raw_current_check_analysis",
             side_effect=[powered_analysis, off_analysis],
         ) as raw_analysis, patch.object(
@@ -446,6 +573,10 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         }
 
         with patch.object(
+            power_v2,
+            "_generic_live_mask_energy",
+            return_value={"available": False, "reason": "teste_fallback"},
+        ), patch.object(
             power_v2,
             "_run_raw_current_check_analysis",
             return_value=powered_analysis,

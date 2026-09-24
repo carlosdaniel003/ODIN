@@ -37,6 +37,9 @@ from src.platform.display_f3_exact_check_template import (
 )
 from src.platform.display_project_repository import normalizar_resolucao_display
 from src.platform.display_visual_rotation import preparar_check_visual_display
+from src.platform.display_f3_same_mask_reference_fix import (
+    F3SameMaskReferenceAnalyzer,
+)
 
 
 F3_CHECK_PHOTO_LEARNING_AUTHORITY = "f3_current_check_photo_mask_states"
@@ -204,17 +207,19 @@ class F3CheckPhotoLearningAnalyzer(F3ExactCheckTemplateAnalyzer):
 
 
 def _install_runtime_aliases() -> None:
-    """Fecha todos os aliases históricos no mesmo analisador do CHECK atual."""
-    runtime_module.DisplayAutomaticCheckAnalyzer = F3CheckPhotoLearningAnalyzer
-    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3CheckPhotoLearningAnalyzer
+    """Usa exemplos ON/OFF reais da mesma máscara como classificação produtiva.
 
-    # A sonda rápida de H1/BLUE importa classes por valor. Se esses aliases não
-    # forem atualizados, o caminho rápido poderia continuar usando o aprendizado
-    # cruzado antigo enquanto o runtime normal já usa a foto do CHECK atual.
+    A foto exata do CHECK continua disponível no DEBUG como comparação de cena,
+    mas uma divergência de template nunca mais é convertida automaticamente no
+    estado oposto do LED.
+    """
+    runtime_module.DisplayAutomaticCheckAnalyzer = F3SameMaskReferenceAnalyzer
+    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3SameMaskReferenceAnalyzer
+
     try:
         import src.platform.display_f3_live_diagnostic_trace as trace_module
 
-        trace_module.F3ExactCheckTemplateAnalyzer = F3CheckPhotoLearningAnalyzer
+        trace_module.F3ExactCheckTemplateAnalyzer = F3SameMaskReferenceAnalyzer
         trace_module._display_f3_check_photo_learning_authority = True
     except Exception:
         pass
@@ -222,18 +227,18 @@ def _install_runtime_aliases() -> None:
     try:
         import src.platform.display_f3_h1_single_frame_probe as probe_module
 
-        probe_module.LearnedDisplayAutomaticCheckAnalyzer = F3CheckPhotoLearningAnalyzer
+        probe_module.LearnedDisplayAutomaticCheckAnalyzer = F3SameMaskReferenceAnalyzer
         probe_module._display_f3_check_photo_learning_authority = True
     except Exception:
         pass
 
-    # DEBUG TÉCNICO deve descrever a mesma autoridade usada em produção. Os dois
-    # nomes históricos continuam disponíveis apenas para compatibilidade da UI.
+    # DEBUG mantém os dois diagnósticos separados: foto exata de cena e
+    # aprendizado produtivo ON/OFF da mesma máscara.
     try:
         import src.platform.display_f3_manual_snapshot_debug as debug_module
 
         debug_module.F3ExactCheckTemplateAnalyzer = F3CheckPhotoLearningAnalyzer
-        debug_module.F3SameMaskReferenceAnalyzer = F3CheckPhotoLearningAnalyzer
+        debug_module.F3SameMaskReferenceAnalyzer = F3SameMaskReferenceAnalyzer
         debug_module._display_f3_check_photo_learning_authority = True
     except Exception:
         pass
@@ -293,7 +298,7 @@ _INSTALLED = False
 
 
 def instalar_aprendizado_foto_check_display_f3() -> None:
-    """Instala a foto + máscaras + estados do CHECK como autoridade final do F3."""
+    """Instala fotos + máscaras + estados como aprendizado produtivo do F3."""
     global _INSTALLED
 
     # Reaplica os aliases em toda chamada. Algumas camadas históricas também os

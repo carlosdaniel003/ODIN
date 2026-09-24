@@ -203,9 +203,10 @@ def main() -> None:
     instalar_guias_mascaras_inicio_display_f3()
     instalar_evidencia_energia_mesma_mascara_display_f3()
     instalar_autoridade_energia_final_display_f3()
-    # Autoridade literal mais externa do F3: a análise bruta do CHECK atual prova
-    # energia; OFF↔ON em BGR/S/V/pixels é somente proteção secundária. Isso também
-    # fecha o DEBUG por CHECK com proveniência explícita da foto usada.
+    # Autoridade de energia independente do CHECK lógico: usa o frame RAW e os
+    # pares ON/OFF reais da mesma máscara aprendidos nas fotos dos CHECKS. Assim
+    # USB/BLUE/AUX continuam provando que o display está ligado mesmo se a
+    # sequência lógica ainda estiver aguardando H1.
     instalar_autoridade_energia_unificada_display_f3()
     # Consumidores históricos do DEBUG/guards recebem a mesma semântica de energia
     # e deixam de publicar uma segunda verdade baseada somente em brilho.
