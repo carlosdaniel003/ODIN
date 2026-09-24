@@ -13,15 +13,15 @@ A autoridade fica única e hierárquica:
 
     PRESENÇA GLOBAL -> ENERGIA PELAS MÁSCARAS -> CHECK -> CONFORMIDADE
 
-A energia primária vem da análise bruta do CHECK lógico atual. Uma máscara que o
-CHECK espera ACESA só vota POWERED quando a própria autoridade de máscara a
-classifica ON com confiança suficiente. OFF<->ON da mesma máscara continua como
-proteção secundária, porém usando a comparação completa BGR/S/V/pixel já usada
-pelo gabarito exato, nunca apenas brilho.
+A energia primária é independente do CHECK lógico. O frame físico atual é lido
+nas máscaras rastreadas e cada máscara disputa entre exemplos ON e OFF da própria
+região, aprendidos das fotos reais dos CHECKS. O menor padrão energizado
+configurado define quantos votos ON são necessários para provar energia.
 
-Nenhuma análise bruta gera OK/NG sozinha. Ela somente pode abrir o gate de
-energia. O pipeline produtivo continua sendo o único responsável por aprovar,
-reprovar ou avançar CHECK.
+A análise do CHECK lógico continua separada: ela decide conformidade e sequência,
+mas não pode desligar o gate só porque a placa está fisicamente em BLUE/USB/AUX
+enquanto o fluxo ainda aguarda H1. Projetos antigos sem pares locais ON/OFF usam
+o caminho anterior apenas como fallback de compatibilidade.
 
 Módulo exclusivo do F3. Não cria timer, não lê uma segunda câmera e não altera F2.
 """
@@ -960,45 +960,77 @@ def _run_check_analyses_with_provenance(
     checks: list[dict],
     rotation: int,
 ) -> list[dict]:
-    """Cada CHECK recebe um analisador novo, evitando qualquer bleed de cache."""
+    """DEBUG separa gabarito exato do classificador produtivo por mesma máscara."""
     rows = []
     for check in checks:
         check_id = str(check.get("id") or "")
         if not check_id:
             continue
-        analyzer = F3CheckPhotoLearningAnalyzer(repository)
+
+        exact_analyzer = F3CheckPhotoLearningAnalyzer(repository)
+        productive_analyzer = same_mask_module.F3SameMaskReferenceAnalyzer(repository)
         try:
-            analysis = analyzer.analyze(
+            exact_analysis = exact_analyzer.analyze(
                 frame=frame,
                 project_name=project_name,
                 check_id=check_id,
                 visual_rotation=int(rotation or 0),
             )
         except Exception as exc:
-            analysis = {
+            exact_analysis = {
                 "ready": False,
                 "approved": None,
-                "reason": f"debug_analysis_error:{type(exc).__name__}:{exc}",
+                "reason": f"debug_exact_analysis_error:{type(exc).__name__}:{exc}",
                 "project_name": str(project_name),
                 "check_id": check_id,
                 "check_name": str(check.get("name") or check_id),
                 "mask_results": [],
             }
-        provenance = _reference_provenance(repository, project_name, check_id, analyzer)
-        analysis = deepcopy(analysis)
-        analysis["reference_provenance"] = provenance
-        analysis["debug_fresh_analyzer_per_check"] = True
-        analysis["debug_canonical_authority"] = F3_POWER_PRIMARY_SOURCE
+
+        try:
+            productive_analysis = productive_analyzer.analyze(
+                frame=frame,
+                project_name=project_name,
+                check_id=check_id,
+                visual_rotation=int(rotation or 0),
+            )
+        except Exception as exc:
+            productive_analysis = {
+                "ready": False,
+                "approved": None,
+                "reason": f"debug_productive_analysis_error:{type(exc).__name__}:{exc}",
+                "project_name": str(project_name),
+                "check_id": check_id,
+                "check_name": str(check.get("name") or check_id),
+                "mask_results": [],
+            }
+
+        provenance = _reference_provenance(
+            repository,
+            project_name,
+            check_id,
+            exact_analyzer,
+        )
+        exact_analysis = deepcopy(exact_analysis)
+        exact_analysis["reference_provenance"] = provenance
+        exact_analysis["debug_fresh_analyzer_per_check"] = True
+        exact_analysis["debug_decision_authority"] = False
+
+        productive_analysis = deepcopy(productive_analysis)
+        productive_analysis["debug_productive_classifier"] = True
+        productive_analysis["debug_decision_authority"] = False
 
         rows.append(
             {
                 "check_id": check_id,
                 "check_name": str(check.get("name") or check_id),
-                "exact_template": deepcopy(analysis),
-                "check_photo_learning": deepcopy(analysis),
-                "power_mask_evidence": _debug_energy_from_analysis(analysis),
+                "exact_template": exact_analysis,
+                "check_photo_learning": productive_analysis,
+                # Diagnóstico legado por CHECK. A energia produtiva real é global
+                # e aparece no bloco POWER AUTHORITY do runtime.
+                "power_mask_evidence": _debug_energy_from_analysis(exact_analysis),
                 "reference_provenance": provenance,
-                "single_canonical_analysis": True,
+                "single_canonical_analysis": False,
             }
         )
     return rows
@@ -1043,6 +1075,27 @@ def _install_debug_power_summary_v2() -> None:
     def report(snapshot: dict) -> str:
         base = previous_report(snapshot)
         lines = str(base).splitlines()
+
+        runtime = snapshot.get("runtime_at_click") if isinstance(snapshot, dict) else {}
+        runtime = runtime if isinstance(runtime, dict) else {}
+        status = runtime.get("power_authority")
+        status = status if isinstance(status, dict) else {}
+        energy = status.get("energy")
+        energy = energy if isinstance(energy, dict) else {}
+        generic = bool(energy.get("logical_check_independent"))
+
+        if generic:
+            replacements = {
+                "SEGMENTOS ESPERADOS ON:": "BASE MÍNIMA ON PARA PROVAR ENERGIA:",
+                "ON CONFIRMADOS:": "MÁSCARAS LIVE ON CONFIRMADAS:",
+                "OFF CONFIRMADOS NOS ON ESPERADOS:": "MÁSCARAS LIVE OFF CONFIRMADAS:",
+            }
+            for index, line in enumerate(lines):
+                for prefix, replacement in replacements.items():
+                    if str(line).startswith(prefix):
+                        lines[index] = str(line).replace(prefix, replacement, 1)
+                        break
+
         insert_at = 7 if len(lines) >= 7 else len(lines)
         lines[insert_at:insert_at] = [
             f"FONTE ÚNICA DE ENERGIA: {F3_POWER_PRIMARY_SOURCE}",

@@ -270,8 +270,8 @@ class RaspberryPi3ProductionApp(
         instalar_gabarito_exato_checks_display_f3()
         instalar_gate_rapido_check_esperado_display_f3()
         # Camadas históricas ainda instalam guards, overlay e telemetria usados
-        # pelo F3. Depois delas, a autoridade produtiva final volta explicitamente
-        # para a própria foto do CHECK + máscaras + estados ACESO/APAGADO.
+        # pelo F3. Depois delas, a autoridade produtiva final volta ao aprendizado
+        # ON/OFF da mesma máscara construído pelas fotos reais dos CHECKS.
         instalar_conformidade_estrita_mascaras_display_f3()
         instalar_aprendizado_foto_check_display_f3()
         # Substitui também a API histórica usada pelo DEBUG/guards, eliminando as

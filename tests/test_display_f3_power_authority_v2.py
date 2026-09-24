@@ -238,6 +238,42 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         self.assertTrue(result["allow_auto"])
         self.assertTrue(result[contract_module.F3_DECISION_ALLOWED_KEY])
 
+    def test_base_de_energia_usa_o_menor_check_discriminante(self):
+        class _Repository:
+            @staticmethod
+            def listar_checks(_project_name):
+                return [
+                    {
+                        "id": "CHECK_001",
+                        "mask_states": {
+                            "A": "on",
+                            "B": "on",
+                            "C": "on",
+                            "D": "on",
+                        },
+                    },
+                    {
+                        "id": "CHECK_004",
+                        "mask_states": {
+                            "A": "on",
+                            "B": "on",
+                            "C": "on",
+                            "D": "on",
+                            "E": "on",
+                            "F": "on",
+                        },
+                    },
+                ]
+
+        minimum, required = power_v2._minimum_powered_votes_from_checks(
+            _Repository(),
+            "DISPLAY A",
+            {"A", "B", "C", "D", "E", "F"},
+        )
+
+        self.assertEqual(4, minimum)
+        self.assertEqual(3, required)
+
     def test_energia_generica_independe_do_check_logico_atual(self):
         generic = {
             "available": True,
@@ -674,6 +710,7 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
 
         source = inspect.getsource(power_v2._run_check_analyses_with_provenance)
         self.assertIn("F3CheckPhotoLearningAnalyzer(repository)", source)
+        self.assertIn("F3SameMaskReferenceAnalyzer(repository)", source)
         self.assertIn("reference_provenance", source)
         self.assertIn("single_canonical_analysis", source)
 

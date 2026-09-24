@@ -2,17 +2,17 @@ from __future__ import annotations
 
 """Compatibilidade final para consumidores históricos de evidência de energia.
 
-A API antiga não recebe ``app`` nem rotação visual. Para DEBUG/guards que ainda a
-consultam, executamos a mesma autoridade canônica no domínio mestre bruto
-(rotation=0): frame, foto do CHECK e máscaras permanecem todos no mesmo sistema
-de coordenadas. O resultado é somente diagnóstico; a decisão produtiva continua
-pertencendo à autoridade unificada instalada no runtime F3.
+A API antiga não recebe ``app`` nem a geometria móvel do tracker. Para
+DEBUG/guards históricos ela usa o classificador ON/OFF por mesma máscara no
+domínio mestre bruto (rotation=0). O resultado é somente diagnóstico por CHECK;
+a decisão produtiva de energia continua global e pertence à autoridade unificada
+instalada no runtime F3.
 """
 
 from copy import deepcopy
 
 import src.platform.display_f3_physical_learning_policy as physical_policy_module
-from src.platform.display_f3_check_photo_learning import F3CheckPhotoLearningAnalyzer
+from src.platform.display_f3_same_mask_reference_fix import F3SameMaskReferenceAnalyzer
 from src.platform.display_f3_power_authority_v2 import (
     F3_UNIFIED_POWER_SOURCE,
     resumir_energia_por_analise_bruta_f3,
@@ -27,7 +27,7 @@ def avaliar_evidencia_energia_unificada_compat_f3(
     project_name: str,
     check_id: str,
 ) -> dict:
-    analyzer = F3CheckPhotoLearningAnalyzer(repository)
+    analyzer = F3SameMaskReferenceAnalyzer(repository)
     try:
         analysis = analyzer.analyze(
             frame=frame,
