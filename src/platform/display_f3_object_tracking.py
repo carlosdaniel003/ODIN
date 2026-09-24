@@ -109,6 +109,10 @@ F3_TRACKING_REFERENCE_SCALE_MIN = 0.55
 F3_TRACKING_REFERENCE_SCALE_MAX = 1.80
 F3_TRACKING_OVERLAY_BOARD_BGR = (255, 214, 56)
 F3_TRACKING_TEMPLATE_MIN_SCORE = 0.42
+# Quando o CHECK lógico já é conhecido, a foto dele pode recuperar SOMENTE a
+# pose geométrica. O conteúdo dos segmentos fica excluído pelo support mask e
+# jamais aprova o CHECK. Isso permite relock em displays com segmento defeituoso.
+F3_TRACKING_CURRENT_CHECK_TEMPLATE_MIN_SCORE = 0.30
 F3_TRACKING_TEMPLATE_MIN_SIZE = 28
 F3_TRACKING_TEMPLATE_PADDING_FRACTION = 0.035
 
@@ -1379,6 +1383,7 @@ class F3DisplayObjectTracker:
 
         template_edges = None
         template_origin = None
+        template_support_mask = None
         normalized_board = _normalize_points(board_points, minimum=3)
         if normalized_board:
             xs = [float(p[0]) for p in normalized_board]
@@ -1397,9 +1402,31 @@ class F3DisplayObjectTracker:
             ):
                 edges = cv2.Canny(gray, 45, 135)
                 crop = edges[iy1:iy2, ix1:ix2]
-                if crop.size and float(np.std(crop)) >= 8.0:
-                    template_edges = crop.copy()
+                support = (
+                    tracking_mask[iy1:iy2, ix1:ix2]
+                    if isinstance(tracking_mask, np.ndarray)
+                    and tracking_mask.shape == gray.shape
+                    else None
+                )
+                support_ok = bool(
+                    isinstance(support, np.ndarray)
+                    and support.shape == crop.shape
+                    and int(cv2.countNonZero(support)) >= 200
+                )
+                structural_crop = (
+                    cv2.bitwise_and(crop, crop, mask=support)
+                    if support_ok
+                    else crop
+                )
+                if (
+                    structural_crop.size
+                    and float(np.std(structural_crop)) >= 8.0
+                ):
+                    template_edges = structural_crop.copy()
                     template_origin = (float(ix1), float(iy1))
+                    template_support_mask = (
+                        support.copy() if support_ok else None
+                    )
 
         # Uma referência pode ser útil mesmo com pouco ORB. O fallback por
         # template de bordas resolve translação quando câmera/suporte são fixos,
@@ -1416,12 +1443,19 @@ class F3DisplayObjectTracker:
             "reference_to_canonical": reference_to_canonical,
             "template_edges": template_edges,
             "template_origin": template_origin,
+            "template_support_mask": template_support_mask,
         }
 
-    def _template_candidate(self, current_edges, key: str):
+    def _template_candidate(
+        self,
+        current_edges,
+        key: str,
+        min_score: float | None = None,
+    ):
         ref = self.references.get(key, {})
         template = ref.get("template_edges")
         origin = ref.get("template_origin")
+        support = ref.get("template_support_mask")
         if (
             current_edges is None
             or template is None
@@ -1430,17 +1464,41 @@ class F3DisplayObjectTracker:
             or template.shape[1] > current_edges.shape[1]
         ):
             return None
+        masked = bool(
+            isinstance(support, np.ndarray)
+            and support.shape == template.shape
+            and int(cv2.countNonZero(support)) >= 200
+        )
         try:
-            response = cv2.matchTemplate(
-                current_edges,
-                template,
-                cv2.TM_CCOEFF_NORMED,
-            )
+            if masked:
+                response = cv2.matchTemplate(
+                    current_edges,
+                    template,
+                    cv2.TM_CCORR_NORMED,
+                    mask=support,
+                )
+                response = np.nan_to_num(
+                    response,
+                    nan=-1.0,
+                    posinf=-1.0,
+                    neginf=-1.0,
+                )
+            else:
+                response = cv2.matchTemplate(
+                    current_edges,
+                    template,
+                    cv2.TM_CCOEFF_NORMED,
+                )
             _min_value, max_value, _min_loc, max_loc = cv2.minMaxLoc(response)
         except Exception:
             return None
         score = float(max_value)
-        if score < F3_TRACKING_TEMPLATE_MIN_SCORE:
+        threshold = (
+            F3_TRACKING_TEMPLATE_MIN_SCORE
+            if min_score is None
+            else max(0.0, min(1.0, float(min_score)))
+        )
+        if score < threshold:
             return None
 
         ref_x, ref_y = float(origin[0]), float(origin[1])
@@ -1475,6 +1533,8 @@ class F3DisplayObjectTracker:
             "score": 2.0 + score * 8.0,
             "source_type": source_type,
             "fallback": "edge_template",
+            "template_masked_for_segments": masked,
+            "template_threshold": float(threshold),
         }
 
     def _temporal_tracking_mask(self):
@@ -1958,6 +2018,8 @@ class F3DisplayObjectTracker:
         frame,
         key: str,
         current_tracking_mask=None,
+        *,
+        template_min_score: float | None = None,
     ) -> dict | None:
         """Calcula a pose contra UMA referência sem alterar o lock global.
 
@@ -2017,7 +2079,11 @@ class F3DisplayObjectTracker:
             current_edges = cv2.Canny(gray, 45, 135)
         except Exception:
             current_edges = None
-        candidate = self._template_candidate(current_edges, str(key))
+        candidate = self._template_candidate(
+            current_edges,
+            str(key),
+            min_score=template_min_score,
+        )
         if candidate is None:
             return None
         candidate = dict(candidate)
@@ -2446,6 +2512,99 @@ def reset_tracking_runtime(app) -> None:
     }
 
 
+def _rescue_current_check_tracking_lock(
+    app,
+    frame,
+    runtime: F3DisplayObjectTracker,
+) -> F3TrackingResult | None:
+    """Recupera a pose pela referência estrutural do CHECK corrente.
+
+    O matcher de template usa uma máscara que remove as 28 ROIs. Portanto uma
+    falha real de segmento (ex.: MASK_024 apagada em BLUE) não derruba o lock e
+    também não pode ser usada para aprovar o CHECK.
+    """
+    if runtime is None or not _valid_frame(frame) or not runtime.ready:
+        return None
+    current = _current_check(app)
+    if not isinstance(current, dict):
+        return None
+    check_id = str(current.get("id") or "")
+    if not check_id:
+        return None
+
+    key = f"check:{check_id}"
+    if key not in runtime.references:
+        return None
+
+    candidate = runtime.candidate_for_reference(
+        frame,
+        key,
+        template_min_score=F3_TRACKING_CURRENT_CHECK_TEMPLATE_MIN_SCORE,
+    )
+    if not isinstance(candidate, dict):
+        return None
+
+    try:
+        matrix = np.asarray(
+            candidate.get("matrix"),
+            dtype=np.float32,
+        ).reshape(2, 3)
+    except Exception:
+        return None
+    if not np.all(np.isfinite(matrix)):
+        return None
+
+    # A referência atual serve apenas de pose e continua sujeita aos limites
+    # globais de escala/translação do tracker.
+    scale = affine_scale(matrix)
+    if not (F3_TRACKING_MIN_SCALE <= scale <= F3_TRACKING_MAX_SCALE):
+        return None
+    if abs(float(matrix[0, 2])) > runtime.width * F3_TRACKING_MAX_TRANSLATION_FRACTION:
+        return None
+    if abs(float(matrix[1, 2])) > runtime.height * F3_TRACKING_MAX_TRANSLATION_FRACTION:
+        return None
+
+    aligned = cv2.warpAffine(
+        frame,
+        matrix,
+        (int(runtime.width), int(runtime.height)),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT101,
+    )
+    now = time.monotonic()
+    gray = runtime._gray(frame)
+
+    runtime.last_matrix = matrix.copy()
+    runtime._last_reference = key
+    runtime.last_compute_s = now
+    runtime.last_frame_id = getattr(app, "camera_ultimo_frame_id", None)
+    runtime.last_gray = gray.copy() if isinstance(gray, np.ndarray) else None
+    runtime.last_verified_s = now
+    runtime.consecutive_misses = 0
+
+    reason = (
+        "locked_current_check_template_rescue"
+        if str(candidate.get("fallback") or "") == "edge_template"
+        else "locked_current_check_orb_rescue"
+    )
+    result = F3TrackingResult(
+        True,
+        aligned,
+        reference=key,
+        matches=int(candidate.get("matches", 0) or 0),
+        inliers=int(candidate.get("inliers", 0) or 0),
+        inlier_ratio=float(candidate.get("ratio", 0.0) or 0.0),
+        rotation_deg=float(candidate.get("rotation_deg", 0.0) or 0.0),
+        scale=float(candidate.get("scale", scale) or scale),
+        reason=reason,
+        current_to_canonical=matrix.copy(),
+        source_type="check",
+        evidence_current=True,
+    )
+    runtime.last_result = result
+    return result
+
+
 def align_frame_for_f3(app, frame):
     if not tracking_enabled(app):
         return frame, None
@@ -2466,6 +2625,15 @@ def align_frame_for_f3(app, frame):
         frame,
         frame_id=getattr(app, "camera_ultimo_frame_id", None),
     )
+    if not bool(result.locked):
+        rescued = _rescue_current_check_tracking_lock(
+            app,
+            frame,
+            runtime,
+        )
+        if rescued is not None:
+            result = rescued
+
     app._display_f3_object_tracking_last_status = {
         "enabled": True,
         "locked": bool(result.locked),
