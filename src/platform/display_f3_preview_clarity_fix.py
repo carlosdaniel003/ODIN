@@ -1341,7 +1341,7 @@ def renderizar_preview_claro_display_f3(frame, context):
                 display_bbox,
             )
 
-        if semantic_power_ready or not energy_gate_declared:
+        if has_any_on and (semantic_power_ready or not energy_gate_declared):
             _draw_display_zoom_inset(
                 source_for_inset,
                 result,
