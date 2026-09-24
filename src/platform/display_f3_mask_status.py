@@ -68,8 +68,11 @@ def formatar_status_mascaras_f3(
     total = int(analysis.get("active_mask_count", len(results)) or len(results))
     matched = int(
         analysis.get(
-            "matched_mask_count",
-            sum(1 for item in results if bool(item.get("matched"))),
+            "effective_matched_mask_count",
+            analysis.get(
+                "matched_mask_count",
+                sum(1 for item in results if bool(item.get("matched"))),
+            ),
         )
         or 0
     )
@@ -79,8 +82,21 @@ def formatar_status_mascaras_f3(
         DISPLAY_CHECK_STATE_OFF: 0,
         DISPLAY_AUTO_CLASS_LOW_LIGHT: 0,
     }
-    for item in results:
-        classified = str(item.get("classified") or "")
+    effective_classifications = analysis.get(
+        "effective_classifications"
+    )
+    if isinstance(effective_classifications, dict):
+        classification_values = [
+            str(value or "").strip().lower()
+            for value in effective_classifications.values()
+        ]
+    else:
+        classification_values = [
+            str(item.get("classified") or "").strip().lower()
+            for item in results
+        ]
+
+    for classified in classification_values:
         if classified in counts:
             counts[classified] += 1
 
