@@ -68,6 +68,41 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         )
         self.assertEqual("off", dark_phase)
 
+    def test_visor_efetivo_distingue_validacao_de_ng_confirmado(self):
+        validating = DisplayProductionF3Window._display_readout_semantic_state(
+            "off",
+            "on",
+            failed=False,
+            ready=True,
+            intermittent=True,
+            has_any_on=True,
+            validating=True,
+            effective_authority=True,
+        )
+        confirmed = DisplayProductionF3Window._display_readout_semantic_state(
+            "off",
+            "on",
+            failed=True,
+            ready=True,
+            intermittent=True,
+            has_any_on=True,
+            validating=False,
+            effective_authority=True,
+        )
+        conform = DisplayProductionF3Window._display_readout_semantic_state(
+            "on",
+            "on",
+            failed=False,
+            ready=True,
+            intermittent=True,
+            has_any_on=True,
+            validating=False,
+            effective_authority=True,
+        )
+        self.assertEqual("warning", validating)
+        self.assertEqual("ng", confirmed)
+        self.assertEqual("on", conform)
+
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(
             getattr(DisplayProductionF3Window, "_odin_display_live_roi_overlay", False)
