@@ -371,6 +371,60 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         self.assertIn("debug_detailed", source)
         self.assertNotIn("NG ", source)
 
+    def test_blue_validacao_amarela_e_ng_confirmado_vermelho(self):
+        classifications = {
+            "MASK_010": "on",
+            "MASK_027": "off",
+        }
+        expected = {
+            "MASK_010": "on",
+            "MASK_027": "on",
+        }
+        failed = {"MASK_027"}
+
+        self.assertEqual(
+            "on",
+            clarity._presentation_for_effective_mask(
+                "MASK_010",
+                classifications,
+                expected,
+                failed,
+                set(),
+                {"MASK_027"},
+                has_any_on=True,
+                intermittent=True,
+                effective_authority=True,
+            ),
+        )
+        self.assertEqual(
+            "warning",
+            clarity._presentation_for_effective_mask(
+                "MASK_027",
+                classifications,
+                expected,
+                failed,
+                set(),
+                {"MASK_027"},
+                has_any_on=True,
+                intermittent=True,
+                effective_authority=True,
+            ),
+        )
+        self.assertEqual(
+            "alert",
+            clarity._presentation_for_effective_mask(
+                "MASK_027",
+                classifications,
+                expected,
+                failed,
+                {"MASK_027"},
+                set(),
+                has_any_on=True,
+                intermittent=True,
+                effective_authority=True,
+            ),
+        )
+
     def test_renderer_final_e_reaplicavel_sem_duplicar_contexto(self):
         source = inspect.getsource(clarity._aplicar_render_final)
         self.assertIn("_display_f3_clear_preview_context_installed", source)
