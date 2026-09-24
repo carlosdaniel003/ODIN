@@ -389,6 +389,64 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         self.assertEqual("current_check_fallback", result["energy_scope"])
         self.assertEqual("sem_pares_locais_on_off", result["fallback_reason"])
 
+    def test_tracking_sem_lock_nao_pode_publicar_28_apagados(self):
+        class _Frame:
+            size = 1
+
+        class _TrackingApp(_FakeApp):
+            camera_ultimo_frame_id = 291
+            camera_service = object()
+            _display_f3_object_tracking_enabled = True
+            _display_f3_object_tracking_last_status = {
+                "enabled": True,
+                "locked": False,
+                "reason": "object_not_locked",
+            }
+
+            @staticmethod
+            def _display_auto_frame_token(frame):
+                return ("object", id(frame))
+
+            @staticmethod
+            def _obter_rotacao_visual_display_f3():
+                return 180
+
+        app = _TrackingApp()
+        frame = _Frame()
+        context = {"check_id": "CHECK_002", "check_name": "BLUE"}
+
+        with patch.object(
+            power_v2,
+            "_generic_live_mask_energy",
+            return_value={
+                "available": False,
+                "reason": "tracking_not_locked",
+            },
+        ), patch.object(
+            power_v2,
+            "_run_raw_current_check_analysis",
+        ) as raw_analysis, patch.object(
+            power_v2,
+            "_secondary_full_pixel_details",
+        ) as secondary:
+            result = power_v2.avaliar_evidencia_energia_unificada_display_f3(
+                app,
+                frame,
+                "CM_500_L",
+                context,
+            )
+
+        self.assertFalse(result["powered_confirmed"])
+        self.assertFalse(result["off_confirmed"])
+        self.assertEqual(
+            legacy_power.F3_POWER_STATE_UNCONFIRMED,
+            result["energy_state"],
+        )
+        self.assertEqual("tracking_lock_required", result["energy_scope"])
+        self.assertEqual("tracking_not_locked", result["reason"])
+        raw_analysis.assert_not_called()
+        secondary.assert_not_called()
+
     def test_tracking_usa_frame_bruto_como_autoridade_de_energia(self):
         class _Frame:
             size = 1
