@@ -121,7 +121,7 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         source = inspect.getsource(
             snapshot_module.capturar_snapshot_debug_display_f3
         )
-        visual_pos = source.index('snapshot["visual_state"] = _window_visual_state(app)')
+        visual_pos = source.index('snapshot["visual_state"] = _coherent_visual_state_from_runtime(')
         runtime_pos = source.index('snapshot["runtime_at_click"] = _runtime_state_at_frame(app)')
         analyses_pos = source.index('snapshot["check_analyses"] = _run_check_analyses(')
         self.assertLess(visual_pos, analyses_pos)
@@ -134,6 +134,67 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("montar_contexto_overlay_snapshot_display_f3", source)
         self.assertIn('snapshot["overlay_context"]', source)
         self.assertIn('snapshot["camera_settings_at_frame"]', source)
+
+    def test_estado_visual_do_debug_herda_energia_e_analise_do_runtime(self):
+        visual = {
+            "readout_context": {
+                "classifications": {"MASK_001": "off"},
+                "power_confirmed": False,
+                "power_off_confirmed": True,
+                "energy_state": "off",
+            },
+            "overlay_context": {
+                "classifications": {"MASK_001": "off"},
+            },
+        }
+        runtime = {
+            "last_auto_analysis": {
+                "project_name": "DISPLAY",
+                "check_id": "CHECK_001",
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_001",
+                        "expected": "on",
+                        "classified": "on",
+                        "matched": True,
+                    },
+                    {
+                        "mask_id": "MASK_002",
+                        "expected": "off",
+                        "classified": "off",
+                        "matched": True,
+                    },
+                ],
+            },
+            "power_authority_status": {
+                "board_present": True,
+                "decision_allowed": True,
+                "energy": {
+                    "energy_state": "powered",
+                    "powered_confirmed": True,
+                    "off_confirmed": False,
+                },
+            },
+        }
+
+        result = snapshot_module._coherent_visual_state_from_runtime(
+            visual,
+            runtime,
+        )
+
+        readout = result["readout_context"]
+        self.assertTrue(readout["power_confirmed"])
+        self.assertFalse(readout["power_off_confirmed"])
+        self.assertEqual("powered", readout["energy_state"])
+        self.assertEqual(
+            {"MASK_001": "on", "MASK_002": "off"},
+            readout["classifications"],
+        )
+        self.assertEqual(
+            {"MASK_001": "on", "MASK_002": "off"},
+            result["overlay_context"]["classifications"],
+        )
+        self.assertTrue(result["debug_visual_runtime_coherent"])
 
     def test_relatorio_identifica_frame_por_hash_e_declara_snapshot_estatico(self):
         frame = np.arange(60, dtype=np.uint8).reshape(4, 5, 3)

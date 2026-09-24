@@ -152,6 +152,9 @@ def _runtime_state_at_frame(app) -> dict:
             "check_geometry_refinement": _safe_deepcopy(
                 runtime_debug.get("check_geometry_refinement")
             ),
+            "power_authority_status": _safe_deepcopy(
+                runtime_debug.get("power_authority_status")
+            ),
             "last_auto_analysis": _safe_deepcopy(evidence.get("analysis")),
             "sequence": _safe_deepcopy(evidence.get("sequence")),
             "last_decision": _safe_deepcopy(runtime_debug.get("last_decision")),
@@ -205,6 +208,9 @@ def _runtime_state_at_frame(app) -> dict:
         "check_geometry_refinement": _safe_deepcopy(
             getattr(app, "_display_f3_check_geometry_refinement", None)
         ),
+        "power_authority_status": _safe_deepcopy(
+            getattr(app, "_display_f3_power_authority_status", None)
+        ),
         "last_auto_analysis": _safe_deepcopy(
             getattr(app, "_display_auto_last_analysis", None)
         ),
@@ -241,6 +247,90 @@ def _runtime_state_at_frame(app) -> dict:
             getattr(app, "_display_auto_waiting_empty_rearm", None)
         ),
     }
+
+
+def _coherent_visual_state_from_runtime(
+    visual_state: dict | None,
+    runtime_state: dict | None,
+) -> dict:
+    """Faz o DEBUG refletir exatamente a autoridade produtiva capturada.
+
+    A janela pode conservar por alguns frames um readout/overlay produzido antes
+    da ultima decisao de energia. Para suporte isso e enganoso: o relatorio nao
+    pode dizer simultaneamente ENERGIA=powered e visor=off. Nao recalculamos
+    camera nem decisao; apenas copiamos last_auto_analysis e
+    power_authority_status ja capturados no mesmo instante.
+    """
+    visual = _safe_deepcopy(visual_state) if isinstance(visual_state, dict) else {}
+    runtime = runtime_state if isinstance(runtime_state, dict) else {}
+
+    readout = (
+        _safe_deepcopy(visual.get("readout_context"))
+        if isinstance(visual.get("readout_context"), dict)
+        else {}
+    )
+    overlay = (
+        _safe_deepcopy(visual.get("overlay_context"))
+        if isinstance(visual.get("overlay_context"), dict)
+        else {}
+    )
+
+    analysis = runtime.get("last_auto_analysis")
+    if isinstance(analysis, dict):
+        mask_results = [
+            item
+            for item in (analysis.get("mask_results") or ())
+            if isinstance(item, dict) and str(item.get("mask_id") or "")
+        ]
+        if mask_results:
+            classifications = {
+                str(item.get("mask_id")): str(
+                    item.get("classified") or ""
+                ).strip().lower()
+                for item in mask_results
+                if str(item.get("classified") or "").strip()
+            }
+            expected_states = {
+                str(item.get("mask_id")): str(
+                    item.get("expected") or ""
+                ).strip().lower()
+                for item in mask_results
+                if str(item.get("expected") or "").strip()
+            }
+            failed = tuple(
+                sorted(
+                    str(item.get("mask_id"))
+                    for item in mask_results
+                    if item.get("matched") is False
+                )
+            )
+            has_any_on = any(
+                value == "on" for value in classifications.values()
+            )
+            for target in (readout, overlay):
+                target["classifications"] = dict(classifications)
+                if expected_states:
+                    target["expected_states"] = dict(expected_states)
+                target["failed_mask_ids"] = failed
+                target["has_any_on"] = bool(has_any_on)
+
+    authority = runtime.get("power_authority_status")
+    energy = authority.get("energy") if isinstance(authority, dict) else None
+    if isinstance(energy, dict):
+        powered = bool(energy.get("powered_confirmed") is True)
+        off = bool(energy.get("off_confirmed") is True)
+        state = str(energy.get("energy_state") or "").strip().lower()
+        for target in (readout, overlay):
+            target["power_confirmed"] = powered
+            target["power_off_confirmed"] = off
+            target["energy_state"] = state
+
+    if readout:
+        visual["readout_context"] = readout
+    if overlay:
+        visual["overlay_context"] = overlay
+    visual["debug_visual_runtime_coherent"] = True
+    return visual
 
 
 def _camera_settings_at_frame(app) -> dict:
@@ -739,7 +829,10 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
     # Tudo abaixo é capturado AGORA, antes de análises custosas. Assim textos,
     # cores, visor e contexto pertencem ao mesmo instante do frame.
     snapshot["runtime_at_click"] = _runtime_state_at_frame(app)
-    snapshot["visual_state"] = _window_visual_state(app)
+    snapshot["visual_state"] = _coherent_visual_state_from_runtime(
+        _window_visual_state(app),
+        snapshot["runtime_at_click"],
+    )
     snapshot["camera_settings_at_frame"] = _camera_settings_at_frame(app)
 
     repository = getattr(app, "display_project_repository", None)
