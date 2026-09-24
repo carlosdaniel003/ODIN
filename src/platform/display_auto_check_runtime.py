@@ -40,6 +40,7 @@ class DisplayAutomaticCheckF3Mixin:
     DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES = 3
     DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO = 0.55
     DISPLAY_AUTO_INTERMITTENT_OFF_PHASE_RATIO = 0.15
+    DISPLAY_AUTO_INTERMITTENT_EXACT_TEMPLATE_VETO_MARGIN = 0.04
     DISPLAY_AUTO_TRANSIENT_CHECK_NAMES = frozenset(
         {"BLUETOOTH", "BLUE", "BT"}
     )
@@ -64,6 +65,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_on_samples = 0
         self._display_auto_intermittent_failure_counts = {}
         self._display_auto_intermittent_persistent_failed_ids = set()
+        self._display_auto_intermittent_exact_veto_ids = set()
+        self._display_auto_intermittent_candidate_failed_ids = set()
         self._display_auto_intermittent_last_phase_analysis = None
         self._display_f3_pending_ng_frame = None
         self._display_f3_pending_ng_frame_id = None
@@ -94,6 +97,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_on_samples = 0
         self._display_auto_intermittent_failure_counts = {}
         self._display_auto_intermittent_persistent_failed_ids = set()
+        self._display_auto_intermittent_exact_veto_ids = set()
+        self._display_auto_intermittent_candidate_failed_ids = set()
         self._display_auto_intermittent_last_phase_analysis = None
         self._display_f3_pending_ng_frame = None
         self._display_f3_pending_ng_frame_id = None
@@ -323,6 +328,67 @@ class DisplayAutomaticCheckF3Mixin:
                 return True
         return False
 
+    @classmethod
+    def _display_auto_exact_template_confirms_expected(cls, item: dict) -> bool:
+        try:
+            similarity = float(item.get("template_similarity"))
+            threshold = float(item.get("template_threshold"))
+        except (TypeError, ValueError):
+            return False
+        return bool(
+            similarity
+            >= threshold + cls.DISPLAY_AUTO_INTERMITTENT_EXACT_TEMPLATE_VETO_MARGIN
+        )
+
+    @staticmethod
+    def _display_auto_apply_intermittent_exact_veto(
+        analysis: dict,
+        phase_evidence: dict,
+    ) -> dict:
+        result = deepcopy(analysis)
+        veto_ids = {
+            str(mask_id)
+            for mask_id in (phase_evidence.get("exact_template_veto_ids") or ())
+            if str(mask_id)
+        }
+        if not veto_ids:
+            return result
+
+        rows = [
+            item
+            for item in (result.get("mask_results") or ())
+            if isinstance(item, dict)
+        ]
+        for item in rows:
+            mask_id = str(item.get("mask_id") or "")
+            if mask_id not in veto_ids:
+                continue
+            expected = str(item.get("expected") or "").strip().lower()
+            if expected not in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF):
+                continue
+            item["learned_classified_before_exact_veto"] = str(
+                item.get("classified") or ""
+            )
+            item["learned_matched_before_exact_veto"] = item.get("matched")
+            item["intermittent_exact_template_veto"] = True
+            item["classified"] = expected
+            item["matched"] = True
+            item["raw_matched"] = True
+            item["intermittent_tolerated"] = False
+            item["classification_source"] = "exact_template_veto_over_learned"
+
+        result["matched_mask_count"] = sum(
+            1 for item in rows if bool(item.get("matched"))
+        )
+        result["active_mask_count"] = len(rows)
+        result["approved"] = bool(rows) and all(
+            bool(item.get("matched")) for item in rows
+        )
+        result["intermittent_exact_template_veto_ids"] = tuple(
+            sorted(veto_ids)
+        )
+        return result
+
     def _display_auto_observe_intermittent_phase(
         self,
         context: dict,
@@ -381,6 +447,8 @@ class DisplayAutomaticCheckF3Mixin:
             counts = dict(
                 getattr(self, "_display_auto_intermittent_failure_counts", {}) or {}
             )
+            exact_veto_ids = set()
+            candidate_failed_ids = set()
             for item in results:
                 mask_id = str(item.get("mask_id") or "")
                 expected = str(item.get("expected") or "")
@@ -392,18 +460,30 @@ class DisplayAutomaticCheckF3Mixin:
                     confidence = 0.0
                 if confidence < DISPLAY_AUTO_MIN_CONFIDENCE:
                     continue
+
                 classified = str(item.get("classified") or "")
-                counts[mask_id] = (
-                    0
-                    if classified == expected
-                    else int(counts.get(mask_id, 0) or 0) + 1
-                )
+                if classified == expected:
+                    counts[mask_id] = 0
+                    continue
+
+                if self._display_auto_exact_template_confirms_expected(item):
+                    counts[mask_id] = 0
+                    exact_veto_ids.add(mask_id)
+                    continue
+
+                counts[mask_id] = int(counts.get(mask_id, 0) or 0) + 1
+                candidate_failed_ids.add(mask_id)
+
             self._display_auto_intermittent_failure_counts = counts
             self._display_auto_intermittent_persistent_failed_ids = {
                 mask_id
                 for mask_id, count in counts.items()
                 if int(count or 0) >= self.DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES
             }
+            self._display_auto_intermittent_exact_veto_ids = exact_veto_ids
+            self._display_auto_intermittent_candidate_failed_ids = (
+                candidate_failed_ids
+            )
 
         return {
             "phase": phase,
@@ -416,6 +496,26 @@ class DisplayAutomaticCheckF3Mixin:
             ),
             "failure_counts": deepcopy(
                 getattr(self, "_display_auto_intermittent_failure_counts", {}) or {}
+            ),
+            "exact_template_veto_ids": tuple(
+                sorted(
+                    getattr(
+                        self,
+                        "_display_auto_intermittent_exact_veto_ids",
+                        set(),
+                    )
+                    or set()
+                )
+            ),
+            "candidate_failed_ids": tuple(
+                sorted(
+                    getattr(
+                        self,
+                        "_display_auto_intermittent_candidate_failed_ids",
+                        set(),
+                    )
+                    or set()
+                )
             ),
             "persistent_failed_ids": tuple(
                 sorted(
@@ -580,6 +680,8 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_auto_intermittent_on_samples = 0
             self._display_auto_intermittent_failure_counts = {}
             self._display_auto_intermittent_persistent_failed_ids = set()
+            self._display_auto_intermittent_exact_veto_ids = set()
+            self._display_auto_intermittent_candidate_failed_ids = set()
             self._display_auto_intermittent_last_phase_analysis = None
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
@@ -651,7 +753,10 @@ class DisplayAutomaticCheckF3Mixin:
                 )
                 return
 
-            analysis = deepcopy(analysis)
+            analysis = self._display_auto_apply_intermittent_exact_veto(
+                analysis,
+                intermittent_phase,
+            )
             analysis["intermittent_phase"] = "on"
             analysis["intermittent_phase_evidence"] = deepcopy(intermittent_phase)
             analysis["intermittent_persistent_failed_ids"] = list(
@@ -713,10 +818,8 @@ class DisplayAutomaticCheckF3Mixin:
         ):
             counts = intermittent_phase.get("failure_counts") or {}
             max_count = max((int(v or 0) for v in counts.values()), default=0)
-            current_failed = sorted(
-                str(item.get("mask_id") or "")
-                for item in (analysis.get("mask_results") or ())
-                if isinstance(item, dict) and item.get("matched") is False
+            current_failed = list(
+                intermittent_phase.get("candidate_failed_ids") or ()
             )
             self._display_auto_set_preview_status(
                 (
