@@ -3139,6 +3139,7 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             # (verde/vermelho/amarelo + números), alimentado pela geometria móvel.
             try:
                 from src.platform.display_f3_preview_clarity_fix import (
+                    _effective_phase_mask_ids_for_current_check,
                     _mask_snapshot_for_current_check,
                     _project_preview_context,
                     renderizar_preview_claro_display_f3,
@@ -3167,9 +3168,43 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         base=semantic_context,
                     )
                     semantic_context = dict(semantic_context)
+                    project_name = str(
+                        semantic_context.get("project_name") or ""
+                    )
+                    check_id = str(
+                        semantic_context.get("check_id") or ""
+                    )
+                    confirmed_failed_ids, validating_ids = (
+                        _effective_phase_mask_ids_for_current_check(
+                            self_window,
+                            project_name=project_name,
+                            check_id=check_id,
+                        )
+                    )
+                    if not confirmed_failed_ids and not validating_ids:
+                        if bool(semantic_context.get("intermittent", False)):
+                            validating_ids = set(failed_mask_ids)
+                        else:
+                            confirmed_failed_ids = set(failed_mask_ids)
+
                     semantic_context["classifications"] = classifications
+                    semantic_context["effective_classifications"] = dict(
+                        classifications
+                    )
                     semantic_context["failed_mask_ids"] = tuple(
                         sorted(failed_mask_ids)
+                    )
+                    semantic_context["effective_failed_mask_ids"] = tuple(
+                        sorted(failed_mask_ids)
+                    )
+                    semantic_context[
+                        "effective_confirmed_failed_mask_ids"
+                    ] = tuple(sorted(confirmed_failed_ids))
+                    semantic_context[
+                        "effective_validating_mask_ids"
+                    ] = tuple(sorted(validating_ids))
+                    semantic_context["ui_mask_authority"] = (
+                        "effective_mask_results_v1"
                     )
                     semantic_context["has_any_on"] = any(
                         str(value).strip().lower() == "on"
@@ -3229,8 +3264,8 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             if locked:
                 if bool(status.get("evidence_current", False)):
                     legend = (
-                        "LOCK ESTÁVEL • VERDE ACESO • VERMELHO APAGADO • "
-                        "AMARELO POUCA LUZ / DIVERGÊNCIA"
+                        "LOCK ESTÁVEL • VERDE ACESO • AZUL/CINZA APAGADO • "
+                        "AMARELO VALIDANDO • VERMELHO FALHA"
                     )
                     color = "#E2E8F0"
                 else:
