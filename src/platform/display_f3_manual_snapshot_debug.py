@@ -1027,6 +1027,9 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         for key in (
             "expected_states",
             "failed_mask_ids",
+            "effective_classifications",
+            "effective_failed_mask_ids",
+            "ui_mask_authority",
             "has_any_on",
             "intermittent",
             "power_confirmed",
