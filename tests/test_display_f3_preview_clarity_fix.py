@@ -35,7 +35,7 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
 
     def test_pouca_luz_fica_amarela(self):
         self.assertEqual(
-            "alert",
+            "warning",
             clarity.estado_visual_mascara_f3(
                 "low_light",
                 DISPLAY_CHECK_STATE_ON,
@@ -99,23 +99,24 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             )
         )
 
-    def test_preview_final_tem_apenas_verde_vermelho_amarelo(self):
+    def test_preview_final_prioriza_legibilidade_e_falha_real(self):
         colors = clarity.F3_PREVIEW_CLEAR_COLORS
-        self.assertEqual({"on", "off", "alert"}, set(colors))
-        self.assertEqual(colors["alert"], (21, 204, 250))
-        self.assertGreaterEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.20)
-        self.assertLessEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.30)
-        self.assertGreaterEqual(clarity.F3_PREVIEW_CLEAR_CONTOUR_THICKNESS, 2)
-        self.assertGreater(clarity.F3_PREVIEW_ALERT_ALPHA, clarity.F3_PREVIEW_CLEAR_ALPHA)
+        self.assertEqual({"on", "off", "warning", "alert"}, set(colors))
+        self.assertEqual(colors["warning"], (21, 204, 250))
+        self.assertEqual(colors["alert"], (68, 68, 239))
+        self.assertEqual(colors["off"], (139, 116, 100))
+        self.assertLessEqual(clarity.F3_PREVIEW_CLEAR_ALPHA, 0.08)
+        self.assertLessEqual(clarity.F3_PREVIEW_CLEAR_CONTOUR_THICKNESS, 1)
+        self.assertGreater(
+            clarity.F3_PREVIEW_ALERT_ALPHA,
+            clarity.F3_PREVIEW_CLEAR_ALPHA,
+        )
         self.assertGreater(
             clarity.F3_PREVIEW_ALERT_CONTOUR_THICKNESS,
             clarity.F3_PREVIEW_CLEAR_CONTOUR_THICKNESS,
         )
-        self.assertNotIn("AZUL", clarity.F3_PREVIEW_CLEAR_LEGEND)
-        self.assertNotIn("CINZA", clarity.F3_PREVIEW_CLEAR_LEGEND)
-        self.assertIn("VERDE: ACESO", clarity.F3_PREVIEW_CLEAR_LEGEND)
-        self.assertIn("VERMELHO: APAGADO", clarity.F3_PREVIEW_CLEAR_LEGEND)
-        self.assertIn("AMARELO FORTE", clarity.F3_PREVIEW_CLEAR_LEGEND)
+        self.assertIn("AZUL/CINZA: APAGADO", clarity.F3_PREVIEW_CLEAR_LEGEND)
+        self.assertIn("VERMELHO: FALHA CONFIRMADA", clarity.F3_PREVIEW_CLEAR_LEGEND)
 
     def test_renderer_produtivo_ignora_falso_on_sem_energia_confirmada(self):
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
@@ -211,8 +212,8 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
 
         self.assertGreater(int(failed.sum()), int(normal.sum()))
         center = failed[50, 50]
-        self.assertGreater(int(center[1]), int(center[0]))
         self.assertGreater(int(center[2]), int(center[0]))
+        self.assertGreater(int(center[2]), int(center[1]))
 
     def test_falha_nao_e_superdestacada_antes_de_existir_segmento_aceso(self):
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
@@ -321,6 +322,54 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
                 check_id="CHECK_002",
             ),
         )
+
+    def test_preview_prefere_estado_efetivo_e_nao_recria_falso_mask_010(self):
+        analysis = {
+            "project_name": "P1",
+            "check_id": "CHECK_002",
+            "effective_classifications": {
+                "MASK_010": "on",
+                "MASK_027": "off",
+            },
+            "effective_failed_mask_ids": ("MASK_027",),
+            "mask_results": [
+                {
+                    "mask_id": "MASK_010",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                },
+                {
+                    "mask_id": "MASK_027",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                },
+            ],
+        }
+        self.assertEqual(
+            {"MASK_010": "on", "MASK_027": "off"},
+            clarity._classifications_from_analysis(
+                analysis,
+                project_name="P1",
+                check_id="CHECK_002",
+            ),
+        )
+        self.assertEqual(
+            {"MASK_027"},
+            clarity._failed_mask_ids_from_analysis(
+                analysis,
+                project_name="P1",
+                check_id="CHECK_002",
+            ),
+        )
+
+    def test_renderer_ao_vivo_tem_zoom_e_badge_somente_para_falha(self):
+        source = inspect.getsource(clarity.renderizar_preview_claro_display_f3)
+        self.assertIn("_draw_display_zoom_inset", source)
+        self.assertIn("_draw_failure_badge", source)
+        self.assertIn("debug_detailed", source)
+        self.assertNotIn("NG ", source)
 
     def test_renderer_final_e_reaplicavel_sem_duplicar_contexto(self):
         source = inspect.getsource(clarity._aplicar_render_final)
