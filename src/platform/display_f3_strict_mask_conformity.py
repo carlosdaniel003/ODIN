@@ -355,7 +355,52 @@ def _install_failed_mask_status() -> None:
         text, color = original_format(analysis, context)
         if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
             return text, color
+
+        validating = tuple(
+            str(mask_id)
+            for mask_id in (
+                analysis.get("effective_validating_mask_ids") or ()
+            )
+            if str(mask_id)
+        )
+        confirmed = tuple(
+            str(mask_id)
+            for mask_id in (
+                analysis.get("effective_confirmed_failed_mask_ids") or ()
+            )
+            if str(mask_id)
+        )
+        if validating and not confirmed:
+            phase = analysis.get("intermittent_phase_evidence")
+            counts = (
+                phase.get("failure_counts")
+                if isinstance(phase, dict)
+                and isinstance(phase.get("failure_counts"), dict)
+                else {}
+            )
+            progress = max(
+                (int(counts.get(mask_id, 0) or 0) for mask_id in validating),
+                default=0,
+            )
+            limit = int(
+                runtime_module.DisplayAutomaticCheckF3Mixin
+                .DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES
+            )
+            suffix = (
+                f" • VALIDANDO {validating[0]} "
+                f"{progress}/{limit}"
+            )
+            if len(validating) > 1:
+                suffix += f" (+{len(validating) - 1})"
+            return text + suffix, "#FDE68A"
+
         failures = _failure_items(analysis)
+        if confirmed:
+            failures = {
+                mask_id: failure
+                for mask_id, failure in failures.items()
+                if mask_id in set(confirmed)
+            }
         if not failures:
             return text, color
 
