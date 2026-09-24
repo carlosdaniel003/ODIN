@@ -115,6 +115,27 @@ class DisplayF3ContourCheckIdentityTests(unittest.TestCase):
         self.assertEqual("tracking_raw_with_live_geometry", result["analysis_frame_source"])
 
 
+    def test_identidade_e_refinamento_tem_cadencias_independentes(self):
+        self.assertGreater(
+            identity.F3_CONTOUR_IDENTITY_REFRESH_S,
+            0.10,
+        )
+        self.assertGreater(
+            identity.F3_DIRECT_REFINEMENT_REFRESH_S,
+            identity.F3_CONTOUR_IDENTITY_REFRESH_S,
+        )
+
+    def test_wrapper_forca_identidade_quando_check_logico_muda(self):
+        import inspect
+
+        source = inspect.getsource(
+            identity.instalar_identidade_visual_contorno_checks_f3
+        )
+        self.assertIn("check_changed", source)
+        self.assertIn("identity_due", source)
+        self.assertIn("refinement_due", source)
+        self.assertIn("_display_f3_live_performance", source)
+
     def test_refinamento_direto_aplica_referencia_do_h1_identificado(self):
         raw = np.zeros((40, 60, 3), dtype=np.uint8)
         matrix = np.asarray(

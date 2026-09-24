@@ -90,7 +90,9 @@ F3_ORIENTATION_UI = {
 }
 
 F3_TRACKING_REFRESH_S = 0.12
-F3_TRACKING_ORB_FEATURES = 1600
+# 1200 mantém margem ampla de correspondências nas referências reais e reduz
+# custo de detectAndCompute em 1920x1080. O fallback temporal/template permanece.
+F3_TRACKING_ORB_FEATURES = 1200
 F3_TRACKING_RATIO_TEST = 0.75
 F3_TRACKING_MIN_MATCHES = 12
 F3_TRACKING_MIN_INLIERS = 8

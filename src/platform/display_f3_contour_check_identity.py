@@ -15,6 +15,7 @@ erros de poucos pixels introduzidos por warp/interpolação antes da leitura.
 from copy import deepcopy
 from pathlib import Path
 from types import MethodType
+import time
 
 import cv2
 import numpy as np
@@ -37,6 +38,10 @@ F3_CONTOUR_IDENTITY_MIN_SCORE = 0.52
 F3_CONTOUR_IDENTITY_MIN_MARGIN = 0.025
 F3_CONTOUR_DISPLAY_WEIGHT = 0.78
 F3_CONTOUR_STRUCTURE_WEIGHT = 0.22
+# Identidade/refino são mais caros que a leitura das 28 máscaras e não precisam
+# acompanhar cada repaint. Mudança de CHECK força atualização imediata.
+F3_CONTOUR_IDENTITY_REFRESH_S = 0.18
+F3_DIRECT_REFINEMENT_REFRESH_S = 0.26
 
 
 def _valid_frame(frame) -> bool:
@@ -842,14 +847,71 @@ def instalar_identidade_visual_contorno_checks_f3(app) -> None:
 
     def process(self):
         raw = _raw_frame(self, getattr(self, "camera_frame_atual", None))
-        identity = avaliar_identidade_visual_checks_por_contorno_f3(self, raw)
-        self._display_f3_check_identity_status = deepcopy(identity)
-        refinement = refinar_geometria_check_identificado_f3(
-            self,
-            raw,
-            identity,
+        now = time.monotonic()
+        try:
+            context = self._display_auto_current_context()
+        except Exception:
+            context = None
+        logical_check_id = str((context or {}).get("check_id") or "")
+        previous_check_id = str(
+            getattr(self, "_display_f3_contour_perf_check_id", "") or ""
         )
-        self._display_f3_check_geometry_refinement = deepcopy(refinement)
+        check_changed = logical_check_id != previous_check_id
+
+        identity = getattr(self, "_display_f3_check_identity_status", None)
+        last_identity_s = float(
+            getattr(self, "_display_f3_contour_identity_last_s", 0.0) or 0.0
+        )
+        identity_due = bool(
+            check_changed
+            or not isinstance(identity, dict)
+            or (now - last_identity_s) >= F3_CONTOUR_IDENTITY_REFRESH_S
+        )
+        if identity_due:
+            identity = avaliar_identidade_visual_checks_por_contorno_f3(
+                self,
+                raw,
+            )
+            self._display_f3_check_identity_status = deepcopy(identity)
+            self._display_f3_contour_identity_last_s = now
+
+        refinement = getattr(
+            self,
+            "_display_f3_check_geometry_refinement",
+            None,
+        )
+        last_refinement_s = float(
+            getattr(self, "_display_f3_contour_refinement_last_s", 0.0) or 0.0
+        )
+        refinement_due = bool(
+            check_changed
+            or not isinstance(refinement, dict)
+            or (now - last_refinement_s) >= F3_DIRECT_REFINEMENT_REFRESH_S
+        )
+        if refinement_due:
+            refinement = refinar_geometria_check_identificado_f3(
+                self,
+                raw,
+                identity,
+            )
+            self._display_f3_check_geometry_refinement = deepcopy(refinement)
+            self._display_f3_contour_refinement_last_s = now
+
+        self._display_f3_contour_perf_check_id = logical_check_id
+        self._display_f3_live_performance = {
+            "preview_interval_ms": int(
+                getattr(self, "DISPLAY_F3_PREVIEW_INTERVAL_MS", 0) or 0
+            ),
+            "analysis_interval_ms": int(
+                getattr(self, "DISPLAY_F3_ANALYSIS_INTERVAL_MS", 0) or 0
+            ),
+            "identity_refresh_ms": int(F3_CONTOUR_IDENTITY_REFRESH_S * 1000.0),
+            "refinement_refresh_ms": int(F3_DIRECT_REFINEMENT_REFRESH_S * 1000.0),
+            "identity_recomputed": bool(identity_due),
+            "refinement_recomputed": bool(refinement_due),
+            "logical_check_id": logical_check_id,
+        }
+
         result = previous_process()
         _publish_identity_status(self, identity)
         return result

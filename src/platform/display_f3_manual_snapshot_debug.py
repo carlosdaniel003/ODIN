@@ -155,6 +155,9 @@ def _runtime_state_at_frame(app) -> dict:
             "check_geometry_refinement": _safe_deepcopy(
                 runtime_debug.get("check_geometry_refinement")
             ),
+            "live_performance": _safe_deepcopy(
+                runtime_debug.get("live_performance")
+            ),
             "power_authority_status": _safe_deepcopy(
                 runtime_debug.get("power_authority_status")
             ),
@@ -210,6 +213,9 @@ def _runtime_state_at_frame(app) -> dict:
         ),
         "check_geometry_refinement": _safe_deepcopy(
             getattr(app, "_display_f3_check_geometry_refinement", None)
+        ),
+        "live_performance": _safe_deepcopy(
+            getattr(app, "_display_f3_live_performance", None)
         ),
         "power_authority_status": _safe_deepcopy(
             getattr(app, "_display_f3_power_authority_status", None)
