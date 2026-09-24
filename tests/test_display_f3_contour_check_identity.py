@@ -92,5 +92,112 @@ class DisplayF3ContourCheckIdentityTests(unittest.TestCase):
         self.assertEqual("tracking_raw_with_live_geometry", result["analysis_frame_source"])
 
 
+    def test_refinamento_direto_aplica_referencia_do_h1_identificado(self):
+        raw = np.zeros((40, 60, 3), dtype=np.uint8)
+        matrix = np.asarray(
+            [[1.0, 0.0, 0.4], [0.0, 1.0, -0.3]],
+            dtype=np.float32,
+        )
+        candidate = {
+            "reference": "check:CHECK_001",
+            "matrix": matrix,
+            "matches": 18,
+            "inliers": 15,
+            "ratio": 0.8333,
+            "rotation_deg": 0.0,
+            "scale": 1.0,
+            "source_type": "check",
+            "current_masked_for_segments": True,
+        }
+        runtime = SimpleNamespace(
+            width=60,
+            height=40,
+            canonical_masks=[],
+            last_result=None,
+            candidate_for_reference=lambda *_args, **_kwargs: candidate,
+            _matrix_continuity=lambda _matrix: (True, 0.98),
+        )
+        base = SimpleNamespace(
+            current_to_canonical=np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            reference="board_off",
+        )
+        app = SimpleNamespace(
+            _display_f3_tracking_result=base,
+            _display_f3_tracking_live_geometry={
+                "locked": True,
+                "resolution": (60, 40),
+                "board_points": [[5, 5], [55, 5], [55, 35], [5, 35]],
+                "masks": [],
+                "reference": "board_off",
+                "geometry_space": "check:CHECK_001",
+            },
+            _display_auto_current_context=lambda: {
+                "check_id": "CHECK_001",
+                "check_name": "H1",
+            },
+        )
+
+        def publish(_app, _raw, refined):
+            _app._display_f3_tracking_live_geometry = {
+                "locked": True,
+                "resolution": (60, 40),
+                "board_points": [[5, 5], [55, 5], [55, 35], [5, 35]],
+                "masks": [{"id": "MASK_001"}],
+                "reference": refined.reference,
+                "geometry_space": "check:CHECK_001",
+            }
+
+        with patch.object(identity, "get_tracking_runtime", return_value=runtime), patch.object(
+            identity,
+            "build_tracking_mask",
+            return_value=np.ones((40, 60), dtype=np.uint8) * 255,
+        ), patch.object(
+            identity,
+            "_update_tracking_live_geometry",
+            side_effect=publish,
+        ):
+            result = identity.refinar_geometria_check_identificado_f3(
+                app,
+                raw,
+                {
+                    "confirmed": True,
+                    "best_check_id": "CHECK_001",
+                    "best_check_name": "H1",
+                },
+            )
+
+        self.assertTrue(result["applied"])
+        self.assertEqual("board_off", result["base_reference"])
+        self.assertEqual("check:CHECK_001", result["direct_reference"])
+        self.assertEqual(15, result["inliers"])
+        self.assertTrue(result["current_masked_for_segments"])
+
+    def test_refinamento_nao_usa_aux_quando_logico_ainda_e_h1(self):
+        raw = np.zeros((40, 60, 3), dtype=np.uint8)
+        app = SimpleNamespace(
+            _display_auto_current_context=lambda: {
+                "check_id": "CHECK_001",
+                "check_name": "H1",
+            },
+        )
+        result = identity.refinar_geometria_check_identificado_f3(
+            app,
+            raw,
+            {
+                "confirmed": True,
+                "best_check_id": "CHECK_003",
+                "best_check_name": "AUX",
+            },
+        )
+
+        self.assertFalse(result["applied"])
+        self.assertEqual(
+            "check_identificado_diferente_do_check_logico",
+            result["reason"],
+        )
+
 if __name__ == "__main__":
     unittest.main()

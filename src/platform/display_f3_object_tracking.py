@@ -1951,6 +1951,78 @@ class F3DisplayObjectTracker:
             "source_type": source_type,
         }
 
+    def candidate_for_reference(
+        self,
+        frame,
+        key: str,
+        current_tracking_mask=None,
+    ) -> dict | None:
+        """Calcula a pose contra UMA referência sem alterar o lock global.
+
+        É usado após a identidade do CHECK estar conhecida. O tracker global
+        continua livre para escolher board_off/mask_reference/orientação, mas a
+        geometria fina das ROIs pode ser recalculada diretamente contra a foto do
+        CHECK atual. A máscara corrente exclui os segmentos para que LEDs ligados
+        ou reflexos não puxem a transformação geométrica.
+        """
+        if (
+            not _valid_frame(frame)
+            or not self.ready
+            or frame.shape[:2] != (self.height, self.width)
+            or str(key or "") not in self.references
+        ):
+            return None
+
+        gray = self._gray(frame)
+        if gray is None:
+            return None
+
+        orb = cv2.ORB_create(
+            nfeatures=F3_TRACKING_ORB_FEATURES,
+            scaleFactor=1.2,
+            nlevels=8,
+            edgeThreshold=12,
+            fastThreshold=7,
+        )
+        try:
+            current_kp, current_desc = orb.detectAndCompute(
+                gray,
+                current_tracking_mask,
+            )
+        except Exception:
+            current_kp, current_desc = [], None
+
+        if (
+            current_desc is not None
+            and len(current_kp) >= F3_TRACKING_MIN_MATCHES
+        ):
+            candidate = self._candidate(
+                current_kp,
+                current_desc,
+                str(key),
+            )
+            if candidate is not None:
+                candidate = dict(candidate)
+                candidate["direct_reference_refinement"] = True
+                candidate["current_masked_for_segments"] = bool(
+                    current_tracking_mask is not None
+                )
+                return candidate
+
+        # Câmera/suporte fixos: mantém o fallback por bordas apenas se o ORB
+        # específico daquele CHECK não produzir correspondências suficientes.
+        try:
+            current_edges = cv2.Canny(gray, 45, 135)
+        except Exception:
+            current_edges = None
+        candidate = self._template_candidate(current_edges, str(key))
+        if candidate is None:
+            return None
+        candidate = dict(candidate)
+        candidate["direct_reference_refinement"] = True
+        candidate["current_masked_for_segments"] = False
+        return candidate
+
     def align(self, frame, frame_id=None) -> F3TrackingResult:
         if not _valid_frame(frame):
             return F3TrackingResult(False, frame, reason="invalid_frame")

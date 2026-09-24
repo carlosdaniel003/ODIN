@@ -149,6 +149,9 @@ def _runtime_state_at_frame(app) -> dict:
             "check_identity_by_contour": _safe_deepcopy(
                 runtime_debug.get("check_identity_by_contour")
             ),
+            "check_geometry_refinement": _safe_deepcopy(
+                runtime_debug.get("check_geometry_refinement")
+            ),
             "last_auto_analysis": _safe_deepcopy(evidence.get("analysis")),
             "sequence": _safe_deepcopy(evidence.get("sequence")),
             "last_decision": _safe_deepcopy(runtime_debug.get("last_decision")),
@@ -198,6 +201,9 @@ def _runtime_state_at_frame(app) -> dict:
         ),
         "check_identity_by_contour": _safe_deepcopy(
             getattr(app, "_display_f3_check_identity_status", None)
+        ),
+        "check_geometry_refinement": _safe_deepcopy(
+            getattr(app, "_display_f3_check_geometry_refinement", None)
         ),
         "last_auto_analysis": _safe_deepcopy(
             getattr(app, "_display_auto_last_analysis", None)
@@ -1104,6 +1110,34 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     )
                 )
             )
+    else:
+        lines.append("indisponível neste snapshot")
+    lines.append("")
+
+    refinement = (
+        runtime_context.get("check_geometry_refinement")
+        if isinstance(runtime_context, dict)
+        else None
+    )
+    lines.append("[REFINAMENTO DIRETO DA GEOMETRIA DO CHECK]")
+    if isinstance(refinement, dict):
+        lines.append(
+            " | ".join(
+                (
+                    f"available={_yes_no(refinement.get('available'))}",
+                    f"applied={_yes_no(refinement.get('applied'))}",
+                    f"expected={refinement.get('expected_check_name') or refinement.get('expected_check_id') or '--'}",
+                    f"identified={refinement.get('identified_check_name') or refinement.get('identified_check_id') or '--'}",
+                    f"base_reference={refinement.get('base_reference', '--')}",
+                    f"direct_reference={refinement.get('direct_reference', '--')}",
+                    f"matches={refinement.get('matches', '--')}",
+                    f"inliers={refinement.get('inliers', '--')}",
+                    f"inlier_ratio={refinement.get('inlier_ratio', '--')}",
+                    f"roi_shift_px={refinement.get('median_roi_shift_px', '--')}",
+                    f"reason={refinement.get('reason', '--')}",
+                )
+            )
+        )
     else:
         lines.append("indisponível neste snapshot")
     lines.append("")

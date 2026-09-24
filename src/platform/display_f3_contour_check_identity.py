@@ -21,6 +21,9 @@ import numpy as np
 
 import src.platform.display_f3_operational_status as operational_module
 from src.platform.display_f3_object_tracking import (
+    F3TrackingResult,
+    _update_tracking_live_geometry,
+    build_tracking_mask,
     get_tracking_runtime,
     tracking_enabled,
 )
@@ -462,6 +465,211 @@ def avaliar_identidade_visual_checks_por_contorno_f3(
     return identity
 
 
+def _refinement_shift_px(runtime, base_matrix, refined_matrix) -> float | None:
+    """Deslocamento mediano das ROIs no frame causado pelo refinamento."""
+    if base_matrix is None or refined_matrix is None:
+        return None
+    masks = getattr(runtime, "canonical_masks", None) or ()
+    centers = []
+    for item in masks:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or "").strip().lower()
+        try:
+            if kind == "circle":
+                centers.append(
+                    [float(item.get("cx", 0.0)), float(item.get("cy", 0.0))]
+                )
+            else:
+                points = [
+                    [float(p[0]), float(p[1])]
+                    for p in (item.get("points") or ())
+                    if isinstance(p, (list, tuple)) and len(p) >= 2
+                ]
+                if points:
+                    centers.append(np.mean(np.asarray(points, dtype=np.float32), axis=0).tolist())
+        except (TypeError, ValueError):
+            continue
+    if not centers:
+        return None
+    try:
+        base_inverse = cv2.invertAffineTransform(
+            np.asarray(base_matrix, dtype=np.float32).reshape(2, 3)
+        )
+        refined_inverse = cv2.invertAffineTransform(
+            np.asarray(refined_matrix, dtype=np.float32).reshape(2, 3)
+        )
+        source = np.asarray(centers, dtype=np.float32).reshape(-1, 1, 2)
+        base_points = cv2.transform(source, base_inverse).reshape(-1, 2)
+        refined_points = cv2.transform(source, refined_inverse).reshape(-1, 2)
+        distances = np.linalg.norm(refined_points - base_points, axis=1)
+        if not distances.size:
+            return None
+        return round(float(np.median(distances)), 3)
+    except Exception:
+        return None
+
+
+def refinar_geometria_check_identificado_f3(
+    app,
+    raw_frame,
+    identity: dict | None,
+) -> dict:
+    """Refina as ROIs diretamente contra a foto do CHECK já identificado.
+
+    A identidade por contorno responde QUAL função está presente. Somente quando
+    ela coincide com o CHECK lógico atual tentamos uma transformação direta
+    FOTO_DO_CHECK -> FRAME_ATUAL. O lock global não é alterado.
+    """
+    telemetry = {
+        "source": "f3_identified_check_direct_geometry_refinement",
+        "available": False,
+        "applied": False,
+        "reason": "identidade_check_indisponivel",
+    }
+    if not isinstance(identity, dict) or not bool(identity.get("confirmed")):
+        return telemetry
+    if not _valid_frame(raw_frame):
+        telemetry["reason"] = "frame_raw_ausente"
+        return telemetry
+
+    identified_id = str(identity.get("best_check_id") or "")
+    identified_name = str(identity.get("best_check_name") or identified_id).strip().upper()
+    telemetry["identified_check_id"] = identified_id
+    telemetry["identified_check_name"] = identified_name
+
+    try:
+        context = app._display_auto_current_context()
+    except Exception:
+        context = None
+    expected_id = str((context or {}).get("check_id") or "")
+    expected_name = str(
+        (context or {}).get("check_name") or expected_id
+    ).strip().upper()
+    telemetry["expected_check_id"] = expected_id
+    telemetry["expected_check_name"] = expected_name
+
+    if not identified_id or identified_id != expected_id:
+        telemetry["reason"] = "check_identificado_diferente_do_check_logico"
+        return telemetry
+
+    runtime = get_tracking_runtime(app)
+    if runtime is None:
+        telemetry["reason"] = "tracker_indisponivel"
+        return telemetry
+
+    base_result = getattr(app, "_display_f3_tracking_result", None)
+    if base_result is None:
+        base_result = getattr(runtime, "last_result", None)
+    base_matrix = getattr(base_result, "current_to_canonical", None)
+    if base_matrix is None:
+        telemetry["reason"] = "pose_global_indisponivel"
+        return telemetry
+
+    geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    current_tracking_mask = None
+    if isinstance(geometry, dict):
+        try:
+            h, w = raw_frame.shape[:2]
+            current_tracking_mask = build_tracking_mask(
+                int(w),
+                int(h),
+                geometry.get("board_points") or (),
+                geometry.get("masks") or (),
+            )
+        except Exception:
+            current_tracking_mask = None
+
+    key = f"check:{identified_id}"
+    try:
+        candidate = runtime.candidate_for_reference(
+            raw_frame,
+            key,
+            current_tracking_mask=current_tracking_mask,
+        )
+    except Exception:
+        candidate = None
+    if not isinstance(candidate, dict) or candidate.get("matrix") is None:
+        telemetry["reason"] = "referencia_direta_check_sem_match"
+        telemetry["direct_reference"] = key
+        return telemetry
+
+    refined_matrix = candidate.get("matrix")
+    try:
+        compatible, closeness = runtime._matrix_continuity(refined_matrix)
+    except Exception:
+        compatible, closeness = False, 0.0
+    if not compatible:
+        telemetry.update(
+            {
+                "available": True,
+                "reason": "pose_direta_incompativel_com_lock_global",
+                "direct_reference": key,
+                "continuity_closeness": round(float(closeness), 4),
+            }
+        )
+        return telemetry
+
+    refined = F3TrackingResult(
+        True,
+        raw_frame,
+        reference=key,
+        matches=int(candidate.get("matches", 0) or 0),
+        inliers=int(candidate.get("inliers", 0) or 0),
+        inlier_ratio=float(candidate.get("ratio", 0.0) or 0.0),
+        rotation_deg=float(candidate.get("rotation_deg", 0.0) or 0.0),
+        scale=float(candidate.get("scale", 1.0) or 1.0),
+        reason="identified_check_direct_refinement",
+        current_to_canonical=np.asarray(
+            refined_matrix,
+            dtype=np.float32,
+        ).reshape(2, 3),
+        source_type="check_direct_refinement",
+        evidence_current=True,
+    )
+    _update_tracking_live_geometry(app, raw_frame, refined)
+
+    refined_geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    applied = bool(
+        isinstance(refined_geometry, dict)
+        and refined_geometry.get("locked")
+        and str(refined_geometry.get("reference") or "") == key
+        and str(refined_geometry.get("geometry_space") or "") == key
+    )
+    telemetry.update(
+        {
+            "available": True,
+            "applied": applied,
+            "reason": (
+                "geometria_refinada_diretamente_pelo_check"
+                if applied
+                else "refinamento_nao_publicou_geometria_do_check"
+            ),
+            "base_reference": str(getattr(base_result, "reference", "") or ""),
+            "direct_reference": key,
+            "matches": int(candidate.get("matches", 0) or 0),
+            "inliers": int(candidate.get("inliers", 0) or 0),
+            "inlier_ratio": round(float(candidate.get("ratio", 0.0) or 0.0), 4),
+            "fallback": str(candidate.get("fallback") or ""),
+            "current_masked_for_segments": bool(
+                candidate.get("current_masked_for_segments", False)
+            ),
+            "continuity_closeness": round(float(closeness), 4),
+            "median_roi_shift_px": _refinement_shift_px(
+                runtime,
+                base_matrix,
+                refined_matrix,
+            ),
+            "geometry_space_after": (
+                str(refined_geometry.get("geometry_space") or "")
+                if isinstance(refined_geometry, dict)
+                else ""
+            ),
+        }
+    )
+    return telemetry
+
+
 class F3TrackedRawCheckAnalyzer:
     """Classifica segmentos no frame RAW usando ROIs móveis do contorno."""
 
@@ -504,6 +712,13 @@ class F3TrackedRawCheckAnalyzer:
                 result["analysis_frame_source"] = "tracking_raw_with_live_geometry"
                 result["tracking_geometry_reference"] = str(geometry.get("reference") or "")
                 result["tracking_geometry_space"] = str(geometry.get("geometry_space") or "")
+                result["tracking_geometry_refinement"] = deepcopy(
+                    getattr(
+                        self.app,
+                        "_display_f3_check_geometry_refinement",
+                        None,
+                    )
+                )
             return result
 
         result = self.semantic.analyze(
@@ -574,6 +789,12 @@ def instalar_identidade_visual_contorno_checks_f3(app) -> None:
         raw = _raw_frame(self, getattr(self, "camera_frame_atual", None))
         identity = avaliar_identidade_visual_checks_por_contorno_f3(self, raw)
         self._display_f3_check_identity_status = deepcopy(identity)
+        refinement = refinar_geometria_check_identificado_f3(
+            self,
+            raw,
+            identity,
+        )
+        self._display_f3_check_geometry_refinement = deepcopy(refinement)
         result = previous_process()
         _publish_identity_status(self, identity)
         return result
