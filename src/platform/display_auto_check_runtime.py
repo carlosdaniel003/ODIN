@@ -389,6 +389,44 @@ class DisplayAutomaticCheckF3Mixin:
         )
         return result
 
+    @staticmethod
+    def _display_auto_publish_effective_ui_authority(
+        analysis: dict,
+    ) -> dict:
+        """Publica a unica verdade de mascaras para visor/status/overlay."""
+        if not isinstance(analysis, dict):
+            return analysis
+
+        rows = [
+            item
+            for item in (analysis.get("mask_results") or ())
+            if isinstance(item, dict) and str(item.get("mask_id") or "")
+        ]
+        effective_classifications = {
+            str(item.get("mask_id")): str(item.get("classified") or "")
+            .strip()
+            .lower()
+            for item in rows
+            if str(item.get("classified") or "").strip()
+        }
+        effective_failed_mask_ids = tuple(
+            sorted(
+                str(item.get("mask_id"))
+                for item in rows
+                if item.get("matched") is False
+            )
+        )
+
+        analysis["effective_classifications"] = effective_classifications
+        analysis["effective_failed_mask_ids"] = effective_failed_mask_ids
+        analysis["effective_active_mask_count"] = len(rows)
+        analysis["effective_matched_mask_count"] = max(
+            0,
+            len(rows) - len(effective_failed_mask_ids),
+        )
+        analysis["ui_mask_authority"] = "effective_mask_results_v1"
+        return analysis
+
     def _display_auto_observe_intermittent_phase(
         self,
         context: dict,
@@ -763,6 +801,9 @@ class DisplayAutomaticCheckF3Mixin:
                 intermittent_phase.get("persistent_failed_ids") or ()
             )
 
+        analysis = self._display_auto_publish_effective_ui_authority(
+            analysis
+        )
         self._display_auto_last_analysis = analysis
 
         # O primeiro CHECK/H1 é a trava física do ciclo. Sem pelo menos um
