@@ -170,6 +170,11 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             result["effective_failed_mask_ids"],
         )
         self.assertEqual(1, result["effective_matched_mask_count"])
+        self.assertEqual(
+            ("MASK_027",),
+            result["effective_confirmed_failed_mask_ids"],
+        )
+        self.assertEqual((), result["effective_validating_mask_ids"])
         self.assertEqual("effective_mask_results_v1", result["ui_mask_authority"])
 
 
