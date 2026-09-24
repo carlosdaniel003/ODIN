@@ -113,6 +113,9 @@ F3_TRACKING_TEMPLATE_MIN_SCORE = 0.42
 # pose geométrica. O conteúdo dos segmentos fica excluído pelo support mask e
 # jamais aprova o CHECK. Isso permite relock em displays com segmento defeituoso.
 F3_TRACKING_CURRENT_CHECK_TEMPLATE_MIN_SCORE = 0.30
+# BOARD_OFF é uma excelente âncora estrutural quando a placa está presente mas
+# o display ainda não acendeu. Usá-la para pose NÃO declara estado de energia.
+F3_TRACKING_BOARD_OFF_TEMPLATE_MIN_SCORE = 0.30
 F3_TRACKING_TEMPLATE_MIN_SIZE = 28
 F3_TRACKING_TEMPLATE_PADDING_FRACTION = 0.035
 
@@ -2517,32 +2520,89 @@ def _rescue_current_check_tracking_lock(
     frame,
     runtime: F3DisplayObjectTracker,
 ) -> F3TrackingResult | None:
-    """Recupera a pose pela referência estrutural do CHECK corrente.
+    """Recupera a pose por referências estruturais sem usar LEDs como estado.
 
-    O matcher de template usa uma máscara que remove as 28 ROIs. Portanto uma
-    falha real de segmento (ex.: MASK_024 apagada em BLUE) não derruba o lock e
-    também não pode ser usada para aprovar o CHECK.
+    Primeiro tentamos a foto do CHECK lógico atual. Se ela não localizar a placa,
+    tentamos BOARD_OFF, que é particularmente útil antes de H1 acender. Em ambos
+    os casos as ROIs dos segmentos ficam excluídas do template; a referência
+    escolhida serve SOMENTE para CURRENT -> CANÔNICO e nunca prova ON/OFF/OK/NG.
     """
     if runtime is None or not _valid_frame(frame) or not runtime.ready:
         return None
+
     current = _current_check(app)
-    if not isinstance(current, dict):
-        return None
-    check_id = str(current.get("id") or "")
-    if not check_id:
-        return None
+    check_id = str((current or {}).get("id") or "") if isinstance(current, dict) else ""
 
-    key = f"check:{check_id}"
-    if key not in runtime.references:
-        return None
-
-    candidate = runtime.candidate_for_reference(
-        frame,
-        key,
-        template_min_score=F3_TRACKING_CURRENT_CHECK_TEMPLATE_MIN_SCORE,
+    specs: list[tuple[str, float]] = []
+    if check_id:
+        specs.append(
+            (
+                f"check:{check_id}",
+                F3_TRACKING_CURRENT_CHECK_TEMPLATE_MIN_SCORE,
+            )
+        )
+    specs.append(
+        (
+            "board_off",
+            F3_TRACKING_BOARD_OFF_TEMPLATE_MIN_SCORE,
+        )
     )
-    if not isinstance(candidate, dict):
+
+    # Evita repetir a mesma chave e registra cada tentativa para o DEBUG.
+    unique_specs: list[tuple[str, float]] = []
+    seen = set()
+    for key, threshold in specs:
+        if key in seen or key not in runtime.references:
+            continue
+        seen.add(key)
+        unique_specs.append((key, threshold))
+
+    attempts = []
+    candidates = []
+    for key, threshold in unique_specs:
+        candidate = runtime.candidate_for_reference(
+            frame,
+            key,
+            template_min_score=threshold,
+        )
+        attempt = {
+            "reference": key,
+            "template_min_score": float(threshold),
+            "candidate": bool(isinstance(candidate, dict)),
+        }
+        if isinstance(candidate, dict):
+            attempt.update(
+                {
+                    "score": round(float(candidate.get("score", 0.0) or 0.0), 4),
+                    "matches": int(candidate.get("matches", 0) or 0),
+                    "inliers": int(candidate.get("inliers", 0) or 0),
+                    "inlier_ratio": round(
+                        float(candidate.get("ratio", 0.0) or 0.0),
+                        4,
+                    ),
+                    "fallback": str(candidate.get("fallback") or ""),
+                    "template_masked_for_segments": bool(
+                        candidate.get("template_masked_for_segments", False)
+                    ),
+                }
+            )
+            enriched = dict(candidate)
+            enriched["_rescue_reference"] = key
+            enriched["_rescue_threshold"] = float(threshold)
+            candidates.append(enriched)
+        attempts.append(attempt)
+
+    if not candidates:
+        app._display_f3_tracking_rescue_debug = {
+            "available": False,
+            "reason": "no_structural_rescue_candidate",
+            "check_id": check_id,
+            "attempts": attempts,
+        }
         return None
+
+    candidate = max(candidates, key=runtime._candidate_rank)
+    key = str(candidate.get("_rescue_reference") or candidate.get("reference") or "")
 
     try:
         matrix = np.asarray(
@@ -2554,8 +2614,6 @@ def _rescue_current_check_tracking_lock(
     if not np.all(np.isfinite(matrix)):
         return None
 
-    # A referência atual serve apenas de pose e continua sujeita aos limites
-    # globais de escala/translação do tracker.
     scale = affine_scale(matrix)
     if not (F3_TRACKING_MIN_SCALE <= scale <= F3_TRACKING_MAX_SCALE):
         return None
@@ -2582,11 +2640,27 @@ def _rescue_current_check_tracking_lock(
     runtime.last_verified_s = now
     runtime.consecutive_misses = 0
 
-    reason = (
-        "locked_current_check_template_rescue"
-        if str(candidate.get("fallback") or "") == "edge_template"
-        else "locked_current_check_orb_rescue"
+    source_label = (
+        "board_off"
+        if key == "board_off"
+        else "current_check"
     )
+    reason = (
+        f"locked_{source_label}_template_rescue"
+        if str(candidate.get("fallback") or "") == "edge_template"
+        else f"locked_{source_label}_orb_rescue"
+    )
+
+    app._display_f3_tracking_rescue_debug = {
+        "available": True,
+        "selected_reference": key,
+        "selected_reason": reason,
+        "selected_score": round(float(candidate.get("score", 0.0) or 0.0), 4),
+        "selected_fallback": str(candidate.get("fallback") or ""),
+        "check_id": check_id,
+        "attempts": attempts,
+    }
+
     result = F3TrackingResult(
         True,
         aligned,
@@ -2598,7 +2672,7 @@ def _rescue_current_check_tracking_lock(
         scale=float(candidate.get("scale", scale) or scale),
         reason=reason,
         current_to_canonical=matrix.copy(),
-        source_type="check",
+        source_type=str(candidate.get("source_type") or ""),
         evidence_current=True,
     )
     runtime.last_result = result
