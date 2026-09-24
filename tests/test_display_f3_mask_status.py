@@ -69,6 +69,35 @@ class DisplayF3MaskStatusTests(unittest.TestCase):
         self.assertIn("1 POUCA LUZ", text)
         self.assertEqual(F3_MASK_STATUS_COLORS["partial"], color)
 
+    def test_status_usa_contagem_e_classificacao_efetivas(self):
+        context = {
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "blue",
+            "check_name": "BLUE",
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "blue",
+            "active_mask_count": 2,
+            "matched_mask_count": 0,
+            "effective_matched_mask_count": 1,
+            "effective_classifications": {
+                "MASK_010": "on",
+                "MASK_027": "off",
+            },
+            "effective_failed_mask_ids": ("MASK_027",),
+            "mask_results": [
+                {"mask_id": "MASK_010", "classified": "off", "matched": False},
+                {"mask_id": "MASK_027", "classified": "off", "matched": False},
+            ],
+        }
+        text, _color = formatar_status_mascaras_f3(analysis, context)
+        self.assertIn("1/2 CONFORMES", text)
+        self.assertIn("1 ACESO", text)
+        self.assertIn("1 APAGADO", text)
+
     def test_analise_de_outro_check_nao_vaza_para_status_atual(self):
         context = {
             "project_name": "DISPLAY_TESTE",
@@ -116,7 +145,7 @@ class DisplayF3MaskStatusTests(unittest.TestCase):
         self.assertIn("_display_operational_status_box", source)
         self.assertIn("mask_analysis_state_label", source)
         self.assertIn("row=1", source)
-        self.assertIn("status_box.configure(height=52)", source)
+        self.assertIn("status_box.configure(height=76)", source)
 
     def test_status_de_mascaras_e_apenas_diagnostico(self):
         source = inspect.getsource(mask_status_module._install_mask_status_runtime)
