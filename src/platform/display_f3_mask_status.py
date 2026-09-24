@@ -123,8 +123,26 @@ def formatar_status_mascaras_f3(
     detected = total > 0 and matched == total
     state_text = "DETECTADO" if detected else "NÃO CONFIRMADO"
     detail = " • ".join(readings)
+
+    signature = analysis.get("segment_signature")
+    pattern_text = ""
+    if isinstance(signature, dict):
+        expected = str(signature.get("expected") or "").strip().upper()
+        observed = str(signature.get("observed") or "").strip().upper()
+        if (
+            expected
+            and observed
+            and "?" not in expected
+            and "?" not in observed
+            and expected != observed
+        ):
+            pattern_text = f" • PADRÃO {observed}≠{expected}"
+
     return (
-        f"MÁSCARAS • {check_name} {state_text} • {matched}/{total} CONFORMES • {detail}",
+        (
+            f"MÁSCARAS • {check_name} {state_text} • "
+            f"{matched}/{total} CONFORMES • {detail}{pattern_text}"
+        ),
         F3_MASK_STATUS_COLORS["detected" if detected else "partial"],
     )
 
