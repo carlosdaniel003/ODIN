@@ -588,7 +588,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             DisplayProductionF3Window,
         )
         self.assertEqual("#22C55E", DisplayProductionF3Window.DISPLAY_READOUT_ACTIVE)
-        self.assertEqual("#14532D", DisplayProductionF3Window.DISPLAY_READOUT_OFF)
+        self.assertEqual("#1E293B", DisplayProductionF3Window.DISPLAY_READOUT_OFF)
         self.assertEqual("#64748B", DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE)
         self.assertEqual("#EF4444", DisplayProductionF3Window.DISPLAY_READOUT_NG)
 
@@ -607,8 +607,9 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("_mask_snapshot_for_current_check", source)
         self.assertIn('semantic_context["classifications"]', source)
         self.assertIn("VERDE ACESO", source)
-        self.assertIn("VERMELHO APAGADO", source)
-        self.assertIn("AMARELO POUCA LUZ", source)
+        self.assertIn("AZUL/CINZA APAGADO", source)
+        self.assertIn("AMARELO VALIDANDO", source)
+        self.assertIn("VERMELHO FALHA", source)
 
     def test_live_semantic_renderer_draws_mask_numbers_without_solid_badge(self):
         renderer_source = inspect.getsource(
@@ -621,7 +622,9 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("cv2.putText", helper_source)
         self.assertNotIn("cv2.rectangle", helper_source)
         self.assertLessEqual(preview_clarity.F3_PREVIEW_CLEAR_ALPHA, 0.08)
-        self.assertLessEqual(preview_clarity.F3_PREVIEW_ALERT_ALPHA, 0.12)
+        self.assertLessEqual(preview_clarity.F3_PREVIEW_ALERT_ALPHA, 0.20)
+        self.assertIn("_draw_failure_badge", renderer_source)
+        self.assertIn("_draw_display_zoom_inset", renderer_source)
 
     def test_h1_reference_gate_requires_real_on_evidence(self):
         helper = auto_runtime.DisplayAutomaticCheckF3Mixin._display_auto_has_reference_power_evidence
@@ -805,6 +808,79 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             matrix = np.asarray(candidate["matrix"], dtype=np.float32)
             self.assertAlmostEqual(-dx, float(matrix[0, 2]), delta=3.0)
             self.assertAlmostEqual(-dy, float(matrix[1, 2]), delta=3.0)
+
+    def test_template_tracking_ignores_changed_display_segments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            reference = np.zeros((240, 320, 3), dtype=np.uint8)
+
+            # Estrutura fixa da placa.
+            cv2.rectangle(reference, (50, 45), (270, 195), (220, 220, 220), 3)
+            cv2.line(reference, (65, 65), (65, 175), (180, 180, 180), 3)
+            cv2.line(reference, (250, 65), (250, 175), (180, 180, 180), 3)
+
+            # Segmento luminoso propositalmente excluído do tracking.
+            segment = {
+                "id": "MASK_024",
+                "type": "polygon",
+                "points": [[200, 150], [240, 150], [240, 162], [200, 162]],
+            }
+            cv2.rectangle(reference, (200, 150), (240, 162), (255, 255, 255), -1)
+            board = [[50, 45], [270, 45], [270, 195], [50, 195]]
+            tracking_mask = tracking.build_tracking_mask(
+                320,
+                240,
+                board,
+                [segment],
+            )
+            refs = {}
+            tracker._add_reference(
+                refs,
+                key="check:BLUE",
+                image=reference,
+                tracking_mask=tracking_mask,
+                reference_to_canonical=np.asarray(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    dtype=np.float32,
+                ),
+                angle=0.0,
+                real_orientation=False,
+                source_type="check",
+                board_points=board,
+            )
+            self.assertIn("check:BLUE", refs)
+            self.assertIsNotNone(
+                refs["check:BLUE"].get("template_support_mask")
+            )
+            tracker.references = refs
+
+            # Frame atual: mesma placa transladada, mas MASK_024 apagada.
+            current = reference.copy()
+            cv2.rectangle(current, (195, 145), (245, 167), (0, 0, 0), -1)
+            dx, dy = 18, -11
+            current = cv2.warpAffine(
+                current,
+                np.asarray(
+                    [[1.0, 0.0, dx], [0.0, 1.0, dy]],
+                    dtype=np.float32,
+                ),
+                (320, 240),
+            )
+
+            gray = tracker._gray(current)
+            candidate = tracker._template_candidate(
+                cv2.Canny(gray, 45, 135),
+                "check:BLUE",
+                min_score=tracking.F3_TRACKING_CURRENT_CHECK_TEMPLATE_MIN_SCORE,
+            )
+            self.assertIsNotNone(candidate)
+            self.assertTrue(candidate.get("template_masked_for_segments"))
+            matrix = np.asarray(candidate["matrix"], dtype=np.float32)
+            self.assertAlmostEqual(-dx, float(matrix[0, 2]), delta=4.0)
+            self.assertAlmostEqual(-dy, float(matrix[1, 2]), delta=4.0)
 
     def test_final_instance_authority_bypasses_historical_f3_wrappers(self):
         source = inspect.getsource(
