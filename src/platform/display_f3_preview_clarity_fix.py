@@ -7,11 +7,12 @@ A classificação, a decisão OK/NG, o debounce e o fluxo produtivo continuam so
 as autoridades já instaladas.
 
 Regra visual final:
-- verde: segmento classificado como ACESO e coerente com o CHECK;
-- vermelho: segmento classificado como APAGADO e coerente com o CHECK;
-- amarelo: POUCA LUZ ou divergência ACESO/APAGADO contra o CHECK;
-- divergência confirmada recebe amarelo muito mais forte que as máscaras normais;
-- nenhuma cor cinza/azul e nenhum texto "NG MASK_xxx" sobre a imagem;
+- verde fino: segmento ACESO conforme;
+- azul/cinza fino: segmento APAGADO conforme;
+- amarelo: leitura em validação/POUCA LUZ;
+- vermelho: somente falha efetiva confirmada;
+- no ao vivo, somente falhas recebem numero grande e linha-guia;
+- o visor fisico recebe um inset ampliado para preservar a leitura dos segmentos;
 - enquanto nenhum segmento ACESO foi reconhecido, segmentos APAGADOS/divergentes
   não são pintados. Isso evita abrir o F3 com o H1 inteiro vermelho/amarelo antes
   de a placa realmente acender.
@@ -54,29 +55,32 @@ from src.platform.display_visual_rotation import (
 )
 
 
-# O contorno é a informação principal. O preenchimento é deliberadamente muito
-# leve para não esconder os segmentos reais do display na câmera ao vivo.
-F3_PREVIEW_CLEAR_ALPHA = 0.06
-F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 2
-# POUCA LUZ/divergência continua evidente pelo amarelo e contorno mais espesso,
-# sem cobrir visualmente o segmento defeituoso.
-F3_PREVIEW_ALERT_ALPHA = 0.10
+# O frame fisico deve continuar legivel. Estados conformes quase nao recebem
+# preenchimento; a falha efetiva e a unica regiao com destaque forte.
+F3_PREVIEW_CLEAR_ALPHA = 0.035
+F3_PREVIEW_CLEAR_CONTOUR_THICKNESS = 1
+F3_PREVIEW_WARNING_ALPHA = 0.08
+F3_PREVIEW_ALERT_ALPHA = 0.18
 F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 3
-# Guia neutra: sem energia confirmada não deve existir nenhuma cor semântica
-# capaz de sugerir ACESO/APAGADO/NG. #64748B em BGR.
 F3_PREVIEW_TRACKING_GUIDE_BGR = (139, 116, 100)
 F3_PREVIEW_TRACKING_GUIDE_THICKNESS = 1
-F3_PREVIEW_STARTUP_NUMBER_BGR = (203, 213, 225)  # cinza claro neutro
+F3_PREVIEW_STARTUP_NUMBER_BGR = (203, 213, 225)
+F3_PREVIEW_FAILURE_BADGE_BGR = (68, 68, 239)
+F3_PREVIEW_FAILURE_BADGE_TEXT_BGR = (255, 255, 255)
+F3_PREVIEW_ZOOM_WIDTH_RATIO = 0.38
+F3_PREVIEW_ZOOM_MAX_WIDTH = 300
+F3_PREVIEW_ZOOM_PADDING_RATIO = 0.18
 
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
-    DISPLAY_CHECK_STATE_OFF: (68, 68, 239),      # vermelho #EF4444
-    "alert": (21, 204, 250),                     # amarelo #FACC15
+    DISPLAY_CHECK_STATE_OFF: (139, 116, 100),    # azul/cinza #64748B
+    "warning": (21, 204, 250),                   # amarelo #FACC15
+    "alert": (68, 68, 239),                      # vermelho #EF4444
 }
 
 F3_PREVIEW_CLEAR_LEGEND = (
-    "VERDE: ACESO  •  VERMELHO: APAGADO  •  "
-    "AMARELO FORTE: POUCA LUZ / DIVERGÊNCIA"
+    "VERDE: ACESO  •  AZUL/CINZA: APAGADO  •  "
+    "AMARELO: VALIDANDO  •  VERMELHO: FALHA CONFIRMADA"
 )
 
 
@@ -92,7 +96,7 @@ def estado_visual_mascara_f3(
     target = str(expected or "").strip().lower()
 
     if current == DISPLAY_AUTO_CLASS_LOW_LIGHT:
-        return "alert"
+        return "warning"
 
     if current == DISPLAY_CHECK_STATE_ON:
         if target == DISPLAY_CHECK_STATE_OFF and has_any_on:
@@ -715,6 +719,326 @@ def _draw_live_mask_number(
     )
 
 
+def _presentation_for_effective_mask(
+    mask_id: str,
+    classifications: dict[str, str],
+    expected_states: dict[str, str],
+    failed_mask_ids: set[str],
+    *,
+    has_any_on: bool,
+    intermittent: bool,
+    effective_authority: bool,
+) -> str | None:
+    current = str(classifications.get(mask_id) or "").strip().lower()
+    if effective_authority:
+        if mask_id in failed_mask_ids:
+            return "alert"
+        if current == DISPLAY_AUTO_CLASS_LOW_LIGHT:
+            return "warning"
+        if current == DISPLAY_CHECK_STATE_ON:
+            return DISPLAY_CHECK_STATE_ON
+        if current == DISPLAY_CHECK_STATE_OFF:
+            return DISPLAY_CHECK_STATE_OFF if has_any_on else None
+        return None
+
+    return estado_visual_mascara_f3(
+        current,
+        expected_states.get(mask_id),
+        has_any_on=has_any_on,
+        intermittent=intermittent,
+    )
+
+
+def _mask_bbox_pixels(mask: dict, sx: float, sy: float):
+    try:
+        x1, y1, x2, y2 = bbox_mascara_display(mask)
+        left = int(round(min(float(x1), float(x2)) * sx))
+        right = int(round(max(float(x1), float(x2)) * sx))
+        top = int(round(min(float(y1), float(y2)) * sy))
+        bottom = int(round(max(float(y1), float(y2)) * sy))
+        return left, top, right, bottom
+    except Exception:
+        return None
+
+
+def _display_bbox_pixels(masks, sx: float, sy: float, frame_shape):
+    boxes = [
+        box
+        for box in (
+            _mask_bbox_pixels(mask, sx, sy)
+            for mask in masks
+            if isinstance(mask, dict)
+        )
+        if box is not None
+    ]
+    if not boxes:
+        return None
+    frame_h, frame_w = frame_shape[:2]
+    left = max(0, min(box[0] for box in boxes))
+    top = max(0, min(box[1] for box in boxes))
+    right = min(frame_w - 1, max(box[2] for box in boxes))
+    bottom = min(frame_h - 1, max(box[3] for box in boxes))
+    return left, top, right, bottom
+
+
+def _draw_failure_badge(
+    result,
+    mask: dict,
+    sx: float,
+    sy: float,
+    display_bbox,
+) -> None:
+    label = _numero_mascara_f3(mask)
+    box = _mask_bbox_pixels(mask, sx, sy)
+    if not label or box is None or display_bbox is None:
+        return
+
+    x1, y1, x2, y2 = box
+    dx1, dy1, dx2, dy2 = display_bbox
+    cx = int(round((x1 + x2) / 2.0))
+    cy = int(round((y1 + y2) / 2.0))
+    dcx = (dx1 + dx2) / 2.0
+    dcy = (dy1 + dy2) / 2.0
+    frame_h, frame_w = result.shape[:2]
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.48
+    thickness = 1
+    (tw, th), baseline = cv2.getTextSize(
+        label,
+        font,
+        font_scale,
+        thickness,
+    )
+    badge_w = tw + 12
+    badge_h = th + baseline + 8
+    gap = 10
+
+    if abs(cx - dcx) >= abs(cy - dcy):
+        if cx < dcx:
+            bx = dx1 - badge_w - gap
+            by = cy - badge_h // 2
+        else:
+            bx = dx2 + gap
+            by = cy - badge_h // 2
+    else:
+        if cy < dcy:
+            bx = cx - badge_w // 2
+            by = dy1 - badge_h - gap
+        else:
+            bx = cx - badge_w // 2
+            by = dy2 + gap
+
+    bx = max(3, min(frame_w - badge_w - 3, int(bx)))
+    by = max(3, min(frame_h - badge_h - 3, int(by)))
+    badge_center = (bx + badge_w // 2, by + badge_h // 2)
+
+    cv2.line(
+        result,
+        (cx, cy),
+        badge_center,
+        F3_PREVIEW_FAILURE_BADGE_BGR,
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.rectangle(
+        result,
+        (bx, by),
+        (bx + badge_w, by + badge_h),
+        F3_PREVIEW_FAILURE_BADGE_BGR,
+        -1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        result,
+        label,
+        (bx + 6, by + badge_h - 5),
+        font,
+        font_scale,
+        F3_PREVIEW_FAILURE_BADGE_TEXT_BGR,
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
+def _draw_inset_mask(
+    inset,
+    mask: dict,
+    sx: float,
+    sy: float,
+    crop_left: int,
+    crop_top: int,
+    scale: float,
+    color,
+    thickness: int,
+) -> None:
+    kind = str(mask.get("type") or "").lower()
+    if kind == "circle":
+        center = (
+            int(round((float(mask.get("cx", 0)) * sx - crop_left) * scale)),
+            int(round((float(mask.get("cy", 0)) * sy - crop_top) * scale)),
+        )
+        axes = (
+            max(1, int(round(float(mask.get("radius", 1)) * sx * scale))),
+            max(1, int(round(float(mask.get("radius", 1)) * sy * scale))),
+        )
+        cv2.ellipse(
+            inset, center, axes, 0, 0, 360, color, thickness, cv2.LINE_AA
+        )
+        return
+
+    polygon = overlay_module._scaled_polygon(mask, sx, sy)
+    if polygon is None or len(polygon) < 3:
+        return
+    transformed = polygon.astype(np.float32)
+    transformed[:, 0] = (transformed[:, 0] - float(crop_left)) * scale
+    transformed[:, 1] = (transformed[:, 1] - float(crop_top)) * scale
+    cv2.polylines(
+        inset,
+        [np.rint(transformed).astype(np.int32)],
+        True,
+        color,
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
+def _draw_display_zoom_inset(
+    source,
+    result,
+    masks,
+    sx: float,
+    sy: float,
+    classifications: dict[str, str],
+    expected_states: dict[str, str],
+    failed_mask_ids: set[str],
+    *,
+    has_any_on: bool,
+    intermittent: bool,
+    effective_authority: bool,
+) -> None:
+    display_bbox = _display_bbox_pixels(masks, sx, sy, source.shape)
+    if display_bbox is None:
+        return
+
+    left, top, right, bottom = display_bbox
+    width = max(1, right - left + 1)
+    height = max(1, bottom - top + 1)
+    pad_x = max(8, int(round(width * F3_PREVIEW_ZOOM_PADDING_RATIO)))
+    pad_y = max(8, int(round(height * F3_PREVIEW_ZOOM_PADDING_RATIO)))
+    frame_h, frame_w = source.shape[:2]
+    crop_left = max(0, left - pad_x)
+    crop_top = max(0, top - pad_y)
+    crop_right = min(frame_w, right + pad_x + 1)
+    crop_bottom = min(frame_h, bottom + pad_y + 1)
+
+    crop = source[crop_top:crop_bottom, crop_left:crop_right]
+    if crop.size == 0 or crop.shape[1] < 16 or crop.shape[0] < 12:
+        return
+
+    target_w = min(
+        F3_PREVIEW_ZOOM_MAX_WIDTH,
+        max(170, int(round(frame_w * F3_PREVIEW_ZOOM_WIDTH_RATIO))),
+    )
+    scale = target_w / float(crop.shape[1])
+    target_h = max(1, int(round(crop.shape[0] * scale)))
+    max_h = max(80, int(round(frame_h * 0.46)))
+    if target_h > max_h:
+        scale = max_h / float(crop.shape[0])
+        target_h = max_h
+        target_w = max(1, int(round(crop.shape[1] * scale)))
+
+    inset = cv2.resize(
+        crop,
+        (target_w, target_h),
+        interpolation=cv2.INTER_CUBIC if scale > 1.0 else cv2.INTER_AREA,
+    )
+
+    for mask in masks:
+        if not isinstance(mask, dict):
+            continue
+        mask_id = str(mask.get("id") or "")
+        presentation = _presentation_for_effective_mask(
+            mask_id,
+            classifications,
+            expected_states,
+            failed_mask_ids,
+            has_any_on=has_any_on,
+            intermittent=intermittent,
+            effective_authority=effective_authority,
+        )
+        if presentation is None:
+            continue
+        color = F3_PREVIEW_CLEAR_COLORS[presentation]
+        _draw_inset_mask(
+            inset,
+            mask,
+            sx,
+            sy,
+            crop_left,
+            crop_top,
+            scale,
+            color,
+            3 if presentation == "alert" else 1,
+        )
+
+    margin = 10
+    display_cx = (left + right) / 2.0
+    display_cy = (top + bottom) / 2.0
+    candidates = [
+        (margin, margin),
+        (frame_w - target_w - margin, margin),
+        (margin, frame_h - target_h - margin),
+        (frame_w - target_w - margin, frame_h - target_h - margin),
+    ]
+    candidates = [
+        (max(0, x), max(0, y))
+        for x, y in candidates
+        if x >= 0 and y >= 0
+    ]
+    if not candidates:
+        return
+    inset_x, inset_y = max(
+        candidates,
+        key=lambda point: (
+            (point[0] + target_w / 2.0 - display_cx) ** 2
+            + (point[1] + target_h / 2.0 - display_cy) ** 2
+        ),
+    )
+
+    result[
+        inset_y:inset_y + target_h,
+        inset_x:inset_x + target_w,
+    ] = inset
+    cv2.rectangle(
+        result,
+        (inset_x - 1, inset_y - 1),
+        (inset_x + target_w, inset_y + target_h),
+        (15, 23, 42),
+        2,
+        cv2.LINE_AA,
+    )
+    zoom = max(1.0, scale)
+    label = f"VISOR x{zoom:.1f}"
+    cv2.rectangle(
+        result,
+        (inset_x, inset_y),
+        (min(frame_w - 1, inset_x + 92), min(frame_h - 1, inset_y + 20)),
+        (15, 23, 42),
+        -1,
+    )
+    cv2.putText(
+        result,
+        label,
+        (inset_x + 5, inset_y + 14),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.38,
+        (226, 232, 240),
+        1,
+        cv2.LINE_AA,
+    )
+
+
 def renderizar_preview_claro_display_f3(frame, context):
     """Render final: máscara normal suave e divergência amarela muito evidente."""
     if frame is None or getattr(frame, "size", 0) == 0:
@@ -789,7 +1113,13 @@ def renderizar_preview_claro_display_f3(frame, context):
         )
     )
 
+    source_for_inset = frame.copy()
     result = frame.copy()
+    effective_authority = bool(
+        context.get("ui_mask_authority")
+        or "effective_failed_mask_ids" in context
+        or "effective_classifications" in context
+    )
 
     # Bounding box/contorno da placa rastreada: permanece sobre a câmera REAL e
     # acompanha translação/rotação/escala da placa sem deformar a imagem.
@@ -867,19 +1197,15 @@ def renderizar_preview_claro_display_f3(frame, context):
         if not isinstance(mask, dict):
             continue
         mask_id = str(mask.get("id") or "")
-        presentation = estado_visual_mascara_f3(
-            classifications.get(mask_id),
-            expected_states.get(mask_id),
+        presentation = _presentation_for_effective_mask(
+            mask_id,
+            classifications,
+            expected_states,
+            failed_mask_ids,
             has_any_on=has_any_on,
             intermittent=bool(context.get("intermittent", False)),
+            effective_authority=effective_authority,
         )
-
-        # matched=False é a evidência direta de divergência. Só ativamos o
-        # destaque após a placa mostrar ao menos um segmento realmente aceso.
-        # Assim a partida do F3 não vira um painel inteiro amarelo/vermelho.
-        confirmed_failure = bool(mask_id in failed_mask_ids and has_any_on)
-        if confirmed_failure:
-            presentation = "alert"
 
         if presentation is None:
             continue
@@ -914,15 +1240,16 @@ def renderizar_preview_claro_display_f3(frame, context):
             mask_id = str(mask.get("id") or "")
             classified = classifications.get(mask_id)
             expected = expected_states.get(mask_id)
-            presentation = estado_visual_mascara_f3(
-                classified,
-                expected,
+            presentation = _presentation_for_effective_mask(
+                mask_id,
+                classifications,
+                expected_states,
+                failed_mask_ids,
                 has_any_on=has_any_on,
                 intermittent=bool(context.get("intermittent", False)),
+                effective_authority=effective_authority,
             )
-            if mask_id in failed_mask_ids and has_any_on:
-                presentation = "alert"
-            if presentation != "alert":
+            if presentation not in {"alert", "warning"}:
                 continue
             _draw_mask(
                 alert_tint,
@@ -931,11 +1258,16 @@ def renderizar_preview_claro_display_f3(frame, context):
                 sy,
                 F3_PREVIEW_CLEAR_COLORS["alert"],
             )
+        alert_alpha = (
+            F3_PREVIEW_ALERT_ALPHA
+            if failed_mask_ids
+            else F3_PREVIEW_WARNING_ALPHA
+        )
         cv2.addWeighted(
             alert_tint,
-            F3_PREVIEW_ALERT_ALPHA,
+            alert_alpha,
             result,
-            1.0 - F3_PREVIEW_ALERT_ALPHA,
+            1.0 - alert_alpha,
             0.0,
             dst=result,
         )
@@ -956,33 +1288,60 @@ def renderizar_preview_claro_display_f3(frame, context):
             F3_PREVIEW_ALERT_CONTOUR_THICKNESS,
         )
 
-    # Numeração visível em todas as máscaras, inclusive antes da classificação.
-    # O número usa a cor semântica quando existe resultado e uma cor neutra quando
-    # ainda estamos apenas rastreando a geometria.
-    for mask in masks:
-        if not isinstance(mask, dict):
-            continue
-        mask_id = str(mask.get("id") or "")
-        presentation = estado_visual_mascara_f3(
-            classifications.get(mask_id),
-            expected_states.get(mask_id),
-            has_any_on=has_any_on,
-            intermittent=bool(context.get("intermittent", False)),
-        )
-        if mask_id in failed_mask_ids and has_any_on:
-            presentation = "alert"
-        number_color = (
-            F3_PREVIEW_CLEAR_COLORS[presentation]
-            if presentation in F3_PREVIEW_CLEAR_COLORS
-            else F3_PREVIEW_STARTUP_NUMBER_BGR
-        )
-        _draw_live_mask_number(
-            result,
-            mask,
-            sx,
-            sy,
-            number_color,
-        )
+    display_bbox = _display_bbox_pixels(masks, sx, sy, result.shape)
+    debug_detailed = bool(context.get("debug_frame_specific"))
+
+    if debug_detailed:
+        # DEBUG pode manter todos os IDs pequenos; a produção ao vivo não.
+        for mask in masks:
+            if not isinstance(mask, dict):
+                continue
+            mask_id = str(mask.get("id") or "")
+            presentation = _presentation_for_effective_mask(
+                mask_id,
+                classifications,
+                expected_states,
+                failed_mask_ids,
+                has_any_on=has_any_on,
+                intermittent=bool(context.get("intermittent", False)),
+                effective_authority=effective_authority,
+            )
+            number_color = (
+                F3_PREVIEW_CLEAR_COLORS[presentation]
+                if presentation in F3_PREVIEW_CLEAR_COLORS
+                else F3_PREVIEW_STARTUP_NUMBER_BGR
+            )
+            _draw_live_mask_number(result, mask, sx, sy, number_color)
+    else:
+        # Operador: somente falhas reais ganham número grande fora do display.
+        for mask in masks:
+            if not isinstance(mask, dict):
+                continue
+            mask_id = str(mask.get("id") or "")
+            if mask_id not in failed_mask_ids:
+                continue
+            _draw_failure_badge(
+                result,
+                mask,
+                sx,
+                sy,
+                display_bbox,
+            )
+
+        if semantic_power_ready or not energy_gate_declared:
+            _draw_display_zoom_inset(
+                source_for_inset,
+                result,
+                masks,
+                sx,
+                sy,
+                classifications,
+                expected_states,
+                failed_mask_ids,
+                has_any_on=has_any_on,
+                intermittent=bool(context.get("intermittent", False)),
+                effective_authority=effective_authority,
+            )
 
     return result
 
@@ -1010,7 +1369,7 @@ def _aplicar_render_final() -> None:
         {
             "on": F3_PREVIEW_CLEAR_COLORS[DISPLAY_CHECK_STATE_ON],
             "off": F3_PREVIEW_CLEAR_COLORS[DISPLAY_CHECK_STATE_OFF],
-            "low_light": F3_PREVIEW_CLEAR_COLORS["alert"],
+            "low_light": F3_PREVIEW_CLEAR_COLORS["warning"],
             "mismatch": F3_PREVIEW_CLEAR_COLORS["alert"],
         }
     )
