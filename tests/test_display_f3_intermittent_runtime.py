@@ -142,6 +142,35 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         self.assertEqual(3, state["failure_counts"]["MASK_027"])
 
 
+    def test_assinatura_4x7_decodifica_blue_com_mask_024_off_como_bluf(self):
+        slots = (
+            "MASK_001", "MASK_002", "MASK_003", "MASK_004", "MASK_005", "MASK_006", "MASK_007",
+            "MASK_008", "MASK_009", "MASK_010", "MASK_011", "MASK_012", "MASK_013", "MASK_014",
+            "MASK_015", "MASK_016", "MASK_017", "MASK_018", "MASK_019", "MASK_020", "MASK_021",
+            # Quarto dígito: A,B,C,D,E,F,G. Na geometria do caso real, D é MASK_024.
+            "MASK_026", "MASK_027", "MASK_028", "MASK_024", "MASK_023", "MASK_022", "MASK_025",
+        )
+        expected_on = {
+            # B = C,D,E,F,G
+            "MASK_003", "MASK_004", "MASK_005", "MASK_006", "MASK_007",
+            # L = D,E,F
+            "MASK_011", "MASK_012", "MASK_013",
+            # U = B,C,D,E,F
+            "MASK_016", "MASK_017", "MASK_018", "MASK_019", "MASK_020",
+            # E = A,D,E,F,G
+            "MASK_026", "MASK_024", "MASK_023", "MASK_022", "MASK_025",
+        }
+        expected = {
+            mask_id: ("on" if mask_id in expected_on else "off")
+            for mask_id in slots
+        }
+        observed = dict(expected)
+        observed["MASK_024"] = "off"
+
+        decode = DisplayAutomaticCheckF3Mixin._display_auto_decode_4x7_signature
+        self.assertEqual("BLUE", decode(slots, expected))
+        self.assertEqual("BLUF", decode(slots, observed))
+
     def test_autoridade_efetiva_publica_somente_mask_027(self):
         analysis = {
             "mask_results": [
