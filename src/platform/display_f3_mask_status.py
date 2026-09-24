@@ -228,11 +228,26 @@ def _publish_mask_status(app) -> None:
             analysis.get("approved") if isinstance(analysis, dict) else None
         ),
         "matched_mask_count": int(
-            (analysis or {}).get("matched_mask_count", 0) or 0
+            (analysis or {}).get(
+                "effective_matched_mask_count",
+                (analysis or {}).get("matched_mask_count", 0),
+            )
+            or 0
         ) if isinstance(analysis, dict) else 0,
         "active_mask_count": int(
-            (analysis or {}).get("active_mask_count", 0) or 0
+            (analysis or {}).get(
+                "effective_active_mask_count",
+                (analysis or {}).get("active_mask_count", 0),
+            )
+            or 0
         ) if isinstance(analysis, dict) else 0,
+        "effective_failed_mask_ids": tuple(
+            str(mask_id)
+            for mask_id in (
+                (analysis or {}).get("effective_failed_mask_ids") or ()
+            )
+            if str(mask_id)
+        ) if isinstance(analysis, dict) else (),
     }
 
 
