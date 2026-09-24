@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from types import SimpleNamespace
 
 import src.platform.display_f3_mask_status as mask_status_module
 from src.platform.display_f3_mask_status import (
@@ -97,6 +98,79 @@ class DisplayF3MaskStatusTests(unittest.TestCase):
         self.assertIn("1/2 CONFORMES", text)
         self.assertIn("1 ACESO", text)
         self.assertIn("1 APAGADO", text)
+
+    def test_status_expoe_blue_bluf_quando_assinatura_diverge(self):
+        context = {
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "blue",
+            "check_name": "BLUE",
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "blue",
+            "active_mask_count": 28,
+            "effective_matched_mask_count": 27,
+            "effective_classifications": {
+                "MASK_024": "off",
+            },
+            "mask_results": [
+                {"mask_id": "MASK_024", "classified": "off", "matched": False},
+            ],
+            "segment_signature": {
+                "expected": "BLUE",
+                "observed": "BLUF",
+                "failed_mask_ids": ("MASK_024",),
+            },
+        }
+        text, _color = formatar_status_mascaras_f3(analysis, context)
+        self.assertIn("27/28 CONFORMES", text)
+        self.assertIn("PADRÃO BLUF≠BLUE", text)
+
+    def test_status_nao_publica_28_apagados_enquanto_tracking_sem_lock(self):
+        class _Window:
+            def __init__(self):
+                self.last = None
+
+            def set_mask_analysis_status(self, text, color):
+                self.last = (text, color)
+
+        window = _Window()
+        app = SimpleNamespace(
+            display_f3_ativo=True,
+            display_f3_window=window,
+            _display_auto_current_context=lambda: {
+                "project_name": "DISPLAY_TESTE",
+                "check_id": "blue",
+                "check_name": "BLUE",
+            },
+            _display_f3_object_tracking_last_status={
+                "enabled": True,
+                "locked": False,
+                "reason": "object_not_locked",
+            },
+            _display_auto_last_analysis={
+                "ready": True,
+                "project_name": "DISPLAY_TESTE",
+                "check_id": "blue",
+                "active_mask_count": 28,
+                "matched_mask_count": 10,
+                "mask_results": [
+                    {"classified": "off", "matched": False}
+                    for _ in range(28)
+                ],
+            },
+        )
+
+        mask_status_module._publish_mask_status(app)
+
+        self.assertIsNotNone(window.last)
+        self.assertEqual(
+            "MÁSCARAS • BLUE: AGUARDANDO RASTREAMENTO",
+            window.last[0],
+        )
+        self.assertNotIn("28 APAGADOS", window.last[0])
 
     def test_analise_de_outro_check_nao_vaza_para_status_atual(self):
         context = {
