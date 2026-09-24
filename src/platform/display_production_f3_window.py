@@ -20,7 +20,11 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
     DISPLAY_READOUT_SCREEN = "#020617"
     DISPLAY_READOUT_BORDER = "#334155"
     DISPLAY_READOUT_ACTIVE = "#22C55E"
-    DISPLAY_READOUT_OFF = "#14532D"
+    DISPLAY_READOUT_OFF = "#1E293B"
+    DISPLAY_READOUT_OFF_OUTLINE = "#475569"
+    DISPLAY_READOUT_WARNING = "#EAB308"
+    DISPLAY_READOUT_WARNING_OUTLINE = "#FDE68A"
+    DISPLAY_READOUT_NUMBER_WARNING = "#FEF3C7"
     DISPLAY_READOUT_INACTIVE = "#64748B"
     DISPLAY_READOUT_INACTIVE_OUTLINE = "#94A3B8"
     DISPLAY_READOUT_NG = "#EF4444"
@@ -435,6 +439,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         ready: bool = True,
         intermittent: bool = False,
         has_any_on: bool = False,
+        validating: bool = False,
+        effective_authority: bool = False,
     ) -> str:
         """Estado lógico do visor fixo com cinza enquanto não há leitura."""
         current = str(classified or "").strip().lower()
@@ -445,6 +451,18 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         # falsos ON/LOW_LIGHT por reflexo, contraste ou ruído.
         if not bool(ready):
             return "neutral"
+
+        if effective_authority:
+            if bool(failed):
+                return "ng"
+            if bool(validating) or current == "low_light":
+                return "warning"
+            if current == "on":
+                return "on"
+            if current == "off":
+                return "off"
+            return "neutral"
+
         if current == "low_light":
             return "ng"
         if target not in {"on", "off"}:
@@ -471,6 +489,12 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 self.DISPLAY_READOUT_NG_OUTLINE,
                 self.DISPLAY_READOUT_NUMBER_NG,
             )
+        if state == "warning":
+            return (
+                self.DISPLAY_READOUT_WARNING,
+                self.DISPLAY_READOUT_WARNING_OUTLINE,
+                self.DISPLAY_READOUT_NUMBER_WARNING,
+            )
         if state == "on":
             return (
                 self.DISPLAY_READOUT_ACTIVE,
@@ -480,7 +504,7 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
         if state == "off":
             return (
                 self.DISPLAY_READOUT_OFF,
-                "#166534",
+                self.DISPLAY_READOUT_OFF_OUTLINE,
                 self.DISPLAY_READOUT_NUMBER,
             )
         return (
@@ -539,11 +563,22 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                     str(mask_id)
                     for mask_id in (
                         (
-                            context.get("effective_failed_mask_ids")
-                            if "effective_failed_mask_ids" in context
-                            else context.get("failed_mask_ids")
+                            context.get("effective_confirmed_failed_mask_ids")
+                            if "effective_confirmed_failed_mask_ids" in context
+                            else (
+                                context.get("effective_failed_mask_ids")
+                                if "effective_failed_mask_ids" in context
+                                else context.get("failed_mask_ids")
+                            )
                         )
                         or ()
+                    )
+                    if str(mask_id)
+                },
+                "validating_mask_ids": {
+                    str(mask_id)
+                    for mask_id in (
+                        context.get("effective_validating_mask_ids") or ()
                     )
                     if str(mask_id)
                 },
@@ -643,6 +678,12 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
             for mask_id in (context.get("failed_mask_ids") or ())
             if str(mask_id)
         }
+        validating = {
+            str(mask_id)
+            for mask_id in (context.get("validating_mask_ids") or ())
+            if str(mask_id)
+        }
+        effective_authority = bool(context.get("ui_mask_authority"))
 
         for segment_name, mask_id in zip(segment_order, mask_ids):
             state = self._display_readout_semantic_state(
@@ -652,6 +693,8 @@ class DisplayProductionF3Window(RaspberryOperationWindow):
                 ready=ready,
                 intermittent=bool(context.get("intermittent", False)),
                 has_any_on=bool(context.get("has_any_on")),
+                validating=mask_id in validating,
+                effective_authority=effective_authority,
             )
             fill, outline, _number = self._display_readout_color(state)
             points = polygons[segment_name]
