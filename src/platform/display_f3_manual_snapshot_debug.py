@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import queue
 import threading
 import tkinter as tk
@@ -979,44 +980,48 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         int(snapshot["rotation"]),
     )
 
+    logical_context = snapshot.get("logical_context") or {}
+    logical_check_id = str(logical_context.get("check_id") or "")
+    frozen_analysis = next(
+        (
+            deepcopy(row.get("check_photo_learning"))
+            for row in (snapshot.get("check_analyses") or ())
+            if isinstance(row, dict)
+            and str(row.get("check_id") or "") == logical_check_id
+            and isinstance(row.get("check_photo_learning"), dict)
+        ),
+        None,
+    )
+    snapshot["frozen_frame_analysis"] = deepcopy(frozen_analysis)
+
+    # O visor e o overlay do DEBUG não herdam last_auto_analysis do runtime.
+    # Eles são reconstruídos da análise feita sobre ESTA cópia congelada.
+    readout = _frozen_frame_visual_context(snapshot, frozen_analysis)
     visual_state = snapshot.get("visual_state")
-    overlay_context = (
-        _safe_deepcopy(visual_state.get("overlay_context"))
-        if isinstance(visual_state, dict)
-        and isinstance(visual_state.get("overlay_context"), dict)
-        else None
-    )
-    if overlay_context is None:
-        try:
-            from src.platform.display_live_roi_overlay import (
-                montar_contexto_overlay_snapshot_display_f3,
-            )
+    visual_state = deepcopy(visual_state) if isinstance(visual_state, dict) else {}
+    visual_state["readout_context"] = deepcopy(readout)
+    visual_state["debug_visual_source"] = "frozen_frame_analysis"
+    snapshot["visual_state"] = visual_state
 
-            runtime_analysis = (
-                snapshot.get("runtime_at_click", {}).get("last_auto_analysis")
-            )
-            logical_context = snapshot.get("logical_context") or {}
-            overlay_context = montar_contexto_overlay_snapshot_display_f3(
-                repository,
-                project_name,
-                str(logical_context.get("check_id") or ""),
-                runtime_analysis if isinstance(runtime_analysis, dict) else None,
-                int(snapshot.get("rotation", 0) or 0),
-            )
-        except Exception as exc:
-            overlay_context = None
-            snapshot["errors"].append(
-                f"overlay_snapshot:{type(exc).__name__}:{exc}"
-            )
+    overlay_context = None
+    try:
+        from src.platform.display_live_roi_overlay import (
+            montar_contexto_overlay_snapshot_display_f3,
+        )
+        overlay_context = montar_contexto_overlay_snapshot_display_f3(
+            repository,
+            project_name,
+            logical_check_id,
+            frozen_analysis if isinstance(frozen_analysis, dict) else None,
+            int(snapshot.get("rotation", 0) or 0),
+        )
+    except Exception as exc:
+        overlay_context = None
+        snapshot["errors"].append(
+            f"overlay_snapshot:{type(exc).__name__}:{exc}"
+        )
 
-    # Completa o contexto com a semântica exata que alimentou o visor. O
-    # renderer final do F3 usa esses campos para mismatch/NG/energia.
-    readout = (
-        visual_state.get("readout_context")
-        if isinstance(visual_state, dict)
-        and isinstance(visual_state.get("readout_context"), dict)
-        else {}
-    )
+    # Completa o contexto com a semântica exata do mesmo frame congelado.
     if isinstance(overlay_context, dict):
         overlay_context = dict(overlay_context)
         for key in (
@@ -1027,6 +1032,10 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
             "power_confirmed",
             "power_off_confirmed",
             "energy_state",
+            "mask_ids",
+            "intermittent_phase",
+            "debug_frame_specific",
+            "debug_frame_sha256_24",
         ):
             if key in readout:
                 overlay_context[key] = _safe_deepcopy(readout.get(key))
@@ -1036,6 +1045,103 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
     # O frame bruto não é persistido na estrutura textual; o hash identifica a
     # cópia usada em todos os cálculos desta execução.
     return snapshot
+
+
+def _frozen_frame_visual_context(
+    snapshot: dict,
+    analysis: dict | None,
+) -> dict:
+    """Semântica visual calculada exclusivamente do frame congelado."""
+    data = analysis if isinstance(analysis, dict) else {}
+    results = [
+        item
+        for item in (data.get("mask_results") or ())
+        if isinstance(item, dict) and str(item.get("mask_id") or "")
+    ]
+    classifications = {
+        str(item.get("mask_id")): str(item.get("classified") or "").strip().lower()
+        for item in results
+        if str(item.get("classified") or "").strip()
+    }
+    expected_states = {
+        str(item.get("mask_id")): str(item.get("expected") or "").strip().lower()
+        for item in results
+        if str(item.get("expected") or "").strip()
+    }
+    failed_mask_ids = tuple(
+        sorted(
+            str(item.get("mask_id"))
+            for item in results
+            if item.get("matched") is False
+        )
+    )
+    mask_ids = tuple(str(item.get("mask_id")) for item in results)
+    on_count = sum(1 for value in classifications.values() if value == "on")
+
+    logical = snapshot.get("logical_context") if isinstance(snapshot, dict) else {}
+    logical = logical if isinstance(logical, dict) else {}
+    intermittent = bool(logical.get("intermittent", False))
+    expected_on_total = sum(
+        1 for value in expected_states.values() if value == DISPLAY_CHECK_STATE_ON
+    )
+    on_threshold = max(
+        1,
+        int(math.ceil(expected_on_total * 0.55)),
+    ) if expected_on_total else 1
+    off_ceiling = max(
+        0,
+        int(math.floor(expected_on_total * 0.15)),
+    ) if expected_on_total else 0
+
+    if not intermittent:
+        phase = "steady"
+    elif on_count >= on_threshold:
+        phase = "on"
+    elif on_count <= off_ceiling:
+        phase = "off"
+    else:
+        phase = "transition"
+
+    runtime = snapshot.get("runtime_at_click") if isinstance(snapshot, dict) else {}
+    authority = (
+        runtime.get("power_authority_status")
+        if isinstance(runtime, dict)
+        and isinstance(runtime.get("power_authority_status"), dict)
+        else {}
+    )
+    energy = authority.get("energy") if isinstance(authority.get("energy"), dict) else {}
+    minimum_on = int(energy.get("minimum_discriminative_on_count", 1) or 1)
+    required_powered = max(1, minimum_on // 2 + 1)
+    powered = bool(on_count >= required_powered and phase != "off")
+
+    return {
+        "classifications": classifications,
+        "expected_states": expected_states,
+        "failed_mask_ids": failed_mask_ids,
+        "mask_ids": mask_ids,
+        "has_any_on": bool(on_count),
+        "intermittent": intermittent,
+        "intermittent_phase": phase,
+        "power_confirmed": powered,
+        "power_off_confirmed": (
+            False
+            if intermittent
+            else bool(not powered and on_count == 0)
+        ),
+        "energy_state": (
+            "powered"
+            if powered
+            else (
+                "intermittent_off"
+                if intermittent and phase == "off"
+                else "unconfirmed"
+            )
+        ),
+        "debug_frame_specific": True,
+        "debug_frame_sha256_24": str(
+            (snapshot.get("frame") or {}).get("sha256_24") or ""
+        ),
+    }
 
 
 def _json(value) -> str:
@@ -1393,6 +1499,15 @@ def _apply_snapshot_result_to_window(
         return snapshot
 
     window._display_f3_manual_snapshot = _safe_deepcopy(snapshot)
+    app = getattr(window, "_display_f3_manual_debug_owner", None)
+    if app is None:
+        app = getattr(window, "_display_f3_debug_owner", None)
+    source_frame = getattr(app, "_display_f3_manual_snapshot_frozen_frame", None)
+    if source_frame is not None and getattr(source_frame, "size", 0) > 0:
+        try:
+            window._display_f3_manual_snapshot_frozen_frame = source_frame.copy()
+        except Exception:
+            window._display_f3_manual_snapshot_frozen_frame = source_frame
     window._display_f3_manual_snapshot_report = str(report or "")
     window._display_f3_manual_snapshot_serial = int(
         getattr(window, "_display_f3_manual_snapshot_serial", 0) or 0

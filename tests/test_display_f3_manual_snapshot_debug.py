@@ -196,6 +196,37 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         )
         self.assertTrue(result["debug_visual_runtime_coherent"])
 
+    def test_contexto_visual_do_frame_congelado_inclui_28_mascaras(self):
+        snapshot = {
+            "frame": {"sha256_24": "abc123"},
+            "logical_context": {"intermittent": True},
+            "runtime_at_click": {
+                "power_authority_status": {
+                    "energy": {"minimum_discriminative_on_count": 7}
+                }
+            },
+        }
+        analysis = {
+            "mask_results": [
+                {
+                    "mask_id": f"MASK_{index:03d}",
+                    "expected": "on" if index <= 18 else "off",
+                    "classified": "on" if index <= 13 else "off",
+                    "matched": index <= 13 or index > 18,
+                    "confidence": 0.9,
+                }
+                for index in range(1, 29)
+            ]
+        }
+        context = snapshot_module._frozen_frame_visual_context(
+            snapshot,
+            analysis,
+        )
+        self.assertEqual(28, len(context["mask_ids"]))
+        self.assertEqual("on", context["intermittent_phase"])
+        self.assertTrue(context["power_confirmed"])
+        self.assertEqual("abc123", context["debug_frame_sha256_24"])
+
     def test_relatorio_identifica_frame_por_hash_e_declara_snapshot_estatico(self):
         frame = np.arange(60, dtype=np.uint8).reshape(4, 5, 3)
         stats = snapshot_module._frame_statistics(frame)

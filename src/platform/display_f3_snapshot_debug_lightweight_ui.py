@@ -538,6 +538,13 @@ def _draw_debug_readout(canvas, context: dict | None) -> bool:
             context.get("mask_ids") or ()
         )
     if len(slots) != 28:
+        canvas.create_text(
+            210,
+            48,
+            text="VISOR SEM 28 MÁSCARAS NO SNAPSHOT",
+            fill=manual_module.DEBUG_MUTED,
+            font=("DejaVu Sans", 8, "bold"),
+        )
         return False
 
     width = 420.0
@@ -921,7 +928,9 @@ def _open_lightweight_snapshot_debug(window):
     visual = snapshot.get("visual_analysis")
     visual = visual if isinstance(visual, dict) else {}
     owner = getattr(window, "_display_f3_manual_debug_owner", None)
-    frozen_frame = getattr(owner, "_display_f3_manual_snapshot_frozen_frame", None)
+    frozen_frame = getattr(window, "_display_f3_manual_snapshot_frozen_frame", None)
+    if frozen_frame is None:
+        frozen_frame = getattr(owner, "_display_f3_manual_snapshot_frozen_frame", None)
 
     visual_area = tk.Frame(body, bg=manual_module.DEBUG_BG)
     visual_area.grid(row=0, column=0, sticky="nsew")
