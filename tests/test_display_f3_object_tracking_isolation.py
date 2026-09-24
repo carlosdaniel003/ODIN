@@ -882,6 +882,103 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             self.assertAlmostEqual(-dx, float(matrix[0, 2]), delta=4.0)
             self.assertAlmostEqual(-dy, float(matrix[1, 2]), delta=4.0)
 
+    def test_board_off_recupera_lock_quando_check_atual_nao_localiza(self):
+        class _Runtime:
+            def __init__(self):
+                self.ready = True
+                self.references = {
+                    "check:CHECK_001": {},
+                    "board_off": {},
+                }
+                self.width = 320
+                self.height = 240
+                self.last_matrix = None
+                self._last_reference = ""
+                self.last_compute_s = 0.0
+                self.last_frame_id = None
+                self.last_gray = None
+                self.last_verified_s = 0.0
+                self.consecutive_misses = 0
+                self.last_result = None
+                self.calls = []
+
+            def candidate_for_reference(
+                self,
+                frame,
+                key,
+                current_tracking_mask=None,
+                *,
+                template_min_score=None,
+            ):
+                self.calls.append((key, template_min_score))
+                if key == "check:CHECK_001":
+                    return None
+                return {
+                    "reference": "board_off",
+                    "matrix": np.asarray(
+                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                        dtype=np.float32,
+                    ),
+                    "matches": 0,
+                    "inliers": 0,
+                    "ratio": 0.61,
+                    "rotation_deg": 0.0,
+                    "scale": 1.0,
+                    "score": 6.88,
+                    "source_type": "board_off",
+                    "fallback": "edge_template",
+                    "template_masked_for_segments": True,
+                }
+
+            @staticmethod
+            def _candidate_rank(candidate):
+                return float(candidate.get("score", 0.0) or 0.0)
+
+            @staticmethod
+            def _gray(image):
+                return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        runtime = _Runtime()
+        app = SimpleNamespace(
+            camera_ultimo_frame_id=77,
+            display_check_runtime=SimpleNamespace(
+                snapshot=lambda: {
+                    "current_check": {
+                        "id": "CHECK_001",
+                        "name": "H1",
+                    }
+                }
+            ),
+        )
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+        result = tracking._rescue_current_check_tracking_lock(
+            app,
+            frame,
+            runtime,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.locked)
+        self.assertEqual("board_off", result.reference)
+        self.assertEqual(
+            "locked_board_off_template_rescue",
+            result.reason,
+        )
+        self.assertEqual(
+            ["check:CHECK_001", "board_off"],
+            [item[0] for item in runtime.calls],
+        )
+        self.assertTrue(app._display_f3_tracking_rescue_debug["available"])
+        self.assertEqual(
+            "board_off",
+            app._display_f3_tracking_rescue_debug["selected_reference"],
+        )
+        # A referência BOARD_OFF recupera apenas a pose. O resultado do tracker
+        # não contém qualquer campo de energia/OK/NG.
+        self.assertFalse(hasattr(result, "powered_confirmed"))
+        self.assertFalse(hasattr(result, "off_confirmed"))
+
     def test_final_instance_authority_bypasses_historical_f3_wrappers(self):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3
