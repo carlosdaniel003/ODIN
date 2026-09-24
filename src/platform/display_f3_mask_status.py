@@ -205,6 +205,42 @@ def _publish_mask_status(app) -> None:
     except Exception:
         context = None
 
+    tracking_status = getattr(
+        app,
+        "_display_f3_object_tracking_last_status",
+        None,
+    )
+    if (
+        isinstance(tracking_status, dict)
+        and tracking_status.get("enabled") is True
+        and not bool(tracking_status.get("locked"))
+    ):
+        check_name = str(
+            (context or {}).get("check_name")
+            or (context or {}).get("check_id")
+            or "CHECK"
+        ).strip().upper()
+        text = f"MÁSCARAS • {check_name}: AGUARDANDO RASTREAMENTO"
+        color = F3_MASK_STATUS_COLORS["waiting"]
+        try:
+            window.set_mask_analysis_status(text, color)
+        except Exception:
+            return
+        app._display_f3_mask_status_snapshot = {
+            "text": text,
+            "color": color,
+            "check_id": str((context or {}).get("check_id") or ""),
+            "check_name": str((context or {}).get("check_name") or ""),
+            "ready": False,
+            "approved": None,
+            "matched_mask_count": 0,
+            "active_mask_count": 0,
+            "effective_failed_mask_ids": (),
+            "tracking_locked": False,
+            "tracking_reason": str(tracking_status.get("reason") or ""),
+        }
+        return
+
     analysis = getattr(app, "_display_auto_last_analysis", None)
     if isinstance(context, dict) and not _analysis_matches_context(analysis, context):
         try:
