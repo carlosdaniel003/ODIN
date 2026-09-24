@@ -502,6 +502,47 @@ def _mask_snapshot_for_current_check(
     return classifications, failed
 
 
+def _effective_phase_mask_ids_for_current_check(
+    window,
+    *,
+    project_name: str,
+    check_id: str,
+) -> tuple[set[str], set[str]]:
+    app = overlay_module._app_from_window(window)
+    if app is None:
+        return set(), set()
+
+    for attr in (
+        "_display_auto_last_analysis",
+        "_display_f3_overlay_analysis_cache",
+        "_display_f3_live_probe_last_analysis",
+    ):
+        analysis = getattr(app, attr, None)
+        if not _analysis_matches_current(
+            analysis,
+            project_name=project_name,
+            check_id=check_id,
+        ):
+            continue
+        confirmed = {
+            str(mask_id)
+            for mask_id in (
+                (analysis or {}).get("effective_confirmed_failed_mask_ids") or ()
+            )
+            if str(mask_id)
+        }
+        validating = {
+            str(mask_id)
+            for mask_id in (
+                (analysis or {}).get("effective_validating_mask_ids") or ()
+            )
+            if str(mask_id)
+        }
+        return confirmed, validating
+
+    return set(), set()
+
+
 def _classifications_for_current_check(
     window,
     *,
@@ -562,10 +603,29 @@ def _contexto_preview_claro(original):
             check_id=str(project_context.get("check_id") or ""),
             base=result,
         )
+        confirmed_failed_mask_ids, validating_mask_ids = (
+            _effective_phase_mask_ids_for_current_check(
+                window,
+                project_name=str(project_context.get("project_name") or ""),
+                check_id=str(project_context.get("check_id") or ""),
+            )
+        )
+        if not confirmed_failed_mask_ids and not validating_mask_ids:
+            if bool(project_context.get("intermittent", False)):
+                validating_mask_ids = set(failed_mask_ids)
+            else:
+                confirmed_failed_mask_ids = set(failed_mask_ids)
+
         result["classifications"] = classifications
         result["effective_classifications"] = dict(classifications)
         result["failed_mask_ids"] = tuple(sorted(failed_mask_ids))
         result["effective_failed_mask_ids"] = tuple(sorted(failed_mask_ids))
+        result["effective_confirmed_failed_mask_ids"] = tuple(
+            sorted(confirmed_failed_mask_ids)
+        )
+        result["effective_validating_mask_ids"] = tuple(
+            sorted(validating_mask_ids)
+        )
         result["ui_mask_authority"] = "effective_mask_results_v1"
         result["has_any_on"] = any(
             str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
@@ -724,6 +784,8 @@ def _presentation_for_effective_mask(
     classifications: dict[str, str],
     expected_states: dict[str, str],
     failed_mask_ids: set[str],
+    confirmed_failed_mask_ids: set[str],
+    validating_mask_ids: set[str],
     *,
     has_any_on: bool,
     intermittent: bool,
@@ -731,8 +793,10 @@ def _presentation_for_effective_mask(
 ) -> str | None:
     current = str(classifications.get(mask_id) or "").strip().lower()
     if effective_authority:
-        if mask_id in failed_mask_ids:
+        if mask_id in confirmed_failed_mask_ids:
             return "alert"
+        if mask_id in validating_mask_ids or mask_id in failed_mask_ids:
+            return "warning"
         if current == DISPLAY_AUTO_CLASS_LOW_LIGHT:
             return "warning"
         if current == DISPLAY_CHECK_STATE_ON:
@@ -912,6 +976,8 @@ def _draw_display_zoom_inset(
     classifications: dict[str, str],
     expected_states: dict[str, str],
     failed_mask_ids: set[str],
+    confirmed_failed_mask_ids: set[str],
+    validating_mask_ids: set[str],
     *,
     has_any_on: bool,
     intermittent: bool,
@@ -963,6 +1029,8 @@ def _draw_display_zoom_inset(
             classifications,
             expected_states,
             failed_mask_ids,
+            confirmed_failed_mask_ids,
+            validating_mask_ids,
             has_any_on=has_any_on,
             intermittent=intermittent,
             effective_authority=effective_authority,
@@ -1093,6 +1161,26 @@ def renderizar_preview_claro_display_f3(frame, context):
             if str(mask_id)
         )
 
+    confirmed_failed_mask_ids = {
+        str(mask_id)
+        for mask_id in (
+            context.get("effective_confirmed_failed_mask_ids") or ()
+        )
+        if str(mask_id)
+    }
+    validating_mask_ids = {
+        str(mask_id)
+        for mask_id in (
+            context.get("effective_validating_mask_ids") or ()
+        )
+        if str(mask_id)
+    }
+    if not confirmed_failed_mask_ids and not validating_mask_ids:
+        if bool(context.get("intermittent", False)) and effective_failed_declared:
+            validating_mask_ids = set(failed_mask_ids)
+        else:
+            confirmed_failed_mask_ids = set(failed_mask_ids)
+
     # Defesa final no renderer. O contexto produtivo sempre publica a autoridade
     # de energia; nesse caso, classificações brutas não podem gerar cor antes de
     # a energia estar realmente confirmada. Contextos legados/testes que não
@@ -1114,6 +1202,8 @@ def renderizar_preview_claro_display_f3(frame, context):
     if energy_gate_declared and not semantic_power_ready:
         classifications = {}
         failed_mask_ids = set()
+        confirmed_failed_mask_ids = set()
+        validating_mask_ids = set()
 
     has_any_on = bool(
         (not energy_gate_declared or semantic_power_ready)
@@ -1215,6 +1305,8 @@ def renderizar_preview_claro_display_f3(frame, context):
             classifications,
             expected_states,
             failed_mask_ids,
+            confirmed_failed_mask_ids,
+            validating_mask_ids,
             has_any_on=has_any_on,
             intermittent=bool(context.get("intermittent", False)),
             effective_authority=effective_authority,
@@ -1224,7 +1316,7 @@ def renderizar_preview_claro_display_f3(frame, context):
             continue
 
         color = F3_PREVIEW_CLEAR_COLORS[presentation]
-        if presentation == "alert":
+        if presentation in {"alert", "warning"}:
             geometry = _draw_mask(alert_tint, mask, sx, sy, color)
             if geometry is not None:
                 alert_geometries.append((geometry, color))
@@ -1258,6 +1350,8 @@ def renderizar_preview_claro_display_f3(frame, context):
                 classifications,
                 expected_states,
                 failed_mask_ids,
+                confirmed_failed_mask_ids,
+                validating_mask_ids,
                 has_any_on=has_any_on,
                 intermittent=bool(context.get("intermittent", False)),
                 effective_authority=effective_authority,
@@ -1269,11 +1363,11 @@ def renderizar_preview_claro_display_f3(frame, context):
                 mask,
                 sx,
                 sy,
-                F3_PREVIEW_CLEAR_COLORS["alert"],
+                F3_PREVIEW_CLEAR_COLORS[presentation],
             )
         alert_alpha = (
             F3_PREVIEW_ALERT_ALPHA
-            if failed_mask_ids
+            if confirmed_failed_mask_ids
             else F3_PREVIEW_WARNING_ALPHA
         )
         cv2.addWeighted(
@@ -1315,6 +1409,8 @@ def renderizar_preview_claro_display_f3(frame, context):
                 classifications,
                 expected_states,
                 failed_mask_ids,
+                confirmed_failed_mask_ids,
+                validating_mask_ids,
                 has_any_on=has_any_on,
                 intermittent=bool(context.get("intermittent", False)),
                 effective_authority=effective_authority,
@@ -1331,7 +1427,7 @@ def renderizar_preview_claro_display_f3(frame, context):
             if not isinstance(mask, dict):
                 continue
             mask_id = str(mask.get("id") or "")
-            if mask_id not in failed_mask_ids:
+            if mask_id not in confirmed_failed_mask_ids:
                 continue
             _draw_failure_badge(
                 result,
@@ -1351,6 +1447,8 @@ def renderizar_preview_claro_display_f3(frame, context):
                 classifications,
                 expected_states,
                 failed_mask_ids,
+                confirmed_failed_mask_ids,
+                validating_mask_ids,
                 has_any_on=has_any_on,
                 intermittent=bool(context.get("intermittent", False)),
                 effective_authority=effective_authority,
