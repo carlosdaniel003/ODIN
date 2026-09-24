@@ -97,6 +97,14 @@ F3_TRACKING_RATIO_TEST = 0.75
 F3_TRACKING_MIN_MATCHES = 12
 F3_TRACKING_MIN_INLIERS = 8
 F3_TRACKING_MIN_INLIER_RATIO = 0.34
+# Segundo descritor usado somente para reacquisition quando o ORB falha.
+# AKAZE é mais caro, porém mais robusto a contraste, escala e pequenas rotações;
+# por isso não roda no caminho nominal de todos os frames.
+F3_TRACKING_AKAZE_THRESHOLD = 0.0008
+F3_TRACKING_AKAZE_RATIO_TEST = 0.80
+F3_TRACKING_AKAZE_MIN_MATCHES = 8
+F3_TRACKING_AKAZE_MIN_INLIERS = 6
+F3_TRACKING_AKAZE_MIN_INLIER_RATIO = 0.28
 F3_TRACKING_RANSAC_THRESHOLD_PX = 4.0
 F3_TRACKING_MIN_SCALE = 0.72
 F3_TRACKING_MAX_SCALE = 1.38
@@ -118,6 +126,10 @@ F3_TRACKING_CURRENT_CHECK_TEMPLATE_MIN_SCORE = 0.30
 F3_TRACKING_BOARD_OFF_TEMPLATE_MIN_SCORE = 0.30
 F3_TRACKING_TEMPLATE_MIN_SIZE = 28
 F3_TRACKING_TEMPLATE_PADDING_FRACTION = 0.035
+# Último recurso estrutural: poucas variantes controladas, executadas somente
+# para a referência direta quando ORB/AKAZE/template nominal falharem.
+F3_TRACKING_ADAPTIVE_TEMPLATE_SCALES = (0.90, 1.00, 1.10)
+F3_TRACKING_ADAPTIVE_TEMPLATE_ANGLES_DEG = (-12.0, 0.0, 12.0)
 
 # Continuidade temporal: a placa pode se mover, mas câmera e suporte são fixos.
 # ORB/multivista continua sendo a autoridade absoluta; fluxo óptico cobre os
@@ -1384,6 +1396,38 @@ class F3DisplayObjectTracker:
                 descriptors = None
                 canonical_points = np.empty((0, 2), dtype=np.float32)
 
+        akaze_descriptors = None
+        akaze_canonical_points = np.empty((0, 2), dtype=np.float32)
+        try:
+            akaze = cv2.AKAZE_create(
+                threshold=F3_TRACKING_AKAZE_THRESHOLD,
+                nOctaves=4,
+                nOctaveLayers=4,
+            )
+            akaze_keypoints, akaze_detected = akaze.detectAndCompute(
+                gray,
+                tracking_mask,
+            )
+        except Exception:
+            akaze_keypoints, akaze_detected = [], None
+        if (
+            akaze_detected is not None
+            and len(akaze_keypoints) >= F3_TRACKING_AKAZE_MIN_MATCHES
+        ):
+            points = np.asarray(
+                [kp.pt for kp in akaze_keypoints],
+                dtype=np.float32,
+            ).reshape(-1, 1, 2)
+            try:
+                akaze_canonical_points = cv2.transform(
+                    points,
+                    reference_to_canonical,
+                ).reshape(-1, 2)
+                akaze_descriptors = akaze_detected
+            except Exception:
+                akaze_descriptors = None
+                akaze_canonical_points = np.empty((0, 2), dtype=np.float32)
+
         template_edges = None
         template_origin = None
         template_support_mask = None
@@ -1434,12 +1478,18 @@ class F3DisplayObjectTracker:
         # Uma referência pode ser útil mesmo com pouco ORB. O fallback por
         # template de bordas resolve translação quando câmera/suporte são fixos,
         # exatamente o cenário produtivo do F3.
-        if descriptors is None and template_edges is None:
+        if (
+            descriptors is None
+            and akaze_descriptors is None
+            and template_edges is None
+        ):
             return
 
         refs[key] = {
             "descriptors": descriptors,
             "canonical_points": canonical_points,
+            "akaze_descriptors": akaze_descriptors,
+            "akaze_canonical_points": akaze_canonical_points,
             "angle_deg": float(angle),
             "real_orientation": bool(real_orientation),
             "source_type": str(source_type or "reference"),
@@ -1539,6 +1589,219 @@ class F3DisplayObjectTracker:
             "template_masked_for_segments": masked,
             "template_threshold": float(threshold),
         }
+
+    def _adaptive_template_candidate(
+        self,
+        current_edges,
+        key: str,
+        min_score: float | None = None,
+    ):
+        """Reacquire estrutural tolerante a escala/rotação.
+
+        O template continua excluindo as ROIs dos segmentos. Cada variante
+        representa apenas a estrutura da placa; a transformação encontrada é
+        convertida de CURRENT -> REFERÊNCIA -> CANÔNICO.
+        """
+        ref = self.references.get(str(key or ""), {})
+        template = ref.get("template_edges")
+        origin = ref.get("template_origin")
+        support = ref.get("template_support_mask")
+        if current_edges is None or template is None or origin is None:
+            return None
+
+        threshold = (
+            F3_TRACKING_TEMPLATE_MIN_SCORE
+            if min_score is None
+            else max(0.0, min(1.0, float(min_score)))
+        )
+        masked_base = bool(
+            isinstance(support, np.ndarray)
+            and support.shape == template.shape
+            and int(cv2.countNonZero(support)) >= 200
+        )
+        best = None
+        h0, w0 = template.shape[:2]
+
+        for requested_scale in F3_TRACKING_ADAPTIVE_TEMPLATE_SCALES:
+            sw = max(
+                F3_TRACKING_TEMPLATE_MIN_SIZE,
+                int(round(w0 * float(requested_scale))),
+            )
+            sh = max(
+                F3_TRACKING_TEMPLATE_MIN_SIZE,
+                int(round(h0 * float(requested_scale))),
+            )
+            if sw >= current_edges.shape[1] or sh >= current_edges.shape[0]:
+                continue
+            sx = float(sw) / max(1.0, float(w0))
+            sy = float(sh) / max(1.0, float(h0))
+            scaled = cv2.resize(
+                template,
+                (sw, sh),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            scaled_support = (
+                cv2.resize(
+                    support,
+                    (sw, sh),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+                if masked_base
+                else None
+            )
+            scale_matrix = np.asarray(
+                [[sx, 0.0, 0.0], [0.0, sy, 0.0]],
+                dtype=np.float32,
+            )
+
+            for angle in F3_TRACKING_ADAPTIVE_TEMPLATE_ANGLES_DEG:
+                if abs(float(requested_scale) - 1.0) < 1e-6 and abs(float(angle)) < 1e-6:
+                    continue
+                center = ((sw - 1.0) * 0.5, (sh - 1.0) * 0.5)
+                rotation = cv2.getRotationMatrix2D(
+                    center,
+                    float(angle),
+                    1.0,
+                ).astype(np.float32)
+                cos_v = abs(float(rotation[0, 0]))
+                sin_v = abs(float(rotation[0, 1]))
+                rw = max(
+                    F3_TRACKING_TEMPLATE_MIN_SIZE,
+                    int(math.ceil(sh * sin_v + sw * cos_v)),
+                )
+                rh = max(
+                    F3_TRACKING_TEMPLATE_MIN_SIZE,
+                    int(math.ceil(sh * cos_v + sw * sin_v)),
+                )
+                if rw >= current_edges.shape[1] or rh >= current_edges.shape[0]:
+                    continue
+                rotation[0, 2] += (rw - 1.0) * 0.5 - center[0]
+                rotation[1, 2] += (rh - 1.0) * 0.5 - center[1]
+                variant = cv2.warpAffine(
+                    scaled,
+                    rotation,
+                    (rw, rh),
+                    flags=cv2.INTER_NEAREST,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=0,
+                )
+                variant_support = (
+                    cv2.warpAffine(
+                        scaled_support,
+                        rotation,
+                        (rw, rh),
+                        flags=cv2.INTER_NEAREST,
+                        borderMode=cv2.BORDER_CONSTANT,
+                        borderValue=0,
+                    )
+                    if isinstance(scaled_support, np.ndarray)
+                    else None
+                )
+                masked = bool(
+                    isinstance(variant_support, np.ndarray)
+                    and variant_support.shape == variant.shape
+                    and int(cv2.countNonZero(variant_support)) >= 150
+                )
+                try:
+                    if masked:
+                        response = cv2.matchTemplate(
+                            current_edges,
+                            variant,
+                            cv2.TM_CCORR_NORMED,
+                            mask=variant_support,
+                        )
+                        response = np.nan_to_num(
+                            response,
+                            nan=-1.0,
+                            posinf=-1.0,
+                            neginf=-1.0,
+                        )
+                    else:
+                        response = cv2.matchTemplate(
+                            current_edges,
+                            variant,
+                            cv2.TM_CCOEFF_NORMED,
+                        )
+                    _min_v, max_v, _min_l, max_loc = cv2.minMaxLoc(response)
+                except Exception:
+                    continue
+                score = float(max_v)
+                if score < threshold:
+                    continue
+
+                original_to_variant = compose_affine(
+                    rotation,
+                    scale_matrix,
+                )
+                if original_to_variant is None:
+                    continue
+                try:
+                    variant_to_original = cv2.invertAffineTransform(
+                        np.asarray(
+                            original_to_variant,
+                            dtype=np.float32,
+                        ).reshape(2, 3)
+                    )
+                except Exception:
+                    continue
+
+                current_to_variant = np.asarray(
+                    [
+                        [1.0, 0.0, -float(max_loc[0])],
+                        [0.0, 1.0, -float(max_loc[1])],
+                    ],
+                    dtype=np.float32,
+                )
+                current_to_crop = compose_affine(
+                    variant_to_original,
+                    current_to_variant,
+                )
+                crop_to_reference = np.asarray(
+                    [
+                        [1.0, 0.0, float(origin[0])],
+                        [0.0, 1.0, float(origin[1])],
+                    ],
+                    dtype=np.float32,
+                )
+                current_to_reference = compose_affine(
+                    crop_to_reference,
+                    current_to_crop,
+                )
+                matrix = compose_affine(
+                    ref.get("reference_to_canonical"),
+                    current_to_reference,
+                )
+                if matrix is None:
+                    continue
+                final_scale = affine_scale(matrix)
+                if not (
+                    F3_TRACKING_MIN_SCALE
+                    <= final_scale
+                    <= F3_TRACKING_MAX_SCALE
+                ):
+                    continue
+
+                candidate = {
+                    "reference": str(key or ""),
+                    "matrix": matrix.astype(np.float32),
+                    "matches": 0,
+                    "inliers": 0,
+                    "ratio": score,
+                    "rotation_deg": affine_rotation_deg(matrix),
+                    "scale": final_scale,
+                    "score": 2.5 + score * 8.0,
+                    "source_type": str(
+                        ref.get("source_type") or "reference"
+                    ),
+                    "fallback": "adaptive_edge_template",
+                    "template_masked_for_segments": masked,
+                    "template_threshold": float(threshold),
+                    "template_variant_scale": float(requested_scale),
+                    "template_variant_angle_deg": float(angle),
+                }
+                if best is None or score > float(best.get("ratio", 0.0)):
+                    best = candidate
+        return best
 
     def _temporal_tracking_mask(self):
         """Máscara da placa no frame anterior, excluindo as ROIs do display."""
@@ -1940,11 +2203,31 @@ class F3DisplayObjectTracker:
         self.reason = "ready"
         return True
 
-    def _candidate(self, current_kp, current_desc, key: str):
-        ref = self.references[key]
-        descriptors = ref.get("descriptors")
-        if descriptors is None or current_desc is None:
+    def _feature_candidate(
+        self,
+        current_kp,
+        current_desc,
+        key: str,
+        *,
+        descriptor_key: str,
+        canonical_key: str,
+        ratio_test: float,
+        min_matches: int,
+        min_inliers: int,
+        min_inlier_ratio: float,
+        fallback: str = "",
+    ):
+        ref = self.references.get(str(key or ""), {})
+        descriptors = ref.get(descriptor_key)
+        canonical = ref.get(canonical_key)
+        if (
+            descriptors is None
+            or current_desc is None
+            or canonical is None
+            or len(canonical) == 0
+        ):
             return None
+
         matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
         try:
             pairs = matcher.knnMatch(descriptors, current_desc, k=2)
@@ -1956,31 +2239,39 @@ class F3DisplayObjectTracker:
             if len(pair) < 2:
                 continue
             first, second = pair[0], pair[1]
-            if first.distance < F3_TRACKING_RATIO_TEST * second.distance:
+            if first.distance < float(ratio_test) * second.distance:
                 good.append(first)
-        if len(good) < F3_TRACKING_MIN_MATCHES:
+        if len(good) < int(min_matches):
             return None
 
-        current_points = np.float32(
-            [current_kp[item.trainIdx].pt for item in good]
-        ).reshape(-1, 1, 2)
-        canonical_points = np.float32(
-            [ref["canonical_points"][item.queryIdx] for item in good]
-        ).reshape(-1, 1, 2)
-        matrix, inlier_mask = cv2.estimateAffinePartial2D(
-            current_points,
-            canonical_points,
-            method=cv2.RANSAC,
-            ransacReprojThreshold=F3_TRACKING_RANSAC_THRESHOLD_PX,
-            maxIters=2500,
-            confidence=0.995,
-            refineIters=12,
-        )
+        try:
+            current_points = np.float32(
+                [current_kp[item.trainIdx].pt for item in good]
+            ).reshape(-1, 1, 2)
+            canonical_points = np.float32(
+                [canonical[item.queryIdx] for item in good]
+            ).reshape(-1, 1, 2)
+        except (IndexError, TypeError, ValueError):
+            return None
+
+        try:
+            matrix, inlier_mask = cv2.estimateAffinePartial2D(
+                current_points,
+                canonical_points,
+                method=cv2.RANSAC,
+                ransacReprojThreshold=F3_TRACKING_RANSAC_THRESHOLD_PX,
+                maxIters=3000,
+                confidence=0.995,
+                refineIters=12,
+            )
+        except Exception:
+            return None
         if matrix is None or inlier_mask is None:
             return None
+
         inliers = int(np.count_nonzero(inlier_mask))
         ratio = float(inliers / max(1, len(good)))
-        if inliers < F3_TRACKING_MIN_INLIERS or ratio < F3_TRACKING_MIN_INLIER_RATIO:
+        if inliers < int(min_inliers) or ratio < float(min_inlier_ratio):
             return None
 
         scale = affine_scale(matrix)
@@ -2004,8 +2295,11 @@ class F3DisplayObjectTracker:
             score += 3.0
         elif source_type == "board_off":
             score += 2.0
-        return {
-            "reference": key,
+        if fallback == "akaze_reacquire":
+            score += 1.5
+
+        result = {
+            "reference": str(key or ""),
             "matrix": matrix.astype(np.float32),
             "matches": len(good),
             "inliers": inliers,
@@ -2015,6 +2309,36 @@ class F3DisplayObjectTracker:
             "score": score,
             "source_type": source_type,
         }
+        if fallback:
+            result["fallback"] = fallback
+        return result
+
+    def _candidate(self, current_kp, current_desc, key: str):
+        return self._feature_candidate(
+            current_kp,
+            current_desc,
+            key,
+            descriptor_key="descriptors",
+            canonical_key="canonical_points",
+            ratio_test=F3_TRACKING_RATIO_TEST,
+            min_matches=F3_TRACKING_MIN_MATCHES,
+            min_inliers=F3_TRACKING_MIN_INLIERS,
+            min_inlier_ratio=F3_TRACKING_MIN_INLIER_RATIO,
+        )
+
+    def _akaze_candidate(self, current_kp, current_desc, key: str):
+        return self._feature_candidate(
+            current_kp,
+            current_desc,
+            key,
+            descriptor_key="akaze_descriptors",
+            canonical_key="akaze_canonical_points",
+            ratio_test=F3_TRACKING_AKAZE_RATIO_TEST,
+            min_matches=F3_TRACKING_AKAZE_MIN_MATCHES,
+            min_inliers=F3_TRACKING_AKAZE_MIN_INLIERS,
+            min_inlier_ratio=F3_TRACKING_AKAZE_MIN_INLIER_RATIO,
+            fallback="akaze_reacquire",
+        )
 
     def candidate_for_reference(
         self,
@@ -2076,8 +2400,38 @@ class F3DisplayObjectTracker:
                 )
                 return candidate
 
-        # Câmera/suporte fixos: mantém o fallback por bordas apenas se o ORB
-        # específico daquele CHECK não produzir correspondências suficientes.
+        # Reacquisition absoluto mais tolerante a contraste/escala/rotação.
+        try:
+            akaze = cv2.AKAZE_create(
+                threshold=F3_TRACKING_AKAZE_THRESHOLD,
+                nOctaves=4,
+                nOctaveLayers=4,
+            )
+            akaze_kp, akaze_desc = akaze.detectAndCompute(
+                gray,
+                current_tracking_mask,
+            )
+        except Exception:
+            akaze_kp, akaze_desc = [], None
+        if (
+            akaze_desc is not None
+            and len(akaze_kp) >= F3_TRACKING_AKAZE_MIN_MATCHES
+        ):
+            candidate = self._akaze_candidate(
+                akaze_kp,
+                akaze_desc,
+                str(key),
+            )
+            if candidate is not None:
+                candidate = dict(candidate)
+                candidate["direct_reference_refinement"] = True
+                candidate["current_masked_for_segments"] = bool(
+                    current_tracking_mask is not None
+                )
+                return candidate
+
+        # Câmera/suporte fixos: mantém o fallback por bordas apenas se os
+        # descritores não produzirem correspondências suficientes.
         try:
             current_edges = cv2.Canny(gray, 45, 135)
         except Exception:
@@ -2087,6 +2441,12 @@ class F3DisplayObjectTracker:
             str(key),
             min_score=template_min_score,
         )
+        if candidate is None:
+            candidate = self._adaptive_template_candidate(
+                current_edges,
+                str(key),
+                min_score=template_min_score,
+            )
         if candidate is None:
             return None
         candidate = dict(candidate)
@@ -2187,6 +2547,33 @@ class F3DisplayObjectTracker:
             if temporal is not None:
                 candidates.append(temporal)
 
+        # Se ORB e continuidade temporal falharem, faça uma reacquisition
+        # absoluta com AKAZE. É deliberadamente tardia para preservar FPS.
+        akaze_available = False
+        if not candidates:
+            try:
+                akaze = cv2.AKAZE_create(
+                    threshold=F3_TRACKING_AKAZE_THRESHOLD,
+                    nOctaves=4,
+                    nOctaveLayers=4,
+                )
+                akaze_kp, akaze_desc = akaze.detectAndCompute(gray, None)
+            except Exception:
+                akaze_kp, akaze_desc = [], None
+            akaze_available = bool(
+                akaze_desc is not None
+                and len(akaze_kp) >= F3_TRACKING_AKAZE_MIN_MATCHES
+            )
+            if akaze_available:
+                for key in tuple(self.references):
+                    candidate = self._akaze_candidate(
+                        akaze_kp,
+                        akaze_desc,
+                        key,
+                    )
+                    if candidate is not None:
+                        candidates.append(candidate)
+
         # Câmera e suporte são fixos: se o PCB tiver poucos corners ORB, use as
         # bordas do contorno desenhado como fallback de translação. Os slots
         # 0/90/180/270 e CHECKS fornecem as orientações reais disponíveis.
@@ -2219,7 +2606,7 @@ class F3DisplayObjectTracker:
                 frame,
                 reason=(
                     "current_features_insufficient"
-                    if not orb_available
+                    if not orb_available and not akaze_available
                     else "object_not_locked"
                 ),
                 evidence_current=False,
@@ -2271,9 +2658,17 @@ class F3DisplayObjectTracker:
                 "locked_template"
                 if str(best.get("fallback") or "") == "edge_template"
                 else (
-                    "locked_temporal"
-                    if str(best.get("fallback") or "") == "temporal_flow"
-                    else "locked"
+                    "locked_adaptive_template"
+                    if str(best.get("fallback") or "") == "adaptive_edge_template"
+                    else (
+                        "locked_akaze"
+                        if str(best.get("fallback") or "") == "akaze_reacquire"
+                        else (
+                            "locked_temporal"
+                            if str(best.get("fallback") or "") == "temporal_flow"
+                            else "locked"
+                        )
+                    )
                 )
             ),
             current_to_canonical=matrix.copy(),
@@ -2679,6 +3074,57 @@ def _rescue_current_check_tracking_lock(
     return result
 
 
+def _invalidate_spatial_authority_after_tracking_loss(
+    app,
+    reason: str,
+) -> None:
+    """Nenhuma classificação espacial antiga sobrevive a um lock perdido."""
+    app._display_auto_last_analysis = None
+    app._display_f3_tracking_analysis_frame = None
+
+    previous = getattr(app, "_display_f3_power_authority_status", None)
+    presence = (
+        deepcopy(previous.get("presence"))
+        if isinstance(previous, dict)
+        and isinstance(previous.get("presence"), dict)
+        else None
+    )
+    board_present = (
+        previous.get("board_present")
+        if isinstance(previous, dict)
+        else None
+    )
+    app._display_f3_power_authority_status = {
+        "source": "f3_tracking_spatial_gate",
+        "board_present": board_present,
+        "presence": presence,
+        "energy": {
+            "available": False,
+            "energy_state": "unconfirmed",
+            "powered_confirmed": False,
+            "off_confirmed": False,
+            "reason": str(reason or "tracking_not_locked"),
+        },
+        "decision_allowed": False,
+        "reason": str(reason or "tracking_not_locked"),
+    }
+
+    operational = getattr(app, "_display_f3_operational_state", None)
+    if isinstance(operational, dict):
+        updated = deepcopy(operational)
+        updated.update(
+            {
+                "kind": "unknown",
+                "text": "RASTREAMENTO F3 • PROCURANDO PLACA",
+                "allow_auto": False,
+                "powered_board_confirmed": False,
+                "power_gate_blocked": True,
+                "power_gate_reason": str(reason or "tracking_not_locked"),
+            }
+        )
+        app._display_f3_operational_state = updated
+
+
 def align_frame_for_f3(app, frame):
     if not tracking_enabled(app):
         return frame, None
@@ -2722,6 +3168,11 @@ def align_frame_for_f3(app, frame):
         "evidence_current": bool(result.evidence_current),
         "misses": int(getattr(runtime, "consecutive_misses", 0) or 0),
     }
+    if not bool(result.locked):
+        _invalidate_spatial_authority_after_tracking_loss(
+            app,
+            str(result.reason or "tracking_not_locked"),
+        )
     return (result.frame if result.locked else frame), result
 
 
