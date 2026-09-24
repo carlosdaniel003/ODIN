@@ -263,18 +263,45 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
 
 def _failure_items(analysis: dict | None) -> dict[str, dict]:
     data = analysis if isinstance(analysis, dict) else {}
+    effective_declared = "effective_failed_mask_ids" in data
+    effective_failed = {
+        str(mask_id)
+        for mask_id in (data.get("effective_failed_mask_ids") or ())
+        if str(mask_id)
+    }
+    effective_classifications = {
+        str(mask_id): str(state).strip().lower()
+        for mask_id, state in dict(
+            data.get("effective_classifications") or {}
+        ).items()
+        if str(mask_id)
+    }
+
     result = {}
     for item in data.get("mask_results", []) or []:
-        if not isinstance(item, dict) or bool(item.get("matched")):
+        if not isinstance(item, dict):
             continue
         mask_id = str(item.get("mask_id") or "")
-        if mask_id:
-            result[mask_id] = {
-                "expected": str(item.get("expected") or ""),
-                "classified": str(item.get("classified") or ""),
-                "expected_label": str(item.get("expected_label") or ""),
-                "classified_label": str(item.get("classified_label") or ""),
-            }
+        if not mask_id:
+            continue
+
+        is_failed = (
+            mask_id in effective_failed
+            if effective_declared
+            else item.get("matched") is False
+        )
+        if not is_failed:
+            continue
+
+        result[mask_id] = {
+            "expected": str(item.get("expected") or ""),
+            "classified": effective_classifications.get(
+                mask_id,
+                str(item.get("classified") or "").strip().lower(),
+            ),
+            "expected_label": str(item.get("expected_label") or ""),
+            "classified_label": str(item.get("classified_label") or ""),
+        }
     return result
 
 
@@ -446,7 +473,7 @@ def _install_failed_mask_status() -> None:
         classified = str(
             failure.get("classified_label") or failure.get("classified") or "?"
         ).upper()
-        suffix = f" • FALHA {first_id}: {expected}→{classified}"
+        suffix = f" • FALHA {first_id}"
         remaining = len(failures) - 1
         if remaining > 0:
             suffix += f" (+{remaining})"
