@@ -372,6 +372,14 @@ def _classifications_from_analysis(
     ):
         return {}
 
+    effective = analysis.get("effective_classifications")
+    if isinstance(effective, dict):
+        return {
+            str(mask_id): str(state).strip().lower()
+            for mask_id, state in effective.items()
+            if str(mask_id) and str(state).strip()
+        }
+
     result = {}
     for item in analysis.get("mask_results", []) or []:
         if not isinstance(item, dict):
@@ -396,6 +404,13 @@ def _failed_mask_ids_from_analysis(
         check_id=check_id,
     ):
         return set()
+
+    if "effective_failed_mask_ids" in analysis:
+        return {
+            str(mask_id)
+            for mask_id in (analysis.get("effective_failed_mask_ids") or ())
+            if str(mask_id)
+        }
 
     results = [
         item
@@ -544,7 +559,10 @@ def _contexto_preview_claro(original):
             base=result,
         )
         result["classifications"] = classifications
+        result["effective_classifications"] = dict(classifications)
         result["failed_mask_ids"] = tuple(sorted(failed_mask_ids))
+        result["effective_failed_mask_ids"] = tuple(sorted(failed_mask_ids))
+        result["ui_mask_authority"] = "effective_mask_results_v1"
         result["has_any_on"] = any(
             str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
             for state in classifications.values()
