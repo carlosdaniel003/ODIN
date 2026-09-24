@@ -93,11 +93,14 @@ def avaliar_entrada_fisica_check_f3(
     if index <= 0:
         identity = getattr(app, "_display_f3_check_identity_status", None)
         if not isinstance(identity, dict) or not identity.get("available"):
-            identity = avaliar_identidade_visual_checks_por_contorno_f3(
-                app,
-                frame=frame,
-                project_name=str((ctx or {}).get("project_name") or ""),
-            )
+            try:
+                identity = avaliar_identidade_visual_checks_por_contorno_f3(
+                    app,
+                    frame=frame,
+                    project_name=str((ctx or {}).get("project_name") or ""),
+                )
+            except Exception:
+                identity = {}
         if isinstance(identity, dict) and identity.get("available"):
             identified_id = str(identity.get("best_check_id") or "")
             confirmed = bool(
@@ -169,11 +172,14 @@ def avaliar_entrada_fisica_check_f3(
     # do que a própria análise de conformidade do CHECK esperado.
     identity = getattr(app, "_display_f3_check_identity_status", None)
     if not isinstance(identity, dict) or not identity.get("available"):
-        identity = avaliar_identidade_visual_checks_por_contorno_f3(
-            app,
-            frame=frame,
-            project_name=str((ctx or {}).get("project_name") or ""),
-        )
+        try:
+            identity = avaliar_identidade_visual_checks_por_contorno_f3(
+                app,
+                frame=frame,
+                project_name=str((ctx or {}).get("project_name") or ""),
+            )
+        except Exception:
+            identity = {}
     if isinstance(identity, dict) and identity.get("available") and identity.get("confirmed"):
         identified_id = str(identity.get("best_check_id") or "")
         if identified_id == current_id:

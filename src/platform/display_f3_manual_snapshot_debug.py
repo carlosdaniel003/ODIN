@@ -146,6 +146,9 @@ def _runtime_state_at_frame(app) -> dict:
             "operational_state": _safe_deepcopy(
                 evidence.get("operational_state")
             ),
+            "check_identity_by_contour": _safe_deepcopy(
+                runtime_debug.get("check_identity_by_contour")
+            ),
             "last_auto_analysis": _safe_deepcopy(evidence.get("analysis")),
             "sequence": _safe_deepcopy(evidence.get("sequence")),
             "last_decision": _safe_deepcopy(runtime_debug.get("last_decision")),
@@ -192,6 +195,9 @@ def _runtime_state_at_frame(app) -> dict:
         "logical_context": _current_context(app),
         "operational_state": _safe_deepcopy(
             getattr(app, "_display_f3_operational_state", None)
+        ),
+        "check_identity_by_contour": _safe_deepcopy(
+            getattr(app, "_display_f3_check_identity_status", None)
         ),
         "last_auto_analysis": _safe_deepcopy(
             getattr(app, "_display_auto_last_analysis", None)
@@ -1060,6 +1066,47 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     )
                 )
         lines.append("")
+
+    runtime_context = snapshot.get("runtime_at_click") or {}
+    identity = (
+        runtime_context.get("check_identity_by_contour")
+        if isinstance(runtime_context, dict)
+        else None
+    )
+    lines.append("[IDENTIDADE VISUAL POR CONTORNO DA PLACA]")
+    if isinstance(identity, dict):
+        lines.append(
+            " | ".join(
+                (
+                    f"available={_yes_no(identity.get('available'))}",
+                    f"confirmed={_yes_no(identity.get('confirmed'))}",
+                    f"best={identity.get('best_check_name') or identity.get('best_check_id') or '--'}",
+                    f"score={identity.get('best_score', '--')}",
+                    f"second={identity.get('second_check_id', '--')}",
+                    f"margin={identity.get('margin', '--')}",
+                    f"reason={identity.get('reason', '--')}",
+                )
+            )
+        )
+        for row in identity.get("rows") or ():
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "contour_check "
+                + " | ".join(
+                    (
+                        f"id={row.get('check_id', '--')}",
+                        f"name={row.get('check_name', '--')}",
+                        f"score={row.get('score', '--')}",
+                        f"display={row.get('display_score', '--')}",
+                        f"edges={row.get('display_edge_similarity', '--')}",
+                        f"structure={row.get('structure_score', '--')}",
+                    )
+                )
+            )
+    else:
+        lines.append("indisponível neste snapshot")
+    lines.append("")
 
     lines.append("[RUNTIME PRODUTIVO OBSERVADO NO MESMO CLIQUE]")
     lines.append(

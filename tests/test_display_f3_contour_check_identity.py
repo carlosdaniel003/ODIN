@@ -67,7 +67,10 @@ class DisplayF3ContourCheckIdentityTests(unittest.TestCase):
             _display_f3_tracking_raw_authority_frame=raw,
         )
         repository = object()
-        analyzer = identity.F3TrackedRawCheckAnalyzer(repository, app)
+        analyzer = object.__new__(identity.F3TrackedRawCheckAnalyzer)
+        analyzer.repository = repository
+        analyzer.app = app
+        analyzer.semantic = SimpleNamespace(analyze=lambda **_kwargs: {})
 
         expected = {
             "ready": True,
