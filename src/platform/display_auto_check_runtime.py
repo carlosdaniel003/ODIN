@@ -417,8 +417,37 @@ class DisplayAutomaticCheckF3Mixin:
             )
         )
 
+        intermittent = bool(
+            analysis.get("intermittent_phase")
+            or analysis.get("intermittent_phase_evidence")
+        )
+        persistent = {
+            str(mask_id)
+            for mask_id in (
+                analysis.get("intermittent_persistent_failed_ids") or ()
+            )
+            if str(mask_id)
+        }
+        effective_failed_set = set(effective_failed_mask_ids)
+        confirmed = (
+            effective_failed_set.intersection(persistent)
+            if intermittent
+            else set(effective_failed_set)
+        )
+        validating = (
+            effective_failed_set.difference(confirmed)
+            if intermittent
+            else set()
+        )
+
         analysis["effective_classifications"] = effective_classifications
         analysis["effective_failed_mask_ids"] = effective_failed_mask_ids
+        analysis["effective_confirmed_failed_mask_ids"] = tuple(
+            sorted(confirmed)
+        )
+        analysis["effective_validating_mask_ids"] = tuple(
+            sorted(validating)
+        )
         analysis["effective_active_mask_count"] = len(rows)
         analysis["effective_matched_mask_count"] = max(
             0,
