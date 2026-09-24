@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import time
 
 import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_f3_power_authority as power_module
@@ -12,6 +13,7 @@ F3_STABLE_PRESENCE_SOURCE = "f3_best_occupied_vs_empty_presence_stability"
 F3_PRESENCE_MIN_OCCUPIED_SCORE = power_module.F3_POWERED_MIN_BOARD_SCENE_SCORE
 F3_PRESENCE_MIN_MARGIN = power_module.F3_POWERED_MIN_OFF_OVER_EMPTY_MARGIN
 F3_PRESENCE_AMBIGUOUS_HOLD_FRAMES = 3
+F3_INTERMITTENT_POWER_HOLD_S = 2.5
 
 
 def _safe_float(value, default=None):
@@ -131,6 +133,7 @@ def _apply_final_presence(app, result: dict, frame, project_name: str, context: 
     output = deepcopy(result)
     if str(output.get("kind") or "").strip().lower() == "empty":
         app._display_f3_presence_stability_latch = None
+        app._display_f3_intermittent_power_latch = None
         return output
 
     presence = _hold_presence(app, avaliar_presenca_melhor_ocupado_f3(output))
@@ -147,11 +150,50 @@ def _apply_final_presence(app, result: dict, frame, project_name: str, context: 
 
     check_id = str((context or {}).get("check_id") or "")
     check_name = str((context or {}).get("check_name") or check_id or "CHECK").strip().upper()
+    intermittent = bool((context or {}).get("intermittent", False))
+    signature = (str(project_name or ""), check_id)
+    now = time.monotonic()
+
+    if evidence.get("powered_confirmed"):
+        if intermittent:
+            app._display_f3_intermittent_power_latch = {
+                "signature": signature,
+                "powered_at_s": now,
+                "evidence": deepcopy(evidence),
+            }
+    elif intermittent:
+        latch = getattr(app, "_display_f3_intermittent_power_latch", None)
+        if isinstance(latch, dict) and tuple(latch.get("signature") or ()) == signature:
+            age = now - float(latch.get("powered_at_s", 0.0) or 0.0)
+            if 0.0 <= age <= F3_INTERMITTENT_POWER_HOLD_S:
+                held = deepcopy(evidence)
+                held.update(
+                    {
+                        "intermittent_phase_hold": True,
+                        "intermittent_live_energy_state": str(
+                            evidence.get("energy_state") or "unconfirmed"
+                        ),
+                        "intermittent_hold_age_ms": int(round(age * 1000.0)),
+                        "energy_state": power_module.F3_POWER_STATE_POWERED,
+                        "powered_confirmed": True,
+                        "off_confirmed": False,
+                    }
+                )
+                evidence = held
+                output["power_evidence"] = deepcopy(evidence)
+            elif age > F3_INTERMITTENT_POWER_HOLD_S:
+                app._display_f3_intermittent_power_latch = None
+    else:
+        app._display_f3_intermittent_power_latch = None
 
     if evidence.get("powered_confirmed"):
         output.update(
             kind="powered",
-            text=f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}",
+            text=(
+                f"PLACA NO SUPORTE • LIGADA • {check_name} • FASE OFF INTERMITENTE"
+                if bool(evidence.get("intermittent_phase_hold"))
+                else f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}"
+            ),
             color=operational_module.F3_OPERATIONAL_STATUS_COLORS["check"],
             allow_auto=True,
             physical_state_key="check:powered_by_stable_presence",

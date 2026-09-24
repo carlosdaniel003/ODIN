@@ -82,6 +82,44 @@ class DisplayF3PresenceStabilityTests(unittest.TestCase):
         self.assertTrue(held["held_from_previous_frame"])
         self.assertEqual(1, held["held_ambiguous_frames"])
 
+    def test_intermitente_mantem_display_ligado_durante_fase_off(self):
+        app = _App()
+        state = {
+            "kind": "unknown",
+            "reference_scores": {
+                "check:CHECK_002": 0.80,
+                "off": 0.70,
+                "empty": 0.30,
+            },
+            "power_evidence": {
+                "energy_state": "powered",
+                "powered_confirmed": True,
+                "off_confirmed": False,
+            },
+        }
+        context = {
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "intermittent": True,
+        }
+        first = presence_module._apply_final_presence(
+            app, state, None, "DISPLAY", context
+        )
+        self.assertEqual("powered", first["kind"])
+
+        off_phase = dict(state)
+        off_phase["power_evidence"] = {
+            "energy_state": "off",
+            "powered_confirmed": False,
+            "off_confirmed": True,
+        }
+        held = presence_module._apply_final_presence(
+            app, off_phase, None, "DISPLAY", context
+        )
+        self.assertEqual("powered", held["kind"])
+        self.assertTrue(held["power_evidence"]["intermittent_phase_hold"])
+        self.assertIn("FASE OFF INTERMITENTE", held["text"])
+
     def test_hold_expira_sem_evidencia(self):
         app = _App()
         presence_module._hold_presence(

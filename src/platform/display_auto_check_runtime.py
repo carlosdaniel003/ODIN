@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 import time
 
 from src.platform.display_auto_check_analyzer import DisplayAutomaticCheckAnalyzer
@@ -36,6 +37,9 @@ class DisplayAutomaticCheckF3Mixin:
     DISPLAY_AUTO_OK_STABLE_FRAMES = 2
     DISPLAY_AUTO_NG_STABLE_FRAMES = 6
     DISPLAY_AUTO_TRANSITION_FRAMES = 1
+    DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES = 3
+    DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO = 0.55
+    DISPLAY_AUTO_INTERMITTENT_OFF_PHASE_RATIO = 0.15
     DISPLAY_AUTO_TRANSIENT_CHECK_NAMES = frozenset(
         {"BLUETOOTH", "BLUE", "BT"}
     )
@@ -56,6 +60,11 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_manual_entry_label = ""
         self._display_auto_intermittent_signature = None
         self._display_auto_intermittent_seen_on = set()
+        self._display_auto_intermittent_phase = "unknown"
+        self._display_auto_intermittent_on_samples = 0
+        self._display_auto_intermittent_failure_counts = {}
+        self._display_auto_intermittent_persistent_failed_ids = set()
+        self._display_auto_intermittent_last_phase_analysis = None
         self._display_f3_pending_ng_frame = None
         self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
@@ -81,6 +90,11 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_last_analysis = None
         self._display_auto_intermittent_signature = None
         self._display_auto_intermittent_seen_on = set()
+        self._display_auto_intermittent_phase = "unknown"
+        self._display_auto_intermittent_on_samples = 0
+        self._display_auto_intermittent_failure_counts = {}
+        self._display_auto_intermittent_persistent_failed_ids = set()
+        self._display_auto_intermittent_last_phase_analysis = None
         self._display_f3_pending_ng_frame = None
         self._display_f3_pending_ng_frame_id = None
         self._display_f3_pending_ng_analysis = None
@@ -309,6 +323,112 @@ class DisplayAutomaticCheckF3Mixin:
                 return True
         return False
 
+    def _display_auto_observe_intermittent_phase(
+        self,
+        context: dict,
+        analysis: dict,
+    ) -> dict:
+        if not bool(context.get("intermittent", False)):
+            return {"phase": "steady", "persistent_failed_ids": ()}
+
+        results = [
+            item
+            for item in (analysis.get("mask_results") or ())
+            if isinstance(item, dict) and str(item.get("mask_id") or "")
+        ]
+        expected_on = [
+            item
+            for item in results
+            if str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+        ]
+        total = len(expected_on)
+        if total <= 0:
+            return {"phase": "on", "persistent_failed_ids": ()}
+
+        current_on_ids = set()
+        for item in expected_on:
+            try:
+                confidence = float(item.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if (
+                confidence >= DISPLAY_AUTO_MIN_CONFIDENCE
+                and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
+            ):
+                current_on_ids.add(str(item.get("mask_id") or ""))
+
+        on_threshold = max(
+            1,
+            int(math.ceil(total * self.DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO)),
+        )
+        off_ceiling = max(
+            0,
+            int(math.floor(total * self.DISPLAY_AUTO_INTERMITTENT_OFF_PHASE_RATIO)),
+        )
+        current_on_count = len(current_on_ids)
+        phase = (
+            "on"
+            if current_on_count >= on_threshold
+            else ("off" if current_on_count <= off_ceiling else "transition")
+        )
+        self._display_auto_intermittent_phase = phase
+        self._display_auto_intermittent_last_phase_analysis = deepcopy(analysis)
+
+        if phase == "on":
+            self._display_auto_intermittent_on_samples = int(
+                getattr(self, "_display_auto_intermittent_on_samples", 0) or 0
+            ) + 1
+            counts = dict(
+                getattr(self, "_display_auto_intermittent_failure_counts", {}) or {}
+            )
+            for item in results:
+                mask_id = str(item.get("mask_id") or "")
+                expected = str(item.get("expected") or "")
+                if expected not in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF):
+                    continue
+                try:
+                    confidence = float(item.get("confidence", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    confidence = 0.0
+                if confidence < DISPLAY_AUTO_MIN_CONFIDENCE:
+                    continue
+                classified = str(item.get("classified") or "")
+                counts[mask_id] = (
+                    0
+                    if classified == expected
+                    else int(counts.get(mask_id, 0) or 0) + 1
+                )
+            self._display_auto_intermittent_failure_counts = counts
+            self._display_auto_intermittent_persistent_failed_ids = {
+                mask_id
+                for mask_id, count in counts.items()
+                if int(count or 0) >= self.DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES
+            }
+
+        return {
+            "phase": phase,
+            "expected_on_total": total,
+            "current_on_count": current_on_count,
+            "on_threshold": on_threshold,
+            "off_ceiling": off_ceiling,
+            "on_phase_samples": int(
+                getattr(self, "_display_auto_intermittent_on_samples", 0) or 0
+            ),
+            "failure_counts": deepcopy(
+                getattr(self, "_display_auto_intermittent_failure_counts", {}) or {}
+            ),
+            "persistent_failed_ids": tuple(
+                sorted(
+                    getattr(
+                        self,
+                        "_display_auto_intermittent_persistent_failed_ids",
+                        set(),
+                    )
+                    or set()
+                )
+            ),
+        }
+
     def _display_auto_update_intermittent_evidence(
         self,
         context: dict,
@@ -456,6 +576,11 @@ class DisplayAutomaticCheckF3Mixin:
                 signature if bool(context.get("intermittent", False)) else None
             )
             self._display_auto_intermittent_seen_on = set()
+            self._display_auto_intermittent_phase = "unknown"
+            self._display_auto_intermittent_on_samples = 0
+            self._display_auto_intermittent_failure_counts = {}
+            self._display_auto_intermittent_persistent_failed_ids = set()
+            self._display_auto_intermittent_last_phase_analysis = None
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
             # H1 e Bluetooth são transitórios. Um CHECK protegido pelo botão
@@ -493,7 +618,6 @@ class DisplayAutomaticCheckF3Mixin:
             check_id=context["check_id"],
             visual_rotation=self._obter_rotacao_visual_display_f3(),
         )
-        self._display_auto_last_analysis = analysis
 
         if not bool(analysis.get("ready")):
             self._display_auto_last_decision = None
@@ -504,6 +628,37 @@ class DisplayAutomaticCheckF3Mixin:
                 "#FCA5A5",
             )
             return
+
+        intermittent_phase = self._display_auto_observe_intermittent_phase(
+            context,
+            analysis,
+        )
+        if bool(context.get("intermittent", False)):
+            phase = str(intermittent_phase.get("phase") or "transition")
+            if phase != "on":
+                # OFF e transição pertencem ao pisca. Não substituem a última
+                # fase ON no visor e não zeram a evidência temporal de defeito.
+                self._display_auto_set_preview_status(
+                    (
+                        f"AUTO • {context['check_name']} • INTERMITENTE • "
+                        + (
+                            "FASE OFF • aguardando próximo pulso"
+                            if phase == "off"
+                            else "transição do pisca"
+                        )
+                    ),
+                    "#FDE68A",
+                )
+                return
+
+            analysis = deepcopy(analysis)
+            analysis["intermittent_phase"] = "on"
+            analysis["intermittent_phase_evidence"] = deepcopy(intermittent_phase)
+            analysis["intermittent_persistent_failed_ids"] = list(
+                intermittent_phase.get("persistent_failed_ids") or ()
+            )
+
+        self._display_auto_last_analysis = analysis
 
         # O primeiro CHECK/H1 é a trava física do ciclo. Sem pelo menos um
         # segmento que H1 espera ACESO efetivamente classificado como ACESO,
@@ -544,6 +699,39 @@ class DisplayAutomaticCheckF3Mixin:
             reference_gate=reference_gate,
         )
         decision = str(policy.get("decision") or DISPLAY_AUTO_DECISION_SEARCHING)
+
+        persistent_failed = (
+            tuple(intermittent_phase.get("persistent_failed_ids") or ())
+            if bool(context.get("intermittent", False))
+            else ()
+        )
+        if bool(context.get("intermittent", False)) and persistent_failed:
+            decision = DISPLAY_AUTO_DECISION_NG
+        elif (
+            bool(context.get("intermittent", False))
+            and decision == DISPLAY_AUTO_DECISION_NG
+        ):
+            counts = intermittent_phase.get("failure_counts") or {}
+            max_count = max((int(v or 0) for v in counts.values()), default=0)
+            current_failed = sorted(
+                str(item.get("mask_id") or "")
+                for item in (analysis.get("mask_results") or ())
+                if isinstance(item, dict) and item.get("matched") is False
+            )
+            self._display_auto_set_preview_status(
+                (
+                    f"AUTO • {context['check_name']} • INTERMITENTE • "
+                    f"validando divergência {max_count}/"
+                    f"{self.DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES}"
+                    + (
+                        f" • {', '.join(current_failed[:4])}"
+                        if current_failed
+                        else ""
+                    )
+                ),
+                "#FDE68A",
+            )
+            return
 
         if (
             bool(context.get("intermittent", False))
@@ -586,7 +774,19 @@ class DisplayAutomaticCheckF3Mixin:
 
         required = (
             1
-            if approved and transient_check
+            if (
+                transient_check
+                and (
+                    approved
+                    or bool(
+                        getattr(
+                            self,
+                            "_display_auto_intermittent_persistent_failed_ids",
+                            set(),
+                        )
+                    )
+                )
+            )
             else (
                 self.DISPLAY_AUTO_OK_STABLE_FRAMES
                 if approved
@@ -595,7 +795,25 @@ class DisplayAutomaticCheckF3Mixin:
         )
         matched = int(analysis.get("matched_mask_count", 0) or 0)
         total = int(analysis.get("active_mask_count", 0) or 0)
-        decision_text = "conforme" if approved else "NG confirmado"
+        persistent_now = tuple(
+            sorted(
+                getattr(
+                    self,
+                    "_display_auto_intermittent_persistent_failed_ids",
+                    set(),
+                )
+                or set()
+            )
+        )
+        decision_text = (
+            "conforme"
+            if approved
+            else (
+                "defeito persistente " + ",".join(persistent_now)
+                if transient_check and persistent_now
+                else "NG confirmado"
+            )
+        )
         self._display_auto_set_preview_status(
             (
                 f"AUTO • {context['check_name']} • {matched}/{total} {decision_text} • "
