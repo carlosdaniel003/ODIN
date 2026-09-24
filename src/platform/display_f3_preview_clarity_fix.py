@@ -1063,22 +1063,35 @@ def renderizar_preview_claro_display_f3(frame, context):
 
     classifications = {
         str(key): str(value).strip().lower()
-        for key, value in dict(context.get("classifications") or {}).items()
+        for key, value in dict(
+            context.get("effective_classifications")
+            or context.get("classifications")
+            or {}
+        ).items()
     }
     expected_states = {
         str(key): str(value).strip().lower()
         for key, value in dict(context.get("expected_states") or {}).items()
     }
+    effective_failed_declared = "effective_failed_mask_ids" in context
     failed_mask_ids = {
         str(mask_id)
-        for mask_id in (context.get("failed_mask_ids") or ())
+        for mask_id in (
+            (
+                context.get("effective_failed_mask_ids")
+                if effective_failed_declared
+                else context.get("failed_mask_ids")
+            )
+            or ()
+        )
         if str(mask_id)
     }
-    failed_mask_ids.update(
-        str(mask_id)
-        for mask_id in dict(context.get("failed_masks") or {}).keys()
-        if str(mask_id)
-    )
+    if not effective_failed_declared:
+        failed_mask_ids.update(
+            str(mask_id)
+            for mask_id in dict(context.get("failed_masks") or {}).keys()
+            if str(mask_id)
+        )
 
     # Defesa final no renderer. O contexto produtivo sempre publica a autoridade
     # de energia; nesse caso, classificações brutas não podem gerar cor antes de
