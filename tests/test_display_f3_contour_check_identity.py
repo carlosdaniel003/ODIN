@@ -52,6 +52,29 @@ class DisplayF3ContourCheckIdentityTests(unittest.TestCase):
         self.assertTrue(result["available"])
         self.assertGreater(result["score"], 0.70)
 
+    def test_similaridade_recorta_canvas_grande_para_roi_da_placa(self):
+        board = np.zeros((1080, 1920), dtype=np.uint8)
+        board[300:430, 1000:1500] = 255
+        display = np.zeros_like(board)
+        display[330:395, 1120:1400] = 255
+
+        reference = np.full((1080, 1920, 3), 50, dtype=np.uint8)
+        current = reference.copy()
+        reference[330:395, 1120:1400] = 220
+        current[330:395, 1120:1400] = 218
+
+        result = identity.calcular_similaridade_contorno_check_f3(
+            current,
+            reference,
+            board,
+            display,
+        )
+
+        self.assertTrue(result["available"])
+        self.assertLess(result["comparison_width"], 700)
+        self.assertLess(result["comparison_height"], 300)
+        self.assertGreater(result["score"], 0.90)
+
     def test_analisador_rastreado_usa_frame_raw_e_mascaras_moveis(self):
         raw = np.zeros((40, 60, 3), dtype=np.uint8)
         aligned = np.ones((40, 60, 3), dtype=np.uint8)

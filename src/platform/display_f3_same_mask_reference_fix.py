@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import time
 
 import cv2
 
@@ -51,6 +52,9 @@ F3_CHECK_PHOTO_LEARNING_SOURCE = "f3_check_photos_learning"
 # não produz OK nem NG, apenas mantém a busca.
 F3_CHECK_PHOTO_MIN_CONFIDENCE = 0.58
 F3_CHECK_PHOTO_AMBIGUOUS_SEPARATION = 0.16
+# O dataset muda somente quando o operador salva configuração/referência. Não
+# precisamos reler vários JSONs e fazer stat() em todas as fotos a cada frame.
+F3_CHECK_PHOTO_SIGNATURE_REFRESH_S = 0.85
 
 # POUCA LUZ deixa de depender de uma terceira referência manual. Ela só é
 # inferida quando a leitura fica de forma estável entre exemplos reais APAGADO
@@ -234,6 +238,7 @@ class F3SameMaskReferenceAnalyzer:
         )
         self._check_photo_cache_key = None
         self._check_photo_cache = None
+        self._check_photo_signature_checked_at = 0.0
 
     @staticmethod
     def _not_ready(reason: str, **extra) -> dict:
@@ -250,6 +255,7 @@ class F3SameMaskReferenceAnalyzer:
         """Compatibilidade com o runtime: invalida o dataset das fotos dos CHECKS."""
         self._check_photo_cache_key = None
         self._check_photo_cache = None
+        self._check_photo_signature_checked_at = 0.0
 
     def _check_photo_signature(
         self,
@@ -591,11 +597,21 @@ class F3SameMaskReferenceAnalyzer:
         masks: list[dict],
         visual_rotation: int,
     ) -> dict:
+        now = time.monotonic()
+        if (
+            self._check_photo_cache is not None
+            and self._check_photo_cache_key is not None
+            and (now - float(self._check_photo_signature_checked_at or 0.0))
+                < F3_CHECK_PHOTO_SIGNATURE_REFRESH_S
+        ):
+            return self._check_photo_cache
+
         cache_key = self._check_photo_signature(
             project_name,
             project,
             visual_rotation,
         )
+        self._check_photo_signature_checked_at = now
         if cache_key == self._check_photo_cache_key:
             return self._check_photo_cache or {}
 

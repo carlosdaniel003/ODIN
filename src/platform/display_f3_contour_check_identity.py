@@ -154,6 +154,48 @@ def _edge_similarity(left: np.ndarray, right: np.ndarray, mask: np.ndarray) -> f
     return max(0.0, min(1.0, float(overlap) / float(denominator)))
 
 
+def _crop_to_board_bbox(
+    current,
+    reference,
+    board_mask: np.ndarray,
+    display_mask: np.ndarray,
+    padding: int = 8,
+):
+    """Recorta o trabalho óptico para a área real da placa.
+
+    Em 1920x1080 o display ocupa apenas uma fração do frame. Executar grayscale,
+    normalização e Canny na imagem inteira para cada CHECK desperdiçava CPU e
+    deixava a interface F3 pesada sem acrescentar informação à decisão.
+    """
+    if (
+        not _valid_frame(current)
+        or not _valid_frame(reference)
+        or board_mask is None
+        or getattr(board_mask, "size", 0) == 0
+    ):
+        return current, reference, board_mask, display_mask
+    try:
+        points = cv2.findNonZero((board_mask > 0).astype(np.uint8))
+        if points is None:
+            return current, reference, board_mask, display_mask
+        x, y, width, height = cv2.boundingRect(points)
+        pad = max(0, int(padding))
+        x1 = max(0, int(x) - pad)
+        y1 = max(0, int(y) - pad)
+        x2 = min(int(board_mask.shape[1]), int(x + width) + pad)
+        y2 = min(int(board_mask.shape[0]), int(y + height) + pad)
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            return current, reference, board_mask, display_mask
+        return (
+            current[y1:y2, x1:x2],
+            reference[y1:y2, x1:x2],
+            board_mask[y1:y2, x1:x2],
+            display_mask[y1:y2, x1:x2],
+        )
+    except Exception:
+        return current, reference, board_mask, display_mask
+
+
 def calcular_similaridade_contorno_check_f3(
     current_canonical,
     reference_canonical,
@@ -161,6 +203,17 @@ def calcular_similaridade_contorno_check_f3(
     display_mask: np.ndarray,
 ) -> dict:
     """Compara somente a placa; o padrão dos segmentos recebe maior peso."""
+    (
+        current_canonical,
+        reference_canonical,
+        board_mask,
+        display_mask,
+    ) = _crop_to_board_bbox(
+        current_canonical,
+        reference_canonical,
+        board_mask,
+        display_mask,
+    )
     current_gray = _normalize_gray(current_canonical, board_mask)
     reference_gray = _normalize_gray(reference_canonical, board_mask)
     if current_gray is None or reference_gray is None:
@@ -212,6 +265,8 @@ def calcular_similaridade_contorno_check_f3(
         "structure_score": round(float(structure_score), 4),
         "board_pixels": int(cv2.countNonZero(board_core)),
         "display_pixels": int(cv2.countNonZero(display)),
+        "comparison_width": int(board_mask.shape[1]),
+        "comparison_height": int(board_mask.shape[0]),
     }
 
 

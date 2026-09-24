@@ -962,13 +962,16 @@ def _run_check_analyses_with_provenance(
 ) -> list[dict]:
     """DEBUG separa gabarito exato do classificador produtivo por mesma máscara."""
     rows = []
+    # O aprendizado ON/OFF é o mesmo dataset para todos os CHECKS. Compartilhar
+    # esta instância evita reler as quatro fotos e reextrair 28 máscaras quatro
+    # vezes no mesmo clique de DEBUG.
+    productive_analyzer = same_mask_module.F3SameMaskReferenceAnalyzer(repository)
     for check in checks:
         check_id = str(check.get("id") or "")
         if not check_id:
             continue
 
         exact_analyzer = F3CheckPhotoLearningAnalyzer(repository)
-        productive_analyzer = same_mask_module.F3SameMaskReferenceAnalyzer(repository)
         try:
             exact_analysis = exact_analyzer.analyze(
                 frame=frame,
@@ -1018,6 +1021,7 @@ def _run_check_analyses_with_provenance(
 
         productive_analysis = deepcopy(productive_analysis)
         productive_analysis["debug_productive_classifier"] = True
+        productive_analysis["debug_shared_learning_dataset"] = True
         productive_analysis["debug_decision_authority"] = False
 
         rows.append(
