@@ -1058,21 +1058,42 @@ def _frozen_frame_visual_context(
         for item in (data.get("mask_results") or ())
         if isinstance(item, dict) and str(item.get("mask_id") or "")
     ]
-    classifications = {
-        str(item.get("mask_id")): str(item.get("classified") or "").strip().lower()
-        for item in results
-        if str(item.get("classified") or "").strip()
-    }
+    effective_classifications = data.get("effective_classifications")
+    classifications = (
+        {
+            str(mask_id): str(state).strip().lower()
+            for mask_id, state in effective_classifications.items()
+            if str(mask_id) and str(state).strip()
+        }
+        if isinstance(effective_classifications, dict)
+        else {
+            str(item.get("mask_id")): str(item.get("classified") or "")
+            .strip()
+            .lower()
+            for item in results
+            if str(item.get("classified") or "").strip()
+        }
+    )
     expected_states = {
         str(item.get("mask_id")): str(item.get("expected") or "").strip().lower()
         for item in results
         if str(item.get("expected") or "").strip()
     }
-    failed_mask_ids = tuple(
-        sorted(
-            str(item.get("mask_id"))
-            for item in results
-            if item.get("matched") is False
+    failed_mask_ids = (
+        tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (data.get("effective_failed_mask_ids") or ())
+                if str(mask_id)
+            )
+        )
+        if "effective_failed_mask_ids" in data
+        else tuple(
+            sorted(
+                str(item.get("mask_id"))
+                for item in results
+                if item.get("matched") is False
+            )
         )
     )
     mask_ids = tuple(str(item.get("mask_id")) for item in results)
@@ -1116,8 +1137,13 @@ def _frozen_frame_visual_context(
 
     return {
         "classifications": classifications,
+        "effective_classifications": dict(classifications),
         "expected_states": expected_states,
         "failed_mask_ids": failed_mask_ids,
+        "effective_failed_mask_ids": failed_mask_ids,
+        "ui_mask_authority": str(
+            data.get("ui_mask_authority") or "frozen_frame_effective"
+        ),
         "mask_ids": mask_ids,
         "has_any_on": bool(on_count),
         "intermittent": intermittent,
