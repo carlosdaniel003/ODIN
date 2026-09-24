@@ -6,6 +6,7 @@ import time
 import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_f3_power_authority as power_module
 import src.platform.display_f3_power_authority_v2 as power_v2_module
+import src.platform.display_f3_presence_relative_empty_fix as relative_presence_module
 import src.platform.display_f3_runtime_contract_fix as contract_module
 
 
@@ -81,6 +82,35 @@ def avaliar_presenca_melhor_ocupado_f3(state: dict | None) -> dict:
                 else "separacao_ocupado_vs_empty_insuficiente"
             ),
         )
+        if present:
+            return result
+
+        # A câmera pode ser reposicionada/refocada e derrubar a similaridade
+        # absoluta de TODAS as referências ao mesmo tempo. Nessa situação, a
+        # pergunta de presença deve continuar sendo relativa: melhor cena que
+        # contém placa x suporte vazio. Reaproveitamos a autoridade dedicada em
+        # vez de reduzir globalmente o threshold absoluto.
+        relative = relative_presence_module.avaliar_presenca_relativa_f3(data)
+        result["relative_presence_diagnostic"] = deepcopy(relative)
+        if bool(relative.get("presence_confirmed")):
+            result.update(
+                available=True,
+                source=str(
+                    relative.get("source")
+                    or relative_presence_module.F3_RELATIVE_PRESENCE_SOURCE
+                ),
+                board_present=bool(relative.get("board_present")),
+                presence_confirmed=True,
+                empty_confirmed=bool(relative.get("empty_confirmed")),
+                empty_score=relative.get("empty_score"),
+                best_occupied_reference=relative.get("best_board_reference"),
+                best_occupied_score=relative.get("best_board_score"),
+                occupied_over_empty_margin=relative.get(
+                    "board_over_empty_margin"
+                ),
+                decision_mode=relative.get("decision_mode"),
+                reason=str(relative.get("reason") or ""),
+            )
         return result
 
     explicit_present = kind in {"off", "check", "powered"}
@@ -243,6 +273,9 @@ def instalar_estabilidade_presenca_placa_display_f3() -> None:
     if getattr(power_module, "_display_f3_presence_stability_installed", False):
         return
 
+    # Esta camada é instalada depois da presença relativa. A função abaixo já
+    # incorpora aquele diagnóstico e não volta ao threshold absoluto antigo
+    # quando a câmera/foco alteram o score de todas as referências.
     power_module._presence_from_global_scores = avaliar_presenca_melhor_ocupado_f3
     previous_authority = power_module.aplicar_autoridade_energia_ao_estado_f3
 
