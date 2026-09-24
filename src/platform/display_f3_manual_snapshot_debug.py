@@ -131,6 +131,18 @@ def _window_visual_state(app) -> dict:
     return {}
 
 
+def _camera_flow_diagnostics(app) -> dict:
+    service = getattr(app, "camera_service", None)
+    getter = getattr(service, "obter_diagnostico_fluxo", None)
+    if not callable(getter):
+        return {}
+    try:
+        value = getter()
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    return _safe_deepcopy(value) if isinstance(value, dict) else {}
+
+
 def _runtime_state_at_frame(app) -> dict:
     evidence = _ng_evidence_snapshot(app)
     if evidence is not None:
@@ -145,6 +157,9 @@ def _runtime_state_at_frame(app) -> dict:
             "ng_evidence_frozen": True,
             "live_camera_ignored": True,
             "camera_frame_id": evidence.get("frame_id"),
+            "camera_flow_diagnostics": _safe_deepcopy(
+                runtime_debug.get("camera_flow_diagnostics")
+            ),
             "logical_context": _current_context(app),
             "operational_state": _safe_deepcopy(
                 evidence.get("operational_state")
@@ -204,6 +219,7 @@ def _runtime_state_at_frame(app) -> dict:
         "ng_evidence_frozen": False,
         "live_camera_ignored": False,
         "camera_frame_id": getattr(app, "camera_ultimo_frame_id", None),
+        "camera_flow_diagnostics": _camera_flow_diagnostics(app),
         "logical_context": _current_context(app),
         "operational_state": _safe_deepcopy(
             getattr(app, "_display_f3_operational_state", None)
