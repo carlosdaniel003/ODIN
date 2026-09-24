@@ -134,18 +134,54 @@ def _build_visual_analysis_snapshot(app, frame, project_name: str) -> dict:
         }
 
     matcher = DisplayVisualReferenceMatcher(repository)
+
+    # A identidade por contorno + região do display é a leitura que realmente
+    # diferencia H1/BLUE/USB/AUX. O comparador global EMPTY/OFF continua abaixo
+    # apenas como diagnóstico de presença.
+    contour_identity = None
     try:
-        status_state = operational_module._build_visual_analysis_state(
+        from src.platform.display_f3_contour_check_identity import (
+            avaliar_identidade_visual_checks_por_contorno_f3,
+        )
+        contour_identity = avaliar_identidade_visual_checks_por_contorno_f3(
             app,
             frame,
-            str(project_name),
         )
     except Exception as exc:
-        status_state = {
-            "text": "ANÁLISE VISUAL: falha no diagnóstico",
-            "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["unavailable"],
+        contour_identity = {
+            "available": False,
+            "confirmed": False,
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+    if isinstance(contour_identity, dict) and contour_identity.get("confirmed"):
+        name = str(
+            contour_identity.get("best_check_name")
+            or contour_identity.get("best_check_id")
+            or "CHECK"
+        ).strip().upper()
+        score = float(contour_identity.get("best_score", 0.0) or 0.0)
+        margin = float(contour_identity.get("margin", 0.0) or 0.0)
+        status_state = {
+            "text": (
+                f"ANÁLISE VISUAL: DISPLAY EM {name} • "
+                f"contorno {score * 100:.0f}% • margem {margin * 100:.0f}%"
+            ),
+            "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["check"],
+        }
+    else:
+        try:
+            status_state = operational_module._build_visual_analysis_state(
+                app,
+                frame,
+                str(project_name),
+            )
+        except Exception as exc:
+            status_state = {
+                "text": "ANÁLISE VISUAL: falha no diagnóstico",
+                "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["unavailable"],
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
     current_small = visual_status_module._small_image(frame)
     try:
@@ -237,6 +273,15 @@ def _build_visual_analysis_snapshot(app, frame, project_name: str) -> dict:
         "candidates": candidates,
         "load_error": load_error,
         "status_error": status_state.get("error"),
+        "check_identity_by_contour": (
+            dict(contour_identity)
+            if isinstance(contour_identity, dict)
+            else None
+        ),
+        "check_identity_authority": bool(
+            isinstance(contour_identity, dict)
+            and contour_identity.get("confirmed")
+        ),
     }
 
 
