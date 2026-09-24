@@ -180,6 +180,24 @@ def _overlay_context(window, visual_rotation: int):
                 if str(mask_id)
             )
         ) if classification_valid else (),
+        "effective_confirmed_failed_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    analysis.get("effective_confirmed_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if classification_valid else (),
+        "effective_validating_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    analysis.get("effective_validating_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if classification_valid else (),
         "ui_mask_authority": (
             str(analysis.get("ui_mask_authority") or "")
             if classification_valid
@@ -283,6 +301,24 @@ def montar_contexto_overlay_snapshot_display_f3(
                 str(mask_id)
                 for mask_id in (
                     (analysis or {}).get("effective_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if isinstance(analysis, dict) else (),
+        "effective_confirmed_failed_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    (analysis or {}).get("effective_confirmed_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+        ) if isinstance(analysis, dict) else (),
+        "effective_validating_mask_ids": tuple(
+            sorted(
+                str(mask_id)
+                for mask_id in (
+                    (analysis or {}).get("effective_validating_mask_ids") or ()
                 )
                 if str(mask_id)
             )
