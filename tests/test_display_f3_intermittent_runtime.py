@@ -5,6 +5,14 @@ import unittest
 from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 
 
+BLUE_ON_IDS = {
+    "MASK_001", "MASK_002", "MASK_005", "MASK_006", "MASK_007",
+    "MASK_008", "MASK_009", "MASK_010", "MASK_015", "MASK_017",
+    "MASK_019", "MASK_020", "MASK_021", "MASK_022", "MASK_023",
+    "MASK_025", "MASK_026", "MASK_027",
+}
+
+
 def _analysis(
     missing: set[str] | None = None,
     exact_similarity: dict[str, float] | None = None,
@@ -12,29 +20,20 @@ def _analysis(
     missing = set(missing or set())
     exact_similarity = dict(exact_similarity or {})
     rows = []
-    for index in range(1, 19):
+    for index in range(1, 29):
         mask_id = f"MASK_{index:03d}"
-        is_missing = mask_id in missing
+        expected = "on" if mask_id in BLUE_ON_IDS else "off"
+        is_missing = mask_id in missing and expected == "on"
+        classified = "off" if is_missing else expected
         rows.append(
             {
                 "mask_id": mask_id,
-                "expected": "on",
-                "classified": "off" if is_missing else "on",
-                "matched": not is_missing,
+                "expected": expected,
+                "classified": classified,
+                "matched": classified == expected,
                 "confidence": 0.95,
                 "template_similarity": exact_similarity.get(mask_id),
                 "template_threshold": 0.82 if mask_id in exact_similarity else None,
-            }
-        )
-    for index in range(19, 29):
-        mask_id = f"MASK_{index:03d}"
-        rows.append(
-            {
-                "mask_id": mask_id,
-                "expected": "off",
-                "classified": "off",
-                "matched": True,
-                "confidence": 0.95,
             }
         )
     return {"ready": True, "mask_results": rows}
@@ -55,9 +54,7 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
 
     def test_fase_totalmente_apagada_nao_e_amostra_de_defeito(self):
         runtime = self._runtime()
-        analysis = _analysis(
-            {f"MASK_{index:03d}" for index in range(1, 19)}
-        )
+        analysis = _analysis(set(BLUE_ON_IDS))
         state = runtime._display_auto_observe_intermittent_phase(
             {"intermittent": True},
             analysis,
