@@ -63,6 +63,7 @@ def resolver_status_visual_runtime_f3(app, current_text: str = "") -> tuple[str,
         return None
 
     placeholder = _is_placeholder(current_text)
+    identity = getattr(app, "_display_f3_check_identity_status", None)
     status = getattr(app, "_display_f3_power_authority_status", None)
     if isinstance(status, dict):
         presence = status.get("presence") if isinstance(status.get("presence"), dict) else {}
@@ -89,6 +90,28 @@ def resolver_status_visual_runtime_f3(app, current_text: str = "") -> tuple[str,
             return (
                 "ANÁLISE VISUAL: PLACA PRESENTE • ENERGIA NÃO CONFIRMADA",
                 operational_module.F3_OPERATIONAL_STATUS_COLORS["unknown"],
+            )
+
+        # Identidade física da função: contorno + região das máscaras já alinhados
+        # no espaço canônico. Ela é independente de OK/NG e pode reconhecer H1
+        # mesmo se uma máscara individual estiver defeituosa.
+        if (
+            board_present
+            and energy_state == power_module.F3_POWER_STATE_POWERED
+            and isinstance(identity, dict)
+            and identity.get("confirmed")
+        ):
+            name = str(
+                identity.get("best_check_name")
+                or identity.get("best_check_id")
+                or "CHECK"
+            ).strip().upper()
+            score = float(identity.get("best_score", 0.0) or 0.0)
+            margin = float(identity.get("margin", 0.0) or 0.0)
+            return (
+                f"ANÁLISE VISUAL: DISPLAY EM {name} • contorno {score * 100:.0f}% "
+                f"• margem {margin * 100:.0f}%",
+                operational_module.F3_OPERATIONAL_STATUS_COLORS["check"],
             )
 
         # Com energia confirmada, o pipeline normal continua livre para mostrar a

@@ -152,15 +152,55 @@ class DisplayF3PhysicalTransitionAuthorityTests(unittest.TestCase):
             result["reason"],
         )
 
-    def test_primeiro_check_nao_exige_transicao_anterior(self):
+    def test_primeiro_check_sem_tracking_mantem_fallback_compativel(self):
         app = _App()
         app.display_check_runtime = _Runtime(current_index=0)
-        result = authority.avaliar_entrada_fisica_check_f3(app)
+        with patch.object(
+            authority,
+            "avaliar_identidade_visual_checks_por_contorno_f3",
+            return_value={"available": False, "confirmed": False},
+        ):
+            result = authority.avaliar_entrada_fisica_check_f3(app)
         self.assertTrue(result["confirmed"])
         self.assertEqual(
-            "primeiro_check_sem_transicao_anterior",
+            "primeiro_check_sem_contorno_disponivel",
             result["reason"],
         )
+
+    def test_h1_so_confirma_quando_contorno_identifica_h1(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=0)
+        app._display_f3_check_identity_status = {
+            "available": True,
+            "confirmed": True,
+            "best_check_id": "CHECK_001",
+            "best_check_name": "H1",
+            "best_score": 0.83,
+            "margin": 0.14,
+        }
+        result = authority.avaliar_entrada_fisica_check_f3(app)
+
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(
+            "primeiro_check_identificado_por_contorno",
+            result["reason"],
+        )
+
+    def test_h1_nao_confirma_se_contorno_identifica_aux(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=0)
+        app._display_f3_check_identity_status = {
+            "available": True,
+            "confirmed": True,
+            "best_check_id": "CHECK_003",
+            "best_check_name": "AUX",
+            "best_score": 0.84,
+            "margin": 0.11,
+        }
+        result = authority.avaliar_entrada_fisica_check_f3(app)
+
+        self.assertFalse(result["confirmed"])
+        self.assertEqual("contorno_identificou_outro_check", result["reason"])
 
     def test_check_defeituoso_pode_entrar_fisicamente_e_depois_gerar_ng(self):
         app = _App()

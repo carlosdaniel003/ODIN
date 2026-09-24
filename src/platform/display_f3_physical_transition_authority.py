@@ -25,6 +25,10 @@ from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 from src.platform.display_f3_check_transition_guard import (
     avaliar_transicao_fisica_checks_f3,
 )
+from src.platform.display_f3_contour_check_identity import (
+    F3_CONTOUR_CHECK_IDENTITY_SOURCE,
+    avaliar_identidade_visual_checks_por_contorno_f3,
+)
 
 
 F3_PHYSICAL_TRANSITION_AUTHORITY_SOURCE = (
@@ -83,14 +87,48 @@ def avaliar_entrada_fisica_check_f3(
         (ctx or {}).get("check_name") or current.get("name") or current_id
     ).strip().upper()
 
-    # H1 é o referencial físico inicial do ciclo e possui seu próprio gate de
-    # presença/energia. Não existe CHECK anterior para comparar.
+    # H1 não possui CHECK anterior, mas isso não significa que qualquer função
+    # ligada seja H1. Quando o tracking tem contorno atual, exigimos que a
+    # identidade visual independente reconheça literalmente o CHECK esperado.
     if index <= 0:
+        identity = getattr(app, "_display_f3_check_identity_status", None)
+        if not isinstance(identity, dict) or not identity.get("available"):
+            identity = avaliar_identidade_visual_checks_por_contorno_f3(
+                app,
+                frame=frame,
+                project_name=str((ctx or {}).get("project_name") or ""),
+            )
+        if isinstance(identity, dict) and identity.get("available"):
+            identified_id = str(identity.get("best_check_id") or "")
+            confirmed = bool(
+                identity.get("confirmed")
+                and identified_id == current_id
+            )
+            return {
+                "source": F3_CONTOUR_CHECK_IDENTITY_SOURCE,
+                "available": True,
+                "confirmed": confirmed,
+                "reason": (
+                    "primeiro_check_identificado_por_contorno"
+                    if confirmed
+                    else (
+                        "contorno_identificou_outro_check"
+                        if identity.get("confirmed") and identified_id
+                        else "primeiro_check_ainda_nao_identificado_por_contorno"
+                    )
+                ),
+                "current_check_id": current_id,
+                "current_check_name": current_name,
+                "current_index": index,
+                "identity": deepcopy(identity),
+            }
+
+        # Compatibilidade fail-safe para projeto antigo sem tracking/contorno.
         return {
             "source": F3_PHYSICAL_TRANSITION_AUTHORITY_SOURCE,
             "available": True,
             "confirmed": True,
-            "reason": "primeiro_check_sem_transicao_anterior",
+            "reason": "primeiro_check_sem_contorno_disponivel",
             "current_check_id": current_id,
             "current_check_name": current_name,
             "current_index": index,
@@ -125,6 +163,45 @@ def avaliar_entrada_fisica_check_f3(
             "current_check_name": current_name,
             "current_index": index,
         }
+
+    # A identidade por contorno compara TODOS os CHECKS no mesmo espaço
+    # canônico. Se ela está conclusiva, é uma evidência física mais independente
+    # do que a própria análise de conformidade do CHECK esperado.
+    identity = getattr(app, "_display_f3_check_identity_status", None)
+    if not isinstance(identity, dict) or not identity.get("available"):
+        identity = avaliar_identidade_visual_checks_por_contorno_f3(
+            app,
+            frame=frame,
+            project_name=str((ctx or {}).get("project_name") or ""),
+        )
+    if isinstance(identity, dict) and identity.get("available") and identity.get("confirmed"):
+        identified_id = str(identity.get("best_check_id") or "")
+        if identified_id == current_id:
+            return {
+                "source": F3_CONTOUR_CHECK_IDENTITY_SOURCE,
+                "available": True,
+                "confirmed": True,
+                "reason": "check_atual_identificado_por_contorno",
+                "previous_check_id": previous_id,
+                "previous_check_name": previous_name,
+                "current_check_id": current_id,
+                "current_check_name": current_name,
+                "current_index": index,
+                "identity": deepcopy(identity),
+            }
+        if identified_id:
+            return {
+                "source": F3_CONTOUR_CHECK_IDENTITY_SOURCE,
+                "available": True,
+                "confirmed": False,
+                "reason": "contorno_identificou_outro_check",
+                "previous_check_id": previous_id,
+                "previous_check_name": previous_name,
+                "current_check_id": current_id,
+                "current_check_name": current_name,
+                "current_index": index,
+                "identity": deepcopy(identity),
+            }
 
     # Se a autoridade física global reconheceu literalmente o CHECK atual,
     # não precisamos de fallback relativo.

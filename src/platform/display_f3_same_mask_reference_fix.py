@@ -515,6 +515,10 @@ class F3SameMaskReferenceAnalyzer:
         project_name: str,
         check_id: str,
         visual_rotation: int = 0,
+        *,
+        mask_geometry_override=None,
+        mask_geometry_resolution=None,
+        mask_geometry_source: str = "",
     ) -> dict:
         if frame is None or getattr(frame, "size", 0) == 0:
             return self._not_ready("camera_sem_frame")
@@ -574,12 +578,42 @@ class F3SameMaskReferenceAnalyzer:
                 check_photo_off_sample_count=len(off_samples),
             )
 
-        visual_frame, visual_resolution, visual_masks = preparar_check_visual_display(
-            frame,
-            master_resolution,
-            masks,
-            visual_rotation,
+        use_geometry_override = bool(
+            mask_geometry_override
+            and frame is not None
+            and getattr(frame, "size", 0) > 0
         )
+        if use_geometry_override:
+            # O tracking já projetou as máscaras para o frame RAW real. Não
+            # giramos nem warpamos novamente: isso evita o duplo deslocamento de
+            # alguns segmentos na borda do display (ex.: falso ON em MASK_020).
+            visual_frame = frame
+            visual_masks = [
+                item
+                for item in (mask_geometry_override or ())
+                if isinstance(item, dict) and str(item.get("id") or "")
+            ]
+            frame_h, frame_w = visual_frame.shape[:2]
+            visual_resolution = (int(frame_w), int(frame_h))
+            if isinstance(mask_geometry_resolution, (list, tuple)) and len(mask_geometry_resolution) >= 2:
+                try:
+                    expected_resolution = (
+                        int(mask_geometry_resolution[0]),
+                        int(mask_geometry_resolution[1]),
+                    )
+                except (TypeError, ValueError):
+                    expected_resolution = visual_resolution
+                if expected_resolution != visual_resolution:
+                    use_geometry_override = False
+
+        if not use_geometry_override:
+            visual_frame, visual_resolution, visual_masks = preparar_check_visual_display(
+                frame,
+                master_resolution,
+                masks,
+                visual_rotation,
+            )
+
         if visual_frame is None or getattr(visual_frame, "size", 0) == 0:
             return self._not_ready("camera_sem_frame_visual")
 
@@ -767,6 +801,12 @@ class F3SameMaskReferenceAnalyzer:
             "same_mask_reference_used_count": int(local_used_count),
             "check_photo_pool_fallback_used_count": int(pool_fallback_count),
             "presence_reference": presence,
+            "live_geometry_override": bool(use_geometry_override),
+            "live_geometry_source": (
+                str(mask_geometry_source or "")
+                if use_geometry_override
+                else ""
+            ),
         }
 
 

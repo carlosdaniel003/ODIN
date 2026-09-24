@@ -139,6 +139,9 @@ from src.platform.display_f3_object_tracking import (  # noqa: E402
     instalar_autoridade_final_instancia_rastreamento_f3,
     instalar_runtime_rastreamento_objetos_display_f3,
 )
+from src.platform.display_f3_contour_check_identity import (  # noqa: E402
+    instalar_identidade_visual_contorno_checks_f3,
+)
 from src.platform.display_f3_physical_transition_authority import (  # noqa: E402
     instalar_autoridade_transicao_fisica_checks_f3,
 )
@@ -240,6 +243,10 @@ def main() -> None:
     # wrappers históricos da MRO escondam a bounding box móvel ou avancem CHECKS
     # por caminhos alternativos da máquina de sequência.
     instalar_autoridade_final_instancia_rastreamento_f3(app)
+    # O contorno já cadastrado em cada referência passa a ser a identidade física
+    # de H1/BLUE/USB/AUX. A leitura produtiva usa as ROIs projetadas no frame RAW,
+    # sem depender do score da câmera inteira nem de um warp antes dos segmentos.
+    instalar_identidade_visual_contorno_checks_f3(app)
     # Última autoridade produtiva: energia confirma somente que o display está
     # ligado. Para avançar BLUE/USB/AUX (e CHECKS futuros), o frame precisa provar
     # fisicamente a transição do CHECK anterior para o atual.
