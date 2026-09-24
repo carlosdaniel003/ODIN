@@ -142,5 +142,36 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         self.assertEqual(3, state["failure_counts"]["MASK_027"])
 
 
+    def test_autoridade_efetiva_publica_somente_mask_027(self):
+        analysis = {
+            "mask_results": [
+                {
+                    "mask_id": "MASK_010",
+                    "classified": "on",
+                    "matched": True,
+                },
+                {
+                    "mask_id": "MASK_027",
+                    "classified": "off",
+                    "matched": False,
+                },
+            ]
+        }
+        result = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_publish_effective_ui_authority(analysis)
+        )
+        self.assertEqual(
+            {"MASK_010": "on", "MASK_027": "off"},
+            result["effective_classifications"],
+        )
+        self.assertEqual(
+            ("MASK_027",),
+            result["effective_failed_mask_ids"],
+        )
+        self.assertEqual(1, result["effective_matched_mask_count"])
+        self.assertEqual("effective_mask_results_v1", result["ui_mask_authority"])
+
+
 if __name__ == "__main__":
     unittest.main()
