@@ -306,11 +306,11 @@ def _failure_items(analysis: dict | None) -> dict[str, dict]:
 
 
 def _install_failed_mask_overlay() -> None:
+    """Publica falhas no contexto; o renderer final decide toda a apresentação."""
     if bool(getattr(overlay_module, "_display_f3_strict_failure_overlay", False)):
         return
 
     original_context = overlay_module._overlay_context
-    original_render = overlay_module.renderizar_overlay_rois_display_f3
 
     def overlay_context(window, visual_rotation: int):
         context = original_context(window, visual_rotation)
@@ -319,136 +319,29 @@ def _install_failed_mask_overlay() -> None:
         app = overlay_module._app_from_window(window)
         analysis = getattr(app, "_display_auto_last_analysis", None) if app else None
         result = dict(context)
-        # O contexto base só publica classifications quando a analise pertence ao
-        # CHECK logico atual. Assim nao reaproveitamos uma falha do CHECK anterior.
         result["failed_masks"] = (
             _failure_items(analysis)
             if dict(result.get("classifications") or {})
             else {}
         )
+        if isinstance(analysis, dict) and "effective_failed_mask_ids" in analysis:
+            result["effective_failed_mask_ids"] = tuple(
+                str(mask_id)
+                for mask_id in (
+                    analysis.get("effective_failed_mask_ids") or ()
+                )
+                if str(mask_id)
+            )
+            result["effective_classifications"] = dict(
+                analysis.get("effective_classifications") or {}
+            )
+            result["ui_mask_authority"] = str(
+                analysis.get("ui_mask_authority")
+                or "effective_mask_results_v1"
+            )
         return result
 
-    def render(frame, context):
-        rendered = original_render(frame, context)
-        if rendered is None or getattr(rendered, "size", 0) == 0:
-            return rendered
-        if not isinstance(context, dict):
-            return rendered
-
-        failed = dict(context.get("failed_masks") or {})
-        resolution = context.get("resolution")
-        masks = tuple(context.get("masks") or ())
-        if not failed or not isinstance(resolution, (list, tuple)) or len(resolution) < 2:
-            return rendered
-
-        source_width = max(1, int(resolution[0]))
-        source_height = max(1, int(resolution[1]))
-        frame_height, frame_width = rendered.shape[:2]
-        sx = frame_width / float(source_width)
-        sy = frame_height / float(source_height)
-
-        tint = rendered.copy()
-        geometries = []
-        for mask in masks:
-            if not isinstance(mask, dict):
-                continue
-            mask_id = str(mask.get("id") or "")
-            failure = failed.get(mask_id)
-            if not isinstance(failure, dict):
-                continue
-            classified = str(failure.get("classified") or "")
-            color = (
-                F3_STRICT_LOW_LIGHT_BGR
-                if classified == DISPLAY_AUTO_CLASS_LOW_LIGHT
-                else F3_STRICT_FAILED_MASK_BGR
-            )
-            kind = str(mask.get("type") or "").lower()
-            if kind == "circle":
-                center = (
-                    int(round(float(mask.get("cx", 0)) * sx)),
-                    int(round(float(mask.get("cy", 0)) * sy)),
-                )
-                axes = (
-                    max(1, int(round(float(mask.get("radius", 1)) * sx))),
-                    max(1, int(round(float(mask.get("radius", 1)) * sy))),
-                )
-                cv2.ellipse(tint, center, axes, 0, 0, 360, color, -1, cv2.LINE_AA)
-                geometries.append(("circle", (center, axes), color, mask_id))
-            else:
-                polygon = overlay_module._scaled_polygon(mask, sx, sy)
-                if polygon is None or len(polygon) < 3:
-                    continue
-                cv2.fillPoly(tint, [polygon], color, lineType=cv2.LINE_AA)
-                geometries.append(("polygon", polygon, color, mask_id))
-
-        if not geometries:
-            return rendered
-
-        cv2.addWeighted(
-            tint,
-            F3_STRICT_FAILED_FILL_ALPHA,
-            rendered,
-            1.0 - F3_STRICT_FAILED_FILL_ALPHA,
-            0.0,
-            dst=rendered,
-        )
-        thickness = max(3, int(round(min(frame_width, frame_height) / 220.0)))
-        font_scale = max(0.42, min(0.8, min(frame_width, frame_height) / 1400.0))
-
-        for kind, geometry, color, mask_id in geometries:
-            if kind == "circle":
-                center, axes = geometry
-                cv2.ellipse(
-                    rendered,
-                    center,
-                    axes,
-                    0,
-                    0,
-                    360,
-                    color,
-                    thickness,
-                    cv2.LINE_AA,
-                )
-                anchor = center
-            else:
-                polygon = geometry
-                cv2.polylines(
-                    rendered,
-                    [polygon],
-                    True,
-                    color,
-                    thickness,
-                    cv2.LINE_AA,
-                )
-                moments = cv2.moments(polygon)
-                if abs(float(moments.get("m00", 0.0))) > 1e-9:
-                    anchor = (
-                        int(moments["m10"] / moments["m00"]),
-                        int(moments["m01"] / moments["m00"]),
-                    )
-                else:
-                    point = polygon.reshape(-1, 2)[0]
-                    anchor = (int(point[0]), int(point[1]))
-
-            cv2.putText(
-                rendered,
-                f"NG {mask_id}",
-                (max(2, anchor[0] - 24), max(14, anchor[1] - 10)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                font_scale,
-                color,
-                max(1, thickness // 2),
-                cv2.LINE_AA,
-            )
-
-        return rendered
-
     overlay_module._overlay_context = overlay_context
-    overlay_module.renderizar_overlay_rois_display_f3 = render
-    overlay_module.DISPLAY_ROI_OVERLAY_LEGEND = (
-        "VERDE: ACESO  •  VERMELHO: APAGADO  •  AMARELO: POUCA LUZ  •  "
-        "AZUL FORTE: MÁSCARA NG"
-    )
     overlay_module._display_f3_strict_failure_overlay = True
 
 
