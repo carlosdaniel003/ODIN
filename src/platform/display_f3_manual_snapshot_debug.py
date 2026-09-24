@@ -1029,6 +1029,8 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
             "failed_mask_ids",
             "effective_classifications",
             "effective_failed_mask_ids",
+            "effective_confirmed_failed_mask_ids",
+            "effective_validating_mask_ids",
             "ui_mask_authority",
             "has_any_on",
             "intermittent",
