@@ -10,14 +10,14 @@ from src.platform.linux_camera_backend import (
     descobrir_dispositivos_video,
     opencv_tem_gstreamer,
 )
-from src.platform.raspberry_pi3_settings import (
+from src.platform.desktop_settings import (
     CAMERA_FPS,
     CAMERA_HEIGHT,
     CAMERA_SCAN_MAX_INDEX,
     CAMERA_WIDTH,
 )
 from src.platform.threaded_camera_service import (
-    ThreadedRaspberryPi3CameraService,
+    ThreadedDesktopCameraService,
 )
 
 
@@ -170,7 +170,7 @@ class LinuxCameraCompatibilityMixin:
         if not sys.platform.startswith("linux"):
             return super()._abrir_candidato_linux(candidato)
 
-        capture = ThreadedRaspberryPi3CameraService._abrir_candidato_linux(
+        capture = ThreadedDesktopCameraService._abrir_candidato_linux(
             self,
             candidato,
         )
@@ -242,7 +242,7 @@ class LinuxCameraCompatibilityMixin:
             return
 
         self._resolution_mismatch_count = 0
-        ThreadedRaspberryPi3CameraService._publicar_frame_otimizado(
+        ThreadedDesktopCameraService._publicar_frame_otimizado(
             self,
             frame,
             estavel=estavel,

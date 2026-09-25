@@ -12,7 +12,7 @@ from src.platform.display_project_repository import (
     normalizar_resolucao_display,
 )
 from src.platform.display_visual_rotation import obter_rotacao_visual_display
-from src.platform.raspberry_pi3_settings import (
+from src.platform.desktop_settings import (
     OPERATION_PREVIEW_HEIGHT,
     OPERATION_PREVIEW_WIDTH,
 )

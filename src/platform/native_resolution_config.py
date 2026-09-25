@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.platform.raspberry_pi3_settings import (
+from src.platform.desktop_settings import (
     CAMERA_FPS,
     CAMERA_HEIGHT,
     CAMERA_WIDTH,

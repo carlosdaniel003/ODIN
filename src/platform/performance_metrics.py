@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from src.platform.production_log import ProductionLogMixin
-from src.platform.raspberry_pi3_settings import (
+from src.platform.desktop_settings import (
     OPERATION_PREVIEW_INTERVAL_MS,
 )
 
