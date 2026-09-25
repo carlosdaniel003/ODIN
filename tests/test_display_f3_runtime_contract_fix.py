@@ -197,6 +197,7 @@ class DisplayF3RuntimeContractFixTests(unittest.TestCase):
             "root",
             "repository",
             "frame_provider",
+            "heavy_executor",
             "on_change",
             "on_close",
         ):
