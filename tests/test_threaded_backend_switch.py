@@ -8,7 +8,7 @@ from src.platform.linux_camera_backend import (
     LinuxCameraBackendCandidate,
 )
 from src.platform.threaded_camera_service import (
-    ThreadedRaspberryPi3CameraService,
+    ThreadedDesktopCameraService,
 )
 
 
@@ -31,7 +31,7 @@ class FakeCapture:
         return True
 
 
-class CameraServiceTeste(ThreadedRaspberryPi3CameraService):
+class CameraServiceTeste(ThreadedDesktopCameraService):
     def __init__(self):
         super().__init__(
             indice_camera=0,

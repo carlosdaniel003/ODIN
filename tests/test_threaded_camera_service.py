@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 from src.platform.threaded_camera_service import (
-    ThreadedRaspberryPi3CameraService,
+    ThreadedDesktopCameraService,
 )
 
 
@@ -40,7 +40,7 @@ class FakeCapture:
         return True
 
 
-class CameraServiceTeste(ThreadedRaspberryPi3CameraService):
+class CameraServiceTeste(ThreadedDesktopCameraService):
     def __init__(self, frames):
         self._frames_teste = list(frames)
         super().__init__(
