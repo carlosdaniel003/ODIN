@@ -30,14 +30,14 @@ jobs:
             config.py \
             main_rpi.py \
             linux_local_config_bootstrap.py \
-            src/platform/display_f3_tk_responsiveness.py \
+            src/platform/display_f3_runtime_coordinator.py \
             tests/test_linux_local_config_bootstrap.py \
-            tests/test_display_f3_tk_responsiveness.py
+            tests/test_display_f3_runtime_coordinator.py
 
       - name: Keep JIG config outside Git checkout
         run: |
           python -m unittest tests.test_linux_local_config_bootstrap -v
 
-      - name: Validate F3 Tk responsiveness guard
+      - name: Validate F3 runtime coordinator
         run: |
-          python -m unittest tests.test_display_f3_tk_responsiveness -v
+          python -m unittest tests.test_display_f3_runtime_coordinator -v

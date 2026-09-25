@@ -88,14 +88,12 @@ class DisplayF3FinalPerformanceTests(unittest.TestCase):
             installer.index("_install_adaptive_preview_cadence()"),
         )
 
-    def test_preview_cadence_keeps_fast_h1_blue_and_event_loop_idle(self):
-        self.assertLessEqual(performance.F3_FAST_CYCLE_TARGET_MS, 50)
-        self.assertGreaterEqual(performance.F3_NORMAL_CYCLE_TARGET_MS, 80)
-        self.assertGreaterEqual(performance.F3_MIN_IDLE_SLICE_MS, 10)
-        source = inspect.getsource(performance._install_adaptive_preview_cadence)
-        self.assertIn("_display_auto_is_reference_gate", source)
-        self.assertIn("_display_auto_is_transient_check", source)
-        self.assertIn("after_cancel", source)
+    def test_preview_cadence_is_not_installed_by_performance_layer(self):
+        installer = inspect.getsource(
+            performance.instalar_performance_final_display_f3
+        )
+        self.assertNotIn("_install_adaptive_preview_cadence()", installer)
+        self.assertIn("_install_fresh_frame_outer_gate()", installer)
 
     def test_exact_reference_hot_path_avoids_full_hd_read_per_candidate(self):
         source = inspect.getsource(performance._install_exact_reference_hot_path)
