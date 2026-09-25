@@ -1258,5 +1258,31 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
 
 
+    def test_live_tracking_heavy_compute_runs_through_high_priority_executor(self):
+        installer = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        submitter = inspect.getsource(tracking._submit_live_tracking_job)
+        worker = inspect.getsource(tracking._run_live_tracking_heavy_job)
+
+        self.assertIn("_submit_live_tracking_job(self, raw_latest)", installer)
+        self.assertNotIn("align_frame_for_f3(self, raw_latest)", installer)
+        self.assertIn("F3HeavyWorkPriority.HIGH", submitter)
+        self.assertIn("replace_pending=True", submitter)
+        self.assertIn("align_frame_for_f3(app, raw_frame)", worker)
+        self.assertIn("_analysis_alignment_for_current_check", worker)
+
+    def test_tracking_reset_cancels_pending_executor_work(self):
+        source = inspect.getsource(tracking.reset_tracking_runtime)
+        self.assertIn("cancel_owner(F3_TRACKING_EXECUTOR_OWNER)", source)
+        self.assertIn("_display_f3_tracking_job_generation", source)
+        self.assertIn("_display_f3_tracking_future = None", source)
+
+    def test_live_geometry_no_longer_generates_discarded_full_frame_warp(self):
+        source = inspect.getsource(tracking._update_tracking_live_geometry)
+        self.assertIn("_analysis_transform_for_current_check", source)
+        self.assertNotIn("_analysis_alignment_for_current_check", source)
+
+
 if __name__ == "__main__":
     unittest.main()
