@@ -1209,11 +1209,12 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("sequence.registrar_resultado_check = MethodType", source)
         self.assertIn("_tracking_h1_power_gate(app)", source)
         self.assertIn("_display_f3_tracking_raw_authority_frame", source)
-        self.assertIn("self.camera_frame_atual = analysis_frame", source)
+        self.assertNotIn("self.camera_frame_atual = pending_frame", source)
+        self.assertIn("_display_auto_analysis_frame_override", source)
         self.assertIn("_display_f3_tracking_instance_frame_prepared", source)
 
-        main_source = Path("main_rpi.py").read_text(encoding="utf-8")
-        self.assertIn("app = RaspberryPi3ProductionApp(root)", main_source)
+        main_source = Path("main_desktop.py").read_text(encoding="utf-8")
+        self.assertIn("app = DesktopProductionApp(root)", main_source)
         self.assertIn(
             "instalar_autoridade_final_instancia_rastreamento_f3(app)",
             main_source,
@@ -1317,6 +1318,43 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("replace_pending=True", submitter)
         self.assertIn("align_frame_for_f3(app, raw_frame)", worker)
         self.assertIn("_analysis_alignment_for_current_check", worker)
+
+    def test_semantic_check_analysis_also_runs_in_heavy_executor(self):
+        installer = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        submitter = inspect.getsource(tracking._submit_live_semantic_job)
+        worker = inspect.getsource(tracking._run_live_semantic_job)
+        process = inspect.getsource(auto_runtime.DisplayAutomaticCheckF3Mixin._process_display_auto_check)
+
+        self.assertIn("_submit_live_semantic_job(", installer)
+        self.assertIn("F3HeavyWorkPriority.HIGH", submitter)
+        self.assertIn('name="f3-live-semantic"', submitter)
+        self.assertIn("analyzer.analyze(", worker)
+        self.assertIn("_display_auto_precomputed_payload", process)
+        self.assertIn("_display_auto_analysis_frame_override", process)
+
+    def test_semantic_apply_never_replaces_visible_camera_with_old_frame(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertNotIn("self.camera_frame_atual = pending_frame", source)
+        self.assertIn(
+            "Preview usa camera_frame_atual (latest)",
+            source,
+        )
+
+    def test_config_open_invalidates_live_tracking_before_build(self):
+        from src.platform.display_production_f3 import DisplayProductionF3Mixin
+
+        source = inspect.getsource(
+            DisplayProductionF3Mixin.abrir_configuracao_projeto_display
+        )
+        self.assertIn("reset_tracking_runtime(self)", source)
+        self.assertLess(
+            source.index("reset_tracking_runtime(self)"),
+            source.index("self.root.after(1, build)"),
+        )
 
     def test_tracking_reset_cancels_pending_executor_work(self):
         source = inspect.getsource(tracking.reset_tracking_runtime)

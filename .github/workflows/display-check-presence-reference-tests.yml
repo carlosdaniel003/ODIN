@@ -81,6 +81,9 @@ jobs:
           python -m unittest \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_live_preview_never_prefers_worker_raw_frame \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_tracking_result_age_blocks_multi_second_operational_decision \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_semantic_check_analysis_also_runs_in_heavy_executor \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_semantic_apply_never_replaces_visible_camera_with_old_frame \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_config_open_invalidates_live_tracking_before_build \
             -v
 
       - name: Run Display F3 configuration architecture tests
