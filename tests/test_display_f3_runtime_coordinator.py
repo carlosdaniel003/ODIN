@@ -208,6 +208,38 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
             F3_COORDINATOR_VERY_HEAVY_IDLE_MS,
         )
 
+    def test_product_bootstrap_uses_coordinator_as_final_scheduler_owner(self):
+        root = Path(__file__).resolve().parents[1]
+        main = (root / "main_rpi.py").read_text(encoding="utf-8")
+        performance = (
+            root / "src" / "platform" / "display_f3_final_performance.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("instalar_coordenador_runtime_display_f3(app)", main)
+        self.assertNotIn("instalar_responsividade_tk_display_f3(app)", main)
+
+        installer_start = performance.index(
+            "def instalar_performance_final_display_f3"
+        )
+        installer = performance[installer_start:]
+        self.assertNotIn("_install_adaptive_preview_cadence()", installer)
+
+    def test_canonical_scheduler_delegates_to_coordinator_before_fallback(self):
+        root = Path(__file__).resolve().parents[1]
+        production = (
+            root / "src" / "platform" / "display_production_f3.py"
+        ).read_text(encoding="utf-8")
+        start = production.index("    def _agendar_preview_display_f3(")
+        end = production.index(
+            "    def _render_preview_display_f3_once",
+            start,
+        )
+        method = production[start:end]
+        self.assertLess(
+            method.index("coordinator.schedule(atraso_ms)"),
+            method.index("self.root.after("),
+        )
+
     def test_stop_cancels_the_single_owned_timer(self):
         app, coordinator = self._install()
         token = app.display_f3_after_id
