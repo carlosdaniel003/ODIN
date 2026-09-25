@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import src.platform.display_f3_tk_responsiveness as responsiveness
+
+_MODULE_PATH = Path("src/platform/display_f3_tk_responsiveness.py")
+_SPEC = importlib.util.spec_from_file_location(
+    "odin_display_f3_tk_responsiveness_test_module",
+    _MODULE_PATH,
+)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError("Nao foi possivel carregar display_f3_tk_responsiveness.py")
+responsiveness = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(responsiveness)
 
 
 class _Root:
