@@ -67,6 +67,33 @@ class DesktopCompositionTests(unittest.TestCase):
         self.assertNotIn("class RaspberryPi3ODINApp", profile)
         self.assertNotIn("class RaspberryPi3ProductionApp", production)
 
+    def test_canonical_desktop_path_has_no_raspberry_or_gpio_dependencies(self):
+        canonical_files = (
+            "main_desktop.py",
+            "src/platform/desktop_production_app.py",
+            "src/platform/desktop_profile.py",
+            "src/platform/desktop_camera_service.py",
+            "src/platform/desktop_enter_trigger.py",
+            "src/platform/desktop_runtime_compatibility.py",
+        )
+        for path in canonical_files:
+            content = source(path)
+            tree = ast.parse(content)
+            imports = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    imports.append(str(node.module or ""))
+                elif isinstance(node, ast.Import):
+                    imports.extend(alias.name for alias in node.names)
+            self.assertFalse(
+                any("raspberry" in name.lower() for name in imports),
+                (path, imports),
+            )
+            self.assertFalse(
+                any("gpio" in name.lower() for name in imports),
+                (path, imports),
+            )
+
     def test_linux_launcher_runs_canonical_main(self):
         launcher = source("scripts/iniciar_odin_linux.sh")
         self.assertIn('"$PROJECT_DIR/main.py"', launcher)

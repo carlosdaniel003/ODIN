@@ -24,7 +24,9 @@ Qualquer agente de IA que trabalhe neste repositório deve começar por `AGENTS.
 - `docs/DECISIONS.md` — decisões arquiteturais aceitas;
 - `docs/F3_MIGRATION.md` — ordem de modernização do F3.
 
-**Plataformas alvo: Windows e Linux desktop.** Referências a Raspberry Pi, GPIO e nomes `Raspberry*` descrevem legado/transição da implementação atual e não definem a arquitetura desejada para novas funcionalidades.
+**Plataformas alvo: Windows e Linux desktop.** A composição canônica já usa
+classes `Desktop*`. Referências a Raspberry Pi, GPIO e nomes `Raspberry*`
+são compatibilidade histórica e não definem o runtime de produto.
 
 ---
 
@@ -53,19 +55,25 @@ A aplicação possui captura ao vivo, seleção visual de câmera, projetos por 
 
 # 1. Inicialização e arquitetura
 
-O ponto de entrada atual é `main.py`, que ainda chama `main_rpi.py` e cria `RaspberryPi3ProductionApp`. Esses nomes são legado arquitetural e não indicam suporte atual a Raspberry Pi. Em Linux, antes de iniciar a interface, o bootstrap prepara uma área de configuração local persistente. A composição produtiva está sendo migrada de forma incremental para uma arquitetura desktop Windows/Linux.
+O ponto de entrada canônico é `main.py`, que chama `main_desktop.py` e cria
+`DesktopProductionApp`. Em Linux, antes de iniciar a interface, o bootstrap
+prepara uma área de configuração local persistente.
 
 ```text
 main.py
-  └─ main_rpi.py
-      └─ RaspberryPi3ProductionApp
+  └─ main_desktop.py
+      └─ DesktopProductionApp
+          ├─ DesktopBaseODINApp
+          ├─ DesktopODINApp
           ├─ área de engenharia / parametrização
           ├─ Produção F2
           ├─ Produção Display F3
-          ├─ serviços de câmera
-          ├─ persistência
-          └─ GPIO / teclado / runtime
+          ├─ serviços de câmera Windows/Linux
+          └─ persistência
 ```
+
+`main_rpi.py` e as classes `Raspberry*` principais são apenas shims/aliases
+de compatibilidade. A composição Desktop não instancia GPIO.
 
 A organização principal do código é:
 
@@ -79,7 +87,11 @@ A organização principal do código é:
 | `tests` | testes unitários e de regressão dos fluxos de visão, câmera, F2 e F3 |
 | `.github/workflows` | validações automatizadas específicas por subsistema |
 
-A classe `RaspberryPi3ProductionApp` é composta por mixins. No F3, diversas camadas são instaladas em ordem deliberada para separar presença física, análise de máscara, estabilidade, performance e apresentação. O comportamento descrito neste README considera o **encadeamento final**, e não apenas as implementações-base isoladas.
+A classe `DesktopProductionApp` é composta por mixins. No F3, diversas camadas
+são instaladas em ordem deliberada para separar presença física, análise de
+máscara, estabilidade, performance e apresentação. O comportamento descrito
+neste README considera o **encadeamento final**, e não apenas as
+implementações-base isoladas.
 
 ---
 
@@ -635,7 +647,9 @@ Durante a execução em sessão gráfica Linux, o ODIN tenta impedir screensaver
 
 # 8. Controles de operação e legado GPIO
 
-O código de GPIO com `gpiozero`/BCM 27 é legado da fase Raspberry e não faz parte da plataforma alvo atual Windows/Linux. Ele pode permanecer temporariamente enquanto consumidores históricos são migrados, mas não deve orientar novas implementações.
+O código de GPIO com `gpiozero`/BCM 27 é legado da fase Raspberry e não faz
+parte da composição `DesktopProductionApp`. Ele permanece no repositório apenas
+para compatibilidade/auditoria e não é inicializado pelo runtime canônico.
 
 O fluxo do microswitch diferencia pressionamento, atraso de posicionamento e liberação. Quando GPIO não está disponível, a operação continua podendo usar teclado.
 

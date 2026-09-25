@@ -243,6 +243,45 @@ Classes Raspberry permanecem somente como compatibilidade temporária até seus 
 
 Não executar rename em massa antes da migração funcional.
 
+### Implementação consolidada da Etapa 6
+
+O launcher e a composição reais agora são Desktop:
+
+~~~text
+main.py
+  └── main_desktop.py
+      └── DesktopProductionApp
+          ├── DesktopBaseODINApp
+          └── DesktopODINApp
+~~~
+
+A composição Desktop:
+
+- não herda `GPIOEnabledRaspberryPi3ODINApp`;
+- preserva `PerformanceMetricsMixin`, `LedProjectManagerMixin` e
+  `LedMaskEditorMixin` em `DesktopBaseODINApp`;
+- não cria `GPIOTriggerService` nem poll periódico GPIO;
+- usa `CAMERA_SERVICE_CLASS` para selecionar
+  `LiveFixedFullHdCameraService`;
+- utiliza nomes canônicos `DesktopCameraService` e
+  `ThreadedDesktopCameraService`;
+- mantém backends/adapters Windows e Linux existentes.
+
+O script `scripts/iniciar_odin_linux.sh` executa `main.py`.
+
+Compatibilidade temporária:
+
+~~~text
+main_rpi.py                    -> main_desktop.main
+RaspberryPi3ProductionApp      -> DesktopProductionApp
+RaspberryPi3ODINApp            -> DesktopODINApp
+RaspberryPi3CameraService      -> DesktopCameraService
+ThreadedRaspberryPi3CameraService -> ThreadedDesktopCameraService
+~~~
+
+Esses aliases não definem mais a arquitetura. A Etapa 7 decide quais podem ser
+removidos após auditoria de consumidores.
+
 ## Etapa 7 — Limpeza de resíduos
 
 Somente depois de testes comprovarem substituição:

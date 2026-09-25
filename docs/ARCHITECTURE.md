@@ -24,9 +24,12 @@ Plataformas suportadas:
 - Windows;
 - Linux desktop.
 
-Raspberry Pi é legado arquitetural. O código atual ainda possui nomes e classes herdados dessa fase, mas a direção oficial é desktop Windows/Linux.
+Raspberry Pi é legado arquitetural. A composição canônica já é desktop
+Windows/Linux; nomes Raspberry remanescentes existem somente como compatibilidade
+histórica até a auditoria de resíduos.
 
-A migração deve ser incremental e protegida por testes. Não realizar rename/removal em massa apenas para eliminar nomes antigos.
+A migração continua incremental e protegida por testes. Não realizar
+rename/removal em massa apenas para eliminar nomes antigos.
 
 ## 3. Domínios do produto
 
@@ -104,6 +107,40 @@ Runtime Coordinator
 ~~~
 
 O objetivo não é reescrever o sistema de uma vez. A migração substitui uma autoridade por vez.
+
+### Composição canônica Desktop
+
+O runtime de produto é composto por:
+
+~~~text
+main.py
+  └── main_desktop.py
+      └── DesktopProductionApp
+          └── DesktopBaseODINApp
+              └── DesktopODINApp
+~~~
+
+Responsabilidades de plataforma:
+
+- `DesktopProductionApp` é a composição final de F2, F3 e parametrização;
+- `DesktopBaseODINApp` agrega projetos, editor de máscaras e métricas sem GPIO;
+- `DesktopODINApp` possui o lifecycle base e seleciona câmera por
+  `CAMERA_SERVICE_CLASS`;
+- `LiveFixedFullHdCameraService` é injetado pela composição final;
+- `DesktopCameraService` e `ThreadedDesktopCameraService` são os nomes
+  canônicos da infraestrutura de captura;
+- Windows e Linux continuam diferenciados por adapters/backends internos.
+
+O bootstrap não altera mais uma variável global
+`raspberry_pi3_profile.RaspberryPi3CameraService`. A classe da câmera é uma
+dependência explícita da composição.
+
+`main_rpi.py`, `RaspberryPi3ProductionApp`, `RaspberryPi3ODINApp`,
+`RaspberryPi3CameraService` e `ThreadedRaspberryPi3CameraService` são aliases
+ou shims de compatibilidade. Não devem ser usados por novo código.
+
+GPIO não faz parte da composição canônica Desktop e nenhum polling GPIO é
+iniciado por `DesktopProductionApp`.
 
 ### Executor pesado canônico do F3
 

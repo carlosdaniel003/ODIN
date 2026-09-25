@@ -218,6 +218,43 @@ Consequências:
 
 ---
 
+## D-016 — DesktopProductionApp é a composição canônica do produto
+
+**Status:** Accepted
+
+O produto Windows/Linux é iniciado por:
+
+~~~text
+main.py
+  -> main_desktop.py
+  -> DesktopProductionApp
+~~~
+
+A composição base é:
+
+~~~text
+DesktopProductionApp
+  -> DesktopBaseODINApp
+  -> DesktopODINApp
+~~~
+
+Consequências:
+
+- `main_rpi.py` é somente launcher de compatibilidade;
+- `RaspberryPi3ProductionApp` e `RaspberryPi3ODINApp` são aliases para as
+  classes Desktop;
+- a câmera é selecionada por `CAMERA_SERVICE_CLASS`, não por monkey patch de
+  variável global em módulo Raspberry;
+- o caminho canônico importa somente módulos Desktop/genéricos e não depende de
+  GPIO;
+- projetos, editor de máscaras e métricas que antes estavam acoplados à classe
+  GPIO foram preservados em `DesktopBaseODINApp`;
+- aliases Raspberry de câmera/thread permanecem temporariamente para consumidores
+  históricos;
+- remoção física dos shims/aliases e código GPIO legado pertence à Etapa 7.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:
