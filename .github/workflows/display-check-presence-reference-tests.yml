@@ -76,6 +76,12 @@ jobs:
             tests.test_display_project_config_scroll \
             -v
 
+      - name: Validate F3 live preview freshness
+        run: |
+          python -m unittest \
+            tests.test_display_f3_object_tracking_isolation \
+            -v
+
       - name: Run Display F3 configuration architecture tests
         run: |
           python -m unittest \
