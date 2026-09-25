@@ -52,6 +52,38 @@ class PlatformLegacyResidueAuditTests(unittest.TestCase):
                     offenders[str(path.relative_to(ROOT))] = legacy
         self.assertEqual({}, offenders)
 
+    def test_tests_do_not_import_legacy_platform_modules(self):
+        offenders: dict[str, list[str]] = {}
+        for path in sorted((ROOT / "tests").rglob("*.py")):
+            if path.name == Path(__file__).name:
+                continue
+            imports = _imports(path)
+            legacy = sorted(imports & LEGACY_MODULES)
+            if legacy:
+                offenders[str(path.relative_to(ROOT))] = legacy
+        self.assertEqual({}, offenders)
+
+    def test_workflows_do_not_reference_legacy_platform_artifacts(self):
+        forbidden = (
+            "main_rpi.py",
+            "raspberry_pi3_production_app.py",
+            "raspberry_pi3_profile.py",
+            "raspberry_pi3_settings.py",
+            "raspberry_camera_service.py",
+            "raspberry_enter_trigger.py",
+            "raspberry_runtime_fixes.py",
+            "gpio_raspberry_app.py",
+            "operation_window_raspberry.py",
+            "gpiozero",
+        )
+        offenders: dict[str, list[str]] = {}
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            content = path.read_text(encoding="utf-8")
+            hits = sorted(token for token in forbidden if token in content)
+            if hits:
+                offenders[str(path.relative_to(ROOT))] = hits
+        self.assertEqual({}, offenders)
+
     def test_production_source_does_not_import_obsolete_f3_scheduler(self):
         offenders: dict[str, list[str]] = {}
         for root in SOURCE_ROOTS:

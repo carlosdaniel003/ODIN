@@ -360,22 +360,11 @@ def instalar_paleta_display() -> None:
     DesktopOperationWindow.PREVIEW_TEXT = DISPLAY_WHITE
     DesktopOperationWindow.PREVIEW_MUTED = DISPLAY_MUTED
 
-    # Classes derivadas redefinem a cor dos LEDs NG.
+    # A janela F2 derivada preserva o mesmo contrato visual.
     try:
-        from src.platform.raspberry_runtime_fixes import (
-            StableDesktopOperationWindow,
-        )
+        from src.platform.blue_operation_window import BlueOperationWindow
 
-        StableDesktopOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
-    except Exception:
-        pass
-
-    try:
-        from src.platform.blue_operation_window import (
-            BlueDesktopOperationWindow,
-        )
-
-        BlueDesktopOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
+        BlueOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
     except Exception:
         pass
 
