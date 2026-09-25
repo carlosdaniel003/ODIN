@@ -37,29 +37,25 @@ Não criar outro `config_performance_fix` para compensar a arquitetura.
 
 ## Etapa 2 — Analisar x Debug
 
-Separar responsabilidades:
+Responsabilidades consolidadas:
 
 ~~~text
 ANALISAR
-  ↓
-frame congelado
-  ↓
-CHECK atual
-  ↓
-resultado operacional/visual
+  ├── captura imediata do print da tela F3
+  ├── congela o frame bruto uma única vez
+  ├── envia CHECK atual como NORMAL
+  └── enfileira relatório técnico completo como LOW
 ~~~
 
 ~~~text
 DEBUG TÉCNICO
-  ↓
-mesmo snapshot congelado
-  ↓
-diagnóstico completo sob demanda
-  ↓
-todos os CHECKS / referências / tracking / energia / presença / telemetria
+  ├── não executa visão computacional
+  ├── apresenta o print já capturado
+  ├── libera COPIAR DEBUG quando o relatório termina
+  └── permite COPIAR IMAGEM para o clipboard do sistema
 ~~~
 
-O botão ANALISAR não deve pagar automaticamente o custo de uma auditoria forense completa.
+A auditoria pesada continua fora do Tkinter e passa pelo executor canônico. O custo diagnóstico nasce somente do clique explícito em ANALISAR e nunca do loop produtivo nem da abertura da janela DEBUG TÉCNICO.
 
 ## Etapa 3 — Executor pesado único
 

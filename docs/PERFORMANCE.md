@@ -294,11 +294,13 @@ Mover o mouse sobre a aplicação nunca deve iniciar trabalho de visão sem rela
 
 ## 11. Analisar x Debug
 
-A ação operacional **ANALISAR** deve ser barata em termos de preparação no Tk e trabalhar somente com o necessário para a análise solicitada.
+A ação manual **ANALISAR** captura imediatamente duas evidências: o frame bruto para cálculo e um print da tela F3 para apresentação. A captura do print ocorre antes de alterar o estado visual do botão.
 
-Diagnóstico completo de engenharia deve ser executado sob demanda pelo fluxo de **DEBUG TÉCNICO**.
+No mesmo clique, o CHECK atual é enviado ao executor pesado com prioridade `NORMAL` e o relatório técnico completo é enfileirado com prioridade `LOW`. O Tkinter apenas captura snapshots mínimos, atualiza feedback e agenda o trabalho; não executa a auditoria pesada.
 
-Debug não deve impor seu custo ao caminho produtivo quando está desligado.
+**DEBUG TÉCNICO é somente apresentação.** Abrir a janela não recalcula visão, não reconstrói overlay/visor/status e não consulta a câmera ao vivo. A janela mostra o print já capturado; `COPIAR DEBUG` é habilitado quando o relatório assíncrono termina e `COPIAR IMAGEM` publica o print no clipboard do sistema.
+
+O custo diagnóstico continua restrito a uma ação explícita do operador — o clique em `ANALISAR` — e passa pelo `F3HeavyVisionExecutor`; nunca entra silenciosamente no loop produtivo.
 
 ## 12. Snapshots mínimos
 

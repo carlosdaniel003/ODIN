@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-"""Tela leve para o DEBUG TÉCNICO completo do snapshot manual do Display F3.
+"""Tela leve do DEBUG TÉCNICO do Display F3.
 
-O relatório completo continua disponível para suporte e para o clipboard, porém
-não é inserido em um widget Text. Isso evita custo de layout/renderização de
-milhares de linhas e mantém a janela consistente com os workspaces F3.
+A janela não reconstrói o frame analisado. Ela apresenta exclusivamente o print
+dos pixels da tela PRODUÇÃO DISPLAY F3 capturado no clique em ANALISAR. O
+relatório técnico completo é gerado em segundo plano sobre o frame bruto
+congelado e fica disponível para COPIAR DEBUG.
 
-A análise visual de presença usa exatamente o mesmo frame congelado pelo botão
-ANALISAR. Ela é anexada ao snapshot somente para diagnóstico e nunca participa
-de OK/NG, avanço de CHECK, rearmamento ou qualquer decisão produtiva.
+A análise visual anexada ao relatório continua estritamente diagnóstica e nunca
+participa de OK/NG, avanço de CHECK, rearmamento ou decisão produtiva.
 """
 
 import base64
+import io
+import sys
 import tkinter as tk
 
 import cv2
@@ -35,13 +37,11 @@ from src.platform.display_visual_reference_status import (
 
 
 DEBUG_SUMMARY = (
-    "O debug técnico contém o snapshot congelado do frame analisado, a análise "
-    "visual informativa da placa, dados da captura, estado físico, scores das "
-    "referências, CHECK lógico, configuração das máscaras, comparação com os "
-    "gabaritos, aprendizado ACESO/APAGADO, status/cores, visor 88:88, overlay "
-    "das máscaras e evidências de energia. O conteúdo "
-    "completo não é renderizado nesta tela para evitar lentidão. Use COPIAR DEBUG "
-    "para enviá-lo ao suporte."
+    "Este é o print exato da tela PRODUÇÃO DISPLAY F3 no instante em que "
+    "ANALISAR foi acionado. Abrir DEBUG TÉCNICO não executa nova visão "
+    "computacional e não reconstrói overlay, visor ou status. O relatório de "
+    "texto é gerado em segundo plano sobre o frame bruto congelado daquele "
+    "mesmo clique e fica disponível em COPIAR DEBUG."
 )
 COPY_START_DELAY_MS = 12
 COPY_FEEDBACK_RESET_MS = 1800
@@ -418,8 +418,9 @@ def _normalized_roi(roi) -> dict | None:
     return {"x": x, "y": y, "width": width, "height": height}
 
 
+
 def _debug_preview_limits(widget=None) -> tuple[int, int]:
-    """Reduz a prévia em telas baixas para preservar a barra de ações."""
+    """Aproveita a área disponível para mostrar o print completo da tela F3."""
     screen_height = 768
     if widget is not None:
         try:
@@ -427,10 +428,10 @@ def _debug_preview_limits(widget=None) -> tuple[int, int]:
         except Exception:
             pass
     if screen_height <= 800:
-        return 560, 250
+        return 820, 410
     if screen_height <= 900:
-        return 620, 300
-    return VISUAL_FRAME_MAX_WIDTH, VISUAL_FRAME_MAX_HEIGHT
+        return 940, 470
+    return 1060, 560
 
 
 def _frame_photo(
@@ -878,23 +879,227 @@ def _schedule_copy_report(window, top, status_label=None, copy_button=None) -> b
     return True
 
 
+
 def _close_debug(window) -> None:
-    try:
-        window._display_f3_snapshot_debug_photo = None
-    except Exception:
-        pass
+    for attribute in (
+        "_display_f3_snapshot_debug_photo",
+        "_display_f3_snapshot_debug_status_label",
+        "_display_f3_snapshot_debug_copy_button",
+        "_display_f3_snapshot_debug_copy_image_button",
+    ):
+        try:
+            setattr(window, attribute, None)
+        except Exception:
+            pass
     window.close_f3_snapshot_debug()
 
 
-def _open_lightweight_snapshot_debug(window):
+def _screen_capture_photo(window, widget=None):
+    """Converte somente o print já capturado para PhotoImage de apresentação."""
+    image = getattr(window, "_display_f3_manual_screen_capture_image", None)
+    if image is None:
+        return None
+    try:
+        preview = image.copy()
+        max_width, max_height = _debug_preview_limits(widget)
+        preview.thumbnail((max_width, max_height))
+        buffer = io.BytesIO()
+        preview.save(buffer, format="PNG")
+        return tk.PhotoImage(data=base64.b64encode(buffer.getvalue()).decode("ascii"))
+    except Exception:
+        return None
+
+
+def _screen_capture_png_bytes(window) -> bytes:
+    image = getattr(window, "_display_f3_manual_screen_capture_image", None)
+    if image is None:
+        return b""
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _copy_screen_image_windows(image) -> bool:
+    """Publica CF_DIB no Windows para Ctrl+V em aplicativos como WhatsApp."""
+    import ctypes
+    from ctypes import wintypes
+
+    bmp = io.BytesIO()
+    image.convert("RGB").save(bmp, format="BMP")
+    dib = bmp.getvalue()[14:]
+    if not dib:
+        return False
+
+    GMEM_MOVEABLE = 0x0002
+    CF_DIB = 8
+    kernel32 = ctypes.windll.kernel32
+    user32 = ctypes.windll.user32
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HANDLE
+    kernel32.GlobalLock.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalFree.argtypes = [wintypes.HANDLE]
+    kernel32.GlobalFree.restype = wintypes.HANDLE
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.EmptyClipboard.restype = wintypes.BOOL
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+    user32.CloseClipboard.restype = wintypes.BOOL
+
+    handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(dib))
+    if not handle:
+        return False
+    pointer = kernel32.GlobalLock(handle)
+    if not pointer:
+        kernel32.GlobalFree(handle)
+        return False
+    try:
+        ctypes.memmove(pointer, dib, len(dib))
+    finally:
+        kernel32.GlobalUnlock(handle)
+
+    if not user32.OpenClipboard(None):
+        kernel32.GlobalFree(handle)
+        return False
+    transferred = False
+    try:
+        if not user32.EmptyClipboard():
+            return False
+        if not user32.SetClipboardData(CF_DIB, handle):
+            return False
+        transferred = True
+        return True
+    finally:
+        user32.CloseClipboard()
+        if not transferred:
+            kernel32.GlobalFree(handle)
+
+
+def _copy_screen_image_to_clipboard(window, top) -> bool:
+    """Copia imagem nativa, nunca texto/base64, para o clipboard do SO."""
+    image = getattr(window, "_display_f3_manual_screen_capture_image", None)
+    if image is None:
+        return False
+    try:
+        if sys.platform.startswith("win"):
+            return _copy_screen_image_windows(image)
+        png = _screen_capture_png_bytes(window)
+        if not png:
+            return False
+        top.clipboard_clear()
+        top.tk.call("clipboard", "append", "-type", "image/png", "--", png)
+        return True
+    except Exception:
+        return False
+
+
+def _schedule_copy_image(window, top, status_label=None, copy_button=None) -> bool:
+    image = getattr(window, "_display_f3_manual_screen_capture_image", None)
+    if image is None:
+        _set_copy_feedback(
+            status_label, copy_button,
+            status_text="PRINT DA TELA NÃO DISPONÍVEL",
+            button_text="COPIAR IMAGEM", enabled=False,
+        )
+        return False
+
+    _set_copy_feedback(
+        status_label, copy_button,
+        status_text="COPIANDO IMAGEM...",
+        button_text="COPIANDO...", enabled=False,
+    )
+
+    def do_copy() -> None:
+        copied = _copy_screen_image_to_clipboard(window, top)
+        if copied:
+            _set_copy_feedback(
+                status_label, copy_button,
+                status_text="IMAGEM COPIADA • USE CTRL+V",
+                button_text="COPIADO", enabled=False,
+            )
+        else:
+            _set_copy_feedback(
+                status_label, copy_button,
+                status_text="NÃO FOI POSSÍVEL COPIAR A IMAGEM",
+                button_text="TENTAR NOVAMENTE", enabled=True,
+            )
+            return
+        try:
+            top.after(
+                COPY_FEEDBACK_RESET_MS,
+                lambda: _restore_image_copy_feedback(window, status_label, copy_button),
+            )
+        except Exception:
+            pass
+
+    try:
+        top.after(COPY_START_DELAY_MS, do_copy)
+    except Exception:
+        do_copy()
+    return True
+
+
+def _restore_image_copy_feedback(window, status_label, copy_button) -> None:
+    available = getattr(window, "_display_f3_manual_screen_capture_image", None) is not None
+    _set_copy_feedback(
+        status_label, copy_button,
+        status_text="PRINT PRONTO PARA CÓPIA" if available else "PRINT INDISPONÍVEL",
+        button_text="COPIAR IMAGEM", enabled=available,
+    )
+
+
+def _refresh_lightweight_debug_state(window) -> None:
+    """Atualiza apenas disponibilidade dos botões; não recalcula diagnóstico."""
     report = str(getattr(window, "_display_f3_manual_snapshot_report", "") or "")
-    if not report:
+    running = bool(getattr(window, "_display_f3_debug_analysis_running", False))
+    image_available = getattr(window, "_display_f3_manual_screen_capture_image", None) is not None
+    status = getattr(window, "_display_f3_snapshot_debug_status_label", None)
+    copy_debug = getattr(window, "_display_f3_snapshot_debug_copy_button", None)
+    copy_image = getattr(window, "_display_f3_snapshot_debug_copy_image_button", None)
+
+    status_text = READY_TEXT if report else (
+        "GERANDO RELATÓRIO TÉCNICO..." if running
+        else "RELATÓRIO TÉCNICO NÃO DISPONÍVEL"
+    )
+    if status is not None:
+        try:
+            status.configure(text=status_text)
+        except Exception:
+            pass
+    if copy_debug is not None:
+        try:
+            copy_debug.configure(
+                state=tk.NORMAL if bool(report) else tk.DISABLED,
+                cursor="hand2" if bool(report) else "arrow",
+            )
+        except Exception:
+            pass
+    if copy_image is not None:
+        try:
+            copy_image.configure(
+                state=tk.NORMAL if image_available else tk.DISABLED,
+                cursor="hand2" if image_available else "arrow",
+            )
+        except Exception:
+            pass
+
+
+def _open_lightweight_snapshot_debug(window):
+    """Abre somente a evidência visual já capturada; não executa análise."""
+    screen_meta = getattr(window, "_display_f3_manual_screen_capture_meta", {})
+    serial = int(getattr(window, "_display_f3_manual_snapshot_serial", 0) or 0)
+    if serial <= 0 and not bool(
+        isinstance(screen_meta, dict) and screen_meta.get("available")
+    ):
         return None
 
     existing = getattr(window, "_display_f3_snapshot_debug_window", None)
     if existing is not None:
         try:
             if existing.winfo_exists():
+                _refresh_lightweight_debug_state(window)
                 existing.deiconify()
                 existing.lift()
                 existing.focus_force()
@@ -904,20 +1109,14 @@ def _open_lightweight_snapshot_debug(window):
 
     top = tk.Toplevel(window.root)
     fit_f3_toplevel(
-        top,
-        window.root,
-        preferred_width=1080,
-        preferred_height=700,
-        min_width=760,
-        min_height=520,
+        top, window.root,
+        preferred_width=1120, preferred_height=760,
+        min_width=760, min_height=520,
     )
     window._display_f3_snapshot_debug_window = top
     window._display_f3_snapshot_debug_text = None
-    top.title("ODIN • DISPLAY F3 • DEBUG DO FRAME ANALISADO")
+    top.title("ODIN • DISPLAY F3 • DEBUG DO PRINT ANALISADO")
     top.configure(bg=manual_module.DEBUG_BG)
-
-    # Uma única maximização, somente depois de toda a hierarquia estar criada.
-    # Evita o antigo ciclo geometry -> paint -> geometry -> paint na abertura.
     try:
         top.after_idle(lambda current=top: maximizar_janela_workspace_f3(current))
     except Exception:
@@ -930,351 +1129,132 @@ def _open_lightweight_snapshot_debug(window):
     shell.grid_rowconfigure(1, weight=1)
     shell.grid_rowconfigure(2, weight=0)
 
-    # Cabeçalho fixo + corpo elástico + rodapé fixo.
     header = tk.Frame(shell, bg=manual_module.DEBUG_BG)
     header.grid(row=0, column=0, sticky="ew")
     tk.Label(
-        header,
-        text="DEBUG TÉCNICO • FRAME ANALISADO",
-        font=("Segoe UI", 18, "bold"),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_TEXT,
-        anchor="w",
+        header, text="DEBUG TÉCNICO • PRINT DA TELA ANALISADA",
+        font=("Segoe UI", 18, "bold"), bg=manual_module.DEBUG_BG,
+        fg=manual_module.DEBUG_TEXT, anchor="w",
     ).pack(fill="x")
 
     snapshot = getattr(window, "_display_f3_manual_snapshot", {}) or {}
     frame_id = (snapshot.get("capture") or {}).get("frame_id", "--")
-    sha = (snapshot.get("frame") or {}).get("sha256_24", "--")
-    capture_source = str((snapshot.get("capture") or {}).get("source") or "")
-    source_text = (
-        "EVIDÊNCIA NG CONGELADA • câmera ao vivo ignorada"
-        if capture_source == "ng_evidence_frozen"
-        else "mesmo frame congelado no clique em ANALISAR"
-    )
+    captured_at = screen_meta.get("captured_at", "--") if isinstance(screen_meta, dict) else "--"
     tk.Label(
         header,
-        text=f"Frame {frame_id} • hash {sha} • {source_text}",
-        font=("Segoe UI", 10),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        anchor="w",
+        text=(
+            f"Frame {frame_id} • print capturado em {captured_at} • "
+            "nenhuma reconstrução é executada ao abrir esta janela"
+        ),
+        font=("Segoe UI", 10), bg=manual_module.DEBUG_BG,
+        fg=manual_module.DEBUG_MUTED, anchor="w",
     ).pack(fill="x", pady=(4, 0))
 
     body = tk.Frame(shell, bg=manual_module.DEBUG_BG)
-    body.grid(
-        row=1,
-        column=0,
-        sticky="nsew",
-        pady=(14, 10),
-    )
+    body.grid(row=1, column=0, sticky="nsew", pady=(14, 10))
     body.grid_columnconfigure(0, weight=1)
     body.grid_rowconfigure(0, weight=1)
 
-    visual = snapshot.get("visual_analysis")
-    visual = visual if isinstance(visual, dict) else {}
-    owner = getattr(window, "_display_f3_manual_debug_owner", None)
-    frozen_frame = getattr(window, "_display_f3_manual_snapshot_frozen_frame", None)
-    if frozen_frame is None:
-        frozen_frame = getattr(owner, "_display_f3_manual_snapshot_frozen_frame", None)
-
-    visual_area = tk.Frame(body, bg=manual_module.DEBUG_BG)
-    visual_area.grid(row=0, column=0, sticky="nsew")
-    visual_area.grid_columnconfigure(0, weight=3)
-    visual_area.grid_columnconfigure(1, weight=2, minsize=330)
-    visual_area.grid_rowconfigure(0, weight=1)
-
-    frame_column = tk.Frame(visual_area, bg=manual_module.DEBUG_BG)
-    frame_column.grid(row=0, column=0, sticky="nsew", padx=(0, 22))
-    preview_rotation = int(snapshot.get("rotation", 0) or 0)
-    tk.Label(
-        frame_column,
-        text=(
-            "FRAME CONGELADO • "
-            f"VISUAL {preview_rotation}° • MESMA CÓPIA USADA NA ANÁLISE"
-        ),
-        font=("Segoe UI", 9, "bold"),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        anchor="w",
-    ).pack(fill="x", pady=(0, 7))
-
     preview_label = tk.Label(
-        frame_column,
-        text="CARREGANDO PRÉVIA DO FRAME...",
-        font=("Segoe UI", 10, "bold"),
-        bg="#020617",
-        fg=manual_module.DEBUG_MUTED,
-        bd=0,
-        anchor="center",
-        padx=12,
-        pady=24,
+        body, text="CARREGANDO PRINT CAPTURADO...",
+        font=("Segoe UI", 10, "bold"), bg="#020617",
+        fg=manual_module.DEBUG_MUTED, bd=0, anchor="center",
+        padx=12, pady=18,
     )
-    preview_label.pack(fill="both", expand=True)
+    preview_label.grid(row=0, column=0, sticky="nsew")
     window._display_f3_snapshot_debug_photo = None
 
-    def render_preview_after_paint():
-        photo = _frame_photo(
-            frozen_frame,
-            visual,
-            top,
-            visual_rotation=preview_rotation,
-            overlay_context=(
-                snapshot.get("overlay_context")
-                if isinstance(snapshot.get("overlay_context"), dict)
-                else None
-            ),
-        )
+    def render_captured_screen():
+        photo = _screen_capture_photo(window, top)
         window._display_f3_snapshot_debug_photo = photo
         try:
             if photo is not None:
                 preview_label.configure(image=photo, text="")
             else:
+                reason = (
+                    (screen_meta.get("error") or screen_meta.get("reason") or "captura indisponível")
+                    if isinstance(screen_meta, dict)
+                    else "captura indisponível"
+                )
                 preview_label.configure(
-                    image="",
-                    text="PRÉVIA DO FRAME NÃO DISPONÍVEL",
+                    image="", text=f"PRINT DA TELA NÃO DISPONÍVEL\n{reason}"
                 )
         except Exception:
             pass
-
     try:
-        # Primeiro abre/pinta a janela; a conversão 1920x1080 -> PhotoImage vem
-        # logo depois e não atrasa a sensação de abertura do DEBUG.
-        top.after(18, render_preview_after_paint)
+        top.after(18, render_captured_screen)
     except Exception:
-        render_preview_after_paint()
-
-    visual_state = (
-        snapshot.get("visual_state")
-        if isinstance(snapshot.get("visual_state"), dict)
-        else {}
-    )
-    readout_context = (
-        visual_state.get("readout_context")
-        if isinstance(visual_state.get("readout_context"), dict)
-        else None
-    )
-    tk.Label(
-        frame_column,
-        text="VISOR DO DISPLAY • SNAPSHOT DO MESMO FRAME",
-        font=("Segoe UI", 9, "bold"),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        anchor="w",
-    ).pack(fill="x", pady=(10, 5))
-    readout_canvas = tk.Canvas(
-        frame_column,
-        bg=DisplayProductionF3Window.DISPLAY_READOUT_SCREEN,
-        highlightbackground=DisplayProductionF3Window.DISPLAY_READOUT_BORDER,
-        highlightthickness=1,
-        bd=0,
-        width=420,
-        height=96,
-    )
-    readout_canvas.pack(anchor="nw")
-    _draw_debug_readout(readout_canvas, readout_context)
-
-    info_column = tk.Frame(visual_area, bg=manual_module.DEBUG_BG)
-    info_column.grid(row=0, column=1, sticky="nsew")
-    tk.Label(
-        info_column,
-        text="STATUS DO FRAME • TEXTO E COR CONGELADOS",
-        font=("Segoe UI", 9, "bold"),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        anchor="w",
-    ).pack(fill="x", pady=(0, 5))
-
-    status_rows = _snapshot_status_rows(visual_state)
-    if status_rows:
-        status_box = tk.Frame(info_column, bg=manual_module.DEBUG_BG)
-        status_box.pack(fill="x", pady=(0, 9))
-        for title, value in status_rows:
-            row_bg = str(value.get("bg") or manual_module.DEBUG_PANEL)
-            row_fg = str(value.get("fg") or manual_module.DEBUG_TEXT)
-            row = tk.Frame(
-                status_box,
-                bg=row_bg,
-                highlightbackground=manual_module.DEBUG_BORDER,
-                highlightthickness=1,
-            )
-            row.pack(fill="x", pady=(0, 3))
-            tk.Label(
-                row,
-                text=f"{title}: {value.get('text', '--')}",
-                font=("Segoe UI", 8, "bold"),
-                bg=row_bg,
-                fg=row_fg,
-                anchor="w",
-                justify="left",
-                wraplength=490,
-            ).pack(fill="x", padx=7, pady=4)
-    else:
-        tk.Label(
-            info_column,
-            text="STATUS DO FRAME NÃO DISPONÍVEIS",
-            font=("Segoe UI", 8, "bold"),
-            bg=manual_module.DEBUG_BG,
-            fg=manual_module.DEBUG_MUTED,
-            anchor="w",
-        ).pack(fill="x", pady=(0, 9))
-
-    tk.Label(
-        info_column,
-        text="ANÁLISE VISUAL • SOMENTE DIAGNÓSTICO",
-        font=("Segoe UI", 10, "bold"),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        anchor="w",
-    ).pack(fill="x")
-    tk.Label(
-        info_column,
-        text=str(visual.get("status_text") or "ANÁLISE VISUAL: não disponível"),
-        font=("Segoe UI", 13, "bold"),
-        bg=manual_module.DEBUG_BG,
-        fg=str(visual.get("status_color") or manual_module.DEBUG_TEXT),
-        justify="left",
-        anchor="w",
-        wraplength=500,
-    ).pack(fill="x", pady=(8, 10))
-    tk.Label(
-        info_column,
-        text="Não altera OK/NG, CHECK, máscaras, avanço do fluxo ou rearmamento.",
-        font=("Segoe UI", 9),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        justify="left",
-        anchor="w",
-        wraplength=500,
-    ).pack(fill="x", pady=(0, 14))
-
-    for line in (
-        _candidate_line(visual, "empty_support", "PLACA FORA DO SUPORTE"),
-        _candidate_line(visual, "board_off", "PLACA DESLIGADA NO SUPORTE"),
-        (
-            f"Margem entre referências: {_pct(visual.get('score_margin'))}  •  "
-            f"mínima {_pct(visual.get('minimum_margin'))}"
-        ),
-    ):
-        tk.Label(
-            info_column,
-            text=line,
-            font=("Segoe UI", 9),
-            bg=manual_module.DEBUG_BG,
-            fg=manual_module.DEBUG_TEXT,
-            justify="left",
-            anchor="w",
-            wraplength=500,
-        ).pack(fill="x", pady=(0, 7))
-
-    lower_info = tk.Frame(body, bg=manual_module.DEBUG_BG)
-    lower_info.grid(row=1, column=0, sticky="ew", pady=(8, 0))
-    lower_info.grid_columnconfigure(0, weight=1)
+        render_captured_screen()
 
     message = tk.Label(
-        lower_info,
-        text=DEBUG_SUMMARY,
-        font=("Segoe UI", 10),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        justify="left",
-        anchor="nw",
-        wraplength=1040,
+        body, text=DEBUG_SUMMARY, font=("Segoe UI", 10),
+        bg=manual_module.DEBUG_BG, fg=manual_module.DEBUG_MUTED,
+        justify="left", anchor="nw", wraplength=1060,
     )
-    message.pack(anchor="nw", fill="x", pady=(14, 0))
-
+    message.grid(row=1, column=0, sticky="ew", pady=(12, 0))
     def fit_message(event):
         try:
             message.configure(wraplength=max(420, int(event.width) - 8))
         except Exception:
             pass
-
     body.bind("<Configure>", fit_message, add="+")
 
     status = tk.Label(
-        lower_info,
-        text=READY_TEXT,
-        font=("Segoe UI", 9, "bold"),
-        bg=manual_module.DEBUG_BG,
-        fg=manual_module.DEBUG_MUTED,
-        anchor="w",
+        body, text="GERANDO RELATÓRIO TÉCNICO...",
+        font=("Segoe UI", 9, "bold"), bg=manual_module.DEBUG_BG,
+        fg=manual_module.DEBUG_MUTED, anchor="w",
     )
-    status.pack(anchor="w", pady=(12, 0))
+    status.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+    window._display_f3_snapshot_debug_status_label = status
 
     actions = tk.Frame(
-        shell,
-        bg=manual_module.DEBUG_PANEL,
-        highlightbackground=manual_module.DEBUG_BORDER,
-        highlightthickness=1,
+        shell, bg=manual_module.DEBUG_PANEL,
+        highlightbackground=manual_module.DEBUG_BORDER, highlightthickness=1,
     )
-    actions.grid(
-        row=2,
-        column=0,
-        sticky="ew",
-        pady=(4, 0),
-    )
+    actions.grid(row=2, column=0, sticky="ew", pady=(4, 0))
     actions.grid_columnconfigure(0, weight=0)
-    actions.grid_columnconfigure(1, weight=1)
-    actions.grid_columnconfigure(2, weight=0)
+    actions.grid_columnconfigure(1, weight=0)
+    actions.grid_columnconfigure(2, weight=1)
+    actions.grid_columnconfigure(3, weight=0)
 
-    copy_button = tk.Button(
-        actions,
-        text="COPIAR DEBUG",
-        font=("Segoe UI", 10, "bold"),
-        bg=manual_module.DEBUG_ACTION,
-        fg="#FFFFFF",
-        activebackground=manual_module.DEBUG_ACTION_ACTIVE,
-        activeforeground="#FFFFFF",
-        disabledforeground="#CBD5E1",
-        relief="flat",
-        bd=0,
-        padx=16,
-        pady=8,
-        cursor="hand2",
+    copy_debug_button = tk.Button(
+        actions, text="COPIAR DEBUG",
+        command=lambda: _schedule_copy_report(window, top, status, copy_debug_button),
+        font=("Segoe UI", 10, "bold"), bg=manual_module.DEBUG_ACTION,
+        fg="#FFFFFF", activebackground=manual_module.DEBUG_ACTION_ACTIVE,
+        activeforeground="#FFFFFF", disabledforeground="#64748B",
+        relief="flat", bd=0, padx=16, pady=8, cursor="arrow", state=tk.DISABLED,
     )
-    copy_button.configure(
-        command=lambda: _schedule_copy_report(window, top, status, copy_button)
+    copy_debug_button.grid(row=0, column=0, sticky="w", padx=(10, 6), pady=9)
+    window._display_f3_snapshot_debug_copy_button = copy_debug_button
+
+    copy_image_button = tk.Button(
+        actions, text="COPIAR IMAGEM",
+        command=lambda: _schedule_copy_image(window, top, status, copy_image_button),
+        font=("Segoe UI", 10, "bold"), bg="#1D4ED8", fg="#FFFFFF",
+        activebackground="#2563EB", activeforeground="#FFFFFF",
+        disabledforeground="#64748B", relief="flat", bd=0,
+        padx=16, pady=8, cursor="hand2",
     )
-    copy_button.grid(
-        row=0,
-        column=0,
-        sticky="w",
-        padx=(10, 6),
-        pady=9,
-    )
+    copy_image_button.grid(row=0, column=1, sticky="w", padx=6, pady=9)
+    window._display_f3_snapshot_debug_copy_image_button = copy_image_button
 
     tk.Button(
-        actions,
-        text="FECHAR",
-        command=lambda: _close_debug(window),
-        font=("Segoe UI", 10, "bold"),
-        bg="#1E293B",
-        fg=manual_module.DEBUG_TEXT,
-        activebackground="#334155",
-        activeforeground="#FFFFFF",
-        relief="flat",
-        bd=0,
-        padx=16,
-        pady=8,
-        cursor="hand2",
-    ).grid(
-        row=0,
-        column=2,
-        sticky="e",
-        padx=(6, 10),
-        pady=9,
-    )
+        actions, text="FECHAR", command=lambda: _close_debug(window),
+        font=("Segoe UI", 10, "bold"), bg="#1E293B",
+        fg=manual_module.DEBUG_TEXT, activebackground="#334155",
+        activeforeground="#FFFFFF", relief="flat", bd=0,
+        padx=16, pady=8, cursor="hand2",
+    ).grid(row=0, column=3, sticky="e", padx=(6, 10), pady=9)
 
-    # Garante que o rodapé permaneça acima do conteúdo mesmo em resize manual.
+    _refresh_lightweight_debug_state(window)
     try:
-        top.update_idletasks()
-        actions.lift()
+        top.after_idle(actions.lift)
     except Exception:
         pass
-
     top.protocol("WM_DELETE_WINDOW", lambda: _close_debug(window))
     top.bind("<Escape>", lambda _event: _close_debug(window))
     return top
-
 
 _INSTALLED = False
 
@@ -1288,6 +1268,9 @@ def instalar_debug_snapshot_leve_display_f3() -> None:
     _install_visual_analysis_snapshot_extension()
     DisplayProductionF3Window.open_f3_snapshot_debug = (
         lambda self: _open_lightweight_snapshot_debug(self)
+    )
+    DisplayProductionF3Window.refresh_f3_snapshot_debug_state = (
+        lambda self: _refresh_lightweight_debug_state(self)
     )
     DisplayProductionF3Window._display_f3_snapshot_debug_lightweight_ui = True
     _INSTALLED = True

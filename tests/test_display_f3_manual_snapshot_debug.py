@@ -45,6 +45,8 @@ class _FakeWindow:
         self._display_f3_manual_analysis_seed = None
         self._display_f3_snapshot_analysis_running = False
         self._display_f3_debug_analysis_running = False
+        self._display_f3_manual_screen_capture_image = None
+        self._display_f3_manual_screen_capture_meta = {}
         self.closed = 0
         self.opened = 0
 
@@ -273,97 +275,47 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("frame_id=88", text)
         self.assertIn(stats["sha256_24"], text)
         self.assertIn("MESMA cópia congelada", text)
-        self.assertIn("auditoria completa sob demanda", text)
+        self.assertIn("auditoria completa em segundo plano", text)
         self.assertIn("[ANÁLISE DA IMAGEM / FRAME CONGELADO]", text)
         self.assertIn("[REFERÊNCIAS VISUAIS / PRESENÇA / SCORE - MESMO FRAME]", text)
         self.assertIn("[ANÁLISE FÍSICA - SEM DEBOUNCE / MESMO FRAME]", text)
         self.assertIn("[COMPARAÇÃO DO MESMO FRAME CONTRA TODOS OS CHECKS]", text)
         self.assertIn("[RUNTIME PRODUTIVO OBSERVADO NO MESMO CLIQUE]", text)
 
-    def test_analisar_processa_somente_check_atual_e_libera_debug(self):
-        app = _FrameApp()
-        app.display_project_repository = object()
-        app._display_f3_ng_evidence_frozen = False
-        window = _FakeWindow(app)
-        seed = {
-            "captured_at": "agora",
-            "frame": np.zeros((4, 6, 3), dtype=np.uint8),
-            "capture": {"frame_id": 123, "stable_frame_id": True},
-            "rotation": 0,
-            "logical_context": {
-                "project_name": "DISPLAY",
-                "check_id": "CHECK_001",
-                "check_name": "H1",
-            },
-        }
-        snapshot = {
-            "source": "f3_manual_current_check_analysis",
-            "analysis_ready": True,
-            "capture": {"frame_id": 123},
-            "frame": {"available": True, "shape": [4, 6, 3]},
-            "logical_context": seed["logical_context"],
-            "frozen_frame_analysis": {
-                "ready": True,
-                "approved": True,
-                "mask_results": [],
-            },
-        }
 
-        with patch.object(
-            snapshot_module,
-            "_prepare_async_snapshot_seed",
-            return_value=seed,
-        ), patch(
-            "src.platform.display_f3_manual_snapshot_debug."
-            "DisplayF3CurrentCheckAnalysisService"
-        ) as service_cls:
-            service_cls.return_value.analyze.return_value = snapshot
-            result = snapshot_module._capture_from_window(window)
-
-        self.assertIs(result, snapshot)
-        self.assertEqual(1, window._display_f3_manual_snapshot_serial)
-        self.assertEqual("", window._display_f3_manual_snapshot_report)
-        self.assertIs(seed, window._display_f3_manual_analysis_seed)
-        self.assertEqual(
-            "normal",
-            window.f3_snapshot_debug_button.values.get("state"),
-        )
-        service_cls.return_value.analyze.assert_called_once_with(seed)
-
-    def test_novo_analisar_invalida_debug_completo_anterior(self):
-        app = _FrameApp()
-        window = _FakeWindow(app)
-        window._display_f3_manual_snapshot_report = "DEBUG ANTIGO"
-        window._display_f3_debug_snapshot_serial = 3
-        window._display_f3_manual_snapshot_serial = 3
-        seed = {
-            "frame": np.zeros((4, 6, 3), dtype=np.uint8),
-            "capture": {"frame_id": 11},
-        }
-        snapshot = {
-            "frame": {"available": True},
-            "frozen_frame_analysis": {"ready": True, "mask_results": []},
-        }
-
-        snapshot_module._apply_current_analysis_result_to_window(
-            window,
-            snapshot,
-            seed,
-        )
-
-        self.assertEqual("", window._display_f3_manual_snapshot_report)
-        self.assertEqual(-1, window._display_f3_debug_snapshot_serial)
-        self.assertEqual(4, window._display_f3_manual_snapshot_serial)
-        self.assertEqual(1, window.closed)
-
-    def test_handler_analisar_nao_gera_auditoria_completa(self):
+    def test_analisar_captura_tela_e_inicia_check_e_relatorio_no_mesmo_clique(self):
         source = inspect.getsource(snapshot_module._capture_from_window)
+        screen_pos = source.index("_capture_f3_production_screen(window)")
+        button_pos = source.index('button.configure(text="ANALISANDO..."')
+        self.assertLess(screen_pos, button_pos)
         self.assertIn("DisplayF3CurrentCheckAnalysisService", source)
         self.assertIn('name="manual-current-check"', source)
         self.assertIn("F3HeavyWorkPriority.NORMAL", source)
-        self.assertNotIn("capturar_snapshot_debug_display_f3", source)
-        self.assertNotIn("montar_relatorio_snapshot_display_f3", source)
-        self.assertNotIn("_run_check_analyses", source)
+        self.assertIn("_prepare_debug_seed_from_analysis(app, seed)", source)
+        self.assertIn("capturar_snapshot_debug_display_f3(app)", source)
+        self.assertIn("montar_relatorio_snapshot_display_f3", source)
+        self.assertIn('name="technical-report-at-analyze"', source)
+        self.assertIn("F3HeavyWorkPriority.LOW", source)
+
+
+    def test_novo_analisar_invalida_relatorio_anterior_no_inicio_do_clique(self):
+        source = inspect.getsource(snapshot_module._capture_from_window)
+        screen_pos = source.index("_capture_f3_production_screen(window)")
+        report_reset = source.index('window._display_f3_manual_snapshot_report = ""')
+        serial_reset = source.index("window._display_f3_debug_snapshot_serial = -1")
+        self.assertLess(screen_pos, report_reset)
+        self.assertLess(report_reset, serial_reset)
+        self.assertIn("window.close_f3_snapshot_debug()", source)
+
+
+    def test_handler_analisar_enfileira_auditoria_completa_sem_nova_thread(self):
+        source = inspect.getsource(snapshot_module._capture_from_window)
+        self.assertIn("executor = _heavy_executor_for_app(app)", source)
+        self.assertEqual(2, source.count("executor.submit("))
+        self.assertIn('name="manual-current-check"', source)
+        self.assertIn('name="technical-report-at-analyze"', source)
+        self.assertNotIn("threading.Thread", source)
+        self.assertNotIn("while True", source)
 
     def test_seed_do_analisar_e_minimo(self):
         source = inspect.getsource(
@@ -376,16 +328,25 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertNotIn("_window_visual_state(app)", source)
         self.assertNotIn("_camera_settings_at_frame(app)", source)
 
-    def test_debug_completo_e_gerado_sob_demanda_do_mesmo_seed(self):
-        source = inspect.getsource(
-            snapshot_module._generate_debug_from_window
-        )
-        self.assertIn("_display_f3_manual_analysis_seed", source)
-        self.assertIn("_prepare_debug_seed_from_analysis", source)
-        self.assertIn("capturar_snapshot_debug_display_f3", source)
-        self.assertIn("montar_relatorio_snapshot_display_f3", source)
-        self.assertIn('name="technical-debug"', source)
-        self.assertIn("F3HeavyWorkPriority.LOW", source)
+
+    def test_debug_tecnico_apenas_abre_material_ja_capturado(self):
+        source = inspect.getsource(snapshot_module._generate_debug_from_window)
+        self.assertIn("open_f3_snapshot_debug", source)
+        self.assertNotIn("_prepare_debug_seed_from_analysis", source)
+        self.assertNotIn("capturar_snapshot_debug_display_f3", source)
+        self.assertNotIn("montar_relatorio_snapshot_display_f3", source)
+        self.assertNotIn("executor.submit", source)
+
+    def test_print_da_tela_e_evidencia_visual_e_nao_fonte_da_visao(self):
+        source = inspect.getsource(snapshot_module._capture_f3_production_screen)
+        self.assertIn("ImageGrab.grab", source)
+        self.assertIn("winfo_rootx", source)
+        self.assertIn("winfo_rooty", source)
+        analyze = inspect.getsource(snapshot_module._capture_from_window)
+        self.assertIn("_prepare_async_snapshot_seed(app)", analyze)
+        self.assertIn("_capture_f3_production_screen(window)", analyze)
+        audit = inspect.getsource(snapshot_module.capturar_snapshot_debug_display_f3)
+        self.assertNotIn("_display_f3_manual_screen_capture_image", audit)
 
     def test_interface_remove_debug_antigo_e_toggle_off(self):
         source = inspect.getsource(snapshot_module._install_window_controls)

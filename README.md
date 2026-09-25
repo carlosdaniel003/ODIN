@@ -485,17 +485,34 @@ A confirmação de suporte vazio e a confirmação da nova placa removem as mem�
 
 ## 5.12 Debug Técnico do F3
 
-A análise técnica manual trabalha sobre um **frame congelado**, mas separa a ação rápida da auditoria completa.
+A análise técnica manual mantém duas evidências do mesmo clique em `ANALISAR`:
 
-Ao acionar `ANALISAR`, o sistema copia um frame coerente uma única vez e analisa **somente o CHECK atual**. O clique não percorre todas as referências e todos os CHECKS. Em NG terminal, quando a análise produtiva já pertence exatamente ao frame congelado, essa análise pode ser reaproveitada.
+1. um **frame bruto congelado**, usado pelos cálculos;
+2. um **print dos pixels visíveis da tela PRODUÇÃO DISPLAY F3**, usado somente para apresentação e compartilhamento.
 
-Depois de `ANALISAR`, o botão `DEBUG TÉCNICO` fica disponível. Ao acioná-lo, o sistema usa **o mesmo frame congelado por ANALISAR** e então gera, pelo executor pesado canônico do F3, a auditoria completa: estatísticas da imagem, comparação de referências, estado físico, configuração e análise dos CHECKS, máscaras, energia, contexto de runtime e relatório técnico. A câmera ao vivo não substitui esse frame durante o debug.
+O print é capturado antes de o próprio botão `ANALISAR` mudar de estado. Em seguida, o sistema analisa o CHECK atual e já enfileira, no mesmo `F3HeavyVisionExecutor`, a geração do relatório técnico completo sobre o frame bruto congelado. A análise do CHECK usa prioridade `NORMAL`; o relatório diagnóstico usa `LOW`, preservando a prioridade do runtime produtivo.
 
-Esse caminho é deliberadamente diagnóstico:
+O botão `DEBUG TÉCNICO` **não inicia visão computacional, não reconstrói overlay, visor ou status e não consulta a câmera ao vivo**. Ele apenas abre o print já capturado. Enquanto o relatório ainda estiver sendo produzido, a janela pode ser aberta normalmente e `COPIAR DEBUG` permanece desabilitado até o texto ficar pronto.
+
+A janela oferece:
+
+- `COPIAR DEBUG` — copia o relatório técnico estático do mesmo frame;
+- `COPIAR IMAGEM` — copia o print como imagem nativa para o clipboard do sistema, permitindo colar com Ctrl+V em aplicativos compatíveis, como WhatsApp;
+- `FECHAR` — fecha somente a apresentação do debug.
+
+Esse caminho continua estritamente diagnóstico:
 
 ```text
-ANALISAR = frame congelado + CHECK atual
-DEBUG TÉCNICO = auditoria completa do mesmo frame sob demanda
+ANALISAR
+  = print imediato da tela
+  + frame bruto congelado
+  + CHECK atual
+  + relatório técnico enfileirado
+
+DEBUG TÉCNICO
+  = apresentação do print já capturado
+  + ações de cópia
+  + zero nova análise
 
 não registra OK/NG
 não avança CHECK
@@ -504,7 +521,7 @@ não rearma a placa
 não modifica a Produção F2
 ```
 
-A interface de debug continua leve; o relatório completo pode ser copiado sem manter milhares de linhas renderizadas continuamente na tela.
+O relatório completo não é renderizado como milhares de linhas na interface; ele permanece disponível para cópia.
 
 ## 5.13 Executor pesado do F3
 

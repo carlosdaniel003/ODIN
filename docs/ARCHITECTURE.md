@@ -163,7 +163,10 @@ Consumidores já migrados:
 - previews da configuração — `LOW`;
 - previews das referências angulares de tracking — `LOW`;
 - análise manual do CHECK atual — `NORMAL`;
-- auditoria do DEBUG TÉCNICO — `LOW`.
+- relatório técnico completo iniciado pelo clique em ANALISAR — `LOW`.
+
+A janela `DEBUG TÉCNICO` é somente apresentação: mostra o print da tela F3
+capturado no mesmo clique e não submete trabalho de visão ao executor.
 
 O callback produtivo completo não é enviado a background. Tracking e
 classificação semântica pesada usam o executor, enquanto aplicação de resultado,

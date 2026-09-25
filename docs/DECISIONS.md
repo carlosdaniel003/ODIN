@@ -304,6 +304,39 @@ CONFIGURAR seja postergado indefinidamente.
 
 ---
 
+## D-019 — DEBUG TÉCNICO F3 apresenta evidência capturada; ANALISAR inicia o relatório
+
+**Status:** Accepted
+
+No fluxo manual do Display F3, o clique em `ANALISAR` é o único ponto que cria
+a evidência diagnóstica daquela interação.
+
+Decisão:
+
+- antes de alterar o próprio botão, `ANALISAR` captura um print dos pixels
+  visíveis da tela PRODUÇÃO DISPLAY F3;
+- o frame bruto da câmera continua sendo congelado separadamente e permanece a
+  única fonte para cálculo de visão;
+- o CHECK atual é submetido ao `F3HeavyVisionExecutor` como `NORMAL`;
+- o relatório técnico completo do mesmo frame é enfileirado no mesmo clique
+  como `LOW`;
+- `DEBUG TÉCNICO` não inicia análise, matching, reconstrução de overlay, visor
+  ou status; ele apenas apresenta o print e as ações de cópia;
+- `COPIAR DEBUG` só é liberado quando o relatório estático fica pronto;
+- `COPIAR IMAGEM` publica o print como imagem nativa no clipboard do sistema.
+
+Consequências:
+
+- abrir DEBUG TÉCNICO tem custo visual pequeno e previsível;
+- o operador vê exatamente a tela existente no instante de ANALISAR, em vez de
+  uma reconstrução posterior;
+- relatório e print permanecem vinculados ao mesmo clique;
+- nenhum scheduler, thread ou autoridade produtiva adicional é criado;
+- D-008 continua válida: todo esse fluxo é observador e não altera OK/NG,
+  sequência, debounce ou rearme.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:
