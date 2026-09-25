@@ -165,14 +165,14 @@ from src.platform.project_master_resolution import (
 from src.platform.project_master_resolution_guard import (
     ProjectMasterResolutionGuardMixin,
 )
-from src.platform.raspberry_enter_trigger import (
+from src.platform.desktop_enter_trigger import (
     DesktopEnterTriggerMixin,
 )
 from src.platform.desktop_settings import (
     OPERATION_PREVIEW_HEIGHT,
     OPERATION_PREVIEW_WIDTH,
 )
-from src.platform.raspberry_runtime_fixes import (
+from src.platform.desktop_runtime_compatibility import (
     DesktopRuntimeCompatibilityMixin,
 )
 from src.platform.reference_capture import (

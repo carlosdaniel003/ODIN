@@ -16,13 +16,13 @@ from src.platform.linux_camera_backend import (
     descobrir_dispositivos_video,
     opencv_tem_gstreamer,
 )
-from src.platform.raspberry_camera_service import RaspberryPi3CameraService
-from src.platform.raspberry_pi3_settings import CAMERA_SCAN_MAX_INDEX
+from src.platform.desktop_camera_service import DesktopCameraService
+from src.platform.desktop_settings import CAMERA_SCAN_MAX_INDEX
 from src.platform.v4l2_controls import V4L2ControlManager
 
 
-class ThreadedRaspberryPi3CameraService(RaspberryPi3CameraService):
-    """Câmera contínua com último frame íntegro, sem bloquear o Tkinter."""
+class ThreadedDesktopCameraService(DesktopCameraService):
+    """Câmera desktop contínua com último frame íntegro, sem bloquear o Tkinter."""
 
     FRAMES_CORROMPIDOS_ANTES_RECONEXAO = 15
     FRAMES_ESTAVEIS_MINIMOS = 2
