@@ -126,3 +126,7 @@ class RaspberryEnterTriggerMixin:
         if evento.widget is not self.root:
             return
         self._cancelar_rearme_enter()
+
+
+# Nome canônico desktop; alias legado preservado.
+DesktopEnterTriggerMixin = RaspberryEnterTriggerMixin

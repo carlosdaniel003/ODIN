@@ -447,3 +447,7 @@ class RaspberryRuntimeFixesMixin:
             f"As {len(transformados)} máscaras do projeto ativo foram "
             "reposicionadas e salvas automaticamente."
         )
+
+
+# Nome canônico desktop; implementação única preservada durante a migração.
+DesktopRuntimeCompatibilityMixin = RaspberryRuntimeFixesMixin
