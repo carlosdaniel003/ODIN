@@ -132,9 +132,36 @@ Consumidores já migrados:
 - análise manual do CHECK atual;
 - auditoria do DEBUG TÉCNICO.
 
-A prioridade `HIGH` está reservada para a análise operacional. A conexão do hot
-path produtivo ao executor pertence à Etapa 4, junto do `F3RuntimeCoordinator`,
-para não mover callbacks stateful do runtime para background de forma insegura.
+A prioridade `HIGH` permanece reservada para compute operacional puro. Durante
+a Etapa 4 ficou comprovado que o callback produtivo atual ainda mistura visão,
+autoridades stateful e apresentação. Ele não é enviado inteiro a background.
+A extração dessas autoridades em serviços com request/result explícitos pertence
+à Etapa 5; só então o compute operacional poderá usar `HIGH` sem tocar Tk/state
+produtivo fora do thread principal.
+
+### Coordenador canônico do runtime F3
+
+O scheduling periódico do F3 possui um proprietário explícito:
+
+~~~text
+src/platform/display_f3_runtime_coordinator.py
+  └── F3RuntimeCoordinator
+~~~
+
+No runtime de produto, instalado por último em `main_rpi.py`, ele:
+
+- possui o único `root.after()` periódico do ciclo F3;
+- coalesça frame repetido em repaint leve;
+- executa ciclo completo apenas em frame novo quando análise/tracking exigem;
+- preserva a segunda metade pendente do pipeline cooperativo de tracking;
+- mantém o rearme ativo em frames novos;
+- reduz a cadência quando CONFIGURAR está aberto;
+- aplica idle real após callbacks caros;
+- observa o `F3HeavyVisionExecutor` e evita concorrência pesada paralela;
+- publica métricas de ticks, ciclos completos, repaints, frames repetidos e idle.
+
+As funções históricas de cadência podem permanecer no código durante a migração,
+mas não são instaladas como autoridades de scheduling no produto.
 
 ## 5. Direção de dependências
 

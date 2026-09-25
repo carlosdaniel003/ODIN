@@ -98,7 +98,7 @@ Uso atual:
 ~~~text
 NORMAL  análise manual do CHECK atual
 LOW     configuração / thumbnails / DEBUG completo
-HIGH    reservado para análise operacional da Etapa 4
+HIGH    reservado para compute operacional puro após consolidação da Etapa 5
 ~~~
 
 Quando a fila está cheia, um job de prioridade maior pode substituir trabalho
@@ -139,6 +139,31 @@ reschedule
 ~~~
 
 O objetivo é um coordenador que agenda o próximo ciclo conscientemente.
+
+### Estado implementado
+
+O runtime de produto usa `F3RuntimeCoordinator` como proprietário do scheduler.
+
+Regras atuais:
+
+~~~text
+1 after periódico F3
+frame repetido        -> repaint leve
+análise não devida    -> repaint leve
+configuração aberta   -> 280 ms
+tracking pendente     -> ciclo completo
+rearme + frame novo   -> ciclo completo
+executor pesado busy  -> repaint leve
+~~~
+
+Após ciclos caros, o coordenador impõe idle progressivo ao mainloop antes de
+agendar o próximo tick. As métricas ficam disponíveis em
+`_display_f3_runtime_coordinator_stats`.
+
+O compute produtivo completo ainda não é executado no worker porque as
+autoridades históricas chamadas por `_process_display_auto_check()` misturam
+visão, estado e UI. Essa separação é requisito da Etapa 5, não motivo para criar
+uma segunda thread/scheduler na Etapa 4.
 
 ## 7. Proibição de busy loop
 

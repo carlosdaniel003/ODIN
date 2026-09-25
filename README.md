@@ -507,9 +507,36 @@ por ele a análise manual do CHECK atual, o DEBUG completo e as previews pesadas
 de configuração/tracking. Isso impede que essas operações criem threads
 independentes e disputem CPU livremente.
 
-A prioridade alta para a análise operacional está reservada para a próxima fase
-de migração do runtime, quando o scheduling do F3 passar a ter um coordenador
-único.
+A prioridade alta permanece reservada para compute operacional puro. O scheduler
+já possui coordenador único; a migração do compute produtivo para `HIGH` depende
+da separação das autoridades stateful na próxima etapa arquitetural.
+
+## 5.14 Coordenador do runtime F3
+
+O ciclo periódico do Display F3 é coordenado por `F3RuntimeCoordinator`.
+
+Ele é instalado por último no bootstrap e possui o scheduler periódico do F3.
+Isso substitui a antiga combinação de scheduler base + cancelamentos e
+reagendamentos externos.
+
+O coordenador diferencia:
+
+- frame novo;
+- frame repetido;
+- análise devida;
+- tracking com segunda metade pendente;
+- configuração aberta;
+- rearme;
+- executor pesado ocupado;
+- callback leve ou caro.
+
+Frame repetido e análise ainda não devida fazem apenas repaint. CONFIGURAR usa
+cadência de fundo. Após um callback caro, o próximo tick recebe um intervalo de
+idle para permitir mouse, teclado e repaint do Tkinter.
+
+O coordenador não decide OK/NG e não implementa tracking, presença, energia ou
+CHECKS. Essas autoridades continuam separadas e serão consolidadas na etapa
+seguinte da migração.
 
 ---
 

@@ -94,8 +94,9 @@ proprietário e substituição de jobs pendentes de preview.
 
 A análise operacional ao vivo ainda permanece no caminho histórico nesta etapa.
 Ela não deve ser simplesmente movida para uma thread porque o callback atual
-também altera estado produtivo e apresentação. A migração dessa análise para
-`HIGH` será feita somente junto do `F3RuntimeCoordinator` na Etapa 4.
+também altera estado produtivo e apresentação. A Etapa 4 passa a controlar
+quando esse pipeline pode executar; a extração de compute puro para `HIGH`
+depende da consolidação das autoridades stateful na Etapa 5.
 
 ## Etapa 4 — F3RuntimeCoordinator
 
@@ -120,6 +121,41 @@ Meta estrutural:
 ~~~
 
 O coordinator não deve virar God Object: ele orquestra serviços, não implementa os algoritmos internos deles.
+
+### Implementação consolidada da Etapa 4
+
+O proprietário canônico é `F3RuntimeCoordinator`.
+
+Fluxo atual:
+
+~~~text
+root.after
+   ↓
+F3RuntimeCoordinator
+   ├── CONFIGURAR aberto → repaint leve / cadência de fundo
+   ├── frame repetido → repaint leve
+   ├── análise ainda não devida → repaint leve
+   ├── tracking pendente → conclui a segunda metade do pipeline
+   ├── rearme + frame novo → ciclo completo
+   └── análise/tracking devido + frame novo → ciclo completo legado
+~~~
+
+Invariantes implementadas:
+
+- um único timer periódico do F3 no runtime de produto;
+- nenhum backlog histórico de frames;
+- frame repetido não dispara novamente o pipeline completo;
+- backpressure quando o executor pesado está ocupado;
+- lifecycle start/stop/shutdown;
+- métricas do scheduler disponíveis no runtime;
+- cadência adaptativa histórica e wrapper final de responsividade deixam de ser
+  autoridades de scheduling.
+
+O pipeline completo ainda é chamado no thread Tk quando necessário porque hoje
+ele contém, no mesmo encadeamento, compute de visão, autoridades stateful e
+publicação de UI. Movê-lo inteiro para o executor violaria a regra de Tk e criaria
+races de state machine. A Etapa 5 deve separar essas autoridades em serviços
+antes de enviar compute operacional puro à prioridade `HIGH`.
 
 ## Etapa 5 — Consolidar autoridades
 

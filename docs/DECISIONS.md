@@ -75,8 +75,10 @@ Contratos aceitos:
 - workers não manipulam Tkinter.
 
 `NORMAL` é usado pela análise manual do CHECK atual. `LOW` é usado por
-previews/configuração e DEBUG completo. `HIGH` é reservado para a análise
-operacional e será conectado ao runtime pelo coordenador da Etapa 4.
+previews/configuração e DEBUG completo. `HIGH` permanece reservado para compute
+operacional puro. O callback produtivo legado ainda contém mutações de estado e
+apresentação e só poderá ser movido ao executor depois da consolidação das
+autoridades na Etapa 5.
 
 Novos trabalhos pesados assíncronos do F3 não devem criar threads próprias fora
 desse executor.
@@ -150,6 +152,34 @@ O projeto não deve trocar classes gigantes por centenas de microarquivos sem fr
 Novos serviços de runtime devem preferir composição e contratos explícitos.
 
 Aumentar MRO, monkey patching e instalação dinâmica de wrappers só é aceitável como ponte de migração documentada.
+
+---
+
+## D-014 — F3RuntimeCoordinator é o proprietário do scheduler F3
+
+**Status:** Accepted
+
+O `F3RuntimeCoordinator`, em
+`src/platform/display_f3_runtime_coordinator.py`, é o proprietário canônico do
+scheduler periódico da Produção Display F3.
+
+No produto:
+
+- somente o coordenador agenda o próximo tick do F3 via `root.after()`;
+- chamadas históricas a `_agendar_preview_display_f3` delegam ao coordenador;
+- frame repetido não percorre novamente o pipeline pesado;
+- CONFIGURAR usa cadência de fundo;
+- resultado/rearme e tracking pendente permanecem observáveis pelo coordenador;
+- callbacks caros recebem uma janela de idle antes do próximo tick;
+- a antiga cadência adaptativa e o wrapper final de responsividade não são
+  instalados como autoridades concorrentes.
+
+O fallback de scheduling no método base continua temporariamente para testes e
+composições que não executam o bootstrap final; ele não é a autoridade do runtime
+de produto.
+
+O coordenador orquestra. Ele não implementa algoritmos de tracking, presença,
+energia, análise de CHECK ou state machine.
 
 ---
 
