@@ -3,6 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 
+from src.platform.desktop_camera_service import DesktopCameraService
 from src.platform.led_project_repository import normalizar_resolucao_mestra
 
 
@@ -187,7 +188,14 @@ class ProjectMasterResolutionMixin:
             return super().iniciar_tela_ao_vivo()
 
         self._atualizar_config_camera_para_resolucao_mestra(resolucao)
-        classe_atual = self.CAMERA_SERVICE_CLASS
+        classe_atual = getattr(self, "CAMERA_SERVICE_CLASS", None)
+        if classe_atual is None:
+            service = getattr(self, "camera_service", None)
+            classe_atual = (
+                type(service)
+                if service is not None
+                else DesktopCameraService
+            )
         classe_travada = self._classe_camera_com_resolucao_travada(
             classe_atual,
             resolucao,

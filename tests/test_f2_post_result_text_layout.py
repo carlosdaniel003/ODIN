@@ -5,7 +5,7 @@ from src.platform.blue_operation_window import (
     BlueOperationWindow,
     texto_placa_analisada_f2,
 )
-from src.ui.operation_window import DesktopOperationWindow
+from src.ui.desktop_operation_window import DesktopOperationWindow
 
 
 class _FakeLabel:

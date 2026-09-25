@@ -8,7 +8,7 @@ import numpy as np
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 from src.platform.desktop_production_app import DesktopProductionApp
-from src.ui.operation_window import DesktopOperationWindow
+from src.ui.desktop_operation_window import DesktopOperationWindow
 
 
 class _FakeRoot:

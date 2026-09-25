@@ -28,7 +28,7 @@ from src.platform.desktop_production_app import (
     DesktopProductionApp,
 )
 from src.ui.main_window import ODINView
-from src.ui.operation_window import DesktopOperationWindow
+from src.ui.desktop_operation_window import DesktopOperationWindow
 
 
 class FakeWidget:
