@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import src.platform.windows_camera_debug as debug
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class WindowsCameraDebugTests(unittest.TestCase):
@@ -88,7 +88,7 @@ class WindowsCameraDebugTests(unittest.TestCase):
         )
 
     def test_app_instala_debug_apos_handoff_e_agenda_snapshot_depois_do_init(self):
-        fonte = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        fonte = inspect.getsource(DesktopProductionApp.__init__)
         self.assertIn("instalar_handoff_camera_windows()", fonte)
         self.assertIn("instalar_debug_camera_windows()", fonte)
         self.assertIn("iniciar_debug_periodico_camera_windows(self)", fonte)

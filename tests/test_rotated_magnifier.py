@@ -7,7 +7,7 @@ import numpy as np
 import src.ui.main_window_parts.magnifier.desenhar_lupa_canvas as lupa_module
 from src.core.roi_geometry import TIPO_ROI_SEGMENTO
 from src.models.led_selection import LedSelection
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.rotated_preview_roi_editor import (
     RotatedPreviewAreaRoiEditorMixin,
     converter_ponto_preview_lupa,
@@ -172,7 +172,7 @@ class RotatedMagnifierTests(unittest.TestCase):
         )
 
     def test_perfil_final_usa_editor_com_preview_rotacionada(self):
-        self.assertIn(RotatedPreviewAreaRoiEditorMixin, RaspberryPi3ProductionApp.__mro__)
+        self.assertIn(RotatedPreviewAreaRoiEditorMixin, DesktopProductionApp.__mro__)
 
     def test_lupa_nao_altera_camera_ou_mascaras(self):
         codigo = inspect.getsource(lupa_module)

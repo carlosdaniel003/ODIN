@@ -2,7 +2,7 @@ import inspect
 import unittest
 from unittest.mock import patch
 
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.windows_camera_handoff import (
     WINDOWS_POST_RELEASE_SETTLE_MS,
     _instalar_preferencia_backend_na_classe,
@@ -174,7 +174,7 @@ class WindowsCameraHandoffTests(unittest.TestCase):
         self.assertEqual(BACKENDS, CameraLinux._backends_preferidos())
 
     def test_perfil_final_instala_handoff_antes_de_construir_aplicacao(self):
-        fonte = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        fonte = inspect.getsource(DesktopProductionApp.__init__)
         self.assertIn("instalar_handoff_camera_windows()", fonte)
         self.assertLess(
             fonte.index("instalar_handoff_camera_windows()"),

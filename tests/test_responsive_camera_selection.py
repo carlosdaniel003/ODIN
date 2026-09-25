@@ -4,12 +4,12 @@ import unittest
 
 import src.platform.responsive_camera_selection as responsive
 from src.platform.camera_selection import CameraSelectionMixin
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class ResponsiveCameraSelectionTests(unittest.TestCase):
     def test_perfil_final_recebe_patch_responsivo(self):
-        self.assertIn(CameraSelectionMixin, RaspberryPi3ProductionApp.__mro__)
+        self.assertIn(CameraSelectionMixin, DesktopProductionApp.__mro__)
         self.assertTrue(
             getattr(CameraSelectionMixin, "_odin_responsive_selector_installed", False)
         )

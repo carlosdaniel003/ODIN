@@ -20,7 +20,7 @@ from src.platform.fixed_mask_geometry_guard import (
     assinatura_geometria,
     copiar_mascara_absoluta,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.segment_display_roi_editor import (
     SegmentDisplayRoiEditorMixin,
     criar_segmento_por_arrasto,
@@ -160,8 +160,8 @@ class SegmentRoiTests(unittest.TestCase):
         self.assertEqual(16, preparado.altura)
 
     def test_perfil_display_ativa_editor_e_runtime_de_segmentos(self):
-        self.assertIn(SegmentDisplayRoiEditorMixin, RaspberryPi3ProductionApp.__mro__)
-        self.assertIn(SegmentDisplayRuntimeMixin, RaspberryPi3ProductionApp.__mro__)
+        self.assertIn(SegmentDisplayRoiEditorMixin, DesktopProductionApp.__mro__)
+        self.assertIn(SegmentDisplayRuntimeMixin, DesktopProductionApp.__mro__)
 
 
 if __name__ == "__main__":

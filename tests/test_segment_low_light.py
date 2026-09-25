@@ -11,7 +11,7 @@ from src.infra.result_repository import ResultRepository
 from src.models.analysis_result import LedAnalysisResult
 from src.models.led_features import LedFeatures
 from src.models.metric_evaluation import MetricEvaluation
-import src.platform.raspberry_pi3_production_app as production_module
+import src.platform.desktop_production_app as production_module
 import src.platform.segment_display_runtime as runtime_module
 
 
@@ -179,7 +179,7 @@ class SegmentLowLightTests(unittest.TestCase):
 
     def test_perfil_producao_sincroniza_trava_com_referencia_ativa(self):
         codigo = inspect.getsource(
-            production_module.RaspberryPi3ProductionApp.preparar_tela_operacao
+            production_module.DesktopProductionApp.preparar_tela_operacao
         )
         self.assertIn("_tem_referencia_pouca_luz_ativa", codigo)
         self.assertIn("definir_diagnostico_pouca_luz_habilitado", codigo)

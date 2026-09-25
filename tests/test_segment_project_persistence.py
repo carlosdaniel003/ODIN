@@ -6,7 +6,7 @@ import src.platform.led_mask_resolution_sync as resolution_sync
 from src.core.roi_geometry import TIPO_ROI_CIRCULO, TIPO_ROI_SEGMENTO
 from src.models.led_selection import LedSelection
 from src.platform.led_mask_editor import LedMaskEditorMixin
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.segment_project_geometry_persistence import (
     SegmentProjectGeometryPersistenceMixin,
     copiar_led_geometria_completa,
@@ -231,7 +231,7 @@ class SegmentProjectPersistenceTests(unittest.TestCase):
         self.assertAlmostEqual(-4.5, led.angulo)
 
     def test_perfil_display_prioriza_persistencia_antes_do_editor_legado(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(SegmentProjectGeometryPersistenceMixin, mro)
         self.assertIn(LedMaskEditorMixin, mro)
         self.assertLess(
