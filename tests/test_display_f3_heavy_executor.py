@@ -203,6 +203,9 @@ class DisplayF3HeavyExecutorTests(unittest.TestCase):
         production = (root / "display_production_f3.py").read_text(
             encoding="utf-8"
         )
+        live_tracking = (root / "display_f3_object_tracking.py").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("F3HeavyWorkPriority.LOW", config)
         self.assertIn("maxsize=F3_CONFIG_PREVIEW_RESULT_LIMIT", config)
@@ -222,6 +225,14 @@ class DisplayF3HeavyExecutorTests(unittest.TestCase):
             production,
         )
         self.assertIn("_on_display_f3_root_destroy", production)
+
+        self.assertIn("F3HeavyWorkPriority.HIGH", live_tracking)
+        self.assertIn("_submit_live_tracking_job(self, raw_latest)", live_tracking)
+        self.assertIn("replace_pending=True", live_tracking)
+        self.assertNotIn(
+            "align_frame_for_f3(self, raw_latest)",
+            live_tracking,
+        )
 
 
 if __name__ == "__main__":
