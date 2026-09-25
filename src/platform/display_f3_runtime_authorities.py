@@ -469,15 +469,21 @@ class F3RuntimeAuthorities:
             self.app,
             state,
         )
-        state["source"] = F3_RUNTIME_AUTHORITIES_SOURCE
+        state.setdefault("source", F3_RUNTIME_AUTHORITIES_SOURCE)
         state["runtime_authority_owner"] = F3_RUNTIME_AUTHORITIES_SOURCE
+        cycle_rearmed = bool(state.get("cycle_rearmed"))
 
         self._cache_key = signature
         self._cache_value = deepcopy(state)
         self.build_count += 1
         self.app._display_f3_operational_state = deepcopy(state)
         self.app._display_f3_runtime_authority_stats = self.stats()
-        return deepcopy(state)
+        result = deepcopy(state)
+        if cycle_rearmed:
+            # O frame EMPTY atual continua publicado, mas nenhuma memória física
+            # da placa anterior atravessa para o próximo frame/placa.
+            self.reset_cycle_state()
+        return result
 
     def stats(self) -> dict:
         return {

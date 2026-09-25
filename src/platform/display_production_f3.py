@@ -556,6 +556,9 @@ class DisplayProductionF3Mixin:
 
     def _ativar_tela_producao_display_f3(self) -> bool:
         self._ensure_f3_heavy_executor()
+        authorities = getattr(self, "_display_f3_runtime_authorities", None)
+        if authorities is not None:
+            authorities.reset_cycle_state()
         self.display_f3_ativo = True
         self._cancelar_resultado_display_f3()
         self._display_f3_ng_evidence_frozen = False
@@ -632,6 +635,9 @@ class DisplayProductionF3Mixin:
 
     def fechar_tela_producao_display_f3(self) -> None:
         self.display_f3_ativo = False
+        authorities = getattr(self, "_display_f3_runtime_authorities", None)
+        if authorities is not None:
+            authorities.reset_cycle_state()
         self.display_check_runtime.reiniciar_placa()
         self._cancelar_resultado_display_f3()
         self._display_f3_ng_evidence_frozen = False
