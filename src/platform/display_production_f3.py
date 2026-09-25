@@ -219,7 +219,11 @@ class DisplayProductionF3Mixin:
                 owner._display_f3_configuration_opening = False
 
         try:
-            self.root.after_idle(build)
+            # F3 possui câmera + scheduler periódicos; after_idle pode ficar
+            # indefinidamente postergado porque o mainloop raramente fica
+            # totalmente ocioso. after(1) garante que o clique em CONFIGURAR
+            # entre na fila normal de eventos e abra o shell imediatamente.
+            self.root.after(1, build)
         except Exception:
             build()
 

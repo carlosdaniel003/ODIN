@@ -152,6 +152,10 @@ F3_TRACKING_CONTINUITY_BONUS = 5.0
 
 F3_TRACKING_EXECUTOR_OWNER = "f3-live-tracking"
 F3_TRACKING_EXECUTOR_KEY = "latest-frame"
+# Resultados de visão podem terminar depois que dezenas de frames novos já
+# chegaram. Geometria antiga pode servir como hint visual, mas nunca deve
+# substituir a câmera atual nem alimentar decisão produtiva muito atrasada.
+F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS = 1200.0
 
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
@@ -3578,7 +3582,12 @@ def _draw_tracking_geometry_visual(
 
 
 
-def _run_live_tracking_heavy_job(app, raw_frame, generation: int) -> dict:
+def _run_live_tracking_heavy_job(
+    app,
+    raw_frame,
+    generation: int,
+    frame_token,
+) -> dict:
     """Executa ORB/AKAZE/warp no executor pesado; não toca widgets Tk."""
     started = time.perf_counter()
     aligned, result = align_frame_for_f3(app, raw_frame)
@@ -3612,6 +3621,7 @@ def _run_live_tracking_heavy_job(app, raw_frame, generation: int) -> dict:
 
     return {
         "generation": int(generation),
+        "frame_token": frame_token,
         "elapsed_ms": round(
             max(0.0, (time.perf_counter() - started) * 1000.0),
             2,
@@ -3634,6 +3644,11 @@ def _submit_live_tracking_job(app, raw_frame):
     generation = int(
         getattr(app, "_display_f3_tracking_job_generation", 0) or 0
     )
+    token_fn = getattr(app, "_display_auto_frame_token", None)
+    try:
+        frame_token = token_fn(raw_frame) if callable(token_fn) else None
+    except Exception:
+        frame_token = None
     try:
         frame_snapshot = raw_frame.copy()
     except Exception:
@@ -3644,6 +3659,7 @@ def _submit_live_tracking_job(app, raw_frame):
             app,
             frame_snapshot,
             generation,
+            frame_token,
         ),
         priority=F3HeavyWorkPriority.HIGH,
         name="f3-live-tracking",
@@ -3807,13 +3823,37 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     analysis_frame = payload.get("analysis_frame")
                     self._display_f3_tracking_result = result
                     self._display_f3_tracking_live_geometry = payload.get("geometry")
-                    self._display_f3_tracking_last_compute_ms = float(
-                        payload.get("elapsed_ms", 0.0) or 0.0
-                    )
-                    if _valid_frame(job_raw):
-                        self._display_f3_tracking_raw_authority_frame = job_raw
+                    compute_ms = float(payload.get("elapsed_ms", 0.0) or 0.0)
+                    self._display_f3_tracking_last_compute_ms = compute_ms
 
-                    if _valid_frame(analysis_frame):
+                    # A câmera visível é sempre latest-frame-wins. O frame que
+                    # entrou no worker pode ter segundos de idade e jamais volta
+                    # a ser autoridade visual quando o job termina.
+                    if _valid_frame(raw_latest):
+                        self._display_f3_tracking_raw_authority_frame = raw_latest
+
+                    # Decisão operacional não pode usar um frame que ficou preso
+                    # no worker por vários segundos. A geometria pode continuar
+                    # como hint até o próximo job, mas a análise do CHECK espera
+                    # um resultado suficientemente recente.
+                    payload_token = payload.get("frame_token")
+                    current_token = None
+                    token_fn = getattr(self, "_display_auto_frame_token", None)
+                    if callable(token_fn) and _valid_frame(raw_latest):
+                        try:
+                            current_token = token_fn(raw_latest)
+                        except Exception:
+                            current_token = None
+                    operational_fresh = bool(
+                        compute_ms <= F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS
+                        and (
+                            payload_token is None
+                            or current_token is None
+                            or payload_token == current_token
+                        )
+                    )
+
+                    if operational_fresh and _valid_frame(analysis_frame):
                         self._display_f3_tracking_analysis_frame = analysis_frame
                         self._display_f3_tracking_pending_raw_frame = (
                             job_raw if _valid_frame(job_raw) else raw_latest
@@ -3882,12 +3922,11 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     visual_rotation=visual_rotation,
                 )
 
-            authority_frame = getattr(
-                app,
-                "_display_f3_tracking_raw_authority_frame",
-                None,
-            )
-            source = authority_frame if _valid_frame(authority_frame) else frame
+            # Nunca renderize o frame que entrou no worker de tracking. Ele pode
+            # ter muitos segundos quando ORB/AKAZE/reacquisition são caros.
+            # O argumento recebido vem do camera_frame_atual e é a única
+            # autoridade visual da câmera ao vivo.
+            source = frame
             if not _valid_frame(source):
                 return previous_window_update(
                     frame,
