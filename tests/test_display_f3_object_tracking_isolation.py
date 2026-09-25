@@ -335,9 +335,9 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_PREVIEW_INTERVAL_MS,
             auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_ANALYSIS_INTERVAL_MS,
         )
-        self.assertLessEqual(
+        self.assertEqual(
+            50,
             auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_PREVIEW_INTERVAL_MS,
-            20,
         )
         self.assertGreaterEqual(
             auto_runtime.DisplayAutomaticCheckF3Mixin.DISPLAY_F3_ANALYSIS_INTERVAL_MS,
@@ -1282,6 +1282,20 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         source = inspect.getsource(tracking._update_tracking_live_geometry)
         self.assertIn("_analysis_transform_for_current_check", source)
         self.assertNotIn("_analysis_alignment_for_current_check", source)
+
+
+    def test_tracking_search_preview_skips_semantic_project_render_until_lock(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("if not locked:", source)
+        self.assertIn(
+            "não recarregue projeto",
+            source,
+        )
+        no_lock = source.split("if not locked:", 1)[1].split("else:", 1)[0]
+        self.assertNotIn("_project_preview_context", no_lock)
+        self.assertNotIn("renderizar_preview_claro_display_f3", no_lock)
 
 
 if __name__ == "__main__":

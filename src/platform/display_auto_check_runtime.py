@@ -52,10 +52,10 @@ class DisplayAutomaticCheckF3Mixin:
 
     # Sobrescreve apenas o intervalo do F3 automático pelo MRO. O F2 não usa
     # este mixin e mantém seu próprio ritmo de captura/renderização.
-    # Preview fluido é independente da visão pesada. 16 ms deixa o Tk buscar o
-    # frame mais recente com baixa latência; a câmera continua limitada pelo FPS
-    # físico configurado (normalmente 30 FPS).
-    DISPLAY_F3_PREVIEW_INTERVAL_MS = 16
+    # O produto desktop publica câmera em torno de 20 FPS. Repaint acima dessa
+    # taxa só redesenha o mesmo frame e disputa o mainloop com eventos do usuário.
+    # 50 ms mantém latest-frame-wins sem criar trabalho visual redundante.
+    DISPLAY_F3_PREVIEW_INTERVAL_MS = 50
     # ORB/contorno/classificação não precisam rodar 30 vezes por segundo. ~11 Hz
     # mantém resposta rápida dos CHECKS sem segurar cada repaint da câmera.
     DISPLAY_F3_ANALYSIS_INTERVAL_MS = 90

@@ -3888,127 +3888,147 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 and geometry.get("locked")
             )
 
-            # IMPORTANTE: o caminho de tracking não pode publicar um frame apenas
-            # com contorno ciano. Ele usa o MESMO renderer semântico da câmera F3
-            # (verde/vermelho/amarelo + números), alimentado pela geometria móvel.
-            try:
-                from src.platform.display_f3_preview_clarity_fix import (
-                    _effective_phase_mask_ids_for_current_check,
-                    _mask_snapshot_for_current_check,
-                    _project_preview_context,
-                    renderizar_preview_claro_display_f3,
-                )
-                from src.platform.display_visual_rotation import (
-                    preparar_frame_visual_display,
-                )
+            # Sem LOCK não existem ROIs móveis válidas. Nesse estado de startup,
+            # renderize somente o frame real reduzido: não recarregue projeto,
+            # máscaras e contexto semântico a cada repaint enquanto o worker
+            # ainda procura a placa.
+            if not locked:
+                try:
+                    from src.platform.display_visual_rotation import (
+                        preparar_frame_visual_display,
+                    )
 
-                visual = preparar_frame_visual_display(
-                    source,
-                    int(visual_rotation or 0) % 360,
-                )
-                visual = _fit_live_preview_before_overlay(
-                    visual,
-                    self_window,
-                )
-                semantic_context = _project_preview_context(
-                    self_window,
-                    int(visual_rotation or 0) % 360,
-                )
-                if isinstance(semantic_context, dict):
-                    classifications, failed_mask_ids = _mask_snapshot_for_current_check(
+                    decorated = preparar_frame_visual_display(
+                        source,
+                        int(visual_rotation or 0) % 360,
+                    )
+                    decorated = _fit_live_preview_before_overlay(
+                        decorated,
                         self_window,
-                        project_name=str(semantic_context.get("project_name") or ""),
-                        check_id=str(semantic_context.get("check_id") or ""),
-                        base=semantic_context,
                     )
-                    semantic_context = dict(semantic_context)
-                    project_name = str(
-                        semantic_context.get("project_name") or ""
+                except Exception:
+                    decorated = source
+            else:
+                # Com LOCK, use o renderer semântico normal da câmera F3
+                # (verde/vermelho/amarelo + números) sobre a geometria móvel.
+                try:
+                    from src.platform.display_f3_preview_clarity_fix import (
+                        _effective_phase_mask_ids_for_current_check,
+                        _mask_snapshot_for_current_check,
+                        _project_preview_context,
+                        renderizar_preview_claro_display_f3,
                     )
-                    check_id = str(
-                        semantic_context.get("check_id") or ""
+                    from src.platform.display_visual_rotation import (
+                        preparar_frame_visual_display,
                     )
-                    confirmed_failed_ids, validating_ids = (
-                        _effective_phase_mask_ids_for_current_check(
-                            self_window,
-                            project_name=project_name,
-                            check_id=check_id,
-                        )
-                    )
-                    if not confirmed_failed_ids and not validating_ids:
-                        if bool(semantic_context.get("intermittent", False)):
-                            validating_ids = set(failed_mask_ids)
-                        else:
-                            confirmed_failed_ids = set(failed_mask_ids)
 
-                    semantic_context["classifications"] = classifications
-                    semantic_context["effective_classifications"] = dict(
-                        classifications
+                    visual = preparar_frame_visual_display(
+                        source,
+                        int(visual_rotation or 0) % 360,
                     )
-                    semantic_context["failed_mask_ids"] = tuple(
-                        sorted(failed_mask_ids)
-                    )
-                    semantic_context["effective_failed_mask_ids"] = tuple(
-                        sorted(failed_mask_ids)
-                    )
-                    semantic_context[
-                        "effective_confirmed_failed_mask_ids"
-                    ] = tuple(sorted(confirmed_failed_ids))
-                    semantic_context[
-                        "effective_validating_mask_ids"
-                    ] = tuple(sorted(validating_ids))
-                    semantic_context["ui_mask_authority"] = (
-                        "effective_mask_results_v1"
-                    )
-                    semantic_context["has_any_on"] = any(
-                        str(value).strip().lower() == "on"
-                        for value in classifications.values()
-                    )
-                    power = getattr(
-                        app,
-                        "_display_f3_power_authority_status",
-                        None,
-                    )
-                    energy = power.get("energy") if isinstance(power, dict) else None
-                    semantic_context["power_confirmed"] = bool(
-                        isinstance(energy, dict)
-                        and energy.get("powered_confirmed") is True
-                    )
-                    semantic_context["power_off_confirmed"] = bool(
-                        isinstance(energy, dict)
-                        and energy.get("off_confirmed") is True
-                    )
-                    semantic_context["energy_state"] = (
-                        str(energy.get("energy_state") or "").strip().lower()
-                        if isinstance(energy, dict)
-                        else ""
-                    )
-                    try:
-                        self_window.set_display_readout_context(
-                            semantic_context
-                        )
-                    except (AttributeError, TypeError):
-                        pass
-                    decorated = renderizar_preview_claro_display_f3(
+                    visual = _fit_live_preview_before_overlay(
                         visual,
-                        semantic_context,
+                        self_window,
                     )
-                else:
-                    try:
-                        self_window.set_display_readout_context(None)
-                    except (AttributeError, TypeError):
-                        pass
+                    semantic_context = _project_preview_context(
+                        self_window,
+                        int(visual_rotation or 0) % 360,
+                    )
+                    if isinstance(semantic_context, dict):
+                        classifications, failed_mask_ids = _mask_snapshot_for_current_check(
+                            self_window,
+                            project_name=str(semantic_context.get("project_name") or ""),
+                            check_id=str(semantic_context.get("check_id") or ""),
+                            base=semantic_context,
+                        )
+                        semantic_context = dict(semantic_context)
+                        project_name = str(
+                            semantic_context.get("project_name") or ""
+                        )
+                        check_id = str(
+                            semantic_context.get("check_id") or ""
+                        )
+                        confirmed_failed_ids, validating_ids = (
+                            _effective_phase_mask_ids_for_current_check(
+                                self_window,
+                                project_name=project_name,
+                                check_id=check_id,
+                            )
+                        )
+                        if not confirmed_failed_ids and not validating_ids:
+                            if bool(semantic_context.get("intermittent", False)):
+                                validating_ids = set(failed_mask_ids)
+                            else:
+                                confirmed_failed_ids = set(failed_mask_ids)
+
+                        semantic_context["classifications"] = classifications
+                        semantic_context["effective_classifications"] = dict(
+                            classifications
+                        )
+                        semantic_context["failed_mask_ids"] = tuple(
+                            sorted(failed_mask_ids)
+                        )
+                        semantic_context["effective_failed_mask_ids"] = tuple(
+                            sorted(failed_mask_ids)
+                        )
+                        semantic_context[
+                            "effective_confirmed_failed_mask_ids"
+                        ] = tuple(sorted(confirmed_failed_ids))
+                        semantic_context[
+                            "effective_validating_mask_ids"
+                        ] = tuple(sorted(validating_ids))
+                        semantic_context["ui_mask_authority"] = (
+                            "effective_mask_results_v1"
+                        )
+                        semantic_context["has_any_on"] = any(
+                            str(value).strip().lower() == "on"
+                            for value in classifications.values()
+                        )
+                        power = getattr(
+                            app,
+                            "_display_f3_power_authority_status",
+                            None,
+                        )
+                        energy = power.get("energy") if isinstance(power, dict) else None
+                        semantic_context["power_confirmed"] = bool(
+                            isinstance(energy, dict)
+                            and energy.get("powered_confirmed") is True
+                        )
+                        semantic_context["power_off_confirmed"] = bool(
+                            isinstance(energy, dict)
+                            and energy.get("off_confirmed") is True
+                        )
+                        semantic_context["energy_state"] = (
+                            str(energy.get("energy_state") or "").strip().lower()
+                            if isinstance(energy, dict)
+                            else ""
+                        )
+                        try:
+                            self_window.set_display_readout_context(
+                                semantic_context
+                            )
+                        except (AttributeError, TypeError):
+                            pass
+                        decorated = renderizar_preview_claro_display_f3(
+                            visual,
+                            semantic_context,
+                        )
+                    else:
+                        try:
+                            self_window.set_display_readout_context(None)
+                        except (AttributeError, TypeError):
+                            pass
+                        decorated = _draw_tracking_geometry_visual(
+                            source,
+                            geometry,
+                            visual_rotation,
+                        )
+            except Exception:
                     decorated = _draw_tracking_geometry_visual(
                         source,
                         geometry,
                         visual_rotation,
                     )
-            except Exception:
-                decorated = _draw_tracking_geometry_visual(
-                    source,
-                    geometry,
-                    visual_rotation,
-                )
 
             status = getattr(
                 app,
