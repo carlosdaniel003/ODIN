@@ -5,7 +5,7 @@ import unittest
 
 import src.platform.display_f3_operational_status as operational_module
 from src.platform.display_f3_operational_status import resolver_estado_operacional_f3
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class DisplayF3OperationalStatusTests(unittest.TestCase):
@@ -117,7 +117,7 @@ class DisplayF3OperationalStatusTests(unittest.TestCase):
         self.assertIn("decisão", source)
 
     def test_perfil_final_instala_status_operacional_depois_do_layout(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         layout_position = source.index("instalar_layout_status_f3_estavel()")
         operational_position = source.index("instalar_status_operacional_display_f3()")
         self.assertLess(layout_position, operational_position)

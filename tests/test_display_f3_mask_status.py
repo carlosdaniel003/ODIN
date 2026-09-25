@@ -232,9 +232,9 @@ class DisplayF3MaskStatusTests(unittest.TestCase):
         self.assertNotIn("src.platform.f2_", source)
 
     def test_perfil_final_instala_status_de_mascaras_apos_runtime_ao_vivo(self):
-        from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+        from src.platform.desktop_production_app import DesktopProductionApp
 
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         live_index = source.index("instalar_runtime_ao_vivo_display_f3()")
         mask_index = source.index("instalar_status_mascaras_display_f3()")
         super_index = source.index("super().__init__(root)")

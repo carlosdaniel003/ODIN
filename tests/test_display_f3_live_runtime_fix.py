@@ -14,7 +14,7 @@ from src.platform.display_f3_live_runtime_fix import (
     estabilizar_estado_fisico_rapido_f3,
     promover_suporte_vazio_rapido_f3,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class _PhysicalApp:
@@ -344,7 +344,7 @@ class DisplayF3LiveRuntimeFixTests(unittest.TestCase):
         self.assertIs(second, app._display_auto_last_analysis)
 
     def test_perfil_instala_runtime_rapido_depois_da_correcao_fisica(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         physical_position = source.index("instalar_correcao_estado_fisico_display_f3()")
         live_position = source.index("instalar_runtime_ao_vivo_display_f3()")
         self.assertLess(physical_position, live_position)

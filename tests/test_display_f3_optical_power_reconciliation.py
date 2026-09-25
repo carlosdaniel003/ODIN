@@ -7,7 +7,7 @@ from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 from src.platform.display_f3_optical_power_reconciliation import (
     reconciliar_estado_operacional_com_evidencia_optica_f3,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class _DummyApp:
@@ -169,7 +169,7 @@ class DisplayF3OpticalPowerReconciliationTests(unittest.TestCase):
             self.assertFalse(state["allow_auto"])
 
     def test_perfil_final_instala_reconciliacao_depois_do_estado_fisico(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         physical_position = source.index("instalar_correcao_estado_fisico_display_f3()")
         optical_position = source.index(
             "instalar_reconciliacao_optica_estado_fisico_display_f3()"

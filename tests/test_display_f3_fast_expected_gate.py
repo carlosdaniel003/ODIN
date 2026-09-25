@@ -9,7 +9,7 @@ from src.platform.display_f3_fast_expected_gate import (
     contexto_exige_captura_rapida_f3,
     liberar_gate_fisico_para_check_rapido_f3,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class DisplayF3FastExpectedGateTests(unittest.TestCase):
@@ -178,7 +178,7 @@ class DisplayF3FastExpectedGateTests(unittest.TestCase):
         self.assertNotIn("fast_expected_check_gate", result)
 
     def test_fast_gate_installs_after_exact_template(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         exact_position = source.index("instalar_gabarito_exato_checks_display_f3()")
         fast_position = source.index("instalar_gate_rapido_check_esperado_display_f3()")
         super_position = source.index("super().__init__(root)")
