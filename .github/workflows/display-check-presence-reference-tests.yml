@@ -37,6 +37,7 @@ jobs:
             src/platform/display_reference_roi.py \
             src/platform/display_f3_status_layout_fix.py \
             src/platform/display_f3_operational_status.py \
+            src/platform/display_f3_runtime_authorities.py \
             src/platform/display_f3_check_transition_guard.py \
             src/platform/display_f3_physical_state_fix.py \
             src/platform/display_f3_live_runtime_fix.py \
@@ -51,6 +52,7 @@ jobs:
             tests/test_display_reference_roi.py \
             tests/test_display_f3_status_layout_fix.py \
             tests/test_display_f3_operational_status.py \
+            tests/test_display_f3_runtime_authorities.py \
             tests/test_display_f3_check_transition_guard.py \
             tests/test_display_f3_physical_state_fix.py \
             tests/test_display_f3_live_runtime_fix.py \
@@ -84,6 +86,12 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_f3_operational_status \
+            -v
+
+      - name: Validate F3 runtime authority ownership
+        run: |
+          python -m unittest \
+            tests.test_display_f3_runtime_authorities \
             -v
 
       - name: Run F3 check transition guard tests
