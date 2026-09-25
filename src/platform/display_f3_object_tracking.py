@@ -4023,7 +4023,7 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                             geometry,
                             visual_rotation,
                         )
-            except Exception:
+                except Exception:
                     decorated = _draw_tracking_geometry_visual(
                         source,
                         geometry,
