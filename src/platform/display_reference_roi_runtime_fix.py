@@ -17,7 +17,7 @@ import cv2
 import src.platform.display_check_presence_reference as check_module
 import src.platform.display_reference_roi as roi_module
 import src.platform.display_visual_reference_status as visual_module
-import src.platform.raspberry_pi3_production_app as production_app_module
+import src.platform.desktop_production_app as production_app_module
 from src.platform.display_project_repository import (
     normalizar_nome_projeto_display,
     normalizar_resolucao_display,

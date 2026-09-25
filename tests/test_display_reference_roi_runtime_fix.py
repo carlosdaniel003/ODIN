@@ -10,6 +10,7 @@ import numpy as np
 import src.platform.display_check_presence_reference as check_module
 import src.platform.display_reference_roi_runtime_fix as fix
 import src.platform.display_visual_reference_status as visual_module
+import src.platform.desktop_production_app as desktop_production_module
 
 
 class _Repository:
@@ -55,6 +56,18 @@ class DisplayReferenceRoiRuntimeFixTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_hook_aponta_para_composicao_desktop_canonica(self):
+        self.assertIs(fix.production_app_module, desktop_production_module)
+        self.assertTrue(
+            callable(
+                getattr(
+                    fix.production_app_module,
+                    "instalar_roi_referencias_display_f3",
+                    None,
+                )
+            )
+        )
 
     def test_check_capture_salva_e_reabre_com_mascaras(self):
         store = check_module.DisplayCheckPresenceReferenceStore(self.repository)
