@@ -32,6 +32,7 @@ jobs:
             src/platform/display_f3_unknown_debug_fix.py \
             src/platform/display_f3_live_diagnostic_trace.py \
             src/platform/display_f3_debug_toggle.py \
+            src/platform/display_f3_analysis_service.py \
             src/platform/display_f3_manual_snapshot_debug.py \
             src/platform/display_f3_snapshot_debug_lightweight_ui.py \
             src/platform/display_f3_reference_mask_save_fix.py \
@@ -56,6 +57,7 @@ jobs:
             tests/test_display_f3_unknown_debug_fix.py \
             tests/test_display_f3_live_diagnostic_trace.py \
             tests/test_display_f3_debug_toggle.py \
+            tests/test_display_f3_manual_analysis_stage2.py \
             tests/test_display_f3_manual_snapshot_debug.py \
             tests/test_display_f3_snapshot_debug_lightweight_ui.py \
             tests/test_display_f3_reference_mask_save_fix.py \
@@ -76,6 +78,12 @@ jobs:
             tests/test_display_f3_reference_preview_rotation.py \
             tests/test_display_f3_physical_powered_gate.py \
             tests/test_display_f3_power_deadlock_fix.py
+
+      - name: Validate F3 manual analysis stage 2
+        run: |
+          python -m unittest \
+            tests.test_display_f3_manual_analysis_stage2 \
+            -v
 
       - name: Run focused regressions
         run: |

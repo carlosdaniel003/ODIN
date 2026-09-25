@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Tela leve para o DEBUG TÉCNICO do snapshot manual do Display F3.
+"""Tela leve para o DEBUG TÉCNICO completo do snapshot manual do Display F3.
 
 O relatório completo continua disponível para suporte e para o clipboard, porém
 não é inserido em um widget Text. Isso evita custo de layout/renderização de
@@ -949,7 +949,7 @@ def _open_lightweight_snapshot_debug(window):
     source_text = (
         "EVIDÊNCIA NG CONGELADA • câmera ao vivo ignorada"
         if capture_source == "ng_evidence_frozen"
-        else "conteúdo congelado no clique em ANALISAR"
+        else "mesmo frame congelado no clique em ANALISAR"
     )
     tk.Label(
         header,

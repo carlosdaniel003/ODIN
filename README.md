@@ -462,13 +462,18 @@ A confirmação de suporte vazio e a confirmação da nova placa removem as mem�
 
 ## 5.12 Debug Técnico do F3
 
-O botão de análise técnica manual trabalha sobre um **frame congelado**.
+A análise técnica manual trabalha sobre um **frame congelado**, mas separa a ação rápida da auditoria completa.
 
-Ao acionar `ANALISAR`, o sistema copia um frame coerente e executa o diagnóstico naquele snapshot. O relatório pode incluir estatísticas da imagem, comparação das referências, contexto do CHECK, geometrias, análise por máscara, evidência física e informações das diferentes autoridades ópticas.
+Ao acionar `ANALISAR`, o sistema copia um frame coerente uma única vez e analisa **somente o CHECK atual**. O clique não percorre todas as referências e todos os CHECKS. Em NG terminal, quando a análise produtiva já pertence exatamente ao frame congelado, essa análise pode ser reaproveitada.
+
+Depois de `ANALISAR`, o botão `DEBUG TÉCNICO` fica disponível. Ao acioná-lo, o sistema usa **o mesmo frame congelado por ANALISAR** e então gera, em worker, a auditoria completa: estatísticas da imagem, comparação de referências, estado físico, configuração e análise dos CHECKS, máscaras, energia, contexto de runtime e relatório técnico. A câmera ao vivo não substitui esse frame durante o debug.
 
 Esse caminho é deliberadamente diagnóstico:
 
 ```text
+ANALISAR = frame congelado + CHECK atual
+DEBUG TÉCNICO = auditoria completa do mesmo frame sob demanda
+
 não registra OK/NG
 não avança CHECK
 não altera debounce
@@ -476,7 +481,7 @@ não rearma a placa
 não modifica a Produção F2
 ```
 
-A interface de debug é leve; o relatório completo pode ser copiado sem manter milhares de linhas renderizadas continuamente na tela.
+A interface de debug continua leve; o relatório completo pode ser copiado sem manter milhares de linhas renderizadas continuamente na tela.
 
 ---
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-"""Análise técnica manual do Display F3 sobre um único frame congelado.
+"""Análise manual e debug técnico do Display F3 sobre frame congelado.
 
-O operador dispara ANALISAR quando quiser investigar o estado atual. O frame é
-copiado imediatamente e todo o diagnóstico abaixo trabalha somente nessa cópia.
+ANALISAR congela um frame e executa somente o CHECK atual. DEBUG TÉCNICO usa
+exatamente esse mesmo frame para gerar a auditoria completa apenas sob demanda.
 Nenhuma função deste módulo registra OK/NG, avança CHECK, rearma ciclo ou altera
 estado da Produção F2.
 """
@@ -26,6 +26,9 @@ import src.platform.display_f3_exact_check_template as exact_module
 import src.platform.display_f3_physical_learning_policy as physical_policy_module
 import src.platform.display_f3_unknown_debug_fix as unknown_debug_module
 from src.platform.display_f3_same_mask_reference_fix import F3SameMaskReferenceAnalyzer
+from src.platform.display_f3_analysis_service import (
+    DisplayF3CurrentCheckAnalysisService,
+)
 from src.platform.display_f3_exact_check_template import F3ExactCheckTemplateAnalyzer
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
@@ -844,27 +847,58 @@ def _physical_diagnostics(
     return result
 
 
-def _prepare_async_snapshot_seed(app) -> dict:
-    """Congela apenas o estado que precisa nascer no thread Tk.
+def _tracking_geometry_snapshot(app) -> dict | None:
+    geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    if not isinstance(geometry, dict) or not bool(geometry.get("locked")):
+        return None
+    masks = [
+        _safe_deepcopy(mask)
+        for mask in (geometry.get("masks") or ())
+        if isinstance(mask, dict)
+    ]
+    if not masks:
+        return None
+    return {
+        "locked": True,
+        "masks": masks,
+        "resolution": _safe_deepcopy(geometry.get("resolution")),
+        "geometry_space": str(geometry.get("geometry_space") or ""),
+        "reference": str(geometry.get("reference") or ""),
+    }
 
-    Leitura de widgets e cópia do frame acontecem aqui. OpenCV pesado, leitura
-    das referências, comparação dos CHECKS e montagem do relatório ficam para
-    um worker, mantendo o event loop da interface responsivo.
+
+def _prepare_async_snapshot_seed(app) -> dict:
+    """Snapshot mínimo do clique em ANALISAR.
+
+    No thread Tk fazemos somente a cópia coerente do frame e capturamos o
+    identificador lógico do CHECK. Telemetria ampla, referências físicas,
+    comparação contra todos os CHECKS e relatório ficam fora deste caminho.
     """
     captured_at = datetime.now(timezone.utc).astimezone().isoformat(
         timespec="milliseconds"
     )
     frame, capture = _freeze_current_frame(app)
-    seed = {
+    evidence = _ng_evidence_snapshot(app)
+    frozen_analysis = (
+        _safe_deepcopy(evidence.get("analysis"))
+        if isinstance(evidence, dict)
+        and isinstance(evidence.get("analysis"), dict)
+        else None
+    )
+    return {
         "captured_at": captured_at,
         "frame": frame,
         "capture": _safe_deepcopy(capture),
         "rotation": _rotation(app),
         "logical_context": _safe_deepcopy(_current_context(app)),
+        "tracking_geometry": _tracking_geometry_snapshot(app),
+        "frozen_production_analysis": frozen_analysis,
     }
-    if frame is None or getattr(frame, "size", 0) == 0:
-        return seed
 
+
+def _prepare_debug_seed_from_analysis(app, analysis_seed: dict) -> dict:
+    """Completa o contexto técnico somente quando DEBUG TÉCNICO é solicitado."""
+    seed = dict(analysis_seed or {})
     runtime = _runtime_state_at_frame(app)
     seed["runtime_at_click"] = _safe_deepcopy(runtime)
     seed["visual_state"] = _coherent_visual_state_from_runtime(
@@ -874,8 +908,12 @@ def _prepare_async_snapshot_seed(app) -> dict:
     seed["camera_settings_at_frame"] = _safe_deepcopy(
         _camera_settings_at_frame(app)
     )
+    seed["debug_context_captured_at"] = (
+        datetime.now(timezone.utc).astimezone().isoformat(
+            timespec="milliseconds"
+        )
+    )
     return seed
-
 
 def _take_async_snapshot_seed(app) -> dict | None:
     seed = getattr(app, "_display_f3_async_snapshot_seed", None)
@@ -1284,7 +1322,10 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
             if ((snapshot.get("capture") or {}).get("source") == "ng_evidence_frozen")
             else "Sem NG congelado, a cópia é o frame capturado ao clicar em ANALISAR."
         ),
-        "Abrir DEBUG TÉCNICO não recalcula nada.",
+        (
+            "DEBUG TÉCNICO gerou esta auditoria completa sob demanda usando "
+            "o frame congelado por ANALISAR."
+        ),
         "",
     ]
 
@@ -1512,54 +1553,89 @@ def _set_button_text_temporarily(button, text: str, reset_text: str = "ANALISAR"
         pass
 
 
-def _apply_snapshot_result_to_window(
+def _apply_current_analysis_result_to_window(
     window,
     snapshot: dict,
-    report: str,
+    analysis_seed: dict,
 ) -> dict:
     button = getattr(window, "f3_manual_analyze_button", None)
     debug_button = getattr(window, "f3_snapshot_debug_button", None)
 
-    if not bool(snapshot.get("report_ready")):
-        if (snapshot.get("frame") or {}).get("available"):
-            window._display_f3_manual_snapshot = _safe_deepcopy(snapshot)
-            window._display_f3_manual_snapshot_report = str(report or "")
-            if debug_button is not None:
-                try:
-                    debug_button.configure(
-                        text="DEBUG TÉCNICO",
-                        state=tk.NORMAL,
-                        cursor="hand2",
-                    )
-                except Exception:
-                    pass
-        if button is not None:
-            try:
-                button.configure(state=tk.NORMAL, cursor="hand2")
-            except Exception:
-                pass
-            _set_button_text_temporarily(button, "ANÁLISE INCOMPLETA")
-        return snapshot
-
+    window._display_f3_manual_analysis_seed = analysis_seed
     window._display_f3_manual_snapshot = _safe_deepcopy(snapshot)
-    app = getattr(window, "_display_f3_manual_debug_owner", None)
-    if app is None:
-        app = getattr(window, "_display_f3_debug_owner", None)
-    source_frame = getattr(app, "_display_f3_manual_snapshot_frozen_frame", None)
-    if source_frame is not None and getattr(source_frame, "size", 0) > 0:
-        try:
-            window._display_f3_manual_snapshot_frozen_frame = source_frame.copy()
-        except Exception:
-            window._display_f3_manual_snapshot_frozen_frame = source_frame
-    window._display_f3_manual_snapshot_report = str(report or "")
+    window._display_f3_manual_snapshot_report = ""
+    window._display_f3_debug_snapshot_serial = -1
     window._display_f3_manual_snapshot_serial = int(
         getattr(window, "_display_f3_manual_snapshot_serial", 0) or 0
     ) + 1
+
+    app = getattr(window, "_display_f3_manual_debug_owner", None)
+    if app is None:
+        app = getattr(window, "_display_f3_debug_owner", None)
+    source_frame = analysis_seed.get("frame") if isinstance(analysis_seed, dict) else None
+    if source_frame is not None and getattr(source_frame, "size", 0) > 0:
+        # A cópia já foi feita no clique. Não duplicamos Full HD novamente.
+        window._display_f3_manual_snapshot_frozen_frame = source_frame
+        try:
+            app._display_f3_manual_snapshot_frozen_frame = source_frame
+        except Exception:
+            pass
+
+    analysis = snapshot.get("frozen_frame_analysis")
+    snapshot["visual_state"] = {
+        "readout_context": _frozen_frame_visual_context(snapshot, analysis),
+        "debug_visual_source": "manual_current_check_only",
+    }
+    window._display_f3_manual_snapshot = _safe_deepcopy(snapshot)
 
     try:
         window.close_f3_snapshot_debug()
     except Exception:
         pass
+
+    frame_available = bool((snapshot.get("frame") or {}).get("available"))
+    if debug_button is not None:
+        try:
+            debug_button.configure(
+                text="DEBUG TÉCNICO",
+                state=tk.NORMAL if frame_available else tk.DISABLED,
+                cursor="hand2" if frame_available else "arrow",
+            )
+        except Exception:
+            pass
+    if button is not None:
+        try:
+            button.configure(state=tk.NORMAL, cursor="hand2")
+        except Exception:
+            pass
+        _set_button_text_temporarily(
+            button,
+            "ANALISADO" if frame_available else "ANÁLISE INCOMPLETA",
+        )
+    return snapshot
+
+
+def _apply_snapshot_result_to_window(
+    window,
+    snapshot: dict,
+    report: str,
+) -> dict:
+    """Publica somente o DEBUG completo; não cria um novo frame/serial."""
+    button = getattr(window, "f3_manual_analyze_button", None)
+    debug_button = getattr(window, "f3_snapshot_debug_button", None)
+
+    window._display_f3_manual_snapshot = _safe_deepcopy(snapshot)
+    window._display_f3_manual_snapshot_report = str(report or "")
+    window._display_f3_debug_snapshot_serial = int(
+        getattr(window, "_display_f3_manual_snapshot_serial", 0) or 0
+    )
+
+    app = getattr(window, "_display_f3_manual_debug_owner", None)
+    if app is None:
+        app = getattr(window, "_display_f3_debug_owner", None)
+    source_frame = getattr(app, "_display_f3_manual_snapshot_frozen_frame", None)
+    if source_frame is not None and getattr(source_frame, "size", 0) > 0:
+        window._display_f3_manual_snapshot_frozen_frame = source_frame
 
     if debug_button is not None:
         try:
@@ -1575,7 +1651,6 @@ def _apply_snapshot_result_to_window(
             button.configure(state=tk.NORMAL, cursor="hand2")
         except Exception:
             pass
-        _set_button_text_temporarily(button, "ANALISADO")
     return snapshot
 
 
@@ -1584,7 +1659,49 @@ def _supports_async_snapshot_capture(window) -> bool:
     return bool(root is not None and callable(getattr(root, "after", None)))
 
 
+def _poll_current_analysis(window) -> None:
+    result_queue = getattr(
+        window,
+        "_display_f3_current_analysis_worker_queue",
+        None,
+    )
+    if result_queue is None:
+        return
+    try:
+        payload = result_queue.get_nowait()
+    except queue.Empty:
+        root = getattr(window, "root", None)
+        if root is not None:
+            try:
+                root.after(
+                    F3_MANUAL_SNAPSHOT_POLL_MS,
+                    lambda: _poll_current_analysis(window),
+                )
+            except Exception:
+                pass
+        return
+
+    window._display_f3_snapshot_analysis_running = False
+    window._display_f3_current_analysis_worker_queue = None
+    snapshot = payload.get("snapshot")
+    seed = payload.get("seed")
+    error = str(payload.get("error") or "")
+    if not isinstance(snapshot, dict):
+        snapshot = {
+            "source": "f3_manual_current_check_analysis",
+            "analysis_ready": False,
+            "frame": {"available": False},
+            "errors": [error or "erro_worker_analise_atual"],
+        }
+    _apply_current_analysis_result_to_window(
+        window,
+        snapshot,
+        seed if isinstance(seed, dict) else {},
+    )
+
+
 def _poll_async_snapshot_capture(window) -> None:
+    """Poll exclusivo da auditoria completa do DEBUG TÉCNICO."""
     result_queue = getattr(window, "_display_f3_snapshot_worker_queue", None)
     if result_queue is None:
         return
@@ -1602,12 +1719,11 @@ def _poll_async_snapshot_capture(window) -> None:
                 pass
         return
 
-    window._display_f3_snapshot_analysis_running = False
+    window._display_f3_debug_analysis_running = False
     window._display_f3_snapshot_worker_queue = None
     snapshot = payload.get("snapshot")
     report = str(payload.get("report") or "")
     error = str(payload.get("error") or "")
-
     if not isinstance(snapshot, dict):
         snapshot = {
             "source": F3_MANUAL_SNAPSHOT_SOURCE,
@@ -1615,10 +1731,17 @@ def _poll_async_snapshot_capture(window) -> None:
             "frame": {"available": False},
             "errors": [error or "erro_worker_debug"],
         }
+
     _apply_snapshot_result_to_window(window, snapshot, report)
+    if report:
+        try:
+            window.open_f3_snapshot_debug()
+        except Exception:
+            pass
 
 
 def _capture_from_window(window) -> dict | None:
+    """ANALISAR: congela uma vez e processa somente o CHECK atual."""
     app = getattr(window, "_display_f3_manual_debug_owner", None)
     if app is None:
         app = getattr(window, "_display_f3_debug_owner", None)
@@ -1629,21 +1752,9 @@ def _capture_from_window(window) -> dict | None:
             _set_button_text_temporarily(button, "SEM CONTEXTO")
         return None
 
-    # Mantém compatibilidade com testes e ambientes sem event loop Tk.
-    if not _supports_async_snapshot_capture(window):
-        snapshot = capturar_snapshot_debug_display_f3(app)
-        report = (
-            montar_relatorio_snapshot_display_f3(snapshot)
-            if isinstance(snapshot, dict)
-            and (
-                bool(snapshot.get("report_ready"))
-                or (snapshot.get("frame") or {}).get("available")
-            )
-            else ""
-        )
-        return _apply_snapshot_result_to_window(window, snapshot, report)
-
     if bool(getattr(window, "_display_f3_snapshot_analysis_running", False)):
+        return None
+    if bool(getattr(window, "_display_f3_debug_analysis_running", False)):
         return None
 
     try:
@@ -1655,6 +1766,123 @@ def _capture_from_window(window) -> dict | None:
             )
         if debug_button is not None:
             debug_button.configure(
+                text="DEBUG TÉCNICO",
+                state=tk.DISABLED,
+                cursor="arrow",
+            )
+    except Exception:
+        pass
+
+    # Única captura de imagem desta interação.
+    seed = _prepare_async_snapshot_seed(app)
+    repository = getattr(app, "display_project_repository", None)
+
+    if not _supports_async_snapshot_capture(window):
+        if repository is None:
+            snapshot = {
+                "source": "f3_manual_current_check_analysis",
+                "analysis_ready": False,
+                "frame": {"available": False},
+                "errors": ["repository_display_indisponivel"],
+            }
+        else:
+            snapshot = DisplayF3CurrentCheckAnalysisService(
+                repository
+            ).analyze(seed)
+        return _apply_current_analysis_result_to_window(
+            window,
+            snapshot,
+            seed,
+        )
+
+    result_queue = queue.Queue(maxsize=1)
+    window._display_f3_current_analysis_worker_queue = result_queue
+    window._display_f3_snapshot_analysis_running = True
+
+    def worker() -> None:
+        try:
+            if repository is None:
+                raise RuntimeError("repository_display_indisponivel")
+            snapshot = DisplayF3CurrentCheckAnalysisService(
+                repository
+            ).analyze(seed)
+            payload = {
+                "snapshot": snapshot,
+                "seed": seed,
+                "error": "",
+            }
+        except Exception as exc:
+            payload = {
+                "snapshot": None,
+                "seed": seed,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        try:
+            result_queue.put_nowait(payload)
+        except queue.Full:
+            pass
+
+    def start_worker() -> None:
+        try:
+            if button is not None:
+                button.configure(text="ANALISANDO CHECK...")
+        except Exception:
+            pass
+        threading.Thread(
+            target=worker,
+            name="ODIN-F3-CurrentCheckAnalysis",
+            daemon=True,
+        ).start()
+
+    root = getattr(window, "root", None)
+    try:
+        root.after(1, start_worker)
+        root.after(
+            F3_MANUAL_SNAPSHOT_POLL_MS,
+            lambda: _poll_current_analysis(window),
+        )
+    except Exception:
+        window._display_f3_snapshot_analysis_running = False
+        start_worker()
+        return None
+    return None
+
+
+def _generate_debug_from_window(window) -> dict | None:
+    """DEBUG TÉCNICO: auditoria completa, somente depois de ANALISAR."""
+    app = getattr(window, "_display_f3_manual_debug_owner", None)
+    if app is None:
+        app = getattr(window, "_display_f3_debug_owner", None)
+    button = getattr(window, "f3_manual_analyze_button", None)
+    debug_button = getattr(window, "f3_snapshot_debug_button", None)
+    seed = getattr(window, "_display_f3_manual_analysis_seed", None)
+    serial = int(getattr(window, "_display_f3_manual_snapshot_serial", 0) or 0)
+
+    if app is None or not isinstance(seed, dict) or serial <= 0:
+        if debug_button is not None:
+            _set_button_text_temporarily(
+                debug_button,
+                "ANALISE PRIMEIRO",
+                reset_text="DEBUG TÉCNICO",
+            )
+        return None
+    if bool(getattr(window, "_display_f3_snapshot_analysis_running", False)):
+        return None
+    if bool(getattr(window, "_display_f3_debug_analysis_running", False)):
+        return None
+
+    if (
+        int(getattr(window, "_display_f3_debug_snapshot_serial", -1) or -1)
+        == serial
+        and str(getattr(window, "_display_f3_manual_snapshot_report", "") or "")
+    ):
+        return window.open_f3_snapshot_debug()
+
+    try:
+        if button is not None:
+            button.configure(state=tk.DISABLED, cursor="arrow")
+        if debug_button is not None:
+            debug_button.configure(
                 text="GERANDO DEBUG...",
                 state=tk.DISABLED,
                 cursor="arrow",
@@ -1662,16 +1890,28 @@ def _capture_from_window(window) -> dict | None:
     except Exception:
         pass
 
-    # Única fase do clique que toca widgets/Tk: cópia rápida e imutável.
-    seed = _prepare_async_snapshot_seed(app)
-    try:
-        app._display_f3_async_snapshot_seed = seed
-    except Exception:
-        pass
+    debug_seed = _prepare_debug_seed_from_analysis(app, seed)
+    app._display_f3_async_snapshot_seed = debug_seed
+
+    if not _supports_async_snapshot_capture(window):
+        snapshot = capturar_snapshot_debug_display_f3(app)
+        report = (
+            montar_relatorio_snapshot_display_f3(snapshot)
+            if isinstance(snapshot, dict)
+            and (
+                bool(snapshot.get("report_ready"))
+                or (snapshot.get("frame") or {}).get("available")
+            )
+            else ""
+        )
+        result = _apply_snapshot_result_to_window(window, snapshot, report)
+        if report:
+            window.open_f3_snapshot_debug()
+        return result
 
     result_queue = queue.Queue(maxsize=1)
     window._display_f3_snapshot_worker_queue = result_queue
-    window._display_f3_snapshot_analysis_running = True
+    window._display_f3_debug_analysis_running = True
 
     def worker() -> None:
         try:
@@ -1698,11 +1938,6 @@ def _capture_from_window(window) -> dict | None:
             pass
 
     def start_worker() -> None:
-        try:
-            if button is not None:
-                button.configure(text="PROCESSANDO...")
-        except Exception:
-            pass
         threading.Thread(
             target=worker,
             name="ODIN-F3-DebugSnapshot",
@@ -1711,18 +1946,16 @@ def _capture_from_window(window) -> dict | None:
 
     root = getattr(window, "root", None)
     try:
-        # Deixa o Tk pintar CAPTURANDO/PROCESSANDO antes da carga de CPU.
         root.after(1, start_worker)
         root.after(
             F3_MANUAL_SNAPSHOT_POLL_MS,
             lambda: _poll_async_snapshot_capture(window),
         )
     except Exception:
-        window._display_f3_snapshot_analysis_running = False
+        window._display_f3_debug_analysis_running = False
         start_worker()
         return None
     return None
-
 
 def _open_snapshot_debug(window):
     report = str(getattr(window, "_display_f3_manual_snapshot_report", "") or "")
@@ -1923,7 +2156,11 @@ def _install_window_controls() -> None:
         self._display_f3_snapshot_debug_window = None
         self._display_f3_snapshot_debug_text = None
         self._display_f3_snapshot_analysis_running = False
+        self._display_f3_debug_analysis_running = False
+        self._display_f3_current_analysis_worker_queue = None
         self._display_f3_snapshot_worker_queue = None
+        self._display_f3_manual_analysis_seed = None
+        self._display_f3_debug_snapshot_serial = -1
 
         analyze = tk.Button(
             self.project_frame,
@@ -1953,7 +2190,7 @@ def _install_window_controls() -> None:
         debug = tk.Button(
             self.project_frame,
             text="DEBUG TÉCNICO",
-            command=lambda owner=self: owner.open_f3_snapshot_debug(),
+            command=lambda owner=self: owner.generate_f3_snapshot_debug(),
             font=("DejaVu Sans", 8, "bold"),
             bg="#1E293B",
             fg="#94A3B8",
@@ -1978,6 +2215,7 @@ def _install_window_controls() -> None:
         self.f3_snapshot_debug_button = debug
 
     cls.capture_f3_snapshot_analysis = lambda self: _capture_from_window(self)
+    cls.generate_f3_snapshot_debug = lambda self: _generate_debug_from_window(self)
     cls.open_f3_snapshot_debug = lambda self: _open_snapshot_debug(self)
     cls.close_f3_snapshot_debug = lambda self: _close_snapshot_debug(self)
     cls.__init__ = init
@@ -1988,7 +2226,7 @@ _INSTALLED = False
 
 
 def instalar_analise_manual_snapshot_display_f3() -> None:
-    """Instala ANALISAR + DEBUG TÉCNICO estático como última camada do F3."""
+    """Instala ANALISAR leve + DEBUG TÉCNICO completo sob demanda no F3."""
     global _INSTALLED
     if _INSTALLED:
         return

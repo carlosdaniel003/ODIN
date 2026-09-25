@@ -226,8 +226,9 @@ def instalar_gate_rapido_check_esperado_display_f3() -> None:
     instalar_correcao_deadlock_energia_display_f3()
 
     # Última camada visual/diagnóstica: remove o toggle OFF/ON e o debug ao vivo
-    # da interface. ANALISAR congela um frame e DEBUG TÉCNICO usa aquele snapshot,
-    # sem recalcular e sem interferir no sequenciador produtivo.
+    # da interface. ANALISAR congela um frame e processa só o CHECK atual;
+    # DEBUG TÉCNICO gera a auditoria completa daquele mesmo frame sob demanda,
+    # sem interferir no sequenciador produtivo.
     from src.platform.display_f3_manual_snapshot_debug import (
         instalar_analise_manual_snapshot_display_f3,
     )
