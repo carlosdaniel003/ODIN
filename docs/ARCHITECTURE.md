@@ -228,6 +228,16 @@ No runtime de produto, instalado por último em `main_desktop.py`, ele:
 O antigo wrapper de responsividade/cadência substituído foi removido da árvore;
 o coordinator permanece como única autoridade periódica do F3.
 
+
+No caminho visual do F3, tracking e câmera têm autoridades diferentes:
+tracking fornece pose/geometria; a preview recebe sempre o frame atual publicado
+pela câmera. O frame usado por ORB/AKAZE não volta a ser autoridade visual quando
+o worker termina.
+
+A abertura de `CONFIGURAR` entra na fila normal do Tk com `after(1)`; não usa
+`after_idle()`, porque câmera e scheduler periódicos podem manter o mainloop
+continuamente ocupado.
+
 ## 5. Direção de dependências
 
 A dependência preferida é:

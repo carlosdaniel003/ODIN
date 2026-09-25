@@ -281,6 +281,29 @@ arquitetural explícita; não deve ser reintroduzida como compatibilidade inform
 
 ---
 
+## D-018 — Preview F3 é latest-frame e CONFIGURAR não depende de idle
+
+**Status:** Accepted
+
+O frame usado por um worker pesado do F3 é uma cópia de análise, não uma fonte
+visual futura.
+
+Decisão:
+
+- `camera_frame_atual` é a única autoridade da imagem ao vivo;
+- quando um job de tracking termina, seu `raw_frame` não pode substituir o
+  frame atual da preview;
+- resultado de tracking muito antigo não alimenta decisão produtiva;
+- `CONFIGURAR` deve ser enfileirado com `after(...)`, não `after_idle()`,
+  porque câmera e scheduler periódicos podem manter o Tk continuamente ocupado;
+- geometria de tracking pode permanecer temporariamente enquanto um novo job
+  calcula, mas nunca congela a imagem visível.
+
+Motivação: evitar preview com vários segundos de atraso e impedir que o clique em
+CONFIGURAR seja postergado indefinidamente.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:
