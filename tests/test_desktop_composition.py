@@ -56,16 +56,21 @@ class DesktopCompositionTests(unittest.TestCase):
             profile,
         )
 
-    def test_legacy_raspberry_modules_are_only_compatibility_shims(self):
-        profile = source("src/platform/raspberry_pi3_profile.py")
-        production = source("src/platform/raspberry_pi3_production_app.py")
-        self.assertIn("RaspberryPi3ODINApp = DesktopODINApp", profile)
-        self.assertIn(
-            "RaspberryPi3ProductionApp = DesktopProductionApp",
-            production,
+    def test_legacy_raspberry_platform_files_were_removed(self):
+        legacy_paths = (
+            "main_rpi.py",
+            "src/platform/gpio_raspberry_app.py",
+            "src/platform/gpio_trigger_service.py",
+            "src/platform/raspberry_camera_service.py",
+            "src/platform/raspberry_enter_trigger.py",
+            "src/platform/raspberry_pi3_production_app.py",
+            "src/platform/raspberry_pi3_profile.py",
+            "src/platform/raspberry_pi3_settings.py",
+            "src/platform/raspberry_runtime_fixes.py",
+            "src/ui/operation_window_raspberry.py",
         )
-        self.assertNotIn("class RaspberryPi3ODINApp", profile)
-        self.assertNotIn("class RaspberryPi3ProductionApp", production)
+        for path in legacy_paths:
+            self.assertFalse((ROOT / path).exists(), path)
 
     def test_canonical_desktop_path_has_no_raspberry_or_gpio_dependencies(self):
         canonical_files = (

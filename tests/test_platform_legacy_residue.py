@@ -17,11 +17,7 @@ LEGACY_MODULES = {
     "src.platform.raspberry_runtime_fixes",
     "src.ui.operation_window_raspberry",
 }
-COMPATIBILITY_SHIMS = {
-    ROOT / "src/platform/raspberry_camera_service.py",
-    ROOT / "src/platform/raspberry_pi3_production_app.py",
-    ROOT / "src/platform/raspberry_pi3_profile.py",
-}
+COMPATIBILITY_SHIMS: set[Path] = set()
 OBSOLETE_RUNTIME_MODULES = {
     "src.platform.display_f3_tk_responsiveness",
 }
