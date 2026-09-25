@@ -11,7 +11,7 @@ from src.core.roi_geometry import (
     normalizar_tipo_roi,
     pontos_segmento,
 )
-from src.platform.blue_operation_window import BlueRaspberryOperationWindow
+from src.platform.blue_operation_window import BlueOperationWindow
 
 
 F2_LIVE_ROI_OVERLAY_ALPHA = 0.14
@@ -274,7 +274,7 @@ def renderizar_mascaras_resultado_f2(frame, leds, failed_led_ids=()):
     return result
 
 
-class SegmentDisplayOperationWindow(BlueRaspberryOperationWindow):
+class SegmentDisplayOperationWindow(BlueOperationWindow):
     """Prévia F2 capaz de desenhar simultaneamente círculos e segmentos."""
 
     def __init__(self, *args, **kwargs) -> None:

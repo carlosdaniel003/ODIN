@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from src.ui.main_window import ODINView
-from src.ui.operation_window_raspberry import RaspberryOperationWindow
+from src.ui.operation_window import DesktopOperationWindow
 
 
 # ---------------------------------------------------------------------------
@@ -347,35 +347,35 @@ def instalar_paleta_display() -> None:
     # Mantém verde para resultado OK, mas a marca do ODIN passa a ser âmbar.
     ODINView.COR_VERDE_CLARO = DISPLAY_YELLOW
 
-    RaspberryOperationWindow.COLOR_WAITING = DISPLAY_DARK_ALT
-    RaspberryOperationWindow.COLOR_POSITIONING = DISPLAY_BLUE_DARK
-    RaspberryOperationWindow.COLOR_WAITING_REMOVAL = DISPLAY_DARK
-    RaspberryOperationWindow.COLOR_PROCESSING = DISPLAY_YELLOW_DARK
-    RaspberryOperationWindow.PREVIEW_BACKGROUND = DISPLAY_DARK
-    RaspberryOperationWindow.PREVIEW_PANEL = DISPLAY_DARK_CARD
-    RaspberryOperationWindow.PREVIEW_BORDER = DISPLAY_BORDER
-    RaspberryOperationWindow.PREVIEW_GUIDE = DISPLAY_YELLOW
-    RaspberryOperationWindow.PREVIEW_BOARD_GUIDE = DISPLAY_BLUE_LIGHT
-    RaspberryOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
-    RaspberryOperationWindow.PREVIEW_TEXT = DISPLAY_WHITE
-    RaspberryOperationWindow.PREVIEW_MUTED = DISPLAY_MUTED
+    DesktopOperationWindow.COLOR_WAITING = DISPLAY_DARK_ALT
+    DesktopOperationWindow.COLOR_POSITIONING = DISPLAY_BLUE_DARK
+    DesktopOperationWindow.COLOR_WAITING_REMOVAL = DISPLAY_DARK
+    DesktopOperationWindow.COLOR_PROCESSING = DISPLAY_YELLOW_DARK
+    DesktopOperationWindow.PREVIEW_BACKGROUND = DISPLAY_DARK
+    DesktopOperationWindow.PREVIEW_PANEL = DISPLAY_DARK_CARD
+    DesktopOperationWindow.PREVIEW_BORDER = DISPLAY_BORDER
+    DesktopOperationWindow.PREVIEW_GUIDE = DISPLAY_YELLOW
+    DesktopOperationWindow.PREVIEW_BOARD_GUIDE = DISPLAY_BLUE_LIGHT
+    DesktopOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
+    DesktopOperationWindow.PREVIEW_TEXT = DISPLAY_WHITE
+    DesktopOperationWindow.PREVIEW_MUTED = DISPLAY_MUTED
 
     # Classes derivadas redefinem a cor dos LEDs NG.
     try:
         from src.platform.raspberry_runtime_fixes import (
-            StableRaspberryOperationWindow,
+            StableDesktopOperationWindow,
         )
 
-        StableRaspberryOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
+        StableDesktopOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
     except Exception:
         pass
 
     try:
         from src.platform.blue_operation_window import (
-            BlueRaspberryOperationWindow,
+            BlueDesktopOperationWindow,
         )
 
-        BlueRaspberryOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
+        BlueDesktopOperationWindow.PREVIEW_FAILED = DISPLAY_DANGER
     except Exception:
         pass
 

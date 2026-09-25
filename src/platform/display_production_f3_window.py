@@ -5,10 +5,10 @@ import tkinter as tk
 from collections.abc import Callable
 
 from src.platform.display_visual_rotation import preparar_frame_visual_display
-from src.ui.operation_window_raspberry import RaspberryOperationWindow
+from src.ui.operation_window import DesktopOperationWindow
 
 
-class DisplayProductionF3Window(RaspberryOperationWindow):
+class DisplayProductionF3Window(DesktopOperationWindow):
     """Tela de Produção Display F3, isolada da Produção F2."""
 
     CHECK_CURRENT = "#D6A900"

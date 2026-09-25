@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from src.platform.raspberry_runtime_fixes import (
-    StableRaspberryOperationWindow,
-)
+import tkinter as tk
+
+from src.ui.operation_window import DesktopOperationWindow
 
 
 def substituir_texto_marcacao_azul(texto: str) -> str:
@@ -19,10 +19,55 @@ def texto_placa_analisada_f2(is_ok: bool) -> str:
     return "PLACA NG\nPONTOS APAGADOS\nDESTACADOS NA CÂMERA"
 
 
-class BlueRaspberryOperationWindow(StableRaspberryOperationWindow):
+class BlueOperationWindow(DesktopOperationWindow):
     """Tela F2 com todas as referências visuais de NG em azul."""
 
     PREVIEW_FAILED = "#2563EB"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.preview_legend.configure(
+            text="CÍRCULO AZUL: LED APAGADO",
+            fg=self.PREVIEW_FAILED,
+        )
+
+    def _widget_pertence_ao_painel(self, widget) -> bool:
+        atual = widget
+        while atual is not None:
+            if atual is self.container:
+                return True
+            atual = getattr(atual, "master", None)
+        return False
+
+    def hide(self) -> None:
+        if self._preview_resize_after_id is not None:
+            try:
+                self.root.after_cancel(self._preview_resize_after_id)
+            except Exception:
+                pass
+            self._preview_resize_after_id = None
+
+        try:
+            widget_com_grab = self.root.grab_current()
+            if (
+                widget_com_grab is not None
+                and self._widget_pertence_ao_painel(widget_com_grab)
+            ):
+                widget_com_grab.grab_release()
+        except Exception:
+            pass
+
+        try:
+            self.container.place_forget()
+            self.container.lower()
+        except tk.TclError:
+            pass
+
+        try:
+            self.root.update_idletasks()
+            self.root.focus_force()
+        except tk.TclError:
+            pass
 
     def show_result(
         self,
