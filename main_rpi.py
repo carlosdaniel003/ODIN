@@ -148,6 +148,9 @@ from src.platform.display_f3_physical_transition_authority import (  # noqa: E40
 from src.platform.display_f3_tracking_orientation_ui import (  # noqa: E402
     instalar_ui_rastreamento_objetos_display_f3,
 )
+from src.platform.display_f3_tk_responsiveness import (  # noqa: E402
+    instalar_responsividade_tk_display_f3,
+)
 
 
 instalar_editor_contorno_placa_f2()
@@ -251,6 +254,9 @@ def main() -> None:
     # ligado. Para avançar BLUE/USB/AUX (e CHECKS futuros), o frame precisa provar
     # fisicamente a transição do CHECK anterior para o atual.
     instalar_autoridade_transicao_fisica_checks_f3(app)
+    # Último wrapper do F3: mede o callback completo, inclusive as autoridades
+    # instaladas acima, e reserva tempo real do mainloop para cliques/teclas.
+    instalar_responsividade_tk_display_f3(app)
     root.mainloop()
 
 

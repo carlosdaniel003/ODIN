@@ -2903,6 +2903,12 @@ def reset_tracking_runtime(app) -> None:
     app._display_f3_tracking_raw_preview_frame = None
     app._display_f3_tracking_result = None
     app._display_f3_tracking_live_geometry = None
+    # O F3 usa pipeline cooperativo em dois ciclos do Tk: rastreamento primeiro,
+    # classificação depois. Nunca deixe um frame pendente sobreviver a reset,
+    # troca de projeto, fechamento do F3 ou perda de rastreamento.
+    app._display_f3_tracking_analysis_frame = None
+    app._display_f3_tracking_analysis_pending = False
+    app._display_f3_tracking_pending_raw_frame = None
     app._display_f3_object_tracking_last_status = {
         "enabled": tracking_enabled(app),
         "locked": False,
@@ -3560,13 +3566,90 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
     previous_preview = app._atualizar_preview_display_f3
 
     def instance_preview(self):
-        raw = getattr(self, "camera_frame_atual", None)
+        raw_latest = getattr(self, "camera_frame_atual", None)
         use_tracking = bool(
             tracking_enabled(self)
             and not bool(
                 getattr(self, "_display_f3_tracking_config_open", False)
             )
         )
+        rearm_pending = bool(
+            getattr(self, "_display_f3_waiting_empty_rearm", False)
+            or getattr(
+                self,
+                "_display_f3_waiting_new_board_after_empty",
+                False,
+            )
+        )
+
+        # O rearme terminal precisa analisar o suporte vazio no frame RAW.
+        # Nesse estado não há motivo para pagar ORB/warp nem manter uma análise
+        # de CHECK pendente.
+        if use_tracking and rearm_pending:
+            self._display_f3_tracking_analysis_pending = False
+            self._display_f3_tracking_analysis_frame = None
+            self._display_f3_tracking_pending_raw_frame = None
+            if _valid_frame(raw_latest):
+                self._display_f3_tracking_raw_authority_frame = raw_latest
+
+            previous_frame = getattr(self, "camera_frame_atual", None)
+            self._display_f3_skip_auto_analysis_this_preview = False
+            self._display_f3_tracking_instance_frame_prepared = True
+            try:
+                return previous_preview()
+            finally:
+                self._display_f3_tracking_instance_frame_prepared = False
+                self._display_f3_skip_auto_analysis_this_preview = False
+                self.camera_frame_atual = (
+                    raw_latest if _valid_frame(raw_latest) else previous_frame
+                )
+
+        pending = bool(
+            use_tracking
+            and getattr(
+                self,
+                "_display_f3_tracking_analysis_pending",
+                False,
+            )
+        )
+        pending_frame = getattr(
+            self,
+            "_display_f3_tracking_analysis_frame",
+            None,
+        )
+        pending_raw = getattr(
+            self,
+            "_display_f3_tracking_pending_raw_frame",
+            None,
+        )
+
+        # Segunda metade do pipeline cooperativo: o rastreamento/alinhamento já
+        # terminou no callback anterior. Agora o Tk executa somente a análise do
+        # CHECK. Isso impede ORB/AKAZE + warp + classificação de ocuparem o mesmo
+        # callback e devolve o mainloop aos botões entre as duas etapas pesadas.
+        if pending and _valid_frame(pending_frame):
+            cycle_raw = pending_raw if _valid_frame(pending_raw) else raw_latest
+            if _valid_frame(cycle_raw):
+                self._display_f3_tracking_raw_authority_frame = cycle_raw
+
+            previous_frame = getattr(self, "camera_frame_atual", None)
+            self.camera_frame_atual = pending_frame
+            self._display_f3_skip_auto_analysis_this_preview = False
+            self._display_f3_tracking_instance_frame_prepared = True
+            try:
+                return previous_preview()
+            finally:
+                self._display_f3_tracking_analysis_pending = False
+                self._display_f3_tracking_analysis_frame = None
+                self._display_f3_tracking_pending_raw_frame = None
+                self._display_f3_tracking_instance_frame_prepared = False
+                self._display_f3_skip_auto_analysis_this_preview = False
+                if _valid_frame(raw_latest):
+                    self.camera_frame_atual = raw_latest
+                    self._display_f3_tracking_raw_authority_frame = raw_latest
+                else:
+                    self.camera_frame_atual = previous_frame
+
         analysis_frame = None
         heavy_due = True
         due_fn = getattr(self, "_display_auto_analysis_due_now", None)
@@ -3581,46 +3664,61 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
         if getattr(self, "_display_f3_tracking_result", None) is None:
             heavy_due = True
 
-        if use_tracking and _valid_frame(raw):
+        if use_tracking and _valid_frame(raw_latest):
             # Autoridade RAW é atualizada em TODOS os frames para que o preview
             # nunca mostre uma imagem antiga.
-            self._display_f3_tracking_raw_authority_frame = raw
+            self._display_f3_tracking_raw_authority_frame = raw_latest
 
             if heavy_due:
-                _aligned, result = align_frame_for_f3(self, raw)
+                _aligned, result = align_frame_for_f3(self, raw_latest)
                 self._display_f3_tracking_result = result
-                _update_tracking_live_geometry(self, raw, result)
+                _update_tracking_live_geometry(self, raw_latest, result)
                 locked = bool(result is not None and result.locked)
                 if locked:
                     aligned_check, _matrix = _analysis_alignment_for_current_check(
                         self,
-                        raw,
+                        raw_latest,
                         result,
                     )
                     if _valid_frame(aligned_check):
                         analysis_frame = aligned_check
-                self._display_f3_tracking_analysis_frame = analysis_frame
+
+                # Se existe frame canônico válido, a classificação fica para o
+                # próximo callback. Mantemos a referência do RAW correspondente
+                # para que geometria, máscaras e evidência pertençam ao mesmo frame.
+                if _valid_frame(analysis_frame):
+                    self._display_f3_tracking_analysis_frame = analysis_frame
+                    self._display_f3_tracking_pending_raw_frame = raw_latest
+                    self._display_f3_tracking_analysis_pending = True
+                else:
+                    self._display_f3_tracking_analysis_frame = None
+                    self._display_f3_tracking_pending_raw_frame = None
+                    self._display_f3_tracking_analysis_pending = False
         elif use_tracking:
             self._display_f3_tracking_live_geometry = None
             self._display_f3_tracking_analysis_frame = None
+            self._display_f3_tracking_pending_raw_frame = None
+            self._display_f3_tracking_analysis_pending = False
+        else:
+            # Tracking desligado mantém literalmente o pipeline anterior.
+            self._display_f3_tracking_analysis_frame = None
+            self._display_f3_tracking_pending_raw_frame = None
+            self._display_f3_tracking_analysis_pending = False
 
-        # Frames entre análises são exclusivamente de exibição. Isso é o que
-        # desacopla FPS visual de ORB/RANSAC/classificação.
-        self._display_f3_skip_auto_analysis_this_preview = bool(
-            use_tracking and not heavy_due
-        )
+        # Com tracking ligado, este callback é somente preview/rastreamento.
+        # A análise automática é liberada exclusivamente no callback pendente
+        # acima, evitando empilhar as duas fases pesadas no mesmo evento Tk.
+        self._display_f3_skip_auto_analysis_this_preview = bool(use_tracking)
 
         previous_frame = getattr(self, "camera_frame_atual", None)
-        if use_tracking and heavy_due and _valid_frame(analysis_frame):
-            self.camera_frame_atual = analysis_frame
         self._display_f3_tracking_instance_frame_prepared = bool(use_tracking)
         try:
             return previous_preview()
         finally:
             self._display_f3_tracking_instance_frame_prepared = False
             self._display_f3_skip_auto_analysis_this_preview = False
-            if use_tracking and _valid_frame(raw):
-                self.camera_frame_atual = raw
+            if use_tracking and _valid_frame(raw_latest):
+                self.camera_frame_atual = raw_latest
             else:
                 self.camera_frame_atual = previous_frame
 
