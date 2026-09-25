@@ -507,9 +507,10 @@ por ele a análise manual do CHECK atual, o DEBUG completo e as previews pesadas
 de configuração/tracking. Isso impede que essas operações criem threads
 independentes e disputem CPU livremente.
 
-A prioridade alta permanece reservada para compute operacional puro. O scheduler
-já possui coordenador único; a migração do compute produtivo para `HIGH` depende
-da separação das autoridades stateful na próxima etapa arquitetural.
+A prioridade alta permanece reservada para compute operacional puro. As
+autoridades stateful já possuem proprietários explícitos; qualquer migração para
+`HIGH` deve enviar somente requests/snapshots sem Tkinter e aplicar o resultado
+de volta ao runtime se o contexto ainda for atual.
 
 ## 5.14 Coordenador do runtime F3
 
@@ -535,8 +536,41 @@ cadência de fundo. Após um callback caro, o próximo tick recebe um intervalo 
 idle para permitir mouse, teclado e repaint do Tkinter.
 
 O coordenador não decide OK/NG e não implementa tracking, presença, energia ou
-CHECKS. Essas autoridades continuam separadas e serão consolidadas na etapa
-seguinte da migração.
+CHECKS. Ele orquestra os proprietários canônicos descritos abaixo.
+
+## 5.15 Autoridades canônicas do runtime F3
+
+O runtime produtivo possui uma composição explícita em
+`F3RuntimeAuthorities`:
+
+~~~text
+F3RuntimeAuthorities
+├── F3TrackingAuthority
+│   └── F3DisplayObjectTracker
+├── F3PresenceAuthority
+├── F3PowerAuthority
+├── F3CheckAnalyzerAuthority
+│   └── F3TrackedRawCheckAnalyzer
+└── F3StateMachineAuthority
+    └── DisplayCheckSequenceRuntime
+~~~
+
+Essa composição é instalada depois das camadas históricas de compatibilidade e
+antes do `F3RuntimeCoordinator`.
+
+O estado físico, presença e energia são cacheados por frame/projeto/CHECK/rearme.
+Assim, se mais de um adapter histórico consultar o mesmo frame, todos recebem o
+mesmo snapshot em vez de repetir matching e decisão física.
+
+Presença é resolvida antes de energia; energia não pode declarar uma placa
+presente. A sequência de CHECKS continua armazenada no
+`DisplayCheckSequenceRuntime`, mas suas mutações produtivas passam pela facade
+`F3StateMachineAuthority` no runtime final.
+
+Os módulos históricos `fix/v2/final/guard/compat` ainda podem fornecer
+algoritmos e adaptação durante a migração. Eles não representam novas
+autoridades. A remoção dos resíduos comprovadamente substituídos é uma etapa
+posterior e separada.
 
 ---
 

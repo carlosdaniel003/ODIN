@@ -185,6 +185,48 @@ remover resíduo
 
 Nunca manter permanentemente duas autoridades.
 
+### Implementação consolidada da Etapa 5
+
+A composição canônica é `F3RuntimeAuthorities`:
+
+~~~text
+F3RuntimeAuthorities
+├── F3TrackingAuthority
+├── F3PresenceAuthority
+├── F3PowerAuthority
+├── F3CheckAnalyzerAuthority
+└── F3StateMachineAuthority
+~~~
+
+O runtime final instala essa composição depois das autoridades/adapters
+históricos e antes do `F3RuntimeCoordinator`.
+
+Mudanças efetivas:
+
+- todos os consumidores de tracking convergem para a mesma instância do
+  `F3DisplayObjectTracker`;
+- presença possui uma única memória de estabilidade curta;
+- energia só é avaliada depois da presença e possui seu próprio latch
+  intermitente;
+- analyzer produtivo e aprendizado ON/OFF reutilizam a mesma instância/cache;
+- mutações da sequência (configurar, avançar, descartar, resetar) usam
+  `F3StateMachineAuthority` quando o runtime final está instalado;
+- estado físico, presença e energia usam cache por
+  `frame + projeto + CHECK + estado de rearme`;
+- múltiplos wrappers históricos que consultam o mesmo frame recebem cópias do
+  mesmo resultado em vez de recalcular a cadeia;
+- abertura, fechamento e confirmação de EMPTY invalidam latches/caches do ciclo;
+- métricas das autoridades são expostas pelo coordinator.
+
+As funções históricas continuam existindo como primitivas e adapters porque sua
+remoção em massa seria uma mudança de comportamento de alto risco. Elas não são
+a fonte final de propriedade. A Etapa 7 auditará consumidores e removerá somente
+resíduos comprovadamente substituídos.
+
+A Etapa 5 não moveu o pipeline produtivo completo para background. A separação
+de proprietários cria a fronteira necessária para offloads futuros de compute
+puro, sem transformar workers em donos de Tkinter/state machine.
+
 ## Etapa 6 — Desktop Windows/Linux
 
 Introduzir composição conceitual de desktop.

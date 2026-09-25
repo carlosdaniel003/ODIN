@@ -98,12 +98,35 @@ Uso atual:
 ~~~text
 NORMAL  análise manual do CHECK atual
 LOW     configuração / thumbnails / DEBUG completo
-HIGH    reservado para compute operacional puro após consolidação da Etapa 5
+HIGH    reservado para compute operacional puro com request/result seguro
 ~~~
 
 Quando a fila está cheia, um job de prioridade maior pode substituir trabalho
 pendente de prioridade inferior. Previews com a mesma chave usam substituição
 latest-wins em vez de acumular backlog.
+
+### Autoridades e custo por frame
+
+A Etapa 5 introduziu `F3RuntimeAuthorities` como composição canônica. O estado
+físico, presença e energia possuem cache pelo token do frame, projeto, CHECK e
+estado de rearme.
+
+Portanto, se adapters históricos consultarem o estado mais de uma vez no mesmo
+frame/contexto, o matching pesado não deve ser repetido. O runtime expõe
+`build_count` e `cache_hits` para validar esse contrato.
+
+A prioridade `HIGH` continua disponível, mas não deve receber um método que
+misture compute, state machine e UI. O uso correto é:
+
+~~~text
+snapshot/request imutável
+ ↓
+compute puro no executor HIGH
+ ↓
+resultado versionado
+ ↓
+aplicação no runtime/thread Tk se ainda pertencer ao contexto atual
+~~~
 
 ## 6. Scheduler
 

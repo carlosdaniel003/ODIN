@@ -132,12 +132,47 @@ Consumidores já migrados:
 - análise manual do CHECK atual;
 - auditoria do DEBUG TÉCNICO.
 
-A prioridade `HIGH` permanece reservada para compute operacional puro. Durante
-a Etapa 4 ficou comprovado que o callback produtivo atual ainda mistura visão,
-autoridades stateful e apresentação. Ele não é enviado inteiro a background.
-A extração dessas autoridades em serviços com request/result explícitos pertence
-à Etapa 5; só então o compute operacional poderá usar `HIGH` sem tocar Tk/state
-produtivo fora do thread principal.
+A prioridade `HIGH` permanece reservada para compute operacional puro. A
+Etapa 5 separou os proprietários stateful do runtime, mas não envia o callback
+produtivo inteiro a background: tracking, presença, energia, análise, sequência
+e apresentação ainda precisam manter seus contratos de aplicação no thread
+correto. Novos offloads devem mover somente compute puro e publicar resultados
+versionados de volta ao runtime.
+
+### Autoridades canônicas do runtime F3
+
+A composição produtiva do F3 possui um registro explícito de proprietários:
+
+~~~text
+src/platform/display_f3_runtime_authorities.py
+  └── F3RuntimeAuthorities
+      ├── F3TrackingAuthority
+      │     └── F3DisplayObjectTracker
+      ├── F3PresenceAuthority
+      ├── F3PowerAuthority
+      ├── F3CheckAnalyzerAuthority
+      │     └── F3TrackedRawCheckAnalyzer
+      └── F3StateMachineAuthority
+            └── DisplayCheckSequenceRuntime
+~~~
+
+Contratos atuais:
+
+- cada responsabilidade possui um proprietário explícito;
+- tracking reutiliza uma única instância stateful do tracker;
+- presença possui uma única memória de estabilidade curta;
+- energia recebe presença como entrada e não pode ignorá-la;
+- analyzer produtivo possui uma única instância/cache por sessão;
+- mutações de sequência passam pela facade da state machine;
+- estado físico + presença + energia são calculados uma vez por
+  `frame/projeto/CHECK/rearme` e reutilizados pelos adapters históricos;
+- caches/latches são invalidados em abertura, fechamento e rearme físico;
+- o coordinator publica as métricas dessas autoridades junto do scheduling.
+
+Os módulos históricos `fix/v2/final/guard/compat` ainda podem fornecer
+algoritmos, políticas e adapters de compatibilidade. Eles não devem ser tratados
+como novos proprietários. A remoção física de caminhos comprovadamente
+substituídos pertence à Etapa 7.
 
 ### Coordenador canônico do runtime F3
 
@@ -198,11 +233,11 @@ O princípio mais importante da arquitetura é **Single Owner**.
 | último frame | Latest Frame Buffer |
 | scheduling F3 | F3 Runtime Coordinator |
 | execução pesada F3 | Heavy Vision Executor |
-| tracking | Tracking Service |
-| presença | Presence Service |
-| energia | Power Service |
-| análise de CHECK | Check Analyzer |
-| sequência | State Machine |
+| tracking | `F3TrackingAuthority` |
+| presença | `F3PresenceAuthority` |
+| energia | `F3PowerAuthority` |
+| análise de CHECK | `F3CheckAnalyzerAuthority` |
+| sequência | `F3StateMachineAuthority` / `DisplayCheckSequenceRuntime` |
 | decisão de resultado | regra canônica do domínio |
 | persistência | Repository |
 | apresentação | ViewModel + UI |

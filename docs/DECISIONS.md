@@ -76,9 +76,9 @@ Contratos aceitos:
 
 `NORMAL` é usado pela análise manual do CHECK atual. `LOW` é usado por
 previews/configuração e DEBUG completo. `HIGH` permanece reservado para compute
-operacional puro. O callback produtivo legado ainda contém mutações de estado e
-apresentação e só poderá ser movido ao executor depois da consolidação das
-autoridades na Etapa 5.
+operacional puro. A Etapa 5 consolidou os proprietários stateful; isso autoriza
+offloads futuros somente quando o trabalho puder ser expresso como request/result
+sem manipular Tkinter ou state machine no worker.
 
 Novos trabalhos pesados assíncronos do F3 não devem criar threads próprias fora
 desse executor.
@@ -180,6 +180,41 @@ de produto.
 
 O coordenador orquestra. Ele não implementa algoritmos de tracking, presença,
 energia, análise de CHECK ou state machine.
+
+---
+
+## D-015 — F3RuntimeAuthorities é a composição canônica das autoridades F3
+
+**Status:** Accepted
+
+`F3RuntimeAuthorities`, em
+`src/platform/display_f3_runtime_authorities.py`, registra os proprietários
+canônicos de tracking, presença, energia, análise de CHECK e máquina de sequência.
+
+Proprietários:
+
+~~~text
+tracking       F3TrackingAuthority
+presença       F3PresenceAuthority
+energia        F3PowerAuthority
+check analyzer F3CheckAnalyzerAuthority
+sequência      F3StateMachineAuthority
+~~~
+
+Consequências:
+
+- consumidores não devem criar uma segunda memória/autoridade para essas
+  responsabilidades;
+- builders históricos de estado físico/operacional funcionam como adapters e
+  recebem o mesmo snapshot canônico cacheado por frame/contexto;
+- energia depende da resposta de presença e não pode promovê-la implicitamente;
+- mutações de sequência passam pela facade canônica quando instalada;
+- caches e latches canônicos são invalidados em abertura, fechamento e rearme;
+- módulos históricos podem continuar fornecendo primitivas de visão e
+  compatibilidade até a auditoria de resíduos da Etapa 7;
+- consolidar autoridade não significa executar automaticamente todo o pipeline
+  em worker. Compute pesado só pode ir ao executor quando estiver separado de
+  Tkinter e das mutações stateful.
 
 ---
 
