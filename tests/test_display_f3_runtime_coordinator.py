@@ -68,6 +68,18 @@ class _Config:
         self.visible = visible
 
 
+class _HeavyExecutor:
+    def __init__(self, active=0, pending=0):
+        self.active = active
+        self.pending = pending
+
+    def stats(self):
+        return {
+            "active_jobs": int(self.active),
+            "pending_jobs": int(self.pending),
+        }
+
+
 class _App:
     DISPLAY_F3_PREVIEW_INTERVAL_MS = 16
 
@@ -89,6 +101,7 @@ class _App:
         self.full_cycles = 0
         self.renders = 0
         self._display_f3_runtime_coordinator = None
+        self._display_f3_heavy_executor = None
 
     def _display_auto_frame_token(self, _frame):
         return ("camera", self.camera_ultimo_frame_id)
@@ -204,6 +217,22 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
         self.assertEqual([], app.root.calls)
         self.assertIsNone(app.display_f3_after_id)
         self.assertFalse(coordinator.stats()["running"])
+
+    def test_heavy_executor_busy_applies_backpressure_without_second_heavy_path(self):
+        app, coordinator = self._install()
+        app._display_f3_heavy_executor = _HeavyExecutor(active=1)
+        app.root.run_next()
+
+        self.assertEqual(0, app.full_cycles)
+        self.assertEqual(1, app.renders)
+        self.assertEqual(
+            "heavy_executor_busy",
+            coordinator.stats()["last_reason"],
+        )
+        self.assertEqual(
+            1,
+            coordinator.stats()["heavy_executor"]["active_jobs"],
+        )
 
     def test_tracking_pending_second_half_runs_even_without_new_frame(self):
         app, coordinator = self._install()

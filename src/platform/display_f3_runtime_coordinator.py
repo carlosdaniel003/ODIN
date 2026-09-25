@@ -133,6 +133,7 @@ class F3RuntimeCoordinator:
             "last_reason": str(self._last_reason),
             "last_frame_token": self._last_frame_token,
             "last_full_cycle_frame_token": self._last_full_cycle_frame_token,
+            "heavy_executor": self._heavy_executor_stats(),
         }
 
     def _base_interval_ms(self) -> int:
@@ -230,6 +231,30 @@ class F3RuntimeCoordinator:
             )
         )
 
+    def _heavy_executor_stats(self) -> dict:
+        executor = getattr(
+            self.app,
+            "_display_f3_heavy_executor",
+            None,
+        )
+        if executor is None:
+            return {}
+        stats = getattr(executor, "stats", None)
+        if not callable(stats):
+            return {}
+        try:
+            value = stats()
+        except Exception:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _heavy_executor_busy(self) -> bool:
+        stats = self._heavy_executor_stats()
+        return bool(
+            int(stats.get("active_jobs", 0) or 0) > 0
+            or int(stats.get("pending_jobs", 0) or 0) > 0
+        )
+
     @staticmethod
     def _idle_after_cycle(elapsed_ms: float) -> int:
         elapsed = max(0.0, float(elapsed_ms))
@@ -255,6 +280,9 @@ class F3RuntimeCoordinator:
             )
         ):
             return "full_cycle", "tracking_analysis_pending"
+
+        if self._heavy_executor_busy():
+            return "render_only", "heavy_executor_busy"
 
         new_frame = frame_token != self._last_frame_token
         if not new_frame:
