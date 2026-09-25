@@ -1,14 +1,30 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-import src.platform.display_f3_runtime_coordinator as coordinator_module
-from src.platform.display_f3_runtime_coordinator import (
-    F3RuntimeCoordinator,
-    F3_COORDINATOR_CONFIG_INTERVAL_MS,
-    F3_COORDINATOR_VERY_HEAVY_IDLE_MS,
-    instalar_coordenador_runtime_display_f3,
+
+_MODULE_PATH = Path("src/platform/display_f3_runtime_coordinator.py")
+_SPEC = importlib.util.spec_from_file_location(
+    "odin_display_f3_runtime_coordinator_test_module",
+    _MODULE_PATH,
+)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError("Nao foi possivel carregar display_f3_runtime_coordinator.py")
+coordinator_module = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(coordinator_module)
+
+F3RuntimeCoordinator = coordinator_module.F3RuntimeCoordinator
+F3_COORDINATOR_CONFIG_INTERVAL_MS = (
+    coordinator_module.F3_COORDINATOR_CONFIG_INTERVAL_MS
+)
+F3_COORDINATOR_VERY_HEAVY_IDLE_MS = (
+    coordinator_module.F3_COORDINATOR_VERY_HEAVY_IDLE_MS
+)
+instalar_coordenador_runtime_display_f3 = (
+    coordinator_module.instalar_coordenador_runtime_display_f3
 )
 
 
