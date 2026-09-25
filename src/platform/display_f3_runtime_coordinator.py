@@ -247,6 +247,15 @@ class F3RuntimeCoordinator:
         if frame_token is None:
             return "render_only", "no_frame"
 
+        if bool(
+            getattr(
+                self.app,
+                "_display_f3_tracking_analysis_pending",
+                False,
+            )
+        ):
+            return "full_cycle", "tracking_analysis_pending"
+
         new_frame = frame_token != self._last_frame_token
         if not new_frame:
             self._repeated_frame_count += 1

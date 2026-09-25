@@ -84,6 +84,7 @@ class _App:
         self._display_f3_object_tracking_enabled = False
         self._display_f3_tracking_config_open = False
         self._display_f3_tracking_result = object()
+        self._display_f3_tracking_analysis_pending = False
         self.analysis_due = True
         self.full_cycles = 0
         self.renders = 0
@@ -203,6 +204,19 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
         self.assertEqual([], app.root.calls)
         self.assertIsNone(app.display_f3_after_id)
         self.assertFalse(coordinator.stats()["running"])
+
+    def test_tracking_pending_second_half_runs_even_without_new_frame(self):
+        app, coordinator = self._install()
+        app.root.run_next()
+        app.analysis_due = False
+        app._display_f3_tracking_analysis_pending = True
+        app.root.run_next()
+
+        self.assertEqual(2, app.full_cycles)
+        self.assertEqual(
+            "tracking_analysis_pending",
+            coordinator.stats()["last_reason"],
+        )
 
     def test_rearm_new_frame_forces_full_cycle_even_when_analysis_not_due(self):
         app, coordinator = self._install()

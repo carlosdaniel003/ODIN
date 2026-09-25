@@ -82,11 +82,11 @@ class DisplayF3FinalPerformanceTests(unittest.TestCase):
         self.assertIn("_display_f3_outer_last_frame_token", source)
         self.assertIn("_display_auto_frame_token", source)
         self.assertIn("return None", source)
-        installer = inspect.getsource(performance.instalar_performance_final_display_f3)
-        self.assertLess(
-            installer.index("_install_fresh_frame_outer_gate()"),
-            installer.index("_install_adaptive_preview_cadence()"),
+        installer = inspect.getsource(
+            performance.instalar_performance_final_display_f3
         )
+        self.assertIn("_install_fresh_frame_outer_gate()", installer)
+        self.assertNotIn("_install_adaptive_preview_cadence()", installer)
 
     def test_preview_cadence_is_not_installed_by_performance_layer(self):
         installer = inspect.getsource(
