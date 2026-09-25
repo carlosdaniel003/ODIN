@@ -579,11 +579,11 @@ def instalar_editor_contorno_placa_f2() -> None:
     instalar_preservacao_contorno_placa_f2()
     BulkRoiEditorMixin.MODOS_EDICAO.add(F2_BOARD_SHAPE_EDIT_MODE)
 
-    from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+    from src.platform.desktop_production_app import DesktopProductionApp
 
     # O modo global pode mudar no Linux enquanto o fullscreen está aberto. O
     # contexto dedicado mantém o editor operacional mesmo assim.
-    modo_atual = RaspberryPi3ProductionApp._modo_edicao_roi_ativo
+    modo_atual = DesktopProductionApp._modo_edicao_roi_ativo
     if not bool(getattr(modo_atual, "_odin_f2_board_shape_mode", False)):
         modo_anterior = modo_atual
 
@@ -593,11 +593,11 @@ def instalar_editor_contorno_placa_f2() -> None:
             return modo_anterior(self)
 
         modo_edicao_roi_com_contorno._odin_f2_board_shape_mode = True
-        RaspberryPi3ProductionApp._modo_edicao_roi_ativo = modo_edicao_roi_com_contorno
+        DesktopProductionApp._modo_edicao_roi_ativo = modo_edicao_roi_com_contorno
 
     # Durante o desenho, a coleção autoritativa deixa de ser leds_selecionados.
     # Isso impede que as 42 ROIs dos LEDs substituam o contorno no jig Linux.
-    leds_atual = RaspberryPi3ProductionApp._leds_editaveis
+    leds_atual = DesktopProductionApp._leds_editaveis
     if not bool(getattr(leds_atual, "_odin_f2_board_shape_working", False)):
         leds_anterior = leds_atual
 
@@ -607,9 +607,9 @@ def instalar_editor_contorno_placa_f2() -> None:
             return leds_anterior(self)
 
         leds_editaveis_com_contorno._odin_f2_board_shape_working = True
-        RaspberryPi3ProductionApp._leds_editaveis = leds_editaveis_com_contorno
+        DesktopProductionApp._leds_editaveis = leds_editaveis_com_contorno
 
-    substituir_atual = RaspberryPi3ProductionApp._substituir_leds_editaveis
+    substituir_atual = DesktopProductionApp._substituir_leds_editaveis
     if not bool(getattr(substituir_atual, "_odin_f2_board_shape_working", False)):
         substituir_anterior = substituir_atual
 
@@ -620,11 +620,11 @@ def instalar_editor_contorno_placa_f2() -> None:
             return substituir_anterior(self, leds)
 
         substituir_leds_editaveis_com_contorno._odin_f2_board_shape_working = True
-        RaspberryPi3ProductionApp._substituir_leds_editaveis = (
+        DesktopProductionApp._substituir_leds_editaveis = (
             substituir_leds_editaveis_com_contorno
         )
 
-    current = RaspberryPi3ProductionApp._confirmar_selecao_tela_cheia
+    current = DesktopProductionApp._confirmar_selecao_tela_cheia
     if bool(getattr(current, "_odin_f2_board_shape_confirm", False)):
         _PATCH_EDITOR_INSTALADO = True
         return
@@ -645,7 +645,7 @@ def instalar_editor_contorno_placa_f2() -> None:
 
     confirmar_selecao_tela_cheia_com_contorno._odin_f2_board_shape_confirm = True
     confirmar_selecao_tela_cheia_com_contorno._odin_f2_board_shape_confirm_base = previous
-    RaspberryPi3ProductionApp._confirmar_selecao_tela_cheia = (
+    DesktopProductionApp._confirmar_selecao_tela_cheia = (
         confirmar_selecao_tela_cheia_com_contorno
     )
     _PATCH_EDITOR_INSTALADO = True

@@ -273,11 +273,11 @@ def instalar_isolamento_estado_contorno_placa_f2() -> None:
     if _PATCH_INSTALADO:
         return
 
-    from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+    from src.platform.desktop_production_app import DesktopProductionApp
 
     _patch_aliases()
 
-    modo_atual = RaspberryPi3ProductionApp._modo_edicao_roi_ativo
+    modo_atual = DesktopProductionApp._modo_edicao_roi_ativo
     if not bool(getattr(modo_atual, "_odin_f2_board_state_mode", False)):
         modo_anterior = modo_atual
 
@@ -287,9 +287,9 @@ def instalar_isolamento_estado_contorno_placa_f2() -> None:
             return modo_anterior(self)
 
         modo_com_estado_dedicado._odin_f2_board_state_mode = True
-        RaspberryPi3ProductionApp._modo_edicao_roi_ativo = modo_com_estado_dedicado
+        DesktopProductionApp._modo_edicao_roi_ativo = modo_com_estado_dedicado
 
-    leds_atual = RaspberryPi3ProductionApp._leds_editaveis
+    leds_atual = DesktopProductionApp._leds_editaveis
     if not bool(getattr(leds_atual, "_odin_f2_board_state_leds", False)):
         leds_anterior = leds_atual
 
@@ -299,9 +299,9 @@ def instalar_isolamento_estado_contorno_placa_f2() -> None:
             return leds_anterior(self)
 
         leds_com_estado_dedicado._odin_f2_board_state_leds = True
-        RaspberryPi3ProductionApp._leds_editaveis = leds_com_estado_dedicado
+        DesktopProductionApp._leds_editaveis = leds_com_estado_dedicado
 
-    substituir_atual = RaspberryPi3ProductionApp._substituir_leds_editaveis
+    substituir_atual = DesktopProductionApp._substituir_leds_editaveis
     if not bool(getattr(substituir_atual, "_odin_f2_board_state_replace", False)):
         substituir_anterior = substituir_atual
 
@@ -312,9 +312,9 @@ def instalar_isolamento_estado_contorno_placa_f2() -> None:
             return substituir_anterior(self, leds)
 
         substituir_com_estado_dedicado._odin_f2_board_state_replace = True
-        RaspberryPi3ProductionApp._substituir_leds_editaveis = substituir_com_estado_dedicado
+        DesktopProductionApp._substituir_leds_editaveis = substituir_com_estado_dedicado
 
-    camera_atual = RaspberryPi3ProductionApp.atualizar_frame_camera
+    camera_atual = DesktopProductionApp.atualizar_frame_camera
     if not bool(getattr(camera_atual, "_odin_f2_board_state_camera_guard", False)):
         camera_anterior = camera_atual
 
@@ -327,7 +327,7 @@ def instalar_isolamento_estado_contorno_placa_f2() -> None:
             return resultado
 
         atualizar_camera_com_guard_editor._odin_f2_board_state_camera_guard = True
-        RaspberryPi3ProductionApp.atualizar_frame_camera = atualizar_camera_com_guard_editor
+        DesktopProductionApp.atualizar_frame_camera = atualizar_camera_com_guard_editor
 
     salvar_atual = board_shape_editor._salvar_e_fechar_editor_placa
     if not bool(getattr(salvar_atual, "_odin_f2_board_state_save", False)):

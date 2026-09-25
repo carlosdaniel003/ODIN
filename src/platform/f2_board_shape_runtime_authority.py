@@ -3,7 +3,7 @@ from __future__ import annotations
 """Autoridade final do editor de contorno físico da placa no F2.
 
 Este módulo existe para eliminar dependência da ordem histórica de mixins/patches no
-jig Linux. Ele é instalado somente depois que ``RaspberryPi3ProductionApp`` terminou
+jig Linux. Ele é instalado somente depois que ``DesktopProductionApp`` terminou
 de inicializar e depois que o renderer nativo das referências F2 já está ativo.
 
 Responsabilidades:
@@ -228,11 +228,11 @@ def instalar_autoridade_final_editor_contorno_f2() -> None:
     if _PATCH_INSTALADO:
         return
 
-    from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+    from src.platform.desktop_production_app import DesktopProductionApp
 
     # 1) Confirmação final do fullscreen. Em contexto F2 não delega para a cadeia
     # histórica de seleção de LEDs; chama diretamente a persistência do contorno.
-    confirmar_atual = RaspberryPi3ProductionApp._confirmar_selecao_tela_cheia
+    confirmar_atual = DesktopProductionApp._confirmar_selecao_tela_cheia
     if not bool(getattr(confirmar_atual, "_odin_f2_board_shape_final_authority", False)):
         confirmar_anterior = confirmar_atual
 
@@ -251,13 +251,13 @@ def instalar_autoridade_final_editor_contorno_f2() -> None:
         confirmar_com_autoridade_final._odin_f2_board_shape_final_authority_base = (
             confirmar_anterior
         )
-        RaspberryPi3ProductionApp._confirmar_selecao_tela_cheia = (
+        DesktopProductionApp._confirmar_selecao_tela_cheia = (
             confirmar_com_autoridade_final
         )
 
     # 2) Personaliza o botão durante a própria criação da janela. Assim o Linux
     # nunca chega a exibir um botão OK para este editor específico.
-    criar_atual = RaspberryPi3ProductionApp._criar_interface_selecao_tela_cheia
+    criar_atual = DesktopProductionApp._criar_interface_selecao_tela_cheia
     if not bool(getattr(criar_atual, "_odin_f2_board_shape_save_button", False)):
         criar_anterior = criar_atual
 
@@ -275,7 +275,7 @@ def instalar_autoridade_final_editor_contorno_f2() -> None:
 
         criar_interface_com_salvar._odin_f2_board_shape_save_button = True
         criar_interface_com_salvar._odin_f2_board_shape_save_button_base = criar_anterior
-        RaspberryPi3ProductionApp._criar_interface_selecao_tela_cheia = (
+        DesktopProductionApp._criar_interface_selecao_tela_cheia = (
             criar_interface_com_salvar
         )
 
