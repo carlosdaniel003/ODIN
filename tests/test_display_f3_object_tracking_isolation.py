@@ -352,6 +352,52 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("_display_f3_skip_auto_analysis_this_preview", source)
         self.assertIn("if heavy_due:", source)
 
+    def test_live_preview_never_prefers_worker_raw_frame(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("source = frame", source)
+        self.assertNotIn(
+            "source = authority_frame if _valid_frame(authority_frame) else frame",
+            source,
+        )
+        self.assertIn(
+            "_display_f3_tracking_raw_authority_frame = raw_latest",
+            source,
+        )
+
+    def test_tracking_result_age_blocks_multi_second_operational_decision(self):
+        fresh = {
+            "age_ms": 250.0,
+            "frame_token": ("camera", 100),
+        }
+        stale_time = {
+            "age_ms": 15000.0,
+            "frame_token": ("camera", 100),
+        }
+        stale_gap = {
+            "age_ms": 300.0,
+            "frame_token": ("camera", 10),
+        }
+        self.assertTrue(
+            tracking._tracking_result_operationally_fresh(
+                fresh,
+                ("camera", 104),
+            )
+        )
+        self.assertFalse(
+            tracking._tracking_result_operationally_fresh(
+                stale_time,
+                ("camera", 101),
+            )
+        )
+        self.assertFalse(
+            tracking._tracking_result_operationally_fresh(
+                stale_gap,
+                ("camera", 100),
+            )
+        )
+
     def test_cached_lock_never_promotes_held_pose_to_current_evidence(self):
         source = inspect.getsource(tracking.F3DisplayObjectTracker.align)
         self.assertIn(

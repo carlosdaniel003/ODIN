@@ -18,7 +18,8 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
             DisplayProductionF3Mixin.abrir_configuracao_projeto_display
         )
         self.assertIn("_display_f3_configuration_opening = True", source)
-        self.assertIn("root.after_idle(build)", source)
+        self.assertIn("root.after(1, build)", source)
+        self.assertNotIn("root.after_idle(build)", source)
         self.assertIn("DisplayProjectConfigWindow(", source)
 
     def test_initial_project_load_is_deferred_after_shell_creation(self):
