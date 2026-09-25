@@ -96,9 +96,9 @@ max_pending = 8
 Uso atual:
 
 ~~~text
+HIGH    tracking ao vivo ORB/AKAZE/template/warp
 NORMAL  análise manual do CHECK atual
 LOW     configuração / thumbnails / DEBUG completo
-HIGH    reservado para compute operacional puro com request/result seguro
 ~~~
 
 Quando a fila está cheia, um job de prioridade maior pode substituir trabalho
@@ -115,8 +115,13 @@ Portanto, se adapters históricos consultarem o estado mais de uma vez no mesmo
 frame/contexto, o matching pesado não deve ser repetido. O runtime expõe
 `build_count` e `cache_hits` para validar esse contrato.
 
-A prioridade `HIGH` continua disponível, mas não deve receber um método que
-misture compute, state machine e UI. O uso correto é:
+A prioridade `HIGH` é usada pelo tracking ao vivo do F3. ORB/AKAZE, fallback
+por template e geração do frame alinhado saem do thread Tk e retornam um
+resultado versionado. A UI aplica somente o resultado ainda pertencente ao ciclo
+atual.
+
+`HIGH` não deve receber um método que misture compute, state machine e widgets.
+O uso correto é:
 
 ~~~text
 snapshot/request imutável
@@ -177,7 +182,12 @@ configuração aberta   -> 280 ms
 tracking pendente     -> ciclo completo
 rearme + frame novo   -> ciclo completo
 executor pesado busy  -> repaint leve
+tracking sem LOCK      -> frame reduzido, sem reconstruir contexto semântico
 ~~~
+
+O repaint produtivo do F3 usa 50 ms como cadência base, coerente com o perfil
+de câmera de aproximadamente 20 FPS; redesenhar o mesmo frame acima dessa taxa
+é trabalho redundante no Tk.
 
 Após ciclos caros, o coordenador impõe idle progressivo ao mainloop antes de
 agendar o próximo tick. As métricas ficam disponíveis em

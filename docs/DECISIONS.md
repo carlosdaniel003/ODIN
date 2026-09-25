@@ -74,11 +74,13 @@ Contratos aceitos:
 - lifecycle ligado à aplicação;
 - workers não manipulam Tkinter.
 
-`NORMAL` é usado pela análise manual do CHECK atual. `LOW` é usado por
-previews/configuração e DEBUG completo. `HIGH` permanece reservado para compute
-operacional puro. A Etapa 5 consolidou os proprietários stateful; isso autoriza
-offloads futuros somente quando o trabalho puder ser expresso como request/result
-sem manipular Tkinter ou state machine no worker.
+`HIGH` é usado pelo tracking ao vivo do F3 para ORB/AKAZE, fallback por
+template e warp/alinhamento. `NORMAL` é usado pela análise manual do CHECK atual.
+`LOW` é usado por previews/configuração e DEBUG completo.
+
+O job de tracking não manipula widgets Tkinter. O resultado é versionado por
+geração/ciclo, jobs pendentes usam latest-frame-wins e resultados obsoletos não
+são aplicados ao ciclo seguinte.
 
 Novos trabalhos pesados assíncronos do F3 não devem criar threads próprias fora
 desse executor.

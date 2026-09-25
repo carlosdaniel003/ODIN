@@ -158,17 +158,16 @@ Contratos atuais:
 
 Consumidores já migrados:
 
-- previews da configuração;
-- previews das referências angulares de tracking;
-- análise manual do CHECK atual;
-- auditoria do DEBUG TÉCNICO.
+- tracking ao vivo ORB/AKAZE/template/warp — `HIGH`;
+- previews da configuração — `LOW`;
+- previews das referências angulares de tracking — `LOW`;
+- análise manual do CHECK atual — `NORMAL`;
+- auditoria do DEBUG TÉCNICO — `LOW`.
 
-A prioridade `HIGH` permanece reservada para compute operacional puro. A
-Etapa 5 separou os proprietários stateful do runtime, mas não envia o callback
-produtivo inteiro a background: tracking, presença, energia, análise, sequência
-e apresentação ainda precisam manter seus contratos de aplicação no thread
-correto. Novos offloads devem mover somente compute puro e publicar resultados
-versionados de volta ao runtime.
+O callback produtivo completo não é enviado a background. Tracking pesado usa
+o executor, enquanto aplicação de resultado, presença, energia, sequência e
+apresentação permanecem nos proprietários corretos. Novos offloads devem mover
+somente compute pesado e publicar resultados versionados de volta ao runtime.
 
 ### Autoridades canônicas do runtime F3
 
