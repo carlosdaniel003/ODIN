@@ -46,6 +46,7 @@ class DisplayProductionF3Mixin:
         self.display_check_runtime = DisplayCheckSequenceRuntime()
         self._display_project_config_window: DisplayProjectConfigWindow | None = None
         self._display_f3_heavy_executor: F3HeavyVisionExecutor | None = None
+        self._display_f3_runtime_coordinator = None
         super().__init__(*args, **kwargs)
         self.display_project_repository = DisplayProjectRepository()
         try:
@@ -74,6 +75,10 @@ class DisplayProductionF3Mixin:
 
     def _on_display_f3_root_destroy(self, event) -> None:
         if getattr(event, "widget", None) is self.root:
+            coordinator = self._display_f3_runtime_coordinator
+            if coordinator is not None:
+                coordinator.shutdown()
+                self._display_f3_runtime_coordinator = None
             self._shutdown_f3_heavy_executor()
 
     def _criar_janela_producao_display_f3(self) -> DisplayProductionF3Window:
@@ -630,7 +635,10 @@ class DisplayProductionF3Mixin:
             except Exception:
                 pass
 
-        if self.display_f3_after_id is not None:
+        coordinator = self._display_f3_runtime_coordinator
+        if coordinator is not None:
+            coordinator.stop()
+        elif self.display_f3_after_id is not None:
             try:
                 self.root.after_cancel(self.display_f3_after_id)
             except Exception:
@@ -661,6 +669,14 @@ class DisplayProductionF3Mixin:
         self,
         atraso_ms: int | None = None,
     ) -> None:
+        coordinator = self._display_f3_runtime_coordinator
+        if coordinator is not None and not coordinator.is_shutdown:
+            coordinator.schedule(atraso_ms)
+            return
+
+        # Fallback de compatibilidade para testes/composições que ainda não
+        # instalaram o coordenador final. No produto, main instala o coordenador
+        # antes de entrar no mainloop.
         if not self.display_f3_ativo or self.display_f3_after_id is not None:
             return
         atraso = (
@@ -676,11 +692,10 @@ class DisplayProductionF3Mixin:
         except Exception:
             self.display_f3_after_id = None
 
-    def _atualizar_preview_display_f3(self) -> None:
-        self.display_f3_after_id = None
+    def _render_preview_display_f3_once(self) -> None:
+        """Somente repaint; não agenda e não executa decisão produtiva."""
         if not self.display_f3_ativo:
             return
-
         janela = self.display_f3_window
         frame = getattr(self, "camera_frame_atual", None)
         freeze_visual = bool(
@@ -693,7 +708,6 @@ class DisplayProductionF3Mixin:
                     visual_rotation=self._obter_rotacao_visual_display_f3(),
                 )
             except TypeError:
-                # Compatibilidade com a interface da Fase 1 e seus testes.
                 try:
                     janela.update_camera_preview(frame)
                 except Exception:
@@ -701,6 +715,11 @@ class DisplayProductionF3Mixin:
             except Exception:
                 pass
 
+    def _atualizar_preview_display_f3(self) -> None:
+        self.display_f3_after_id = None
+        if not self.display_f3_ativo:
+            return
+        self._render_preview_display_f3_once()
         self._agendar_preview_display_f3()
 
     @staticmethod

@@ -788,5 +788,5 @@ def instalar_performance_final_display_f3() -> None:
     _install_exact_reference_hot_path()
     _install_exact_mask_reference_cache()
     _install_fresh_frame_outer_gate()
-    _install_adaptive_preview_cadence()
+    # Cadência/scheduling pertencem ao F3RuntimeCoordinator (Etapa 4).
     _install_mask_editor_hot_path()
