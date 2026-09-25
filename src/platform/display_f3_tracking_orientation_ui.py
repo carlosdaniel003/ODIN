@@ -9,7 +9,6 @@ F3TrackingConfigStore e as máscaras/checks já existentes do Projeto Display.
 
 import math
 import queue
-import threading
 import tkinter as tk
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -20,6 +19,7 @@ import cv2
 import numpy as np
 
 import src.platform.display_production_f3 as production_module
+from src.platform.display_f3_heavy_executor import F3HeavyWorkPriority
 from src.platform.display_f3_object_tracking import (
     F3_ORIENTATION_ANGLE,
     F3_ORIENTATION_SLOTS,
@@ -1566,8 +1566,11 @@ def _build_tracking_config_class(base_cls):
             self._f3_tracking_preview_canvases: dict[str, tk.Canvas] = {}
             self._f3_tracking_preview_generation = 0
             self._f3_tracking_preview_cache: dict[tuple, object] = {}
-            self._f3_tracking_preview_results = queue.Queue()
+            self._f3_tracking_preview_results = queue.Queue(maxsize=2)
             self._f3_tracking_preview_poll_after = None
+            self._f3_tracking_preview_owner = (
+                f"f3-tracking-preview:{id(self)}"
+            )
             self._f3_tracking_enabled_var = tk.BooleanVar(
                 master=root,
                 value=self._f3_tracking_store.enabled(),
@@ -1608,6 +1611,9 @@ def _build_tracking_config_class(base_cls):
                         self.window.after_cancel(poll_after)
                     except Exception:
                         pass
+                executor = getattr(self, "_heavy_executor", None)
+                if executor is not None:
+                    executor.cancel_owner(self._f3_tracking_preview_owner)
                 if callable(external_on_close):
                     external_on_close()
 
@@ -1916,13 +1922,17 @@ def _build_tracking_config_class(base_cls):
             if not jobs:
                 return
 
-            def worker() -> None:
-                worker_store = F3TrackingConfigStore(self.repository)
-                for slot, entry, key in jobs:
-                    if generation != self._f3_tracking_preview_generation:
-                        return
+            executor = getattr(self, "_heavy_executor", None)
+            if executor is None:
+                return
+            cache = self._f3_tracking_preview_cache
+            repository = self.repository
 
-                    thumbnail = self._f3_tracking_preview_cache.get(key)
+            def worker() -> list[tuple]:
+                worker_store = F3TrackingConfigStore(repository)
+                results = []
+                for slot, entry, key in jobs:
+                    thumbnail = cache.get(key)
                     if thumbnail is None:
                         image = cv2.imread(
                             str(entry.get("image_path") or ""),
@@ -1935,11 +1945,11 @@ def _build_tracking_config_class(base_cls):
                                 slot,
                                 entry,
                             )
-                            # Reduza a FOTO antes de desenhar a geometria. Quando
-                            # desenhávamos em 1920x1080 e só depois reduzíamos para
-                            # ~184 px, linhas de 2/3 px desapareciam por subpixel.
                             h, w = image.shape[:2]
-                            scale = min(184.0 / max(1, w), 106.0 / max(1, h))
+                            scale = min(
+                                184.0 / max(1, w),
+                                106.0 / max(1, h),
+                            )
                             tw = max(1, int(round(w * scale)))
                             th = max(1, int(round(h * scale)))
                             thumbnail = cv2.resize(
@@ -1948,7 +1958,10 @@ def _build_tracking_config_class(base_cls):
                                 interpolation=cv2.INTER_AREA,
                             )
                             preview_matrix = np.asarray(
-                                [[scale, 0.0, 0.0], [0.0, scale, 0.0]],
+                                [
+                                    [scale, 0.0, 0.0],
+                                    [0.0, scale, 0.0],
+                                ],
                                 dtype=np.float32,
                             )
                             board_preview = transform_points(
@@ -1956,14 +1969,13 @@ def _build_tracking_config_class(base_cls):
                                 preview_matrix,
                             )
                             masks_preview = [
-                                _transform_reference_mask(mask, preview_matrix)
+                                _transform_reference_mask(
+                                    mask,
+                                    preview_matrix,
+                                )
                                 for mask in tuple(masks or ())
                                 if isinstance(mask, dict)
                             ]
-                            # Mesmo visual da preview principal de "Máscaras",
-                            # mas com traço proporcional ao card menor. Antes,
-                            # 2/3 px em uma miniatura de ~184 px fazia dezenas de
-                            # segmentos se fundirem numa "caixa" amarela sobre o display.
                             thumbnail = draw_reference_geometry(
                                 thumbnail,
                                 board_preview,
@@ -1972,20 +1984,44 @@ def _build_tracking_config_class(base_cls):
                                 board_thickness=2,
                                 mask_thickness=1,
                             )
-                            self._f3_tracking_preview_cache[key] = thumbnail
+                            cache[key] = thumbnail
+                    results.append((slot, key, thumbnail))
+                return results
 
-                    self._f3_tracking_preview_results.put(
-                        (generation, slot, key, thumbnail)
-                    )
-                self._f3_tracking_preview_results.put(
-                    (generation, None, None, None)
-                )
+            future = executor.submit(
+                worker,
+                priority=F3HeavyWorkPriority.LOW,
+                name="tracking-orientation-previews",
+                owner=self._f3_tracking_preview_owner,
+                key="orientation-previews",
+                replace_pending=True,
+            )
 
-            threading.Thread(
-                target=worker,
-                name="odin-f3-config-preview",
-                daemon=True,
-            ).start()
+            def completed(done) -> None:
+                if done.cancelled():
+                    return
+                error = ""
+                try:
+                    results = done.result()
+                except Exception as exc:
+                    results = []
+                    error = f"{type(exc).__name__}: {exc}"
+                payload = (generation, results, error)
+                try:
+                    self._f3_tracking_preview_results.put_nowait(payload)
+                    return
+                except queue.Full:
+                    pass
+                try:
+                    self._f3_tracking_preview_results.get_nowait()
+                except queue.Empty:
+                    return
+                try:
+                    self._f3_tracking_preview_results.put_nowait(payload)
+                except queue.Full:
+                    return
+
+            future.add_done_callback(completed)
             self._schedule_f3_tracking_preview_poll()
 
         def _schedule_f3_tracking_preview_poll(self) -> None:
@@ -2004,7 +2040,7 @@ def _build_tracking_config_class(base_cls):
             done_current_generation = False
             while True:
                 try:
-                    generation, slot, key, thumbnail = (
+                    generation, results, _error = (
                         self._f3_tracking_preview_results.get_nowait()
                     )
                 except queue.Empty:
@@ -2012,15 +2048,14 @@ def _build_tracking_config_class(base_cls):
 
                 if generation != self._f3_tracking_preview_generation:
                     continue
-                if slot is None:
-                    done_current_generation = True
-                    continue
-                self._apply_f3_tracking_preview(
-                    generation,
-                    slot,
-                    key,
-                    thumbnail,
-                )
+                done_current_generation = True
+                for slot, key, thumbnail in results:
+                    self._apply_f3_tracking_preview(
+                        generation,
+                        slot,
+                        key,
+                        thumbnail,
+                    )
 
             if not done_current_generation:
                 self._schedule_f3_tracking_preview_poll()

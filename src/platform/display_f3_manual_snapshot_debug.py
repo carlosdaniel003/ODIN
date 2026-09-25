@@ -14,7 +14,6 @@ import hashlib
 import json
 import math
 import queue
-import threading
 import tkinter as tk
 
 import cv2
@@ -29,6 +28,7 @@ from src.platform.display_f3_same_mask_reference_fix import F3SameMaskReferenceA
 from src.platform.display_f3_analysis_service import (
     DisplayF3CurrentCheckAnalysisService,
 )
+from src.platform.display_f3_heavy_executor import F3HeavyWorkPriority
 from src.platform.display_f3_exact_check_template import F3ExactCheckTemplateAnalyzer
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
@@ -1667,6 +1667,32 @@ def _apply_snapshot_result_to_window(
     return snapshot
 
 
+def _heavy_executor_for_app(app):
+    getter = getattr(app, "_ensure_f3_heavy_executor", None)
+    if callable(getter):
+        return getter()
+    executor = getattr(app, "_display_f3_heavy_executor", None)
+    if executor is None or bool(getattr(executor, "is_shutdown", False)):
+        raise RuntimeError("executor_pesado_f3_indisponivel")
+    return executor
+
+
+def _put_bounded_result(result_queue, payload) -> None:
+    try:
+        result_queue.put_nowait(payload)
+        return
+    except queue.Full:
+        pass
+    try:
+        result_queue.get_nowait()
+    except queue.Empty:
+        return
+    try:
+        result_queue.put_nowait(payload)
+    except queue.Full:
+        return
+
+
 def _supports_async_snapshot_capture(window) -> bool:
     root = getattr(window, "root", None)
     return bool(root is not None and callable(getattr(root, "after", None)))
@@ -1812,51 +1838,77 @@ def _capture_from_window(window) -> dict | None:
     window._display_f3_current_analysis_worker_queue = result_queue
     window._display_f3_snapshot_analysis_running = True
 
-    def worker() -> None:
+    def worker() -> dict:
         try:
             if repository is None:
                 raise RuntimeError("repository_display_indisponivel")
             snapshot = DisplayF3CurrentCheckAnalysisService(
                 repository
             ).analyze(seed)
-            payload = {
+            return {
                 "snapshot": snapshot,
                 "seed": seed,
                 "error": "",
             }
         except Exception as exc:
-            payload = {
+            return {
                 "snapshot": None,
                 "seed": seed,
                 "error": f"{type(exc).__name__}: {exc}",
             }
-        try:
-            result_queue.put_nowait(payload)
-        except queue.Full:
-            pass
 
-    def start_worker() -> None:
+    def submit_job() -> None:
         try:
             if button is not None:
                 button.configure(text="ANALISANDO CHECK...")
         except Exception:
             pass
-        threading.Thread(
-            target=worker,
-            name="ODIN-F3-CurrentCheckAnalysis",
-            daemon=True,
-        ).start()
+        try:
+            executor = _heavy_executor_for_app(app)
+            future = executor.submit(
+                worker,
+                priority=F3HeavyWorkPriority.NORMAL,
+                name="manual-current-check",
+                owner=f"f3-manual:{id(window)}",
+                key="current-check",
+                replace_pending=True,
+            )
+        except Exception as exc:
+            _put_bounded_result(
+                result_queue,
+                {
+                    "snapshot": None,
+                    "seed": seed,
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+            return
+
+        def completed(done) -> None:
+            if done.cancelled():
+                return
+            try:
+                payload = done.result()
+            except Exception as exc:
+                payload = {
+                    "snapshot": None,
+                    "seed": seed,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            _put_bounded_result(result_queue, payload)
+
+        future.add_done_callback(completed)
 
     root = getattr(window, "root", None)
     try:
-        root.after(1, start_worker)
+        root.after(1, submit_job)
         root.after(
             F3_MANUAL_SNAPSHOT_POLL_MS,
             lambda: _poll_current_analysis(window),
         )
     except Exception:
         window._display_f3_snapshot_analysis_running = False
-        start_worker()
+        submit_job()
         return None
     return None
 
@@ -1926,7 +1978,7 @@ def _generate_debug_from_window(window) -> dict | None:
     window._display_f3_snapshot_worker_queue = result_queue
     window._display_f3_debug_analysis_running = True
 
-    def worker() -> None:
+    def worker() -> dict:
         try:
             snapshot = capturar_snapshot_debug_display_f3(app)
             report = (
@@ -1938,35 +1990,61 @@ def _generate_debug_from_window(window) -> dict | None:
                 )
                 else ""
             )
-            payload = {"snapshot": snapshot, "report": report, "error": ""}
+            return {"snapshot": snapshot, "report": report, "error": ""}
         except Exception as exc:
-            payload = {
+            return {
                 "snapshot": None,
                 "report": "",
                 "error": f"{type(exc).__name__}: {exc}",
             }
-        try:
-            result_queue.put_nowait(payload)
-        except queue.Full:
-            pass
 
-    def start_worker() -> None:
-        threading.Thread(
-            target=worker,
-            name="ODIN-F3-DebugSnapshot",
-            daemon=True,
-        ).start()
+    def submit_job() -> None:
+        try:
+            executor = _heavy_executor_for_app(app)
+            future = executor.submit(
+                worker,
+                priority=F3HeavyWorkPriority.LOW,
+                name="technical-debug",
+                owner=f"f3-manual:{id(window)}",
+                key="technical-debug",
+                replace_pending=True,
+            )
+        except Exception as exc:
+            _put_bounded_result(
+                result_queue,
+                {
+                    "snapshot": None,
+                    "report": "",
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+            return
+
+        def completed(done) -> None:
+            if done.cancelled():
+                return
+            try:
+                payload = done.result()
+            except Exception as exc:
+                payload = {
+                    "snapshot": None,
+                    "report": "",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            _put_bounded_result(result_queue, payload)
+
+        future.add_done_callback(completed)
 
     root = getattr(window, "root", None)
     try:
-        root.after(1, start_worker)
+        root.after(1, submit_job)
         root.after(
             F3_MANUAL_SNAPSHOT_POLL_MS,
             lambda: _poll_async_snapshot_capture(window),
         )
     except Exception:
         window._display_f3_debug_analysis_running = False
-        start_worker()
+        submit_job()
         return None
     return None
 

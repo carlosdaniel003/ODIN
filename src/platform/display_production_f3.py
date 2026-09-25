@@ -4,6 +4,7 @@ from copy import deepcopy
 import tkinter as tk
 
 from src.platform.display_check_sequence_runtime import DisplayCheckSequenceRuntime
+from src.platform.display_f3_heavy_executor import F3HeavyVisionExecutor
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 from src.platform.display_project_config import DisplayProjectConfigWindow
 from src.platform.display_project_repository import (
@@ -44,10 +45,36 @@ class DisplayProductionF3Mixin:
         self.display_project_repository: DisplayProjectRepository | None = None
         self.display_check_runtime = DisplayCheckSequenceRuntime()
         self._display_project_config_window: DisplayProjectConfigWindow | None = None
+        self._display_f3_heavy_executor: F3HeavyVisionExecutor | None = None
         super().__init__(*args, **kwargs)
         self.display_project_repository = DisplayProjectRepository()
+        try:
+            self.root.bind(
+                "<Destroy>",
+                self._on_display_f3_root_destroy,
+                add="+",
+            )
+        except Exception:
+            pass
         self._instalar_modo_display_f3()
         self._atualizar_resumo_projeto_display_f3()
+
+    def _ensure_f3_heavy_executor(self) -> F3HeavyVisionExecutor:
+        executor = self._display_f3_heavy_executor
+        if executor is None or executor.is_shutdown:
+            executor = F3HeavyVisionExecutor()
+            self._display_f3_heavy_executor = executor
+        return executor
+
+    def _shutdown_f3_heavy_executor(self) -> None:
+        executor = self._display_f3_heavy_executor
+        self._display_f3_heavy_executor = None
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_pending=True)
+
+    def _on_display_f3_root_destroy(self, event) -> None:
+        if getattr(event, "widget", None) is self.root:
+            self._shutdown_f3_heavy_executor()
 
     def _criar_janela_producao_display_f3(self) -> DisplayProductionF3Window:
         return DisplayProductionF3Window(
@@ -167,6 +194,7 @@ class DisplayProductionF3Mixin:
                     root=owner.root,
                     repository=repository,
                     frame_provider=owner._obter_frame_para_configuracao_display,
+                    heavy_executor=owner._ensure_f3_heavy_executor(),
                     on_change=owner._atualizar_resumo_projeto_display_f3,
                     on_close=owner._ao_fechar_configuracao_projeto_display,
                 )
@@ -512,6 +540,7 @@ class DisplayProductionF3Mixin:
         return evento
 
     def _ativar_tela_producao_display_f3(self) -> bool:
+        self._ensure_f3_heavy_executor()
         self.display_f3_ativo = True
         self._cancelar_resultado_display_f3()
         self._display_f3_ng_evidence_frozen = False

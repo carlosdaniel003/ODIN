@@ -33,12 +33,15 @@ class DisplayProjectConfigWindow:
         root,
         repository: DisplayProjectRepository,
         frame_provider: Callable[[], object | None],
+        heavy_executor=None,
         on_change: Callable[[], None] | None = None,
         on_close: Callable[[], None] | None = None,
     ) -> None:
         self.root = root
         self.repository = repository
         self.frame_provider = frame_provider
+        self._heavy_executor = heavy_executor
+        self._owns_heavy_executor = False
         self.on_change = on_change
         self.on_close = on_close
         self.mask_editor: DisplayMaskEditorWindow | None = None
@@ -406,7 +409,15 @@ class DisplayProjectConfigWindow:
             from src.platform.display_f3_config_service import (
                 DisplayF3ConfigPreviewService,
             )
-            service = DisplayF3ConfigPreviewService()
+            executor = self._heavy_executor
+            if executor is None:
+                from src.platform.display_f3_heavy_executor import (
+                    F3HeavyVisionExecutor,
+                )
+                executor = F3HeavyVisionExecutor()
+                self._heavy_executor = executor
+                self._owns_heavy_executor = True
+            service = DisplayF3ConfigPreviewService(executor)
             self._config_preview_service = service
         return service
 
@@ -1205,6 +1216,13 @@ class DisplayProjectConfigWindow:
                 service.stop()
             except Exception:
                 pass
+        if self._owns_heavy_executor and self._heavy_executor is not None:
+            self._heavy_executor.shutdown(
+                wait=False,
+                cancel_pending=True,
+            )
+            self._heavy_executor = None
+            self._owns_heavy_executor = False
 
         manager = self.check_manager
         if manager is not None and manager.visible:

@@ -12,14 +12,17 @@ O serviço não cria nem manipula widgets Tkinter.
 
 import base64
 import queue
-import threading
+from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 
+from src.platform.display_f3_heavy_executor import F3HeavyWorkPriority
+
 
 F3_CONFIG_PREVIEW_CACHE_LIMIT = 32
+F3_CONFIG_PREVIEW_RESULT_LIMIT = 8
 
 
 @dataclass(frozen=True)
@@ -76,22 +79,53 @@ def _fit_image(image, width: int, height: int):
 
 
 class DisplayF3ConfigPreviewService:
-    """Um worker serializado e latest-wins para previews de configuração."""
+    """Previews de configuração submetidas ao executor pesado canônico."""
 
-    def __init__(self) -> None:
-        self._work_queue: queue.Queue = queue.Queue()
-        self._result_queue: queue.Queue = queue.Queue()
-        self._lock = threading.Lock()
-        self._pending: dict[str, dict] = {}
-        self._queued: set[str] = set()
-        self._stopped = threading.Event()
-        self._cache: dict[tuple, dict] = {}
-        self._thread = threading.Thread(
-            target=self._worker_loop,
-            name="ODIN-F3-ConfigPreview",
-            daemon=True,
+    def __init__(self, executor) -> None:
+        if executor is None:
+            raise ValueError("DisplayF3ConfigPreviewService requer heavy executor.")
+        self._executor = executor
+        self._result_queue: queue.Queue = queue.Queue(
+            maxsize=F3_CONFIG_PREVIEW_RESULT_LIMIT
         )
-        self._thread.start()
+        self._stopped = False
+        self._owner = f"f3-config-preview:{id(self)}"
+        self._cache: dict[tuple, dict] = {}
+
+    @staticmethod
+    def _build_result(request: dict) -> DisplayF3ConfigPreviewResult:
+        error = ""
+        payload = {}
+        try:
+            payload = request["renderer"](request["payload"])
+            if not isinstance(payload, dict):
+                payload = {}
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        return DisplayF3ConfigPreviewResult(
+            key=str(request["key"]),
+            generation=int(request["generation"]),
+            kind=str(request["kind"]),
+            payload=payload,
+            error=error,
+        )
+
+    def _publish_result(self, result: DisplayF3ConfigPreviewResult) -> None:
+        if self._stopped:
+            return
+        try:
+            self._result_queue.put_nowait(result)
+            return
+        except queue.Full:
+            pass
+        try:
+            self._result_queue.get_nowait()
+        except queue.Empty:
+            return
+        try:
+            self._result_queue.put_nowait(result)
+        except queue.Full:
+            return
 
     def _submit(
         self,
@@ -102,7 +136,7 @@ class DisplayF3ConfigPreviewService:
         renderer,
         payload: dict,
     ) -> None:
-        if self._stopped.is_set():
+        if self._stopped:
             return
         request = {
             "key": str(key),
@@ -111,14 +145,33 @@ class DisplayF3ConfigPreviewService:
             "renderer": renderer,
             "payload": payload,
         }
-        should_enqueue = False
-        with self._lock:
-            self._pending[str(key)] = request
-            if str(key) not in self._queued:
-                self._queued.add(str(key))
-                should_enqueue = True
-        if should_enqueue:
-            self._work_queue.put(str(key))
+        future = self._executor.submit(
+            lambda current=request: self._build_result(current),
+            priority=F3HeavyWorkPriority.LOW,
+            name=f"config-preview:{kind}",
+            owner=self._owner,
+            key=str(key),
+            replace_pending=True,
+        )
+
+        def completed(done) -> None:
+            if done.cancelled() or self._stopped:
+                return
+            try:
+                result = done.result()
+            except CancelledError:
+                return
+            except Exception as exc:
+                result = DisplayF3ConfigPreviewResult(
+                    key=str(key),
+                    generation=int(generation),
+                    kind=str(kind),
+                    payload={},
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            self._publish_result(result)
+
+        future.add_done_callback(completed)
 
     def submit_mask_reference_preview(
         self,
@@ -184,46 +237,10 @@ class DisplayF3ConfigPreviewService:
         return results
 
     def stop(self) -> None:
-        if self._stopped.is_set():
+        if self._stopped:
             return
-        self._stopped.set()
-        with self._lock:
-            self._pending.clear()
-            self._queued.clear()
-        try:
-            self._work_queue.put_nowait(None)
-        except queue.Full:
-            pass
-
-    def _worker_loop(self) -> None:
-        while not self._stopped.is_set():
-            key = self._work_queue.get()
-            if key is None:
-                return
-            with self._lock:
-                request = self._pending.pop(str(key), None)
-                self._queued.discard(str(key))
-            if not isinstance(request, dict):
-                continue
-
-            error = ""
-            payload = {}
-            try:
-                payload = request["renderer"](request["payload"])
-                if not isinstance(payload, dict):
-                    payload = {}
-            except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}"
-
-            self._result_queue.put(
-                DisplayF3ConfigPreviewResult(
-                    key=str(request["key"]),
-                    generation=int(request["generation"]),
-                    kind=str(request["kind"]),
-                    payload=payload,
-                    error=error,
-                )
-            )
+        self._stopped = True
+        self._executor.cancel_owner(self._owner)
 
     def _cache_get(self, key: tuple) -> dict | None:
         value = self._cache.get(key)
