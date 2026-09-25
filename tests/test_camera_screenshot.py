@@ -2,13 +2,13 @@ import inspect
 import unittest
 
 from src.platform.camera_screenshot import CameraScreenshotMixin, SCREENSHOT_DIR
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.ui.main_window_parts.panels.criar_painel_principal import criar_painel_principal
 
 
 class CameraScreenshotTests(unittest.TestCase):
     def test_perfil_final_inclui_screenshot(self):
-        self.assertIn(CameraScreenshotMixin, RaspberryPi3ProductionApp.__mro__)
+        self.assertIn(CameraScreenshotMixin, DesktopProductionApp.__mro__)
 
     def test_pasta_de_screenshot_e_capturas(self):
         self.assertEqual("screenshots", SCREENSHOT_DIR.name)

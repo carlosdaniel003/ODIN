@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from src.platform.analysis_response_metrics import AnalysisResponseMetricsMixin
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.segment_display_runtime import SegmentDisplayRuntimeMixin
 from src.ui.main_window_parts.layout.criar_barra_metadados import criar_barra_metadados
 from src.ui.main_window_parts.updates.atualizar_metricas_desempenho import (
@@ -51,7 +51,7 @@ class _AnaliseFake(AnalysisResponseMetricsMixin, _AnaliseBaseFake):
 
 class AnalysisResponseMetricsTests(unittest.TestCase):
     def test_perfil_display_mede_antes_do_runtime_de_segmentos(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(AnalysisResponseMetricsMixin, mro)
         self.assertIn(SegmentDisplayRuntimeMixin, mro)
         self.assertLess(

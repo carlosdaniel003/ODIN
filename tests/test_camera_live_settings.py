@@ -3,7 +3,7 @@ import unittest
 
 from src.platform.camera_advanced_config import normalizar_controles_avancados
 from src.platform.camera_live_settings import CameraLiveSettingsMixin
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.reference_project_sets import ProjectReferenceSetsMixin
 from src.ui.main_window_parts.settings.abrir_janela_configuracoes_ao_vivo import (
     LIVE_CAMERA_DEBOUNCE_MS,
@@ -47,10 +47,10 @@ class _CameraServiceFake:
 
 class CameraLiveSettingsTests(unittest.TestCase):
     def test_perfil_final_inclui_mixin_camera_ao_vivo(self):
-        self.assertIn(CameraLiveSettingsMixin, RaspberryPi3ProductionApp.__mro__)
+        self.assertIn(CameraLiveSettingsMixin, DesktopProductionApp.__mro__)
 
     def test_configuracoes_camera_cooperam_com_referencias_multiplas(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(ProjectReferenceSetsMixin, mro)
         self.assertLess(
             mro.index(CameraLiveSettingsMixin),

@@ -21,7 +21,7 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_ON,
     DisplayProjectRepository,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class DisplayCheckPresenceReferenceTests(unittest.TestCase):
@@ -203,7 +203,7 @@ class DisplayCheckPresenceReferenceTests(unittest.TestCase):
         self.assertIn("capture_presence_reference", source)
 
     def test_perfil_final_instala_extensao_sem_mudar_mro_f2(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         self.assertIn("instalar_referencia_presenca_check_display()", source)
         module_source = inspect.getsource(presence_module)
         self.assertNotIn("src.platform.f2_", module_source)

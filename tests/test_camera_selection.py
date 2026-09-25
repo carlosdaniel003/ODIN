@@ -10,7 +10,7 @@ from src.platform.camera_selection import (
     camera_backends_preferidos,
     criar_classe_camera_indice_estrito,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class _Candidato:
@@ -41,7 +41,7 @@ class _CaptureFake:
 
 class CameraSelectionTests(unittest.TestCase):
     def test_perfil_final_inclui_seletor_camera(self):
-        self.assertIn(CameraSelectionMixin, RaspberryPi3ProductionApp.__mro__)
+        self.assertIn(CameraSelectionMixin, DesktopProductionApp.__mro__)
 
     def test_windows_prioriza_media_foundation_e_linux_v4l2(self):
         windows = camera_backends_preferidos("win32")
