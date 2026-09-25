@@ -31,4 +31,4 @@ fi
 } >> "$LOG_FILE"
 
 export PYTHONUNBUFFERED=1
-exec "$PYTHON_BIN" "$PROJECT_DIR/main_rpi.py" >> "$LOG_FILE" 2>&1
+exec "$PYTHON_BIN" "$PROJECT_DIR/main.py" >> "$LOG_FILE" 2>&1

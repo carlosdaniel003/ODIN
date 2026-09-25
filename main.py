@@ -1,4 +1,4 @@
-from main_rpi import main
+from main_desktop import main
 
 
 if __name__ == "__main__":

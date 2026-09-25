@@ -25,14 +25,26 @@ jobs:
           test -f scripts/iniciar_odin_linux.sh
           test -x scripts/iniciar_odin_linux.sh
           bash -n scripts/iniciar_odin_linux.sh
-          grep -q 'main_rpi.py' scripts/iniciar_odin_linux.sh
+          grep -q 'main.py' scripts/iniciar_odin_linux.sh
+          ! grep -q 'main_rpi.py' scripts/iniciar_odin_linux.sh
           python -m py_compile \
             config.py \
+            main.py \
+            main_desktop.py \
             main_rpi.py \
             linux_local_config_bootstrap.py \
+            src/platform/desktop_settings.py \
+            src/platform/desktop_camera_service.py \
+            src/platform/desktop_profile.py \
+            src/platform/desktop_base_app.py \
+            src/platform/desktop_production_app.py \
             src/platform/display_f3_runtime_coordinator.py \
             tests/test_linux_local_config_bootstrap.py \
             tests/test_display_f3_runtime_coordinator.py
+
+      - name: Validate desktop composition
+        run: |
+          python -m unittest tests.test_desktop_composition -v
 
       - name: Keep JIG config outside Git checkout
         run: |
