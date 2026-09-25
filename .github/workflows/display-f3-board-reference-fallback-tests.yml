@@ -20,7 +20,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install opencv-python-headless numpy gpiozero
+          python -m pip install opencv-python-headless numpy
 
       - name: Compile physical classifier and regressions
         run: |
