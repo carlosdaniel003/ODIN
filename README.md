@@ -12,6 +12,20 @@ F2 e F3 compartilham componentes de baixo nível — câmera, extração de cara
 
 > Este README documenta o comportamento atual da branch `display`.
 
+
+## Documentação obrigatória para desenvolvimento
+
+Qualquer agente de IA que trabalhe neste repositório deve começar por `AGENTS.md` e seguir os documentos canônicos em `docs/`.
+
+- `docs/ARCHITECTURE.md` — responsabilidades e direção estrutural;
+- `docs/ENGINEERING_RULES.md` — regras para correções, features e refatorações;
+- `docs/PERFORMANCE.md` — invariantes de runtime e responsividade;
+- `docs/AI_WORKFLOW.md` — processo de trabalho por etapas;
+- `docs/DECISIONS.md` — decisões arquiteturais aceitas;
+- `docs/F3_MIGRATION.md` — ordem de modernização do F3.
+
+**Plataformas alvo: Windows e Linux desktop.** Referências a Raspberry Pi, GPIO e nomes `Raspberry*` descrevem legado/transição da implementação atual e não definem a arquitetura desejada para novas funcionalidades.
+
 ---
 
 ## Visão geral
@@ -33,13 +47,13 @@ flowchart LR
     I --> J[Resultado da placa]
 ```
 
-A aplicação possui captura ao vivo, seleção visual de câmera, projetos por produto, resolução mestre, referências ópticas, ROIs circulares e segmentadas, visualização técnica, logging, persistência de configuração e execução dedicada em Linux/Raspberry Pi.
+A aplicação possui captura ao vivo, seleção visual de câmera, projetos por produto, resolução mestre, referências ópticas, ROIs circulares e segmentadas, visualização técnica, logging, persistência de configuração e execução desktop em Windows/Linux. Nomes e integrações Raspberry existentes são legado em processo de migração.
 
 ---
 
 # 1. Inicialização e arquitetura
 
-O ponto de entrada é `main.py`, que chama `main_rpi.py`. Em Linux, antes de iniciar a interface, o bootstrap prepara uma área de configuração local persistente; em seguida é criada a classe final `RaspberryPi3ProductionApp`.
+O ponto de entrada atual é `main.py`, que ainda chama `main_rpi.py` e cria `RaspberryPi3ProductionApp`. Esses nomes são legado arquitetural e não indicam suporte atual a Raspberry Pi. Em Linux, antes de iniciar a interface, o bootstrap prepara uma área de configuração local persistente. A composição produtiva está sendo migrada de forma incremental para uma arquitetura desktop Windows/Linux.
 
 ```text
 main.py
@@ -544,9 +558,9 @@ Durante a execução em sessão gráfica Linux, o ODIN tenta impedir screensaver
 
 ---
 
-# 8. GPIO e controles de operação
+# 8. Controles de operação e legado GPIO
 
-No Raspberry Pi, o gatilho físico usa `gpiozero` e o pino **BCM 27**.
+O código de GPIO com `gpiozero`/BCM 27 é legado da fase Raspberry e não faz parte da plataforma alvo atual Windows/Linux. Ele pode permanecer temporariamente enquanto consumidores históricos são migrados, mas não deve orientar novas implementações.
 
 O fluxo do microswitch diferencia pressionamento, atraso de posicionamento e liberação. Quando GPIO não está disponível, a operação continua podendo usar teclado.
 
@@ -642,7 +656,7 @@ python main.py
 
 Em Windows, `requirements.txt` instala `opencv-python`, além de `numpy` e `gpiozero`.
 
-## Linux / Raspberry Pi
+## Linux
 
 O repositório possui um instalador para a pilha de câmera Linux:
 
@@ -732,7 +746,7 @@ ODIN/
 │   ├── core/                    # visão e regras ópticas
 │   ├── infra/                   # câmera, arquivos e persistência
 │   ├── models/                  # modelos de domínio
-│   ├── platform/                # F2, F3, Raspberry, Linux e Windows
+│   ├── platform/                # F2, F3, Windows/Linux e compatibilidade legada
 │   └── ui/                      # interface desktop
 ├── tests/                       # testes unitários/regressão
 ├── config.py
@@ -757,6 +771,7 @@ Algumas regras aparecem repetidamente no código porque são contratos do produt
 5. Uma renegociação de câmera não deve alterar silenciosamente a geometria das ROIs.
 6. Debug e status informativos não devem modificar o resultado produtivo.
 7. Otimizações de performance não podem reduzir as validações físicas/semânticas exigidas pelo fluxo.
+8. A arquitetura nova deve assumir Windows/Linux desktop; Raspberry é legado transitório.
 
 ---
 

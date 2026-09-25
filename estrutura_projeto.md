@@ -1,56 +1,58 @@
-# Estrutura do Projeto — ODIN v10
+# Estrutura do Projeto — registro histórico v10
 
-## Objetivo desta versão
+> **Documento histórico. Não é a arquitetura normativa atual do ODIN.**
+>
+> Para decisões atuais, leia `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ENGINEERING_RULES.md`, `docs/PERFORMANCE.md`, `docs/AI_WORKFLOW.md` e `docs/DECISIONS.md`.
 
-Modularizar somente o arquivo `src/ui/main_window.py`, mantendo a classe pública `ODINView` e preservando nomes de funções, variáveis, callbacks e regras de negócio.
+## Contexto histórico
 
-## Estrutura da interface modularizada
+A versão v10 teve como objetivo modularizar somente o arquivo `src/ui/main_window.py`, mantendo a classe pública `ODINView` e preservando nomes de funções, variáveis, callbacks e regras de negócio.
 
-```text
+A estrutura criada foi:
+
+~~~text
 src/ui/
 │   main_window.py
 │   __init__.py
 │
-└───main_window_parts
-    │   __init__.py
-    │
-    ├───canvas
-    ├───history
-    ├───image
-    ├───layout
-    ├───lifecycle
-    ├───panels
-    ├───settings
-    ├───state
-    ├───updates
-    └───widgets
-```
+└── main_window_parts/
+    ├── canvas/
+    ├── history/
+    ├── image/
+    ├── layout/
+    ├── lifecycle/
+    ├── panels/
+    ├── settings/
+    ├── state/
+    ├── updates/
+    └── widgets/
+~~~
 
-## Regra aplicada
+`src/ui/main_window.py` continuou sendo o ponto público usado pelo restante do sistema:
 
-`src/ui/main_window.py` continua sendo o ponto público usado pelo restante do sistema:
-
-```python
+~~~python
 from src.ui.main_window import ODINView
-```
+~~~
 
-Os métodos foram movidos para `src/ui/main_window_parts/` e vinculados novamente dentro da classe `ODINView`, mantendo os mesmos nomes.
+Os métodos foram distribuídos em `src/ui/main_window_parts/` e vinculados novamente dentro da classe `ODINView`.
 
-## Responsabilidades por pasta
+## Responsabilidades históricas
 
 | Pasta | Responsabilidade |
-|---|---|
+| --- | --- |
 | `lifecycle` | inicialização da janela |
 | `layout` | montagem estrutural do layout |
-| `panels` | painéis principais da interface |
+| `panels` | painéis principais |
 | `widgets` | componentes reutilizáveis |
-| `settings` | janela de configurações |
-| `image` | redimensionamento, exibição e conversão de coordenadas da imagem |
-| `canvas` | desenho de imagem, LEDs, resultados e placeholders |
-| `state` | normalização de listas/estado visual |
-| `updates` | atualização de textos, resumo, KPIs e renderizações |
-| `history` | histórico, observações, barra de confiança e data/hora |
+| `settings` | configurações |
+| `image` | redimensionamento, exibição e coordenadas |
+| `canvas` | desenho de imagem, LEDs e resultados |
+| `state` | normalização de estado visual |
+| `updates` | textos, resumo, KPIs e renderizações |
+| `history` | histórico e informações auxiliares |
 
-## Observação
+## Regra atual
 
-Esta etapa não altera regra de classificação, extração de features, salvamento, seleção ou callbacks. É somente refatoração estrutural da interface.
+Essa refatoração continua válida como registro do que aconteceu, mas não deve ser usada para concluir que "mais arquivos = melhor modularização".
+
+A regra atual é modularizar por **responsabilidade coesa e contrato claro**, conforme `docs/ARCHITECTURE.md`.
