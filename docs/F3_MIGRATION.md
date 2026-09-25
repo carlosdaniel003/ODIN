@@ -239,9 +239,8 @@ DesktopProductionApp
 └── Linux adapters
 ~~~
 
-Classes Raspberry permanecem somente como compatibilidade temporária até seus consumidores serem migrados.
-
-Não executar rename em massa antes da migração funcional.
+Durante a Etapa 6, aliases Raspberry foram mantidos temporariamente enquanto
+consumidores eram migrados. A Etapa 7 concluiu a remoção desses bridges.
 
 ### Implementação consolidada da Etapa 6
 
@@ -269,31 +268,46 @@ A composição Desktop:
 
 O script `scripts/iniciar_odin_linux.sh` executa `main.py`.
 
-Compatibilidade temporária:
-
-~~~text
-main_rpi.py                    -> main_desktop.main
-RaspberryPi3ProductionApp      -> DesktopProductionApp
-RaspberryPi3ODINApp            -> DesktopODINApp
-RaspberryPi3CameraService      -> DesktopCameraService
-ThreadedRaspberryPi3CameraService -> ThreadedDesktopCameraService
-~~~
-
-Esses aliases não definem mais a arquitetura. A Etapa 7 decide quais podem ser
-removidos após auditoria de consumidores.
+A Etapa 6 manteve bridges temporários durante a transição. Todos os consumidores
+foram posteriormente migrados para os nomes Desktop e os bridges foram removidos
+na Etapa 7.
 
 ## Etapa 7 — Limpeza de resíduos
 
-Somente depois de testes comprovarem substituição:
+### Implementação consolidada da Etapa 7
 
-- remover imports mortos;
-- remover wrappers não usados;
-- remover instaladores redundantes;
-- remover aliases temporários;
-- remover módulos fix/compat sem consumidores;
-- remover timers antigos;
-- remover estados duplicados;
-- remover classes Raspberry não utilizadas.
+A limpeza foi guiada por auditoria automatizada, não por remoção em massa.
+
+Foram removidos:
+
+- `main_rpi.py`;
+- classes/shims `Raspberry*`;
+- módulos de câmera/settings/trigger/runtime Raspberry;
+- infraestrutura GPIO e dependência `gpiozero`;
+- janela operacional Raspberry;
+- wrapper obsoleto `display_f3_tk_responsiveness.py`;
+- módulos patch-like órfãos comprovadamente sem consumidores;
+- referências Raspberry/GPIO em testes e workflows.
+
+Foram adicionados contratos permanentes:
+
+- `tests/test_platform_legacy_residue.py` impede retorno de imports/artefatos
+  Raspberry/GPIO e do scheduler F3 substituído;
+- `tests/test_orphan_patch_residue.py` exige consumidor produtivo para módulos
+  `fix/v2/final/guard/compat/authority/reconciliation/responsiveness`;
+- `tests/test_desktop_composition.py` confirma a composição Desktop e a ausência
+  dos antigos arquivos de plataforma.
+
+Módulos com nomes históricos que permanecem não são automaticamente resíduos:
+o audit só permite que permaneçam quando possuem consumidor produtivo atual.
+
+O ponto de entrada final é:
+
+~~~text
+python main.py
+  -> main_desktop.py
+  -> DesktopProductionApp
+~~~
 
 ## Critérios globais
 

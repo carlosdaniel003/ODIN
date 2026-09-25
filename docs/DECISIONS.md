@@ -240,18 +240,42 @@ DesktopProductionApp
 
 Consequências:
 
-- `main_rpi.py` é somente launcher de compatibilidade;
-- `RaspberryPi3ProductionApp` e `RaspberryPi3ODINApp` são aliases para as
-  classes Desktop;
-- a câmera é selecionada por `CAMERA_SERVICE_CLASS`, não por monkey patch de
-  variável global em módulo Raspberry;
+- a câmera é selecionada por `CAMERA_SERVICE_CLASS`;
 - o caminho canônico importa somente módulos Desktop/genéricos e não depende de
   GPIO;
-- projetos, editor de máscaras e métricas que antes estavam acoplados à classe
-  GPIO foram preservados em `DesktopBaseODINApp`;
-- aliases Raspberry de câmera/thread permanecem temporariamente para consumidores
-  históricos;
-- remoção física dos shims/aliases e código GPIO legado pertence à Etapa 7.
+- projetos, editor de máscaras e métricas foram preservados em
+  `DesktopBaseODINApp`;
+- os bridges temporários Raspberry utilizados durante a migração foram removidos
+  conforme D-017.
+
+---
+
+## D-017 — Resíduos Raspberry/GPIO e patches órfãos são proibidos
+
+**Status:** Accepted
+
+A Etapa 7 encerra os bridges temporários da migração.
+
+Decisão:
+
+- o produto não mantém `main_rpi.py`, classes `Raspberry*` ou infraestrutura
+  GPIO;
+- `gpiozero` não é dependência do produto;
+- o scheduler F3 substituído não permanece como módulo de compatibilidade;
+- módulos patch-like só podem permanecer se tiverem consumidor produtivo
+  verificável;
+- testes e workflows devem usar exclusivamente a composição Desktop.
+
+Contratos automatizados:
+
+~~~text
+tests/test_platform_legacy_residue.py
+tests/test_orphan_patch_residue.py
+tests/test_desktop_composition.py
+~~~
+
+Qualquer necessidade futura de Raspberry/GPIO exige uma nova decisão
+arquitetural explícita; não deve ser reintroduzida como compatibilidade informal.
 
 ---
 
