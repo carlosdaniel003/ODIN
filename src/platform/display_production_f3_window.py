@@ -5,7 +5,7 @@ import tkinter as tk
 from collections.abc import Callable
 
 from src.platform.display_visual_rotation import preparar_frame_visual_display
-from src.ui.operation_window import DesktopOperationWindow
+from src.ui.desktop_operation_window import DesktopOperationWindow
 
 
 class DisplayProductionF3Window(DesktopOperationWindow):

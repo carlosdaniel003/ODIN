@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from src.ui.main_window import ODINView
-from src.ui.operation_window import DesktopOperationWindow
+from src.ui.desktop_operation_window import DesktopOperationWindow
 
 
 # ---------------------------------------------------------------------------

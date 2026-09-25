@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
-from src.ui.operation_window import DesktopOperationWindow
+from src.ui.desktop_operation_window import DesktopOperationWindow
 
 
 def substituir_texto_marcacao_azul(texto: str) -> str:
