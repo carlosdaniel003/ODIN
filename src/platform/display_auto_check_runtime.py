@@ -102,6 +102,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
         self._display_f3_pending_ng_runtime = None
+        self._display_auto_precomputed_payload = None
+        self._display_auto_analysis_frame_override = None
         super().__init__(*args, **kwargs)
         self._rebuild_display_auto_analyzer()
 
@@ -134,6 +136,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
         self._display_f3_pending_ng_runtime = None
+        self._display_auto_precomputed_payload = None
+        self._display_auto_analysis_frame_override = None
         self._display_auto_transition_frames = (
             self.DISPLAY_AUTO_TRANSITION_FRAMES if transition else 0
         )
@@ -852,13 +856,32 @@ class DisplayAutomaticCheckF3Mixin:
             )
             return
 
-        frame = getattr(self, "camera_frame_atual", None)
+        precomputed = getattr(self, "_display_auto_precomputed_payload", None)
+        override_frame = getattr(
+            self,
+            "_display_auto_analysis_frame_override",
+            None,
+        )
+        frame = (
+            override_frame
+            if override_frame is not None
+            and getattr(override_frame, "size", 0) > 0
+            else getattr(self, "camera_frame_atual", None)
+        )
         if frame is None or getattr(frame, "size", 0) == 0:
             self._reset_display_auto_stability()
             return
 
-        frame_token = self._display_auto_frame_token(frame)
-        if frame_token == self._display_auto_last_frame_token:
+        frame_token = (
+            precomputed.get("frame_token")
+            if isinstance(precomputed, dict)
+            and precomputed.get("frame_token") is not None
+            else self._display_auto_frame_token(frame)
+        )
+        if (
+            frame_token == self._display_auto_last_frame_token
+            and not isinstance(precomputed, dict)
+        ):
             return
         self._display_auto_last_frame_token = frame_token
 
@@ -916,20 +939,42 @@ class DisplayAutomaticCheckF3Mixin:
             )
             return
 
-        analyzer = self._display_auto_analyzer
-        repository = getattr(self, "display_project_repository", None)
-        if analyzer is None or getattr(analyzer, "repository", None) is not repository:
-            self._rebuild_display_auto_analyzer()
-            analyzer = self._display_auto_analyzer
-        if analyzer is None:
-            return
+        analysis = None
+        if isinstance(precomputed, dict):
+            payload_context = precomputed.get("context")
+            payload_analysis = precomputed.get("analysis")
+            if (
+                isinstance(payload_context, dict)
+                and isinstance(payload_analysis, dict)
+                and str(payload_context.get("project_name") or "")
+                == str(context.get("project_name") or "")
+                and str(payload_context.get("check_id") or "")
+                == str(context.get("check_id") or "")
+            ):
+                analysis = deepcopy(payload_analysis)
+            self._display_auto_precomputed_payload = None
 
-        analysis = analyzer.analyze(
-            frame=frame,
-            project_name=context["project_name"],
-            check_id=context["check_id"],
-            visual_rotation=self._obter_rotacao_visual_display_f3(),
-        )
+            # Um resultado assíncrono pertence a um snapshot específico. Se o
+            # CHECK/projeto mudou enquanto o worker calculava, descarte em vez de
+            # refazer analyzer.analyze() no thread Tk.
+            if analysis is None and override_frame is not None:
+                return
+
+        if analysis is None:
+            analyzer = self._display_auto_analyzer
+            repository = getattr(self, "display_project_repository", None)
+            if analyzer is None or getattr(analyzer, "repository", None) is not repository:
+                self._rebuild_display_auto_analyzer()
+                analyzer = self._display_auto_analyzer
+            if analyzer is None:
+                return
+
+            analysis = analyzer.analyze(
+                frame=frame,
+                project_name=context["project_name"],
+                check_id=context["check_id"],
+                visual_rotation=self._obter_rotacao_visual_display_f3(),
+            )
 
         if not bool(analysis.get("ready")):
             self._display_auto_last_decision = None
@@ -1234,6 +1279,11 @@ class DisplayAutomaticCheckF3Mixin:
             self._reset_display_auto_stability()
 
     def _display_auto_analysis_due_now(self, now: float | None = None) -> bool:
+        if isinstance(
+            getattr(self, "_display_auto_precomputed_payload", None),
+            dict,
+        ):
+            return True
         if bool(getattr(self, "_display_f3_skip_auto_analysis_this_preview", False)):
             return False
         current = time.monotonic() if now is None else float(now)

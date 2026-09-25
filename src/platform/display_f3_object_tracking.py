@@ -152,6 +152,7 @@ F3_TRACKING_CONTINUITY_BONUS = 5.0
 
 F3_TRACKING_EXECUTOR_OWNER = "f3-live-tracking"
 F3_TRACKING_EXECUTOR_KEY = "latest-frame"
+F3_SEMANTIC_EXECUTOR_KEY = "semantic-latest"
 # Resultados de visão podem terminar depois que dezenas de frames novos já
 # chegaram. Geometria antiga pode servir como hint visual, mas nunca deve
 # substituir a câmera atual nem alimentar decisão produtiva muito atrasada.
@@ -2925,6 +2926,9 @@ def reset_tracking_runtime(app) -> None:
         getattr(app, "_display_f3_tracking_job_generation", 0) or 0
     ) + 1
     app._display_f3_tracking_future = None
+    app._display_f3_semantic_future = None
+    app._display_auto_precomputed_payload = None
+    app._display_auto_analysis_frame_override = None
     app._display_f3_tracking_raw_preview_frame = None
     app._display_f3_tracking_result = None
     app._display_f3_tracking_live_geometry = None
@@ -3679,6 +3683,115 @@ def _submit_live_tracking_job(app, raw_frame):
     return future
 
 
+def _run_live_semantic_job(
+    analyzer,
+    analysis_frame,
+    context: dict,
+    visual_rotation: int,
+    generation: int,
+    frame_token,
+    source_age_ms: float,
+    submitted_at_s: float,
+) -> dict:
+    """Classificação pesada do CHECK fora do thread Tk."""
+    started = time.perf_counter()
+    analysis = analyzer.analyze(
+        frame=analysis_frame,
+        project_name=str(context.get("project_name") or ""),
+        check_id=str(context.get("check_id") or ""),
+        visual_rotation=int(visual_rotation or 0),
+    )
+    elapsed_ms = max(
+        0.0,
+        (time.perf_counter() - started) * 1000.0,
+    )
+    return {
+        "generation": int(generation),
+        "frame_token": frame_token,
+        "age_ms": round(max(0.0, float(source_age_ms)) + elapsed_ms, 2),
+        "semantic_elapsed_ms": round(elapsed_ms, 2),
+        "queue_age_ms": round(
+            max(0.0, (time.perf_counter() - float(submitted_at_s)) * 1000.0),
+            2,
+        ),
+        "analysis_frame": analysis_frame,
+        "context": deepcopy(context),
+        "analysis": analysis,
+    }
+
+
+def _submit_live_semantic_job(
+    app,
+    analysis_frame,
+    tracking_payload: dict,
+):
+    if not _valid_frame(analysis_frame):
+        return None
+
+    executor = getattr(app, "_display_f3_heavy_executor", None)
+    if executor is None:
+        ensure = getattr(app, "_ensure_f3_heavy_executor", None)
+        executor = ensure() if callable(ensure) else None
+    if executor is None:
+        return None
+
+    context_fn = getattr(app, "_display_auto_current_context", None)
+    try:
+        context = context_fn() if callable(context_fn) else None
+    except Exception:
+        context = None
+    if not isinstance(context, dict):
+        return None
+
+    analyzer = getattr(app, "_display_auto_analyzer", None)
+    repository = getattr(app, "display_project_repository", None)
+    if analyzer is None or getattr(analyzer, "repository", None) is not repository:
+        rebuild = getattr(app, "_rebuild_display_auto_analyzer", None)
+        if callable(rebuild):
+            rebuild()
+        analyzer = getattr(app, "_display_auto_analyzer", None)
+    if analyzer is None:
+        return None
+
+    try:
+        visual_rotation = int(
+            app._obter_rotacao_visual_display_f3()
+        )
+    except Exception:
+        visual_rotation = 0
+    try:
+        frame_snapshot = analysis_frame.copy()
+    except Exception:
+        frame_snapshot = analysis_frame
+
+    generation = int(
+        getattr(app, "_display_f3_tracking_job_generation", 0) or 0
+    )
+    submitted_at_s = time.perf_counter()
+    source_age_ms = float(tracking_payload.get("age_ms", 0.0) or 0.0)
+    frame_token = tracking_payload.get("frame_token")
+
+    future = executor.submit(
+        lambda: _run_live_semantic_job(
+            analyzer,
+            frame_snapshot,
+            deepcopy(context),
+            visual_rotation,
+            generation,
+            frame_token,
+            source_age_ms,
+            submitted_at_s,
+        ),
+        priority=F3HeavyWorkPriority.HIGH,
+        name="f3-live-semantic",
+        owner=F3_TRACKING_EXECUTOR_OWNER,
+        key=F3_SEMANTIC_EXECUTOR_KEY,
+        replace_pending=True,
+    )
+    app._display_f3_semantic_future = future
+    return future
+
+
 def _tracking_result_operationally_fresh(
     payload: dict,
     current_token,
@@ -3772,6 +3885,93 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     raw_latest if _valid_frame(raw_latest) else previous_frame
                 )
 
+        semantic_future = getattr(
+            self,
+            "_display_f3_semantic_future",
+            None,
+        )
+        ready_semantic = None
+        if (
+            use_tracking
+            and semantic_future is not None
+            and semantic_future.done()
+        ):
+            self._display_f3_semantic_future = None
+            try:
+                payload = semantic_future.result()
+            except Exception as exc:
+                payload = None
+                self._display_f3_object_tracking_last_status = {
+                    "enabled": True,
+                    "locked": False,
+                    "reason": f"semantic_worker_error:{type(exc).__name__}",
+                }
+
+            generation = int(
+                getattr(self, "_display_f3_tracking_job_generation", 0) or 0
+            )
+            if (
+                isinstance(payload, dict)
+                and int(payload.get("generation", -1)) == generation
+                and bool(getattr(self, "display_f3_ativo", False))
+            ):
+                current_token = None
+                token_fn = getattr(self, "_display_auto_frame_token", None)
+                if callable(token_fn) and _valid_frame(raw_latest):
+                    try:
+                        current_token = token_fn(raw_latest)
+                    except Exception:
+                        current_token = None
+                current_context = None
+                context_fn = getattr(self, "_display_auto_current_context", None)
+                if callable(context_fn):
+                    try:
+                        current_context = context_fn()
+                    except Exception:
+                        current_context = None
+                payload_context = payload.get("context")
+                same_context = bool(
+                    isinstance(current_context, dict)
+                    and isinstance(payload_context, dict)
+                    and str(current_context.get("project_name") or "")
+                    == str(payload_context.get("project_name") or "")
+                    and str(current_context.get("check_id") or "")
+                    == str(payload_context.get("check_id") or "")
+                )
+                if (
+                    same_context
+                    and _tracking_result_operationally_fresh(
+                        payload,
+                        current_token,
+                    )
+                    and isinstance(payload.get("analysis"), dict)
+                    and _valid_frame(payload.get("analysis_frame"))
+                ):
+                    ready_semantic = payload
+
+        if isinstance(ready_semantic, dict):
+            self._display_auto_precomputed_payload = {
+                "frame_token": ready_semantic.get("frame_token"),
+                "context": deepcopy(ready_semantic.get("context") or {}),
+                "analysis": deepcopy(ready_semantic.get("analysis") or {}),
+            }
+            self._display_auto_analysis_frame_override = ready_semantic.get(
+                "analysis_frame"
+            )
+            self._display_f3_skip_auto_analysis_this_preview = False
+            self._display_f3_tracking_instance_frame_prepared = True
+            try:
+                # Preview usa camera_frame_atual (latest). Somente o motor
+                # automático lê _display_auto_analysis_frame_override.
+                return previous_preview()
+            finally:
+                self._display_auto_precomputed_payload = None
+                self._display_auto_analysis_frame_override = None
+                self._display_f3_tracking_instance_frame_prepared = False
+                self._display_f3_skip_auto_analysis_this_preview = False
+                if _valid_frame(raw_latest):
+                    self._display_f3_tracking_raw_authority_frame = raw_latest
+
         pending = bool(
             use_tracking
             and getattr(
@@ -3791,32 +3991,28 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             None,
         )
 
-        # Segunda metade do pipeline cooperativo: o rastreamento/alinhamento já
-        # terminou no callback anterior. Agora o Tk executa somente a análise do
-        # CHECK. Isso impede ORB/AKAZE + warp + classificação de ocuparem o mesmo
-        # callback e devolve o mainloop aos botões entre as duas etapas pesadas.
+        # Compatibilidade: se uma camada anterior ainda sinalizar análise
+        # pendente, o frame analisado é fornecido por override privado. A câmera
+        # visível permanece SEMPRE em latest-frame-wins.
         if pending and _valid_frame(pending_frame):
             cycle_raw = pending_raw if _valid_frame(pending_raw) else raw_latest
             if _valid_frame(cycle_raw):
                 self._display_f3_tracking_raw_authority_frame = cycle_raw
 
-            previous_frame = getattr(self, "camera_frame_atual", None)
-            self.camera_frame_atual = pending_frame
+            self._display_auto_analysis_frame_override = pending_frame
             self._display_f3_skip_auto_analysis_this_preview = False
             self._display_f3_tracking_instance_frame_prepared = True
             try:
                 return previous_preview()
             finally:
+                self._display_auto_analysis_frame_override = None
                 self._display_f3_tracking_analysis_pending = False
                 self._display_f3_tracking_analysis_frame = None
                 self._display_f3_tracking_pending_raw_frame = None
                 self._display_f3_tracking_instance_frame_prepared = False
                 self._display_f3_skip_auto_analysis_this_preview = False
                 if _valid_frame(raw_latest):
-                    self.camera_frame_atual = raw_latest
                     self._display_f3_tracking_raw_authority_frame = raw_latest
-                else:
-                    self.camera_frame_atual = previous_frame
 
         analysis_frame = None
         heavy_due = True
@@ -3893,11 +4089,15 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     )
 
                     if operational_fresh and _valid_frame(analysis_frame):
-                        self._display_f3_tracking_analysis_frame = analysis_frame
-                        self._display_f3_tracking_pending_raw_frame = (
-                            job_raw if _valid_frame(job_raw) else raw_latest
-                        )
-                        self._display_f3_tracking_analysis_pending = True
+                        self._display_f3_tracking_analysis_frame = None
+                        self._display_f3_tracking_pending_raw_frame = None
+                        self._display_f3_tracking_analysis_pending = False
+                        if getattr(self, "_display_f3_semantic_future", None) is None:
+                            _submit_live_semantic_job(
+                                self,
+                                analysis_frame,
+                                payload,
+                            )
                     else:
                         self._display_f3_tracking_analysis_frame = None
                         self._display_f3_tracking_pending_raw_frame = None
@@ -3908,9 +4108,15 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 "_display_f3_tracking_future",
                 None,
             )
+            semantic_future = getattr(
+                self,
+                "_display_f3_semantic_future",
+                None,
+            )
             if (
                 heavy_due
                 and tracking_future is None
+                and semantic_future is None
                 and not bool(
                     getattr(
                         self,

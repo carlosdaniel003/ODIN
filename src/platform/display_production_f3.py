@@ -182,6 +182,14 @@ class DisplayProductionF3Mixin:
         self._display_f3_configuration_opening = True
         self._display_f3_last_config_error = ""
         try:
+            from src.platform.display_f3_object_tracking import (
+                reset_tracking_runtime,
+            )
+            reset_tracking_runtime(self)
+        except Exception:
+            # A configuração deve abrir mesmo se o tracking estiver indisponível.
+            pass
+        try:
             self._display_auto_set_preview_status(
                 "CONFIGURAÇÃO • abrindo...",
                 "#FDE68A",
