@@ -13,7 +13,7 @@ from src.platform.display_f3_reference_authority_fix import (
     _sequence_authoritative_operational_state,
     classificar_mascara_com_referencias_f3,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 def _features(value: float) -> LedFeatures:
@@ -116,7 +116,7 @@ class DisplayF3ReferenceAuthorityFixTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
 
     def test_final_profile_installs_reference_authority_after_existing_f3_layers(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         status_position = source.index("instalar_status_mascaras_display_f3()")
         authority_position = source.index("instalar_autoridade_referencias_display_f3()")
         super_position = source.index("super().__init__(root)")

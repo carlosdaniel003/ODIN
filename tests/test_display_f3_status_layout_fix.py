@@ -13,7 +13,7 @@ from src.platform.display_visual_reference_status import (
     DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
     DISPLAY_PROJECT_REFERENCE_EMPTY_SUPPORT,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class DisplayF3StatusLayoutFixTests(unittest.TestCase):
@@ -98,7 +98,7 @@ class DisplayF3StatusLayoutFixTests(unittest.TestCase):
         self.assertIn("height=2", source)
 
     def test_perfil_final_instala_fix_apos_status_visual(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         status_pos = source.index("instalar_status_referencias_visuais_display()")
         fix_pos = source.index("instalar_layout_status_f3_estavel()")
         self.assertLess(status_pos, fix_pos)

@@ -24,11 +24,11 @@ from src.platform.display_theme import (
     mapear_cor_display,
     obter_estilo_botao_display,
 )
-from src.platform.raspberry_pi3_production_app import (
-    RaspberryPi3ProductionApp,
+from src.platform.desktop_production_app import (
+    DesktopProductionApp,
 )
 from src.ui.main_window import ODINView
-from src.ui.operation_window_raspberry import RaspberryOperationWindow
+from src.ui.operation_window import DesktopOperationWindow
 
 
 class FakeWidget:
@@ -188,15 +188,15 @@ class DisplayThemeTests(unittest.TestCase):
         self.assertEqual(DISPLAY_WHITE, ODINView.COR_TEXTO)
         self.assertEqual(
             DISPLAY_DARK,
-            RaspberryOperationWindow.PREVIEW_BACKGROUND,
+            DesktopOperationWindow.PREVIEW_BACKGROUND,
         )
         self.assertEqual(
             DISPLAY_BORDER,
-            RaspberryOperationWindow.PREVIEW_BORDER,
+            DesktopOperationWindow.PREVIEW_BORDER,
         )
 
     def test_perfil_display_inclui_mixin_de_tema(self):
-        self.assertIn(DisplayThemeMixin, RaspberryPi3ProductionApp.__mro__)
+        self.assertIn(DisplayThemeMixin, DesktopProductionApp.__mro__)
 
 
 if __name__ == "__main__":

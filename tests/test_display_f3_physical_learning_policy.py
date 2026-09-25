@@ -26,7 +26,7 @@ from src.platform.display_visual_reference_status import (
     DisplayProjectPresenceReferenceStore,
     DisplayVisualReferenceMatcher,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 def _features(value: float) -> LedFeatures:
@@ -211,7 +211,7 @@ class DisplayF3PhysicalLearningPolicyTests(unittest.TestCase):
             self.assertEqual(2, h1_evidence["powered_votes"])
 
     def test_final_policy_is_installed_after_check_photo_learning(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         learning_position = source.index(
             "instalar_referencias_por_mesma_mascara_display_f3()"
         )

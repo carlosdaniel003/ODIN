@@ -10,7 +10,7 @@ from src.platform.display_f3_physical_state_fix import (
     classificar_estado_fisico_hierarquico_f3,
     overlay_contexto_independente_da_analise,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class _Store:
@@ -238,7 +238,7 @@ class DisplayF3PhysicalStateFixTests(unittest.TestCase):
         self.assertEqual({}, context["classifications"])
 
     def test_perfil_instala_fix_depois_da_roi_das_referencias(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         roi_position = source.index("instalar_roi_referencias_display_f3()")
         fix_position = source.index("instalar_correcao_estado_fisico_display_f3()")
         self.assertLess(roi_position, fix_position)
