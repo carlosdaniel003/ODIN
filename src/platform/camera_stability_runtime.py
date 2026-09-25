@@ -128,3 +128,7 @@ class RaspberryCameraStabilityMixin:
 
         engine.analyze = analisar_com_confirmacao
         engine._odin_confirmacao_temporal_instalada = True
+
+
+# Nome canônico desktop; alias legado preservado.
+DesktopCameraStabilityMixin = RaspberryCameraStabilityMixin

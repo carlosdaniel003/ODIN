@@ -12,7 +12,7 @@ from src.platform.linux_camera_compatibility import (
     LinuxCameraCompatibilityMixin,
 )
 from src.platform.threaded_camera_service import (
-    ThreadedRaspberryPi3CameraService,
+    ThreadedDesktopCameraService,
 )
 from src.platform.windows_camera_compatibility import (
     WindowsCameraCompatibilityMixin,
@@ -103,7 +103,7 @@ class LiveFixedFullHdCameraService(
                 "height": int(travada[1]),
             }
         )
-        ThreadedRaspberryPi3CameraService.atualizar_configuracoes_camera(
+        ThreadedDesktopCameraService.atualizar_configuracoes_camera(
             self,
             configuracoes,
         )

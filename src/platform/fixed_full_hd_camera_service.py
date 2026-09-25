@@ -8,21 +8,21 @@ from src.platform.linux_camera_backend import (
     descobrir_dispositivos_video,
     opencv_tem_gstreamer,
 )
-from src.platform.raspberry_pi3_settings import (
+from src.platform.desktop_settings import (
     CAMERA_FPS,
     CAMERA_HEIGHT,
     CAMERA_SCAN_MAX_INDEX,
     CAMERA_WIDTH,
 )
 from src.platform.threaded_camera_service import (
-    ThreadedRaspberryPi3CameraService,
+    ThreadedDesktopCameraService,
 )
 
 
-class FixedFullHdCameraService(ThreadedRaspberryPi3CameraService):
+class FixedFullHdCameraService(ThreadedDesktopCameraService):
     """1080p fixo no Linux e captura nativa/negociada no Windows.
 
-    No Raspberry/Linux a operação continua estritamente em 1920x1080 a 20 FPS.
+    No Linux desktop a operação continua estritamente em 1920x1080 a 20 FPS.
     No Windows o driver escolhe resolução, FPS e formato como nas APIs nativas
     do sistema. Isso evita ciclos de reconexão em câmeras USB que funcionam no
     Windows, mas não aceitam imediatamente o perfil MJPG 1080p imposto pelo

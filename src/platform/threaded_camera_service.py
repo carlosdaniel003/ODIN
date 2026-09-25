@@ -772,3 +772,7 @@ class ThreadedRaspberryPi3CameraService(RaspberryPi3CameraService):
                 )
 
         self._controles_automaticos_travados = True
+
+
+# Nome canônico desktop; implementação única preservada.
+ThreadedDesktopCameraService = ThreadedRaspberryPi3CameraService
