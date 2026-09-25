@@ -48,6 +48,10 @@ jobs:
         run: |
           python -m unittest tests.test_platform_legacy_residue -v
 
+      - name: Audit orphan patch modules
+        run: |
+          python -m unittest tests.test_orphan_patch_residue -v
+
       - name: Keep JIG config outside Git checkout
         run: |
           python -m unittest tests.test_linux_local_config_bootstrap -v
