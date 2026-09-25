@@ -30,6 +30,7 @@ jobs:
         run: |
           python -m py_compile \
             src/platform/display_project_config.py \
+            src/platform/display_f3_heavy_executor.py \
             src/platform/display_f3_config_service.py \
             src/platform/display_check_presence_reference.py \
             src/platform/display_visual_reference_status.py \

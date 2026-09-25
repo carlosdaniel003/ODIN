@@ -42,6 +42,16 @@ class DisplayF3ManualAnalysisStage2Tests(unittest.TestCase):
         self.assertNotIn("_runtime_state_at_frame", source)
         self.assertNotIn("_camera_settings_at_frame", source)
 
+    def test_stage2_jobs_use_shared_executor_instead_of_threads(self):
+        analyze = inspect.getsource(manual._capture_from_window)
+        debug = inspect.getsource(manual._generate_debug_from_window)
+        self.assertIn("_heavy_executor_for_app", analyze)
+        self.assertIn("F3HeavyWorkPriority.NORMAL", analyze)
+        self.assertIn("_heavy_executor_for_app", debug)
+        self.assertIn("F3HeavyWorkPriority.LOW", debug)
+        self.assertNotIn("threading.Thread(", analyze)
+        self.assertNotIn("threading.Thread(", debug)
+
     def test_full_debug_still_compares_all_checks_only_on_demand(self):
         source = inspect.getsource(manual.capturar_snapshot_debug_display_f3)
         self.assertIn("_run_check_analyses", source)

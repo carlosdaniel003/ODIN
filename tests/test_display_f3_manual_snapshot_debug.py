@@ -359,7 +359,8 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
     def test_handler_analisar_nao_gera_auditoria_completa(self):
         source = inspect.getsource(snapshot_module._capture_from_window)
         self.assertIn("DisplayF3CurrentCheckAnalysisService", source)
-        self.assertIn('name="ODIN-F3-CurrentCheckAnalysis"', source)
+        self.assertIn('name="manual-current-check"', source)
+        self.assertIn("F3HeavyWorkPriority.NORMAL", source)
         self.assertNotIn("capturar_snapshot_debug_display_f3", source)
         self.assertNotIn("montar_relatorio_snapshot_display_f3", source)
         self.assertNotIn("_run_check_analyses", source)
@@ -383,7 +384,8 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("_prepare_debug_seed_from_analysis", source)
         self.assertIn("capturar_snapshot_debug_display_f3", source)
         self.assertIn("montar_relatorio_snapshot_display_f3", source)
-        self.assertIn('name="ODIN-F3-DebugSnapshot"', source)
+        self.assertIn('name="technical-debug"', source)
+        self.assertIn("F3HeavyWorkPriority.LOW", source)
 
     def test_interface_remove_debug_antigo_e_toggle_off(self):
         source = inspect.getsource(snapshot_module._install_window_controls)

@@ -70,11 +70,13 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertNotIn("_photo_from_image", source)
         self.assertNotIn("PhotoImage", source)
 
-    def test_preview_service_has_single_worker_and_no_tk_dependency(self):
+    def test_preview_service_uses_canonical_heavy_executor_and_no_tk(self):
         source = inspect.getsource(config_service)
-        self.assertIn('name="ODIN-F3-ConfigPreview"', source)
-        self.assertIn("self._pending[str(key)] = request", source)
-        self.assertIn("self._queued", source)
+        self.assertIn("self._executor.submit(", source)
+        self.assertIn("F3HeavyWorkPriority.LOW", source)
+        self.assertIn("replace_pending=True", source)
+        self.assertIn("maxsize=F3_CONFIG_PREVIEW_RESULT_LIMIT", source)
+        self.assertNotIn("threading.Thread(", source)
         self.assertNotIn("import tkinter", source)
         self.assertNotIn("tk.", source)
 
