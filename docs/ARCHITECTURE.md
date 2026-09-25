@@ -159,15 +159,17 @@ Contratos atuais:
 Consumidores já migrados:
 
 - tracking ao vivo ORB/AKAZE/template/warp — `HIGH`;
+- classificação semântica automática do CHECK F3 — `HIGH`;
 - previews da configuração — `LOW`;
 - previews das referências angulares de tracking — `LOW`;
 - análise manual do CHECK atual — `NORMAL`;
 - auditoria do DEBUG TÉCNICO — `LOW`.
 
-O callback produtivo completo não é enviado a background. Tracking pesado usa
-o executor, enquanto aplicação de resultado, presença, energia, sequência e
-apresentação permanecem nos proprietários corretos. Novos offloads devem mover
-somente compute pesado e publicar resultados versionados de volta ao runtime.
+O callback produtivo completo não é enviado a background. Tracking e
+classificação semântica pesada usam o executor, enquanto aplicação de resultado,
+presença, energia, sequência e apresentação permanecem nos proprietários
+corretos. O frame analisado nunca substitui `camera_frame_atual`: a câmera
+visível continua latest-frame-wins.
 
 ### Autoridades canônicas do runtime F3
 

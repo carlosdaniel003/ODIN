@@ -512,9 +512,9 @@ O F3 possui um executor canônico para tarefas pesadas assíncronas:
 `F3HeavyVisionExecutor`.
 
 Ele mantém **um único worker**, fila limitada e prioridades. Atualmente passam
-por ele a análise manual do CHECK atual, o DEBUG completo e as previews pesadas
-de configuração/tracking. Isso impede que essas operações criem threads
-independentes e disputem CPU livremente.
+por ele tracking ORB/AKAZE, classificação semântica automática do CHECK, análise
+manual, DEBUG e previews pesadas. O frame analisado é privado do motor: a câmera
+ao vivo continua exibindo sempre o frame mais recente.
 
 A prioridade alta permanece reservada para compute operacional puro. As
 autoridades stateful já possuem proprietários explícitos; qualquer migração para
@@ -541,8 +541,9 @@ O coordenador diferencia:
 - callback leve ou caro.
 
 Frame repetido e análise ainda não devida fazem apenas repaint. CONFIGURAR usa
-cadência de fundo. Após um callback caro, o próximo tick recebe um intervalo de
-idle para permitir mouse, teclado e repaint do Tkinter.
+cadência de fundo e invalida tracking/classificação pendentes antes de abrir.
+Após um callback caro, o próximo tick recebe um intervalo de idle para permitir
+mouse, teclado e repaint do Tkinter.
 
 O coordenador não decide OK/NG e não implementa tracking, presença, energia ou
 CHECKS. Ele orquestra os proprietários canônicos descritos abaixo.

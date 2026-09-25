@@ -97,6 +97,7 @@ Uso atual:
 
 ~~~text
 HIGH    tracking ao vivo ORB/AKAZE/template/warp
+HIGH    classificação semântica automática do CHECK
 NORMAL  análise manual do CHECK atual
 LOW     configuração / thumbnails / DEBUG completo
 ~~~
@@ -115,10 +116,10 @@ Portanto, se adapters históricos consultarem o estado mais de uma vez no mesmo
 frame/contexto, o matching pesado não deve ser repetido. O runtime expõe
 `build_count` e `cache_hits` para validar esse contrato.
 
-A prioridade `HIGH` é usada pelo tracking ao vivo do F3. ORB/AKAZE, fallback
-por template e geração do frame alinhado saem do thread Tk e retornam um
-resultado versionado. A UI aplica somente o resultado ainda pertencente ao ciclo
-atual.
+A prioridade `HIGH` é usada pelo tracking e pela classificação semântica
+automática do F3. ORB/AKAZE, fallback por template, warp e
+`analyzer.analyze()` saem do thread Tk e retornam resultados versionados. O Tk
+aplica somente o resultado ainda pertencente ao projeto/CHECK/ciclo atual.
 
 A câmera visível segue **latest-frame-wins também na renderização**. O frame
 copiado para um worker nunca pode voltar a substituir `camera_frame_atual`
@@ -126,8 +127,12 @@ quando o job terminar. Se o tracking levar muito tempo, a geometria pode
 permanecer como hint temporário, mas a imagem mostrada continua sendo sempre o
 frame mais recente da câmera.
 
-Resultados de tracking com idade operacional excessiva ou gap de frames acima
-do limite não alimentam decisão automática de CHECK.
+Resultados de tracking ou classificação com idade operacional excessiva ou gap
+de frames acima do limite não alimentam decisão automática de CHECK.
+
+Ao abrir CONFIGURAR, jobs pendentes de tracking/classificação são invalidados
+antes da construção da janela para evitar que a configuração espere o pipeline
+produtivo.
 
 `HIGH` não deve receber um método que misture compute, state machine e widgets.
 O uso correto é:
