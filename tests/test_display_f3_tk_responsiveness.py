@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import inspect
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-import src.platform.display_f3_object_tracking as tracking
 import src.platform.display_f3_tk_responsiveness as responsiveness
 
 
@@ -75,9 +74,9 @@ class DisplayF3TkResponsivenessTests(unittest.TestCase):
         self.assertIs(first, app._atualizar_preview_display_f3)
 
     def test_tracking_and_analysis_are_split_between_tk_callbacks(self):
-        source = inspect.getsource(
-            tracking.instalar_autoridade_final_instancia_rastreamento_f3
-        )
+        source = Path(
+            "src/platform/display_f3_object_tracking.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("_display_f3_tracking_analysis_pending", source)
         self.assertIn("_display_f3_tracking_pending_raw_frame", source)
         self.assertIn(
