@@ -773,6 +773,3 @@ class ThreadedDesktopCameraService(DesktopCameraService):
 
         self._controles_automaticos_travados = True
 
-
-# Alias legado mantido para consumidores históricos.
-ThreadedRaspberryPi3CameraService = ThreadedDesktopCameraService
