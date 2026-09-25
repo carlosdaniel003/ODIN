@@ -95,6 +95,16 @@ class PlatformLegacyResidueAuditTests(unittest.TestCase):
         self.assertNotIn("instalar_responsividade_tk_display_f3", main)
         self.assertNotIn("_install_adaptive_preview_cadence", main)
 
+    def test_requirements_do_not_restore_gpio_dependency(self):
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        self.assertNotIn("gpiozero", requirements.lower())
+
+    def test_source_has_no_threaded_raspberry_camera_alias(self):
+        source = (
+            ROOT / "src/platform/threaded_camera_service.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("ThreadedRaspberryPi3CameraService", source)
+
 
 if __name__ == "__main__":
     unittest.main()

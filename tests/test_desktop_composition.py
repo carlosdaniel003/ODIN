@@ -99,6 +99,11 @@ class DesktopCompositionTests(unittest.TestCase):
                 (path, imports),
             )
 
+    def test_threaded_camera_has_only_desktop_public_name(self):
+        threaded = source("src/platform/threaded_camera_service.py")
+        self.assertIn("class ThreadedDesktopCameraService", threaded)
+        self.assertNotIn("ThreadedRaspberryPi3CameraService", threaded)
+
     def test_linux_launcher_runs_canonical_main(self):
         launcher = source("scripts/iniciar_odin_linux.sh")
         self.assertIn('"$PROJECT_DIR/main.py"', launcher)
