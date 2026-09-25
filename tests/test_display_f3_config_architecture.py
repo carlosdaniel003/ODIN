@@ -4,6 +4,7 @@ import inspect
 import unittest
 
 import src.platform.display_f3_config_service as config_service
+import src.platform.display_project_config as config_module
 from src.platform.display_project_config import DisplayProjectConfigWindow
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_visual_reference_status import (
@@ -21,15 +22,21 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertIn("DisplayProjectConfigWindow(", source)
 
     def test_initial_project_load_is_deferred_after_shell_creation(self):
-        source = inspect.getsource(DisplayProjectConfigWindow.__init__)
-        self.assertIn("_schedule_initial_refresh()", source)
-        self.assertNotIn("\n        self.refresh()\n", source)
+        source = inspect.getsource(config_module)
+        self.assertIn("self._schedule_initial_refresh()", source)
+        constructor_start = source.index("class DisplayProjectConfigWindow")
+        constructor_end = source.index(
+            "    def _widget_inside_project_scroll",
+            constructor_start,
+        )
+        constructor = source[constructor_start:constructor_end]
+        self.assertNotIn("\n        self.refresh()\n", constructor)
 
     def test_mask_preview_configure_event_only_schedules_work(self):
-        init_source = inspect.getsource(DisplayProjectConfigWindow.__init__)
+        module_source = inspect.getsource(config_module)
         self.assertIn(
             "self._on_mask_reference_preview_configure",
-            init_source,
+            module_source,
         )
         handler = inspect.getsource(
             DisplayProjectConfigWindow._on_mask_reference_preview_configure

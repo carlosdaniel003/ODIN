@@ -44,6 +44,7 @@ jobs:
             src/platform/raspberry_pi3_production_app.py \
             tests/test_display_project_config_scroll.py \
             tests/test_display_f3_config_architecture.py \
+            tests/test_display_f3_config_open_smoke.py \
             tests/test_display_check_presence_reference.py \
             tests/test_display_visual_reference_status.py \
             tests/test_display_reference_roi.py \
@@ -64,6 +65,12 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_f3_config_architecture \
+            -v
+
+      - name: Smoke test real Display F3 configuration window
+        run: |
+          xvfb-run -a python -m unittest \
+            tests.test_display_f3_config_open_smoke \
             -v
 
       - name: Run F3 fixed status layout tests
