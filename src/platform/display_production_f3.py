@@ -489,7 +489,12 @@ class DisplayProductionF3Mixin:
             # runtime no H1, e perderíamos o CHECK/cores que realmente falharam.
             self._congelar_evidencia_ng_display_f3()
 
-        evento = self.display_check_runtime.registrar_resultado_check(aprovado)
+        authority = getattr(self, "_display_f3_state_machine_authority", None)
+        evento = (
+            authority.register(aprovado)
+            if authority is not None
+            else self.display_check_runtime.registrar_resultado_check(aprovado)
+        )
         janela = self.display_f3_window
         tipo = str(evento.get("event", ""))
         snapshot = evento.get("snapshot", self.display_check_runtime.snapshot())
@@ -533,7 +538,12 @@ class DisplayProductionF3Mixin:
         if not snapshot_atual.get("checks"):
             return None
 
-        evento = self.display_check_runtime.descartar_placa()
+        authority = getattr(self, "_display_f3_state_machine_authority", None)
+        evento = (
+            authority.discard()
+            if authority is not None
+            else self.display_check_runtime.descartar_placa()
+        )
         snapshot = evento.get("snapshot", self.display_check_runtime.snapshot())
         janela = self.display_f3_window
         if janela is not None:

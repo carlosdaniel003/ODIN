@@ -2680,6 +2680,10 @@ class F3DisplayObjectTracker:
 
 
 def get_tracking_runtime(app):
+    owner = getattr(app, "_display_f3_tracking_authority", None)
+    owned_runtime = getattr(owner, "runtime", None)
+    if isinstance(owned_runtime, F3DisplayObjectTracker):
+        return owned_runtime
     runtime = getattr(app, "_display_f3_object_tracker", None)
     repository = getattr(app, "display_project_repository", None)
     if repository is None:

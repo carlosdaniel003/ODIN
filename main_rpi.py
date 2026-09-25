@@ -148,6 +148,9 @@ from src.platform.display_f3_physical_transition_authority import (  # noqa: E40
 from src.platform.display_f3_tracking_orientation_ui import (  # noqa: E402
     instalar_ui_rastreamento_objetos_display_f3,
 )
+from src.platform.display_f3_runtime_authorities import (  # noqa: E402
+    instalar_autoridades_runtime_display_f3,
+)
 from src.platform.display_f3_runtime_coordinator import (  # noqa: E402
     instalar_coordenador_runtime_display_f3,
 )
@@ -254,6 +257,10 @@ def main() -> None:
     # ligado. Para avançar BLUE/USB/AUX (e CHECKS futuros), o frame precisa provar
     # fisicamente a transição do CHECK anterior para o atual.
     instalar_autoridade_transicao_fisica_checks_f3(app)
+    # Etapa 5: as primitivas históricas permanecem disponíveis para compatibilidade,
+    # mas tracking/presença/energia/analyzer/state machine possuem proprietários
+    # explícitos. Builders legados consultam o mesmo snapshot cacheado por frame.
+    instalar_autoridades_runtime_display_f3(app)
     # Proprietário final do scheduling F3. É instalado depois de todas as
     # autoridades para capturar o pipeline final, mas somente ele agenda o próximo
     # ciclo. Frames repetidos fazem apenas repaint; ciclos caros recebem idle real.
