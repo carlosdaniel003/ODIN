@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 import unicodedata
 
-import src.platform.raspberry_pi3_profile as raspberry_pi3_profile
 from src.platform.camera_selection import (
     CAMERA_SELECTOR_RELEASE_GRACE_MS,
     CameraSelectionMixin,
@@ -278,8 +277,9 @@ def instalar_handoff_camera_windows() -> None:
             return resultado
 
         backend = getattr(self, "backend_camera_selecionado", None)
-        classe = raspberry_pi3_profile.RaspberryPi3CameraService
-        _instalar_preferencia_backend_na_classe(classe, backend)
+        classe = getattr(self, "CAMERA_SERVICE_CLASS", None)
+        if classe is not None:
+            _instalar_preferencia_backend_na_classe(classe, backend)
         return resultado
 
     confirmar_camera_com_handoff_seguro._odin_windows_handoff = True

@@ -6,8 +6,6 @@ import tkinter as tk
 
 import cv2
 
-import src.platform.raspberry_pi3_profile as raspberry_pi3_profile
-
 
 CAMERA_SELECTOR_SCAN_MAX_INDEX = 3
 CAMERA_SELECTOR_MAX_PREVIEWS = 2
@@ -233,7 +231,9 @@ class CameraSelectionMixin:
 
     def _preparar_camera_selecionada_estrita(self, indice: int) -> None:
         if self._camera_service_base_selecao is None:
-            atual = raspberry_pi3_profile.RaspberryPi3CameraService
+            atual = getattr(self, "CAMERA_SERVICE_CLASS", None)
+            if atual is None:
+                raise RuntimeError("Composição desktop sem CAMERA_SERVICE_CLASS.")
             self._camera_service_base_selecao = getattr(
                 atual,
                 "_odin_camera_selector_base_class",
@@ -243,8 +243,8 @@ class CameraSelectionMixin:
         classe_estrita = criar_classe_camera_indice_estrito(
             self._camera_service_base_selecao
         )
-        raspberry_pi3_profile.RaspberryPi3CameraService = classe_estrita
-        raspberry_pi3_profile.INDICE_CAMERA_PADRAO = int(indice)
+        self.CAMERA_SERVICE_CLASS = classe_estrita
+        self.indice_camera_selecionada = int(indice)
 
     def abrir_seletor_camera(self, ao_selecionar=None) -> None:
         janela_existente = self._camera_selector_window

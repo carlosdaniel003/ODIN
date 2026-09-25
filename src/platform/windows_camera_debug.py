@@ -132,8 +132,8 @@ def instalar_debug_camera_windows() -> bool:
     import cv2
     from src.infra.camera_service import CameraService
     from src.platform.camera_selection import CameraSelectionMixin
-    from src.platform.raspberry_camera_service import RaspberryPi3CameraService
-    from src.platform.threaded_camera_service import ThreadedRaspberryPi3CameraService
+    from src.platform.desktop_camera_service import DesktopCameraService
+    from src.platform.threaded_camera_service import ThreadedDesktopCameraService
     from src.platform.windows_camera_compatibility import WindowsCameraCompatibilityMixin
     import src.platform.responsive_camera_selection as responsive
 
@@ -244,8 +244,7 @@ def instalar_debug_camera_windows() -> bool:
             )
             resultado = original(self, indice)
             try:
-                import src.platform.raspberry_pi3_profile as perfil
-                classe = perfil.RaspberryPi3CameraService
+                classe = getattr(self, "CAMERA_SERVICE_CLASS", DesktopCameraService)
                 classe_nome = getattr(classe, "__name__", repr(classe))
             except Exception:
                 classe_nome = "?"
@@ -394,7 +393,7 @@ def instalar_debug_camera_windows() -> bool:
             return resultado
         return abrir
 
-    _wrap_method(RaspberryPi3CameraService, "_abrir_camera", wrap_abrir)
+    _wrap_method(DesktopCameraService, "_abrir_camera", wrap_abrir)
 
     def wrap_probe(original):
         def probe(self, capture):
@@ -443,7 +442,7 @@ def instalar_debug_camera_windows() -> bool:
                 )
         return loop
 
-    _wrap_method(ThreadedRaspberryPi3CameraService, "_loop_captura", wrap_loop)
+    _wrap_method(ThreadedDesktopCameraService, "_loop_captura", wrap_loop)
 
     def wrap_publicar(original):
         def publicar(self, frame, estavel: bool):
@@ -462,7 +461,7 @@ def instalar_debug_camera_windows() -> bool:
         return publicar
 
     _wrap_method(
-        ThreadedRaspberryPi3CameraService,
+        ThreadedDesktopCameraService,
         "_publicar_frame_otimizado",
         wrap_publicar,
     )

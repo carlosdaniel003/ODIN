@@ -136,8 +136,11 @@ class DesktopODINApp(ODINApp):
         largura_camera, altura_camera, fps_camera = (
             self.obter_parametros_camera_dinamicos()
         )
+        indice_camera = getattr(self, "indice_camera_selecionada", None)
+        if indice_camera is None:
+            indice_camera = INDICE_CAMERA_PADRAO
         self.camera_service = self.CAMERA_SERVICE_CLASS(
-            indice_camera=INDICE_CAMERA_PADRAO,
+            indice_camera=int(indice_camera),
             largura=largura_camera,
             altura=altura_camera,
             fps=fps_camera,

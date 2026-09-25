@@ -3,7 +3,6 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 
-import src.platform.raspberry_pi3_profile as raspberry_pi3_profile
 from src.platform.led_project_repository import normalizar_resolucao_mestra
 
 
@@ -188,16 +187,16 @@ class ProjectMasterResolutionMixin:
             return super().iniciar_tela_ao_vivo()
 
         self._atualizar_config_camera_para_resolucao_mestra(resolucao)
-        classe_atual = raspberry_pi3_profile.RaspberryPi3CameraService
+        classe_atual = self.CAMERA_SERVICE_CLASS
         classe_travada = self._classe_camera_com_resolucao_travada(
             classe_atual,
             resolucao,
         )
-        raspberry_pi3_profile.RaspberryPi3CameraService = classe_travada
+        self.CAMERA_SERVICE_CLASS = classe_travada
         try:
             resultado = super().iniciar_tela_ao_vivo()
         finally:
-            raspberry_pi3_profile.RaspberryPi3CameraService = classe_atual
+            self.CAMERA_SERVICE_CLASS = classe_atual
 
         self._atualizar_config_camera_para_resolucao_mestra(resolucao)
         self._travar_servico_na_resolucao_mestra(
