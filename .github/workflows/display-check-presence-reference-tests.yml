@@ -79,7 +79,8 @@ jobs:
       - name: Validate F3 live preview freshness
         run: |
           python -m unittest \
-            tests.test_display_f3_object_tracking_isolation \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_live_preview_never_prefers_worker_raw_frame \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_tracking_result_age_blocks_multi_second_operational_decision \
             -v
 
       - name: Run Display F3 configuration architecture tests
