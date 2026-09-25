@@ -76,6 +76,27 @@ Características:
 
 Nenhum módulo deve criar thread pesada arbitrariamente depois dessa consolidação sem passar pelo executor.
 
+### Implementação consolidada da Etapa 3
+
+O proprietário canônico é `F3HeavyVisionExecutor`.
+
+Já passam pelo executor:
+
+~~~text
+NORMAL  ANALISAR / CHECK atual
+LOW     DEBUG TÉCNICO completo
+LOW     previews de configuração
+LOW     previews das referências angulares de tracking
+~~~
+
+O executor mantém um único worker, fila limitada, prioridade, cancelamento por
+proprietário e substituição de jobs pendentes de preview.
+
+A análise operacional ao vivo ainda permanece no caminho histórico nesta etapa.
+Ela não deve ser simplesmente movida para uma thread porque o callback atual
+também altera estado produtivo e apresentação. A migração dessa análise para
+`HIGH` será feita somente junto do `F3RuntimeCoordinator` na Etapa 4.
+
 ## Etapa 4 — F3RuntimeCoordinator
 
 Criar proprietário único do scheduling do F3.

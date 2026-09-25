@@ -84,6 +84,27 @@ BAIXA   thumbnails, previews e debug completo
 
 Trabalho de baixa prioridade não deve competir com inspeção produtiva.
 
+### Estado implementado
+
+O executor canônico atual é `F3HeavyVisionExecutor` e mantém:
+
+~~~text
+max_workers = 1
+max_pending = 8
+~~~
+
+Uso atual:
+
+~~~text
+NORMAL  análise manual do CHECK atual
+LOW     configuração / thumbnails / DEBUG completo
+HIGH    reservado para análise operacional da Etapa 4
+~~~
+
+Quando a fila está cheia, um job de prioridade maior pode substituir trabalho
+pendente de prioridade inferior. Previews com a mesma chave usam substituição
+latest-wins em vez de acumular backlog.
+
 ## 6. Scheduler
 
 O F3 deve convergir para exatamente um scheduler periódico proprietário.

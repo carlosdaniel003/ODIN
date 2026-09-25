@@ -105,6 +105,37 @@ Runtime Coordinator
 
 O objetivo não é reescrever o sistema de uma vez. A migração substitui uma autoridade por vez.
 
+### Executor pesado canônico do F3
+
+A execução pesada assíncrona do F3 possui atualmente um proprietário explícito:
+
+~~~text
+src/platform/display_f3_heavy_executor.py
+  └── F3HeavyVisionExecutor
+~~~
+
+Contratos atuais:
+
+- exatamente um worker por aplicação;
+- no máximo um job pesado ativo;
+- fila pendente limitada;
+- prioridade `HIGH / NORMAL / LOW`;
+- substituição de job pendente por chave para previews latest-wins;
+- cancelamento de jobs pendentes por proprietário;
+- lifecycle encerrado junto da janela raiz;
+- nenhum acesso a widgets Tkinter pelo executor.
+
+Consumidores já migrados:
+
+- previews da configuração;
+- previews das referências angulares de tracking;
+- análise manual do CHECK atual;
+- auditoria do DEBUG TÉCNICO.
+
+A prioridade `HIGH` está reservada para a análise operacional. A conexão do hot
+path produtivo ao executor pertence à Etapa 4, junto do `F3RuntimeCoordinator`,
+para não mover callbacks stateful do runtime para background de forma insegura.
+
 ## 5. Direção de dependências
 
 A dependência preferida é:

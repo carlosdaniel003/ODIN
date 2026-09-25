@@ -60,9 +60,26 @@ Quando análise está ocupada, somente o frame pendente mais recente é preserva
 
 **Status:** Accepted
 
-O F3 deve convergir para um executor proprietário de trabalho pesado com concorrência explicitamente limitada.
+O F3 possui como proprietário canônico de trabalho pesado o
+`F3HeavyVisionExecutor`, em `src/platform/display_f3_heavy_executor.py`.
 
-Operações de debug/previews não devem competir livremente com a análise produtiva.
+Contratos aceitos:
+
+- um único worker por aplicação;
+- máximo de um job pesado ativo;
+- fila pendente limitada;
+- prioridades `HIGH`, `NORMAL` e `LOW`;
+- backpressure sem fila histórica ilimitada;
+- cancelamento de jobs pendentes por proprietário;
+- lifecycle ligado à aplicação;
+- workers não manipulam Tkinter.
+
+`NORMAL` é usado pela análise manual do CHECK atual. `LOW` é usado por
+previews/configuração e DEBUG completo. `HIGH` é reservado para a análise
+operacional e será conectado ao runtime pelo coordenador da Etapa 4.
+
+Novos trabalhos pesados assíncronos do F3 não devem criar threads próprias fora
+desse executor.
 
 ---
 

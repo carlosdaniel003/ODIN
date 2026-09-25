@@ -480,7 +480,7 @@ A análise técnica manual trabalha sobre um **frame congelado**, mas separa a a
 
 Ao acionar `ANALISAR`, o sistema copia um frame coerente uma única vez e analisa **somente o CHECK atual**. O clique não percorre todas as referências e todos os CHECKS. Em NG terminal, quando a análise produtiva já pertence exatamente ao frame congelado, essa análise pode ser reaproveitada.
 
-Depois de `ANALISAR`, o botão `DEBUG TÉCNICO` fica disponível. Ao acioná-lo, o sistema usa **o mesmo frame congelado por ANALISAR** e então gera, em worker, a auditoria completa: estatísticas da imagem, comparação de referências, estado físico, configuração e análise dos CHECKS, máscaras, energia, contexto de runtime e relatório técnico. A câmera ao vivo não substitui esse frame durante o debug.
+Depois de `ANALISAR`, o botão `DEBUG TÉCNICO` fica disponível. Ao acioná-lo, o sistema usa **o mesmo frame congelado por ANALISAR** e então gera, pelo executor pesado canônico do F3, a auditoria completa: estatísticas da imagem, comparação de referências, estado físico, configuração e análise dos CHECKS, máscaras, energia, contexto de runtime e relatório técnico. A câmera ao vivo não substitui esse frame durante o debug.
 
 Esse caminho é deliberadamente diagnóstico:
 
@@ -496,6 +496,20 @@ não modifica a Produção F2
 ```
 
 A interface de debug continua leve; o relatório completo pode ser copiado sem manter milhares de linhas renderizadas continuamente na tela.
+
+## 5.13 Executor pesado do F3
+
+O F3 possui um executor canônico para tarefas pesadas assíncronas:
+`F3HeavyVisionExecutor`.
+
+Ele mantém **um único worker**, fila limitada e prioridades. Atualmente passam
+por ele a análise manual do CHECK atual, o DEBUG completo e as previews pesadas
+de configuração/tracking. Isso impede que essas operações criem threads
+independentes e disputem CPU livremente.
+
+A prioridade alta para a análise operacional está reservada para a próxima fase
+de migração do runtime, quando o scheduling do F3 passar a ter um coordenador
+único.
 
 ---
 
