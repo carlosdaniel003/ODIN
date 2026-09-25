@@ -6,7 +6,7 @@ from pathlib import Path
 from src.infra.config_repository import ConfigRepository
 from src.models.led_selection import LedSelection
 from src.platform.led_project_repository import instalar_repositorio_projetos_led
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.reference_capture import ReferenceCaptureMixin
 from src.platform.reference_project_sets import (
     ProjectReferenceSetsMixin,
@@ -251,7 +251,7 @@ class ReferenceProjectRepositoryTests(unittest.TestCase):
 
 class ReferenceProjectMroTests(unittest.TestCase):
     def test_perfil_display_prioriza_multiplas_referencias_sobre_captura_legada(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(ProjectReferenceSetsMixin, mro)
         self.assertIn(ReferenceCaptureMixin, mro)
         self.assertLess(

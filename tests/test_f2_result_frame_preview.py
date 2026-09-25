@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from src.platform.f2_automatic_analysis import F2AutomaticAnalysisMixin
-from src.platform.raspberry_pi3_profile import RaspberryPi3ODINApp
+from src.platform.desktop_profile import DesktopODINApp
 from src.platform.segment_display_operation_window import (
     calcular_tamanho_quadro_resultado_f2,
     renderizar_mascaras_resultado_f2,
@@ -140,7 +140,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertEqual(1, app.operacao_ng)
 
     def test_fluxo_base_f2_publica_frame_e_geometria_das_mascaras(self):
-        app = RaspberryPi3ODINApp.__new__(RaspberryPi3ODINApp)
+        app = DesktopODINApp.__new__(DesktopODINApp)
         app.operacao_ativa = True
         app.operacao_processando = False
         app._operacao_resultado_after_id = None
@@ -163,7 +163,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         app._agendar_preview_operacao = lambda *_args, **_kwargs: None
         app._agendar_retorno_aguardando = lambda: None
 
-        RaspberryPi3ODINApp.disparar_inspecao_operacao(app)
+        DesktopODINApp.disparar_inspecao_operacao(app)
 
         self.assertEqual(1, len(app.operacao_engine.received_frames))
         self.assertEqual(1, len(app.operacao_window.preview_calls))

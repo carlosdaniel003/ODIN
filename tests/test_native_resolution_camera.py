@@ -7,7 +7,7 @@ from src.platform.fixed_full_hd_camera_service import (
     FixedFullHdCameraService,
 )
 from src.platform.linux_camera_backend import LinuxCameraBackendCandidate
-from src.platform.raspberry_pi3_settings import (
+from src.platform.desktop_settings import (
     CAMERA_FPS,
     CAMERA_HEIGHT,
     CAMERA_RESOLUTION_FALLBACKS,

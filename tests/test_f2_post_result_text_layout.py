@@ -2,10 +2,10 @@ import unittest
 from unittest.mock import patch
 
 from src.platform.blue_operation_window import (
-    BlueRaspberryOperationWindow,
+    BlueOperationWindow,
     texto_placa_analisada_f2,
 )
-from src.platform.raspberry_runtime_fixes import StableRaspberryOperationWindow
+from src.ui.operation_window import DesktopOperationWindow
 
 
 class _FakeLabel:
@@ -30,17 +30,17 @@ class F2PostResultTextLayoutTests(unittest.TestCase):
         )
 
     def test_show_waiting_centraliza_e_desliga_wrap_antigo(self):
-        window = BlueRaspberryOperationWindow.__new__(BlueRaspberryOperationWindow)
+        window = BlueOperationWindow.__new__(BlueOperationWindow)
         window.detail_label = _FakeLabel()
         window._has_led_result = True
         window._last_result_ok = False
 
         with patch.object(
-            StableRaspberryOperationWindow,
+            DesktopOperationWindow,
             "show_waiting",
             return_value=None,
         ):
-            BlueRaspberryOperationWindow.show_waiting(
+            BlueOperationWindow.show_waiting(
                 window,
                 led_count=10,
                 total=1,

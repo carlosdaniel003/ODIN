@@ -3,7 +3,7 @@ import unittest
 from src.platform.project_master_resolution_guard import (
     ProjectMasterResolutionGuardMixin,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.project_master_resolution import ProjectMasterResolutionMixin
 
 
@@ -123,7 +123,7 @@ class ProjectMasterResolutionGuardTests(unittest.TestCase):
         self.assertEqual(17, config["gain"])
 
     def test_mro_final_coloca_guard_antes_da_resolucao_mestra(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(ProjectMasterResolutionGuardMixin, mro)
         self.assertIn(ProjectMasterResolutionMixin, mro)
         self.assertLess(
