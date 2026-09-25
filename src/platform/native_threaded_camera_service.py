@@ -18,7 +18,7 @@ from src.platform.linux_camera_backend import (
     descobrir_dispositivos_video,
     opencv_tem_gstreamer,
 )
-from src.platform.raspberry_pi3_settings import (
+from src.platform.desktop_settings import (
     CAMERA_FPS,
     CAMERA_HEIGHT,
     CAMERA_RESOLUTION_FALLBACKS,
@@ -26,12 +26,12 @@ from src.platform.raspberry_pi3_settings import (
     CAMERA_WIDTH,
 )
 from src.platform.threaded_camera_service import (
-    ThreadedRaspberryPi3CameraService,
+    ThreadedDesktopCameraService,
 )
 
 
 class NativeResolutionThreadedCameraService(
-    ThreadedRaspberryPi3CameraService
+    ThreadedDesktopCameraService
 ):
     """Seleciona o maior perfil confortável, usando 1080p30 como referência."""
 

@@ -14,9 +14,9 @@ from src.platform.native_camera_mode import (
     get_native_camera_mode,
     raspberry_safe_resolution_limit,
 )
-from src.platform.raspberry_pi3_settings import CAMERA_SCAN_MAX_INDEX
+from src.platform.desktop_settings import CAMERA_SCAN_MAX_INDEX
 from src.platform.threaded_camera_service import (
-    ThreadedRaspberryPi3CameraService,
+    ThreadedDesktopCameraService,
 )
 
 
@@ -36,7 +36,7 @@ class _DisabledFrameIntegrityValidator:
         return _IntegrityAccepted()
 
 
-class RelaxedNativeCameraService(ThreadedRaspberryPi3CameraService):
+class RelaxedNativeCameraService(ThreadedDesktopCameraService):
     """Perfil temporariamente tolerante e com resolução nativa no Linux."""
 
     READ_FAILURES_BEFORE_RECOVERY = 150
