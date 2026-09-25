@@ -39,6 +39,7 @@ def _imports(path: Path) -> set[str]:
 
 
 class PlatformLegacyResidueAuditTests(unittest.TestCase):
+    maxDiff = None
     def test_production_source_does_not_depend_on_legacy_platform_modules(self):
         offenders: dict[str, list[str]] = {}
         for root in SOURCE_ROOTS:
