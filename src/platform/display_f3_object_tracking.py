@@ -2897,7 +2897,7 @@ def set_tracking_enabled(app, enabled: bool) -> bool:
         return False
     runtime.store.set_enabled(bool(enabled))
     app._display_f3_object_tracking_enabled = bool(enabled)
-    runtime.reset()
+    reset_tracking_runtime(app)
     app._display_f3_object_tracking_last_status = {
         "enabled": bool(enabled),
         "locked": False,
@@ -3580,6 +3580,7 @@ def _draw_tracking_geometry_visual(
 
 def _run_live_tracking_heavy_job(app, raw_frame, generation: int) -> dict:
     """Executa ORB/AKAZE/warp no executor pesado; não toca widgets Tk."""
+    started = time.perf_counter()
     aligned, result = align_frame_for_f3(app, raw_frame)
     geometry = None
     analysis_frame = None
@@ -3601,8 +3602,20 @@ def _run_live_tracking_heavy_job(app, raw_frame, generation: int) -> dict:
         )
         if not _valid_frame(analysis_frame):
             analysis_frame = aligned
+    current_generation = int(
+        getattr(app, "_display_f3_tracking_job_generation", 0) or 0
+    )
+    if int(generation) != current_generation:
+        runtime = get_tracking_runtime(app)
+        if runtime is not None:
+            runtime.reset()
+
     return {
         "generation": int(generation),
+        "elapsed_ms": round(
+            max(0.0, (time.perf_counter() - started) * 1000.0),
+            2,
+        ),
         "raw_frame": raw_frame,
         "result": result,
         "geometry": geometry,
@@ -3643,7 +3656,7 @@ def _submit_live_tracking_job(app, raw_frame):
 
 
 def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
-    """Autoridade final no OBJETO real criado por main_rpi.
+    """Autoridade final na instância real de DesktopProductionApp.
 
     Evita que wrappers históricos na MRO escondam o tracker. Também protege a
     própria máquina de sequência, portanto nenhum caminho alternativo consegue
@@ -3794,6 +3807,9 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     analysis_frame = payload.get("analysis_frame")
                     self._display_f3_tracking_result = result
                     self._display_f3_tracking_live_geometry = payload.get("geometry")
+                    self._display_f3_tracking_last_compute_ms = float(
+                        payload.get("elapsed_ms", 0.0) or 0.0
+                    )
                     if _valid_frame(job_raw):
                         self._display_f3_tracking_raw_authority_frame = job_raw
 
