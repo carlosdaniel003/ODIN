@@ -774,5 +774,5 @@ class ThreadedDesktopCameraService(DesktopCameraService):
         self._controles_automaticos_travados = True
 
 
-# Nome canônico desktop; implementação única preservada.
-ThreadedDesktopCameraService = ThreadedRaspberryPi3CameraService
+# Alias legado mantido para consumidores históricos.
+ThreadedRaspberryPi3CameraService = ThreadedDesktopCameraService
