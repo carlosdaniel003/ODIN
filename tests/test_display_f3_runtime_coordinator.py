@@ -210,7 +210,7 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
 
     def test_product_bootstrap_uses_coordinator_as_final_scheduler_owner(self):
         root = Path(__file__).resolve().parents[1]
-        main = (root / "main_rpi.py").read_text(encoding="utf-8")
+        main = (root / "main_desktop.py").read_text(encoding="utf-8")
         performance = (
             root / "src" / "platform" / "display_f3_final_performance.py"
         ).read_text(encoding="utf-8")

@@ -224,7 +224,7 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         self.assertNotIn("root.after(", source)
 
     def test_product_bootstrap_installs_authorities_before_coordinator(self):
-        source = open("main_rpi.py", encoding="utf-8").read()
+        source = open("main_desktop.py", encoding="utf-8").read()
         authority_pos = source.index("instalar_autoridades_runtime_display_f3(app)")
         coordinator_pos = source.index("instalar_coordenador_runtime_display_f3(app)")
         transition_pos = source.index(
