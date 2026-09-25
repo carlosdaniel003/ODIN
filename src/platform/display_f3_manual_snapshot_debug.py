@@ -982,11 +982,24 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         snapshot["report_ready"] = False
         return snapshot
 
-    try:
-        project_name = str(repository.obter_projeto_ativo() or "")
-    except Exception as exc:
-        project_name = ""
-        snapshot["errors"].append(f"erro_projeto_ativo:{type(exc).__name__}:{exc}")
+    captured_context = (
+        snapshot.get("logical_context")
+        if isinstance(snapshot.get("logical_context"), dict)
+        else {}
+    )
+    captured_project_name = str(
+        captured_context.get("project_name") or ""
+    )
+    if captured_project_name:
+        project_name = captured_project_name
+    else:
+        try:
+            project_name = str(repository.obter_projeto_ativo() or "")
+        except Exception as exc:
+            project_name = ""
+            snapshot["errors"].append(
+                f"erro_projeto_ativo:{type(exc).__name__}:{exc}"
+            )
     snapshot["project_name"] = project_name
     snapshot["config_file"] = str(getattr(repository, "config_file", "--"))
     if not project_name:

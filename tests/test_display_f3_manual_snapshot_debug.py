@@ -136,6 +136,15 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertLess(visual_pos, analyses_pos)
         self.assertLess(runtime_pos, analyses_pos)
 
+    def test_debug_completo_usa_projeto_capturado_no_analisar(self):
+        source = inspect.getsource(
+            snapshot_module.capturar_snapshot_debug_display_f3
+        )
+        self.assertIn("captured_project_name", source)
+        captured_pos = source.index("if captured_project_name:")
+        active_pos = source.index("repository.obter_projeto_ativo()")
+        self.assertLess(captured_pos, active_pos)
+
     def test_snapshot_inclui_contexto_overlay_e_configuracao_camera(self):
         source = inspect.getsource(
             snapshot_module.capturar_snapshot_debug_display_f3
@@ -264,7 +273,7 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("frame_id=88", text)
         self.assertIn(stats["sha256_24"], text)
         self.assertIn("MESMA cópia congelada", text)
-        self.assertIn("Abrir DEBUG TÉCNICO não recalcula nada", text)
+        self.assertIn("auditoria completa sob demanda", text)
         self.assertIn("[ANÁLISE DA IMAGEM / FRAME CONGELADO]", text)
         self.assertIn("[REFERÊNCIAS VISUAIS / PRESENÇA / SCORE - MESMO FRAME]", text)
         self.assertIn("[ANÁLISE FÍSICA - SEM DEBOUNCE / MESMO FRAME]", text)
