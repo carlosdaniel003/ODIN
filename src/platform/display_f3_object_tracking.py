@@ -31,6 +31,9 @@ import numpy as np
 from src.platform.display_check_presence_reference import (
     DisplayCheckPresenceReferenceStore,
 )
+from src.platform.display_f3_heavy_executor import (
+    F3HeavyWorkPriority,
+)
 from src.platform.display_f3_mask_editor_reference import (
     DisplayMaskEditorReferenceStore,
 )
@@ -146,6 +149,9 @@ F3_TRACKING_LOCK_GRACE_FRAMES = 5
 F3_TRACKING_LOCK_GRACE_S = 0.72
 F3_TRACKING_REFERENCE_STICK_BONUS = 2.5
 F3_TRACKING_CONTINUITY_BONUS = 5.0
+
+F3_TRACKING_EXECUTOR_OWNER = "f3-live-tracking"
+F3_TRACKING_EXECUTOR_KEY = "latest-frame"
 
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
@@ -2904,6 +2910,16 @@ def reset_tracking_runtime(app) -> None:
     runtime = get_tracking_runtime(app)
     if runtime is not None:
         runtime.reset()
+    executor = getattr(app, "_display_f3_heavy_executor", None)
+    if executor is not None:
+        try:
+            executor.cancel_owner(F3_TRACKING_EXECUTOR_OWNER)
+        except Exception:
+            pass
+    app._display_f3_tracking_job_generation = int(
+        getattr(app, "_display_f3_tracking_job_generation", 0) or 0
+    ) + 1
+    app._display_f3_tracking_future = None
     app._display_f3_tracking_raw_preview_frame = None
     app._display_f3_tracking_result = None
     app._display_f3_tracking_live_geometry = None
@@ -3186,30 +3202,22 @@ def align_frame_for_f3(app, frame):
     return (result.frame if result.locked else frame), result
 
 
-def _analysis_alignment_for_current_check(
+def _analysis_transform_for_current_check(
     app,
-    raw_frame,
     result: F3TrackingResult | None,
 ):
-    """Alinha somente a ANÁLISE ao frame de referência do CHECK atual.
-
-    O tracker localiza qualquer vista -> canônico. Em seguida, para analisar H1,
-    BLUE, AUX etc., compomos CANÔNICO -> FOTO DO CHECK. Assim as máscaras que o
-    usuário desenhou naquela foto continuam coincidindo pixel a pixel, mesmo que
-    cada CHECK tenha sido fotografado em uma posição diferente.
-    """
+    """Retorna CURRENT -> espaço de análise sem gerar imagem."""
     if (
         result is None
         or not result.locked
         or result.current_to_canonical is None
-        or not _valid_frame(raw_frame)
     ):
-        return None, None
+        return None, "canonical"
 
     runtime = get_tracking_runtime(app)
     current = _current_check(app)
     if runtime is None or not isinstance(current, dict):
-        return result.frame, result.current_to_canonical
+        return result.current_to_canonical, "canonical"
 
     check_id = str(current.get("id") or "")
     reference = runtime.references.get(f"check:{check_id}")
@@ -3219,31 +3227,49 @@ def _analysis_alignment_for_current_check(
         else None
     )
     if mapping is None:
-        return result.frame, result.current_to_canonical
+        return result.current_to_canonical, "canonical"
 
     try:
         canonical_to_check = cv2.invertAffineTransform(
             np.asarray(mapping, dtype=np.float32).reshape(2, 3)
         )
     except Exception:
-        return result.frame, result.current_to_canonical
+        return result.current_to_canonical, "canonical"
 
     current_to_check = compose_affine(
         canonical_to_check,
         result.current_to_canonical,
     )
     if current_to_check is None:
-        return result.frame, result.current_to_canonical
+        return result.current_to_canonical, "canonical"
+    return current_to_check, f"check:{check_id}"
 
-    tracker = runtime
+
+def _analysis_alignment_for_current_check(
+    app,
+    raw_frame,
+    result: F3TrackingResult | None,
+):
+    """Gera o frame de análise somente uma vez, fora do thread Tk quando possível."""
+    if not _valid_frame(raw_frame):
+        return None, None
+
+    matrix, _space = _analysis_transform_for_current_check(app, result)
+    if matrix is None:
+        return None, None
+
+    runtime = get_tracking_runtime(app)
+    if runtime is None:
+        return None, None
+
     aligned = cv2.warpAffine(
         raw_frame,
-        current_to_check,
-        (int(tracker.width), int(tracker.height)),
+        np.asarray(matrix, dtype=np.float32).reshape(2, 3),
+        (int(runtime.width), int(runtime.height)),
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_REFLECT101,
     )
-    return aligned, current_to_check
+    return aligned, matrix
 
 
 def _update_tracking_live_geometry(
@@ -3301,18 +3327,18 @@ def _update_tracking_live_geometry(
                 source_board = check_board
             if check_masks:
                 source_masks = check_masks
-            analysis_frame, current_to_check = _analysis_alignment_for_current_check(
-                app,
-                raw_frame,
-                result,
+            current_to_check, transform_space = (
+                _analysis_transform_for_current_check(
+                    app,
+                    result,
+                )
             )
-            del analysis_frame
             if current_to_check is not None:
                 try:
                     source_to_current = cv2.invertAffineTransform(
                         np.asarray(current_to_check, dtype=np.float32).reshape(2, 3)
                     )
-                    geometry_space = f"check:{check_id}"
+                    geometry_space = str(transform_space or f"check:{check_id}")
                 except Exception:
                     source_to_current = None
 
@@ -3551,6 +3577,71 @@ def _draw_tracking_geometry_visual(
     return result
 
 
+
+def _run_live_tracking_heavy_job(app, raw_frame, generation: int) -> dict:
+    """Executa ORB/AKAZE/warp no executor pesado; não toca widgets Tk."""
+    aligned, result = align_frame_for_f3(app, raw_frame)
+    geometry = None
+    analysis_frame = None
+    if result is not None and bool(result.locked):
+        # A geometria usa apenas matrizes; o único warp adicional cria o frame
+        # de análise do CHECK atual e também fica fora do Tk.
+        previous_geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+        try:
+            _update_tracking_live_geometry(app, raw_frame, result)
+            geometry = deepcopy(
+                getattr(app, "_display_f3_tracking_live_geometry", None)
+            )
+        finally:
+            app._display_f3_tracking_live_geometry = previous_geometry
+        analysis_frame, _matrix = _analysis_alignment_for_current_check(
+            app,
+            raw_frame,
+            result,
+        )
+        if not _valid_frame(analysis_frame):
+            analysis_frame = aligned
+    return {
+        "generation": int(generation),
+        "raw_frame": raw_frame,
+        "result": result,
+        "geometry": geometry,
+        "analysis_frame": analysis_frame,
+    }
+
+
+def _submit_live_tracking_job(app, raw_frame):
+    executor = getattr(app, "_display_f3_heavy_executor", None)
+    if executor is None:
+        ensure = getattr(app, "_ensure_f3_heavy_executor", None)
+        executor = ensure() if callable(ensure) else None
+    if executor is None:
+        return None
+
+    generation = int(
+        getattr(app, "_display_f3_tracking_job_generation", 0) or 0
+    )
+    try:
+        frame_snapshot = raw_frame.copy()
+    except Exception:
+        frame_snapshot = raw_frame
+
+    future = executor.submit(
+        lambda: _run_live_tracking_heavy_job(
+            app,
+            frame_snapshot,
+            generation,
+        ),
+        priority=F3HeavyWorkPriority.HIGH,
+        name="f3-live-tracking",
+        owner=F3_TRACKING_EXECUTOR_OWNER,
+        key=F3_TRACKING_EXECUTOR_KEY,
+        replace_pending=True,
+    )
+    app._display_f3_tracking_future = future
+    return future
+
+
 def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
     """Autoridade final no OBJETO real criado por main_rpi.
 
@@ -3673,31 +3764,67 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             # nunca mostre uma imagem antiga.
             self._display_f3_tracking_raw_authority_frame = raw_latest
 
-            if heavy_due:
-                _aligned, result = align_frame_for_f3(self, raw_latest)
-                self._display_f3_tracking_result = result
-                _update_tracking_live_geometry(self, raw_latest, result)
-                locked = bool(result is not None and result.locked)
-                if locked:
-                    aligned_check, _matrix = _analysis_alignment_for_current_check(
-                        self,
-                        raw_latest,
-                        result,
-                    )
-                    if _valid_frame(aligned_check):
-                        analysis_frame = aligned_check
+            tracking_future = getattr(
+                self,
+                "_display_f3_tracking_future",
+                None,
+            )
+            if tracking_future is not None and tracking_future.done():
+                self._display_f3_tracking_future = None
+                try:
+                    payload = tracking_future.result()
+                except Exception as exc:
+                    payload = None
+                    self._display_f3_object_tracking_last_status = {
+                        "enabled": True,
+                        "locked": False,
+                        "reason": f"tracking_worker_error:{type(exc).__name__}",
+                    }
 
-                # Se existe frame canônico válido, a classificação fica para o
-                # próximo callback. Mantemos a referência do RAW correspondente
-                # para que geometria, máscaras e evidência pertençam ao mesmo frame.
-                if _valid_frame(analysis_frame):
-                    self._display_f3_tracking_analysis_frame = analysis_frame
-                    self._display_f3_tracking_pending_raw_frame = raw_latest
-                    self._display_f3_tracking_analysis_pending = True
-                else:
-                    self._display_f3_tracking_analysis_frame = None
-                    self._display_f3_tracking_pending_raw_frame = None
-                    self._display_f3_tracking_analysis_pending = False
+                generation = int(
+                    getattr(self, "_display_f3_tracking_job_generation", 0) or 0
+                )
+                if (
+                    isinstance(payload, dict)
+                    and int(payload.get("generation", -1)) == generation
+                    and bool(getattr(self, "display_f3_ativo", False))
+                ):
+                    result = payload.get("result")
+                    job_raw = payload.get("raw_frame")
+                    analysis_frame = payload.get("analysis_frame")
+                    self._display_f3_tracking_result = result
+                    self._display_f3_tracking_live_geometry = payload.get("geometry")
+                    if _valid_frame(job_raw):
+                        self._display_f3_tracking_raw_authority_frame = job_raw
+
+                    if _valid_frame(analysis_frame):
+                        self._display_f3_tracking_analysis_frame = analysis_frame
+                        self._display_f3_tracking_pending_raw_frame = (
+                            job_raw if _valid_frame(job_raw) else raw_latest
+                        )
+                        self._display_f3_tracking_analysis_pending = True
+                    else:
+                        self._display_f3_tracking_analysis_frame = None
+                        self._display_f3_tracking_pending_raw_frame = None
+                        self._display_f3_tracking_analysis_pending = False
+
+            tracking_future = getattr(
+                self,
+                "_display_f3_tracking_future",
+                None,
+            )
+            if (
+                heavy_due
+                and tracking_future is None
+                and not bool(
+                    getattr(
+                        self,
+                        "_display_f3_tracking_analysis_pending",
+                        False,
+                    )
+                )
+            ):
+                _submit_live_tracking_job(self, raw_latest)
         elif use_tracking:
             self._display_f3_tracking_live_geometry = None
             self._display_f3_tracking_analysis_frame = None
