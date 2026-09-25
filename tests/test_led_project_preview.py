@@ -16,7 +16,7 @@ from src.platform.led_project_preview_store import (
     instalar_preview_projeto_led_store,
     obter_preview_projeto_led,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class LedProjectPreviewMathTests(unittest.TestCase):
@@ -125,7 +125,7 @@ class LedProjectPreviewStoreTests(unittest.TestCase):
 
 class LedProjectPreviewIntegrationTests(unittest.TestCase):
     def test_perfil_display_inclui_mixin_de_preview(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(LedProjectPreviewMixin, mro)
 
     def test_preview_intercepta_seletor_e_delega_fluxo_existente(self):

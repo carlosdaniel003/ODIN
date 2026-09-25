@@ -8,7 +8,7 @@ from src.platform.display_theme import aplicar_tema_arvore
 from src.platform.freeform_segment_roi import FreeformSegmentDrawingMixin
 from src.platform.fullscreen_led_selection import FullscreenLedSelectionMixin
 from src.platform.mass_roi_selection_tool import MassRoiSelectionToolMixin
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.roi_toolbar_theme import eh_botao_ferramenta_roi
 
 
@@ -46,7 +46,7 @@ class FakeToolbarButton:
 
 class MassRoiSelectionToolTests(unittest.TestCase):
     def test_perfil_final_inclui_ferramenta_na_ordem_cooperativa(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(MassRoiSelectionToolMixin, mro)
         self.assertLess(mro.index(FreeformSegmentDrawingMixin), mro.index(MassRoiSelectionToolMixin))
         self.assertLess(mro.index(MassRoiSelectionToolMixin), mro.index(FullscreenLedSelectionMixin))

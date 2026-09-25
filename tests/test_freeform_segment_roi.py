@@ -17,7 +17,7 @@ from src.platform.freeform_segment_roi import (
     criar_segmento_livre_por_pontos,
 )
 from src.platform.fullscreen_led_selection import FullscreenLedSelectionMixin
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.segment_display_roi_editor import criar_segmento_por_arrasto
 
 
@@ -113,7 +113,7 @@ class FreeformSegmentRoiTests(unittest.TestCase):
         )
 
     def test_perfil_final_inclui_desenho_livre_antes_do_fullscreen(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertIn(FreeformSegmentDrawingMixin, mro)
         self.assertLess(
             mro.index(FreeformSegmentDrawingMixin),

@@ -16,7 +16,7 @@ from src.platform.live_fixed_full_hd_camera_service import (
 )
 from src.platform.neutral_project_startup import NeutralProjectStartupMixin
 from src.platform.project_master_resolution_guard import ProjectMasterResolutionGuardMixin
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class _Service:
@@ -357,7 +357,7 @@ class LinuxF2FixedResolutionTests(unittest.TestCase):
             self.assertEqual(1, app.close_calls)
 
     def test_mixin_fica_acima_dos_guardas_que_poderiam_destravar(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertLess(
             mro.index(LinuxF2FixedResolutionMixin),
             mro.index(ProjectMasterResolutionGuardMixin),

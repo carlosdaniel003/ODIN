@@ -21,7 +21,7 @@ from src.platform.display_visual_reference_status import (
     DisplayVisualReferenceMatcher,
     display_check_cards_structure_key,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class DisplayVisualReferenceStatusTests(unittest.TestCase):
@@ -189,7 +189,7 @@ class DisplayVisualReferenceStatusTests(unittest.TestCase):
         self.assertIn("_project_presence_canvases", source)
 
     def test_perfil_final_instala_status_sem_importar_runtime_f2_no_modulo(self):
-        app_source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        app_source = inspect.getsource(DesktopProductionApp.__init__)
         self.assertIn("instalar_status_referencias_visuais_display()", app_source)
         module_source = inspect.getsource(status_module)
         self.assertNotIn("src.platform.f2_", module_source)
