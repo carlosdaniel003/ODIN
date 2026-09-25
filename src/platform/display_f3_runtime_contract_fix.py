@@ -180,16 +180,18 @@ def _install_configuration_constructor_contract() -> None:
             root,
             repository,
             frame_provider,
+            heavy_executor=None,
             on_change=None,
             on_close=None,
         ):
             return current_init(
                 self,
-                root,
-                repository,
-                frame_provider,
-                on_change,
-                on_close,
+                root=root,
+                repository=repository,
+                frame_provider=frame_provider,
+                heavy_executor=heavy_executor,
+                on_change=on_change,
+                on_close=on_close,
             )
 
         base_cls.__init__ = init
@@ -205,6 +207,7 @@ def _install_configuration_constructor_contract() -> None:
             repository,
             *,
             frame_provider=None,
+            heavy_executor=None,
             on_change=None,
             on_close=None,
         ):
@@ -213,6 +216,7 @@ def _install_configuration_constructor_contract() -> None:
                 root,
                 repository,
                 frame_provider=frame_provider,
+                heavy_executor=heavy_executor,
                 on_close=on_close,
             )
             # O refresh inicial da camada de performance é executado por after(),
