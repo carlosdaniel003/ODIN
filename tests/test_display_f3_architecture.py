@@ -7,8 +7,8 @@ import numpy as np
 
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
-from src.ui.operation_window_raspberry import RaspberryOperationWindow
+from src.platform.desktop_production_app import DesktopProductionApp
+from src.ui.operation_window import DesktopOperationWindow
 
 
 class _FakeRoot:
@@ -201,7 +201,7 @@ class DisplayF3ArchitectureTests(unittest.TestCase):
         self.assertNotIn("SegmentDisplayOperationWindow", fonte)
 
     def test_janela_f3_reutiliza_somente_renderer_base_da_camera(self):
-        self.assertTrue(issubclass(DisplayProductionF3Window, RaspberryOperationWindow))
+        self.assertTrue(issubclass(DisplayProductionF3Window, DesktopOperationWindow))
         fonte = inspect.getsource(DisplayProductionF3Window.update_camera_preview)
         self.assertIn("self.update_preview(visual_frame, leds=())", fonte)
         self.assertIn("preparar_frame_visual_display", fonte)
@@ -442,8 +442,8 @@ class DisplayF3ArchitectureTests(unittest.TestCase):
         self.assertEqual(antes, self._snapshot_f2(app))
 
     def test_integracao_preserva_instalacao_f2_e_adiciona_f3_por_mixin(self):
-        self.assertTrue(issubclass(RaspberryPi3ProductionApp, DisplayProductionF3Mixin))
-        fonte_f2 = inspect.getsource(RaspberryPi3ProductionApp._instalar_tela_operacao)
+        self.assertTrue(issubclass(DesktopProductionApp, DisplayProductionF3Mixin))
+        fonte_f2 = inspect.getsource(DesktopProductionApp._instalar_tela_operacao)
         self.assertIn("SegmentDisplayOperationWindow", fonte_f2)
         self.assertIn('"<F2>"', fonte_f2)
         self.assertIn('text="PRODUÇÃO  F2"', fonte_f2)

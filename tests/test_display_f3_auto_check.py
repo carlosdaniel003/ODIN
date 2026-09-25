@@ -24,7 +24,7 @@ from src.platform.display_reference_store import (
     DisplayReferenceLearningStore,
     display_learning_path_for_repository,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 def _features(value: float) -> LedFeatures:
@@ -376,7 +376,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         self.assertEqual([True], events)
 
     def test_auto_mixin_is_before_f3_runtime_and_does_not_replace_trigger_methods(self):
-        mro = RaspberryPi3ProductionApp.__mro__
+        mro = DesktopProductionApp.__mro__
         self.assertLess(
             mro.index(DisplayAutomaticCheckF3Mixin),
             mro.index(DisplayProductionF3Mixin),

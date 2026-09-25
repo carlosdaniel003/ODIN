@@ -19,7 +19,7 @@ from src.platform.display_f3_check_photo_learning import (
     instalar_aprendizado_foto_check_display_f3,
 )
 from src.platform.display_project_repository import DisplayProjectRepository
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 def _frame(left: int, right: int) -> np.ndarray:
@@ -114,7 +114,7 @@ class DisplayF3CheckPhotoLearningTests(unittest.TestCase):
         self.assertIs(trace_module.F3ExactCheckTemplateAnalyzer, F3SameMaskReferenceAnalyzer)
 
     def test_final_authority_is_installed_after_historical_strict_layer(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         strict_position = source.index("instalar_conformidade_estrita_mascaras_display_f3()")
         photo_position = source.index("instalar_aprendizado_foto_check_display_f3()")
         super_position = source.index("super().__init__(root)")

@@ -19,7 +19,7 @@ from src.platform.display_visual_reference_status import (
     DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
     DISPLAY_PROJECT_REFERENCE_EMPTY_SUPPORT,
 )
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class _FakeProjectStore:
@@ -269,7 +269,7 @@ class DisplayF3CheckTransitionGuardTests(unittest.TestCase):
         self.assertIn("máscaras", source)
 
     def test_perfil_final_instala_guard_depois_do_status_operacional(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         operational = source.index("instalar_status_operacional_display_f3()")
         transition = source.index("instalar_guard_transicao_check_display_f3()")
         self.assertLess(operational, transition)

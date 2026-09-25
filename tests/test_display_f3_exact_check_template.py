@@ -19,7 +19,7 @@ from src.platform.display_f3_exact_check_template import (
     comparar_mascara_com_gabarito_f3,
 )
 from src.platform.display_project_repository import DisplayProjectRepository
-from src.platform.raspberry_pi3_production_app import RaspberryPi3ProductionApp
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 def _frame(mask_1_value: int, mask_2_value: int) -> np.ndarray:
@@ -196,7 +196,7 @@ class DisplayF3ExactCheckTemplateTests(unittest.TestCase):
             self.assertGreater(score_off - score_h1, 0.20)
 
     def test_exact_template_installs_after_previous_f3_learning_layers(self):
-        source = inspect.getsource(RaspberryPi3ProductionApp.__init__)
+        source = inspect.getsource(DesktopProductionApp.__init__)
         policy_position = source.index(
             "instalar_politica_fisica_e_aprendizado_display_f3()"
         )
