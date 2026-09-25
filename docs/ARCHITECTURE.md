@@ -24,12 +24,11 @@ Plataformas suportadas:
 - Windows;
 - Linux desktop.
 
-Raspberry Pi é legado arquitetural. A composição canônica já é desktop
-Windows/Linux; nomes Raspberry remanescentes existem somente como compatibilidade
-histórica até a auditoria de resíduos.
+Raspberry Pi não é plataforma suportada. A composição canônica é desktop
+Windows/Linux e os shims/classes Raspberry e GPIO já foram removidos após
+auditoria de consumidores e CI.
 
-A migração continua incremental e protegida por testes. Não realizar
-rename/removal em massa apenas para eliminar nomes antigos.
+A árvore produtiva deve permanecer orientada a Desktop/Windows/Linux.
 
 ## 3. Domínios do produto
 
@@ -131,16 +130,11 @@ Responsabilidades de plataforma:
   canônicos da infraestrutura de captura;
 - Windows e Linux continuam diferenciados por adapters/backends internos.
 
-O bootstrap não altera mais uma variável global
-`raspberry_pi3_profile.RaspberryPi3CameraService`. A classe da câmera é uma
-dependência explícita da composição.
+A classe da câmera é uma dependência explícita da composição por
+`CAMERA_SERVICE_CLASS`.
 
-`main_rpi.py`, `RaspberryPi3ProductionApp`, `RaspberryPi3ODINApp`,
-`RaspberryPi3CameraService` e `ThreadedRaspberryPi3CameraService` são aliases
-ou shims de compatibilidade. Não devem ser usados por novo código.
-
-GPIO não faz parte da composição canônica Desktop e nenhum polling GPIO é
-iniciado por `DesktopProductionApp`.
+Não existem aliases `Raspberry*`, launcher `main_rpi.py` nem infraestrutura
+GPIO no runtime canônico.
 
 ### Executor pesado canônico do F3
 
@@ -206,10 +200,10 @@ Contratos atuais:
 - caches/latches são invalidados em abertura, fechamento e rearme físico;
 - o coordinator publica as métricas dessas autoridades junto do scheduling.
 
-Os módulos históricos `fix/v2/final/guard/compat` ainda podem fornecer
-algoritmos, políticas e adapters de compatibilidade. Eles não devem ser tratados
-como novos proprietários. A remoção física de caminhos comprovadamente
-substituídos pertence à Etapa 7.
+Módulos históricos `fix/v2/final/guard/compat` que permanecem na árvore foram
+auditados e possuem consumidores produtivos. Módulos órfãos comprovadamente
+substituídos foram removidos na Etapa 7. Nenhum novo patch paralelo deve ser
+criado quando existir um proprietário canônico.
 
 ### Coordenador canônico do runtime F3
 
@@ -220,7 +214,7 @@ src/platform/display_f3_runtime_coordinator.py
   └── F3RuntimeCoordinator
 ~~~
 
-No runtime de produto, instalado por último em `main_rpi.py`, ele:
+No runtime de produto, instalado por último em `main_desktop.py`, ele:
 
 - possui o único `root.after()` periódico do ciclo F3;
 - coalesça frame repetido em repaint leve;
@@ -232,8 +226,8 @@ No runtime de produto, instalado por último em `main_rpi.py`, ele:
 - observa o `F3HeavyVisionExecutor` e evita concorrência pesada paralela;
 - publica métricas de ticks, ciclos completos, repaints, frames repetidos e idle.
 
-As funções históricas de cadência podem permanecer no código durante a migração,
-mas não são instaladas como autoridades de scheduling no produto.
+O antigo wrapper de responsividade/cadência substituído foi removido da árvore;
+o coordinator permanece como única autoridade periódica do F3.
 
 ## 5. Direção de dependências
 

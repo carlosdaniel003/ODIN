@@ -24,9 +24,9 @@ Qualquer agente de IA que trabalhe neste repositório deve começar por `AGENTS.
 - `docs/DECISIONS.md` — decisões arquiteturais aceitas;
 - `docs/F3_MIGRATION.md` — ordem de modernização do F3.
 
-**Plataformas alvo: Windows e Linux desktop.** A composição canônica já usa
-classes `Desktop*`. Referências a Raspberry Pi, GPIO e nomes `Raspberry*`
-são compatibilidade histórica e não definem o runtime de produto.
+**Plataformas alvo: Windows e Linux desktop.** A composição canônica usa
+classes `Desktop*`. Os shims/classes Raspberry e a infraestrutura GPIO foram
+removidos da árvore produtiva após a auditoria da migração.
 
 ---
 
@@ -49,7 +49,7 @@ flowchart LR
     I --> J[Resultado da placa]
 ```
 
-A aplicação possui captura ao vivo, seleção visual de câmera, projetos por produto, resolução mestre, referências ópticas, ROIs circulares e segmentadas, visualização técnica, logging, persistência de configuração e execução desktop em Windows/Linux. Nomes e integrações Raspberry existentes são legado em processo de migração.
+A aplicação possui captura ao vivo, seleção visual de câmera, projetos por produto, resolução mestre, referências ópticas, ROIs circulares e segmentadas, visualização técnica, logging, persistência de configuração e execução desktop em Windows/Linux.
 
 ---
 
@@ -72,9 +72,6 @@ main.py
           └─ persistência
 ```
 
-`main_rpi.py` e as classes `Raspberry*` principais são apenas shims/aliases
-de compatibilidade. A composição Desktop não instancia GPIO.
-
 A organização principal do código é:
 
 | Camada | Responsabilidade |
@@ -83,7 +80,7 @@ A organização principal do código é:
 | `src/models` | estruturas de dados de seleção, features, métricas e resultados |
 | `src/infra` | câmera, configuração, arquivos, resultados e logs |
 | `src/ui` | interface principal e janelas operacionais |
-| `src/platform` | composição do produto, F2, F3, Raspberry/Linux/Windows, câmera e extensões de runtime |
+| `src/platform` | composição do produto, F2, F3, Windows/Linux, câmera e extensões de runtime |
 | `tests` | testes unitários e de regressão dos fluxos de visão, câmera, F2 e F3 |
 | `.github/workflows` | validações automatizadas específicas por subsistema |
 
@@ -210,7 +207,7 @@ O F2 também aplica uma guarda física de emissão. Ela busca evidência de núc
 
 O modo automático monitora continuamente as ROIs e pode iniciar a inspeção sem pressionar Enter quando existe evidência luminosa estável suficiente.
 
-O disparo automático não substitui os controles manuais. **Enter, teclado numérico e GPIO** continuam disponíveis quando aplicáveis.
+O disparo automático não substitui os controles manuais. **Enter e teclado numérico** continuam disponíveis quando aplicáveis.
 
 Após uma análise concluída, o automático é bloqueado para impedir a reinspeção da mesma placa. O novo ciclo exige a sequência física:
 
@@ -645,13 +642,10 @@ Durante a execução em sessão gráfica Linux, o ODIN tenta impedir screensaver
 
 ---
 
-# 8. Controles de operação e legado GPIO
+# 8. Controles de operação
 
-O código de GPIO com `gpiozero`/BCM 27 é legado da fase Raspberry e não faz
-parte da composição `DesktopProductionApp`. Ele permanece no repositório apenas
-para compatibilidade/auditoria e não é inicializado pelo runtime canônico.
-
-O fluxo do microswitch diferencia pressionamento, atraso de posicionamento e liberação. Quando GPIO não está disponível, a operação continua podendo usar teclado.
+A operação canônica é exclusivamente desktop Windows/Linux e não depende de
+GPIO. Os controles produtivos são tratados pela interface e pelo teclado.
 
 Controles principais:
 
@@ -743,7 +737,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Em Windows, `requirements.txt` instala `opencv-python`, além de `numpy` e `gpiozero`.
+Em Windows, `requirements.txt` instala `opencv-python`, além de `numpy` e `Pillow`.
 
 ## Linux
 
@@ -835,12 +829,11 @@ ODIN/
 │   ├── core/                    # visão e regras ópticas
 │   ├── infra/                   # câmera, arquivos e persistência
 │   ├── models/                  # modelos de domínio
-│   ├── platform/                # F2, F3, Windows/Linux e compatibilidade legada
+│   ├── platform/                # F2, F3, Windows/Linux e runtime
 │   └── ui/                      # interface desktop
 ├── tests/                       # testes unitários/regressão
 ├── config.py
 ├── main.py
-├── main_rpi.py
 ├── requirements.txt
 ├── linux_local_config_bootstrap.py
 ├── diagnosticar_camera_lumus.py
@@ -882,7 +875,7 @@ A branch já possui, de forma funcional e integrada:
 - proteção contra falso OFF, falso disparo e reinspeção da mesma placa;
 - snapshot de debug técnico do F3;
 - persistência de resultados NG e logs;
-- compatibilidade específica para câmera Linux/Windows;
+- adapters específicos para câmera Linux/Windows;
 - suíte extensa de testes de regressão.
 
 O desenvolvimento atual está concentrado em robustez óptica, estabilidade de ciclo e comportamento de produção, especialmente na separação entre **estado físico da placa**, **estado semântico das máscaras** e **apresentação visual ao operador**.
