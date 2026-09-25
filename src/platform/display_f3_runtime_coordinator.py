@@ -134,6 +134,14 @@ class F3RuntimeCoordinator:
             "last_frame_token": self._last_frame_token,
             "last_full_cycle_frame_token": self._last_full_cycle_frame_token,
             "heavy_executor": self._heavy_executor_stats(),
+            "runtime_authorities": dict(
+                getattr(
+                    self.app,
+                    "_display_f3_runtime_authority_stats",
+                    {},
+                )
+                or {}
+            ),
         }
 
     def _base_interval_ms(self) -> int:

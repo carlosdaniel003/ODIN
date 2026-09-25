@@ -281,6 +281,9 @@ class F3StateMachineAuthority:
     def snapshot(self) -> dict:
         return self.runtime.snapshot()
 
+    def configure(self, checks, *, reset: bool = False) -> bool:
+        return self.runtime.configurar_checks(checks, reiniciar=bool(reset))
+
     def register(self, approved: bool) -> dict:
         return self.runtime.registrar_resultado_check(bool(approved))
 

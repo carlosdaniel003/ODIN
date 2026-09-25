@@ -241,7 +241,11 @@ class DisplayProductionF3Mixin:
         nome = repository.obter_projeto_ativo()
         projeto = repository.carregar_projeto(nome) if nome else None
         if projeto is None:
-            self.display_check_runtime.configurar_checks([])
+            authority = getattr(self, "_display_f3_state_machine_authority", None)
+            if authority is not None:
+                authority.configure([])
+            else:
+                self.display_check_runtime.configurar_checks([])
             try:
                 janela.set_project_info(None, None, 0, 0)
                 janela.set_check_sequence(self.display_check_runtime.snapshot())
@@ -254,9 +258,13 @@ class DisplayProductionF3Mixin:
         )
         mascaras = projeto.get("masks", [])
         checks = projeto.get("checks", [])
-        self.display_check_runtime.configurar_checks(
-            checks if isinstance(checks, list) else []
-        )
+        authority = getattr(self, "_display_f3_state_machine_authority", None)
+        if authority is not None:
+            authority.configure(checks if isinstance(checks, list) else [])
+        else:
+            self.display_check_runtime.configurar_checks(
+                checks if isinstance(checks, list) else []
+            )
         try:
             janela.set_project_info(
                 projeto.get("name"),
@@ -572,7 +580,11 @@ class DisplayProductionF3Mixin:
             except Exception:
                 pass
         self._atualizar_resumo_projeto_display_f3()
-        self.display_check_runtime.reiniciar_placa()
+        authority = getattr(self, "_display_f3_state_machine_authority", None)
+        if authority is not None:
+            authority.reset_plate()
+        else:
+            self.display_check_runtime.reiniciar_placa()
         janela = self.display_f3_window
         if janela is not None:
             try:
@@ -638,7 +650,11 @@ class DisplayProductionF3Mixin:
         authorities = getattr(self, "_display_f3_runtime_authorities", None)
         if authorities is not None:
             authorities.reset_cycle_state()
-        self.display_check_runtime.reiniciar_placa()
+        authority = getattr(self, "_display_f3_state_machine_authority", None)
+        if authority is not None:
+            authority.reset_plate()
+        else:
+            self.display_check_runtime.reiniciar_placa()
         self._cancelar_resultado_display_f3()
         self._display_f3_ng_evidence_frozen = False
         self._display_f3_ng_evidence_frame = None
