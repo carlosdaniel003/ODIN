@@ -732,7 +732,8 @@ class DisplayProjectConfigPresenceWindow(
             min_height=620,
         )
         self._install_project_presence_panel()
-        self._update_project_presence_detail()
+        # O refresh inicial da classe base é diferido. Quando ele selecionar o
+        # projeto, _load_selected() solicitará as previews ao worker.
 
     def _install_project_presence_panel(self) -> None:
         parent = self.activate_button.master
@@ -831,14 +832,32 @@ class DisplayProjectConfigPresenceWindow(
             return
         project_name = self._selected_name()
         self._project_presence_photos.clear()
+        self._project_presence_preview_generation = int(
+            getattr(self, "_project_presence_preview_generation", 0) or 0
+        ) + 1
+        generation = self._project_presence_preview_generation
+
+        try:
+            metadata_by_kind = (
+                store.get_all(project_name)
+                if project_name
+                else {}
+            )
+        except Exception:
+            metadata_by_kind = {}
+
         for kind in DISPLAY_PROJECT_REFERENCE_TYPES:
             canvas = self._project_presence_canvases.get(kind)
             status = self._project_presence_status.get(kind)
             if canvas is None or status is None:
                 continue
             canvas.delete("all")
-            metadata = store.get(project_name or "", kind) if project_name else None
-            if metadata is None:
+            metadata = (
+                metadata_by_kind.get(kind)
+                if isinstance(metadata_by_kind, dict)
+                else None
+            )
+            if not isinstance(metadata, dict):
                 canvas.create_text(
                     87,
                     41,
@@ -848,29 +867,76 @@ class DisplayProjectConfigPresenceWindow(
                 )
                 status.configure(text="SEM REFERÊNCIA", fg=self.MUTED)
                 continue
-            path = Path(str(metadata.get("image_path") or ""))
-            image = cv2.imread(str(path), cv2.IMREAD_COLOR) if path.exists() else None
-            if image is None:
-                canvas.create_text(
-                    87,
-                    41,
-                    text="ARQUIVO AUSENTE",
-                    fill="#FCA5A5",
-                    font=("Segoe UI", 7, "bold"),
-                )
-                status.configure(text="ARQUIVO AUSENTE", fg="#FCA5A5")
-                continue
-            photo = _photo_from_image(image, 170, 78)
-            if photo is not None:
-                self._project_presence_photos[kind] = photo
-                canvas.create_image(87, 41, image=photo, anchor=tk.CENTER)
-            status.configure(
-                text=(
-                    f"ATIVA • {int(metadata.get('width', 0))}x"
-                    f"{int(metadata.get('height', 0))}"
-                ),
-                fg="#86EFAC",
+
+            canvas.create_text(
+                87,
+                41,
+                text="CARREGANDO...",
+                fill="#94A3B8",
+                font=("Segoe UI", 8, "bold"),
             )
+            status.configure(
+                text="CARREGANDO REFERÊNCIA...",
+                fg=self.MUTED,
+            )
+            service = self._get_config_preview_service()
+            key = service.submit_presence_reference_preview(
+                generation=generation,
+                project_name=project_name,
+                reference_kind=kind,
+                metadata=metadata,
+                target_width=170,
+                target_height=78,
+            )
+            self._register_config_preview_request(key, generation)
+
+    def _apply_presence_reference_preview_result(self, result) -> None:
+        if int(result.generation) != int(
+            getattr(self, "_project_presence_preview_generation", 0) or 0
+        ):
+            return
+        payload = result.payload if isinstance(result.payload, dict) else {}
+        if str(payload.get("project_name") or "") != str(
+            self._selected_name() or ""
+        ):
+            return
+        kind = str(payload.get("reference_kind") or "")
+        canvas = self._project_presence_canvases.get(kind)
+        status = self._project_presence_status.get(kind)
+        if canvas is None or status is None:
+            return
+
+        canvas.delete("all")
+        if result.error or not bool(payload.get("available")):
+            canvas.create_text(
+                87,
+                41,
+                text="ARQUIVO AUSENTE",
+                fill="#FCA5A5",
+                font=("Segoe UI", 7, "bold"),
+            )
+            status.configure(
+                text="ARQUIVO AUSENTE",
+                fg="#FCA5A5",
+            )
+            return
+
+        photo_data = payload.get("photo_data")
+        if not photo_data:
+            return
+        try:
+            photo = tk.PhotoImage(data=photo_data)
+        except Exception:
+            return
+        self._project_presence_photos[kind] = photo
+        canvas.create_image(87, 41, image=photo, anchor=tk.CENTER)
+        status.configure(
+            text=(
+                f"ATIVA • {int(payload.get('width', 0))}x"
+                f"{int(payload.get('height', 0))}"
+            ),
+            fg="#86EFAC",
+        )
 
     def edit_board_off_geometry(self) -> None:
         store = self._project_presence_store

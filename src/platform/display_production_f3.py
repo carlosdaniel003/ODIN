@@ -133,27 +133,62 @@ class DisplayProductionF3Mixin:
                 pass
 
     def abrir_configuracao_projeto_display(self) -> None:
-        existente = self._display_project_config_window
-        if existente is not None and existente.visible:
+        existing = self._display_project_config_window
+        if existing is not None:
             try:
-                existente.window.lift()
-                existente.window.focus_force()
+                if existing.visible:
+                    existing.window.deiconify()
+                    existing.window.lift()
+                    existing.window.focus_force()
+                    return
             except Exception:
-                pass
+                self._display_project_config_window = None
+
+        if bool(getattr(self, "_display_f3_configuration_opening", False)):
             return
 
-        repository = self.display_project_repository
-        if repository is None:
-            repository = DisplayProjectRepository()
-            self.display_project_repository = repository
+        self._display_f3_configuration_opening = True
+        self._display_f3_last_config_error = ""
+        try:
+            self._display_auto_set_preview_status(
+                "CONFIGURAÇÃO • abrindo...",
+                "#FDE68A",
+            )
+        except Exception:
+            pass
 
-        self._display_project_config_window = DisplayProjectConfigWindow(
-            root=self.root,
-            repository=repository,
-            frame_provider=self._obter_frame_para_configuracao_display,
-            on_change=self._atualizar_resumo_projeto_display_f3,
-            on_close=self._ao_fechar_configuracao_projeto_display,
-        )
+        def build(owner=self):
+            try:
+                repository = owner.display_project_repository
+                if repository is None:
+                    repository = DisplayProjectRepository()
+                    owner.display_project_repository = repository
+                owner._display_project_config_window = DisplayProjectConfigWindow(
+                    root=owner.root,
+                    repository=repository,
+                    frame_provider=owner._obter_frame_para_configuracao_display,
+                    on_change=owner._atualizar_resumo_projeto_display_f3,
+                    on_close=owner._ao_fechar_configuracao_projeto_display,
+                )
+            except Exception as exc:
+                owner._display_project_config_window = None
+                owner._display_f3_last_config_error = (
+                    f"{type(exc).__name__}: {exc}"
+                )
+                try:
+                    owner._display_auto_set_preview_status(
+                        f"CONFIGURAÇÃO • falha ao abrir • {type(exc).__name__}",
+                        "#FCA5A5",
+                    )
+                except Exception:
+                    pass
+            finally:
+                owner._display_f3_configuration_opening = False
+
+        try:
+            self.root.after_idle(build)
+        except Exception:
+            build()
 
     def _renderizar_fluxo_checks_display_f3(self) -> None:
         janela = self.display_f3_window

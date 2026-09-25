@@ -6,7 +6,6 @@ Esta camada atua nos custos que não acrescentam informação operacional:
 - releitura/normalização dos mesmos JSONs a cada frame;
 - processamento repetido do mesmo frame da câmera antes do gate de frame novo;
 - análise F3 e render da janela de produção atrás das telas de configuração;
-- abertura síncrona da configuração com carga pesada antes do primeiro paint;
 - matcher visual legado que ficou sem saída depois do status físico unificado;
 - leitura/cópia Full HD repetida das fotos de referência;
 - redraw completo do editor apenas para mover a lupa.
@@ -15,15 +14,12 @@ Esta camada atua nos custos que não acrescentam informação operacional:
 from copy import deepcopy
 from pathlib import Path
 import time
-import traceback
 
 import cv2
 import numpy as np
 
 
 F3_CONFIG_BACKGROUND_INTERVAL_MS = 280
-F3_CONFIG_OPEN_DELAY_MS = 1
-F3_REFERENCE_PREVIEW_DELAY_MS = 45
 F3_MASK_POINTER_INTERVAL_S = 1.0 / 20.0
 F3_MASK_DRAG_REDRAW_INTERVAL_S = 1.0 / 30.0
 F3_MAGNIFIER_TAG = "odin_f3_magnifier_overlay"
@@ -151,158 +147,6 @@ def configuracao_f3_visivel(app) -> bool:
         return bool(config.visible)
     except Exception:
         return False
-
-
-def _install_fast_configuration_open() -> None:
-    """Faz o clique em CONFIGURAR devolver o controle ao Tk imediatamente."""
-    import src.platform.display_production_f3 as production_module
-    from src.platform.display_project_repository import DisplayProjectRepository
-
-    cls = production_module.DisplayProductionF3Mixin
-    if bool(getattr(cls, "_display_f3_async_configuration_open_installed", False)):
-        return
-
-    def open_configuration(self) -> None:
-        existing = getattr(self, "_display_project_config_window", None)
-        if existing is not None:
-            try:
-                if existing.visible:
-                    existing.window.deiconify()
-                    existing.window.lift()
-                    existing.window.focus_force()
-                    return
-            except Exception:
-                self._display_project_config_window = None
-
-        if bool(getattr(self, "_display_f3_configuration_opening", False)):
-            return
-
-        self._display_f3_configuration_opening = True
-        self._display_f3_last_config_error = ""
-        try:
-            self._display_auto_set_preview_status(
-                "CONFIGURAÇÃO • abrindo...",
-                "#FDE68A",
-            )
-        except Exception:
-            pass
-
-        def build(owner=self):
-            try:
-                repository = getattr(owner, "display_project_repository", None)
-                if repository is None:
-                    repository = DisplayProjectRepository()
-                    owner.display_project_repository = repository
-
-                # A referência é resolvida em tempo de execução porque a extensão
-                # de presença física substitui a classe base no módulo F3.
-                window_cls = production_module.DisplayProjectConfigWindow
-                created = window_cls(
-                    root=owner.root,
-                    repository=repository,
-                    frame_provider=owner._obter_frame_para_configuracao_display,
-                    on_change=owner._atualizar_resumo_projeto_display_f3,
-                    on_close=owner._ao_fechar_configuracao_projeto_display,
-                )
-                owner._display_project_config_window = created
-            except Exception as exc:
-                owner._display_project_config_window = None
-                owner._display_f3_last_config_error = f"{type(exc).__name__}: {exc}"
-                traceback.print_exc()
-                try:
-                    owner._display_auto_set_preview_status(
-                        f"CONFIGURAÇÃO • falha ao abrir • {type(exc).__name__}",
-                        "#FCA5A5",
-                    )
-                except Exception:
-                    pass
-            finally:
-                owner._display_f3_configuration_opening = False
-
-        try:
-            self.root.after(F3_CONFIG_OPEN_DELAY_MS, build)
-        except Exception:
-            self._display_f3_configuration_opening = False
-            build()
-
-    cls.abrir_configuracao_projeto_display = open_configuration
-    cls._display_f3_async_configuration_open_installed = True
-
-
-def _install_lazy_configuration_content() -> None:
-    """Mostra o Toplevel antes de carregar projeto e thumbnails de referência."""
-    import src.platform.display_project_config as config_module
-
-    base_cls = config_module.DisplayProjectConfigWindow
-    if not bool(getattr(base_cls, "_display_f3_lazy_initial_content_installed", False)):
-        original_init = base_cls.__init__
-        original_refresh = base_cls.refresh
-
-        def refresh(self, prefer: str | None = None):
-            if bool(getattr(self, "_display_f3_defer_initial_refresh", False)):
-                self._display_f3_defer_initial_refresh = False
-
-                def delayed(owner=self, target=prefer):
-                    try:
-                        if owner.visible:
-                            original_refresh(owner, target)
-                    except Exception:
-                        pass
-
-                try:
-                    self.window.after(F3_CONFIG_OPEN_DELAY_MS, delayed)
-                except Exception:
-                    delayed()
-                return None
-            return original_refresh(self, prefer)
-
-        def init(self, *args, **kwargs):
-            self._display_f3_defer_initial_refresh = True
-            original_init(self, *args, **kwargs)
-
-        base_cls.refresh = refresh
-        base_cls.__init__ = init
-        base_cls._display_f3_lazy_initial_content_installed = True
-
-    # A extensão de presença lê e converte JPEGs para PhotoImage. Ela também é
-    # adiada/debounced para o primeiro paint da janela não esperar thumbnails.
-    try:
-        import src.platform.display_visual_reference_status as visual_module
-
-        presence_cls = visual_module.DisplayProjectConfigPresenceWindow
-        if not bool(
-            getattr(presence_cls, "_display_f3_lazy_reference_preview_installed", False)
-        ):
-            original_detail = presence_cls._update_project_presence_detail
-
-            def detail(self):
-                previous = getattr(self, "_display_f3_reference_preview_after_id", None)
-                if previous is not None:
-                    try:
-                        self.window.after_cancel(previous)
-                    except Exception:
-                        pass
-
-                def render(owner=self):
-                    owner._display_f3_reference_preview_after_id = None
-                    try:
-                        if owner.visible:
-                            original_detail(owner)
-                    except Exception:
-                        pass
-
-                try:
-                    self._display_f3_reference_preview_after_id = self.window.after(
-                        F3_REFERENCE_PREVIEW_DELAY_MS,
-                        render,
-                    )
-                except Exception:
-                    render()
-
-            presence_cls._update_project_presence_detail = detail
-            presence_cls._display_f3_lazy_reference_preview_installed = True
-    except Exception:
-        pass
 
 
 def _install_configuration_runtime_pause() -> None:
@@ -939,8 +783,6 @@ def _install_mask_editor_hot_path() -> None:
 
 def instalar_performance_final_display_f3() -> None:
     _install_repository_caches()
-    _install_fast_configuration_open()
-    _install_lazy_configuration_content()
     _install_configuration_runtime_pause()
     _install_legacy_visual_status_bypass()
     _install_exact_reference_hot_path()

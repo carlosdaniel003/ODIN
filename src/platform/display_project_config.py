@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import base64
 import tkinter as tk
-
-import cv2
 from collections.abc import Callable
 from tkinter import messagebox, simpledialog
 
@@ -15,6 +12,11 @@ from src.platform.display_project_repository import (
     normalizar_nome_projeto_display,
     normalizar_resolucao_display,
 )
+
+
+F3_CONFIG_INITIAL_LOAD_DELAY_MS = 20
+F3_CONFIG_PREVIEW_POLL_MS = 24
+F3_CONFIG_PREVIEW_RESIZE_DEBOUNCE_MS = 140
 
 
 class DisplayProjectConfigWindow:
@@ -46,6 +48,15 @@ class DisplayProjectConfigWindow:
         self.check_manager: DisplayCheckManagerWindow | None = None
         self._project_scroll_canvas: tk.Canvas | None = None
         self._project_scroll_content = None
+        self._config_preview_service = None
+        self._config_preview_poll_after_id = None
+        self._config_preview_outstanding: set[tuple[str, int]] = set()
+        self._initial_refresh_after_id = None
+        self._mask_preview_resize_after_id = None
+        self._mask_preview_generation = 0
+        self._mask_preview_requested_size = None
+        self._mask_preview_rendered_size = None
+        self._current_project_snapshot = None
 
         self.window = tk.Toplevel(root)
         self.window.title("ODIN • Projeto Display")
@@ -269,7 +280,7 @@ class DisplayProjectConfigWindow:
         self.mask_reference_preview.pack(fill=tk.X, expand=True)
         self.mask_reference_preview.bind(
             "<Configure>",
-            lambda _event: self._render_mask_reference_preview(),
+            self._on_mask_reference_preview_configure,
             add="+",
         )
 
@@ -368,9 +379,134 @@ class DisplayProjectConfigWindow:
             cursor="hand2",
         ).pack(anchor="e", padx=22, pady=(0, 16))
 
-        self.refresh()
+        # O shell da configuração aparece primeiro. Projeto e previews são
+        # carregados depois que o Tk já teve oportunidade de pintar a janela.
+        self.status.configure(text="Carregando Projetos Display...")
+        self._schedule_initial_refresh()
         self.window.lift()
         self.window.focus_force()
+
+    def _schedule_initial_refresh(self) -> None:
+        def load(owner=self):
+            owner._initial_refresh_after_id = None
+            if owner.visible:
+                owner.refresh()
+
+        try:
+            self._initial_refresh_after_id = self.window.after(
+                F3_CONFIG_INITIAL_LOAD_DELAY_MS,
+                load,
+            )
+        except Exception:
+            load()
+
+    def _get_config_preview_service(self):
+        service = self._config_preview_service
+        if service is None:
+            from src.platform.display_f3_config_service import (
+                DisplayF3ConfigPreviewService,
+            )
+            service = DisplayF3ConfigPreviewService()
+            self._config_preview_service = service
+        return service
+
+    def _register_config_preview_request(
+        self,
+        key: str,
+        generation: int,
+    ) -> None:
+        self._config_preview_outstanding.add((str(key), int(generation)))
+        self._ensure_config_preview_poll()
+
+    def _ensure_config_preview_poll(self) -> None:
+        if self._config_preview_poll_after_id is not None or not self.visible:
+            return
+        try:
+            self._config_preview_poll_after_id = self.window.after(
+                F3_CONFIG_PREVIEW_POLL_MS,
+                self._poll_config_preview_results,
+            )
+        except Exception:
+            self._config_preview_poll_after_id = None
+
+    def _poll_config_preview_results(self) -> None:
+        self._config_preview_poll_after_id = None
+        service = self._config_preview_service
+        if service is None:
+            return
+
+        for result in service.poll_results():
+            self._config_preview_outstanding.discard(
+                (str(result.key), int(result.generation))
+            )
+            handler = getattr(
+                self,
+                f"_apply_{str(result.kind)}_result",
+                None,
+            )
+            if callable(handler):
+                try:
+                    handler(result)
+                except Exception:
+                    pass
+
+        if self._config_preview_outstanding and self.visible:
+            self._ensure_config_preview_poll()
+
+    def _mask_preview_target_size(self) -> tuple[int, int]:
+        canvas = getattr(self, "mask_reference_preview", None)
+        if canvas is None:
+            return 360, 150
+        try:
+            return (
+                max(120, int(canvas.winfo_width() or 360)),
+                max(90, int(canvas.winfo_height() or 150)),
+            )
+        except Exception:
+            return 360, 150
+
+    def _on_mask_reference_preview_configure(self, event=None) -> None:
+        canvas = getattr(self, "mask_reference_preview", None)
+        if canvas is None:
+            return
+        try:
+            width = max(
+                120,
+                int(getattr(event, "width", 0) or canvas.winfo_width() or 360),
+            )
+            height = max(
+                90,
+                int(getattr(event, "height", 0) or canvas.winfo_height() or 150),
+            )
+            canvas.coords("mask_preview_image", width / 2, height / 2)
+            rendered = self._mask_preview_rendered_size
+            if isinstance(rendered, tuple) and len(rendered) == 2:
+                rw, rh = rendered
+                canvas.coords(
+                    "mask_preview_border",
+                    (width - rw) / 2,
+                    (height - rh) / 2,
+                    (width + rw) / 2,
+                    (height + rh) / 2,
+                )
+        except Exception:
+            pass
+
+        if not isinstance(self._current_project_snapshot, dict):
+            return
+        previous = self._mask_preview_resize_after_id
+        if previous is not None:
+            try:
+                self.window.after_cancel(previous)
+            except Exception:
+                pass
+        try:
+            self._mask_preview_resize_after_id = self.window.after(
+                F3_CONFIG_PREVIEW_RESIZE_DEBOUNCE_MS,
+                self._render_mask_reference_preview,
+            )
+        except Exception:
+            self._mask_preview_resize_after_id = None
 
     def _widget_inside_project_scroll(self, widget) -> bool:
         target = self._project_scroll_content
@@ -487,147 +623,151 @@ class DisplayProjectConfigWindow:
             pass
         self._mask_preview_photo = None
 
-    def _render_mask_reference_preview(self) -> None:
+    def _render_mask_reference_preview(self, project=None) -> None:
+        self._mask_preview_resize_after_id = None
         canvas = getattr(self, "mask_reference_preview", None)
         status = getattr(self, "mask_reference_status", None)
         if canvas is None:
             return
+
         name = self._selected_name()
-        project = self.repository.carregar_projeto(name) if name else None
-        if project is None:
+        if not name:
             self._clear_mask_reference_preview("Selecione um Projeto Display.")
             if status is not None:
                 status.configure(text="Nenhuma foto de referência.")
             return
 
-        store = self._mask_reference_store()
-        frame = store.load_frame(name)
-        if frame is None or getattr(frame, "size", 0) == 0:
-            self._clear_mask_reference_preview(
-                "SEM FOTO\nUse “Tirar foto com a câmera”."
-            )
-            if status is not None:
-                status.configure(text="Nenhuma foto de referência salva.")
+        if not isinstance(project, dict):
+            cached = self._current_project_snapshot
+            if (
+                isinstance(cached, dict)
+                and str(cached.get("name") or "") == name
+            ):
+                project = cached
+            else:
+                project = self.repository.carregar_projeto(name)
+        if not isinstance(project, dict):
+            self._clear_mask_reference_preview("Selecione um Projeto Display.")
             return
 
         try:
-            from src.platform.display_f3_object_tracking import (
-                F3TrackingConfigStore,
-                canonical_board_points,
-                transform_mask,
-                transform_points,
-            )
-            from src.platform.display_f3_tracking_orientation_ui import (
-                draw_reference_geometry,
-            )
-
             from src.platform.display_visual_rotation import (
                 obter_rotacao_visual_do_frame_provider,
-                preparar_check_visual_display,
-                preparar_pontos_visuais_display,
             )
-
-            master_resolution = normalizar_resolucao_display(
-                project.get("master_resolution")
-            )
-            if master_resolution is None:
-                raise ValueError("invalid master resolution")
-
             visual_rotation = obter_rotacao_visual_do_frame_provider(
                 self.frame_provider
             )
-            frame_visual, visual_resolution, masks_visual = (
-                preparar_check_visual_display(
-                    frame,
-                    master_resolution,
-                    project.get("masks", []),
-                    visual_rotation,
-                )
-            )
-            board_master = canonical_board_points(
-                project,
-                F3TrackingConfigStore(self.repository),
-            )
-            board_visual = preparar_pontos_visuais_display(
-                board_master,
-                master_resolution[0],
-                master_resolution[1],
-                visual_rotation,
-            )
+        except Exception:
+            visual_rotation = 0
 
-            height, width = frame_visual.shape[:2]
-            canvas.update_idletasks()
-            cw = max(120, int(canvas.winfo_width() or 360))
-            ch = max(90, int(canvas.winfo_height() or 150))
-            scale = min(
-                (cw - 12) / max(1.0, float(width)),
-                (ch - 12) / max(1.0, float(height)),
-            )
-            tw = max(1, int(round(width * scale)))
-            th = max(1, int(round(height * scale)))
-            thumb = cv2.resize(
-                frame_visual,
-                (tw, th),
-                interpolation=cv2.INTER_AREA,
-            )
-            matrix = (
-                (scale, 0.0, 0.0),
-                (0.0, scale, 0.0),
-            )
-            board_preview = transform_points(board_visual, matrix)
-            # A miniatura usa a MESMA orientação visual do editor. Assim, se a
-            # câmera principal está em 180°, foto, placa e máscaras também são
-            # mostradas em 180° antes de qualquer redução para o card.
-            masks_preview = [
-                transform_mask(mask, matrix)
-                for mask in (masks_visual or [])
-                if isinstance(mask, dict)
-            ]
-            thumb = draw_reference_geometry(
-                thumb,
-                board_preview,
-                [mask for mask in masks_preview if mask is not None],
-                alpha=0.74,
-            )
-            ok, encoded = cv2.imencode(
-                ".png",
-                thumb,
-                [cv2.IMWRITE_PNG_COMPRESSION, 1],
-            )
-            if not ok:
-                raise ValueError("preview encode failed")
-            self._mask_preview_photo = tk.PhotoImage(
-                data=base64.b64encode(encoded).decode("ascii")
-            )
-            canvas.delete("all")
-            canvas.create_image(
-                cw / 2,
-                ch / 2,
-                image=self._mask_preview_photo,
-                anchor=tk.CENTER,
-            )
-            canvas.create_rectangle(
-                (cw - tw) / 2,
-                (ch - th) / 2,
-                (cw + tw) / 2,
-                (ch + th) / 2,
-                outline="#334155",
-                width=1,
+        target_width, target_height = self._mask_preview_target_size()
+        self._mask_preview_requested_size = (target_width, target_height)
+        self._mask_preview_generation += 1
+        generation = int(self._mask_preview_generation)
+        service = self._get_config_preview_service()
+        key = service.submit_mask_reference_preview(
+            generation=generation,
+            repository=self.repository,
+            project_name=name,
+            project=project,
+            visual_rotation=visual_rotation,
+            target_width=target_width,
+            target_height=target_height,
+        )
+        self._register_config_preview_request(key, generation)
+        if status is not None:
+            status.configure(text="Carregando prévia da referência...")
+
+    def _apply_mask_reference_preview_result(self, result) -> None:
+        if int(result.generation) != int(self._mask_preview_generation):
+            return
+        payload = result.payload if isinstance(result.payload, dict) else {}
+        if str(payload.get("project_name") or "") != str(
+            self._selected_name() or ""
+        ):
+            return
+
+        status = getattr(self, "mask_reference_status", None)
+        if result.error:
+            self._clear_mask_reference_preview(
+                "FOTO SALVA\nPreview indisponível."
             )
             if status is not None:
                 status.configure(
-                    text=(
-                        f"Foto estática salva • {width}x{height} • "
-                        f"{len(project.get('masks', []) or [])} máscara(s) • "
-                        f"VISUAL {visual_rotation}°"
+                    text=f"Foto estática salva • erro da preview: {result.error}"
+                )
+            return
+
+        if not bool(payload.get("available")):
+            reason = str(payload.get("reason") or "")
+            if reason == "no_reference":
+                self._clear_mask_reference_preview(
+                    "SEM FOTO\nUse “Tirar foto com a câmera”."
+                )
+                if status is not None:
+                    status.configure(
+                        text="Nenhuma foto de referência salva."
                     )
+            else:
+                self._clear_mask_reference_preview(
+                    "FOTO SALVA\nPreview indisponível."
                 )
-        except Exception as exc:
-            self._clear_mask_reference_preview("FOTO SALVA\nPreview indisponível.")
-            if status is not None:
-                status.configure(
-                    text=f"Foto estática salva • erro da preview: {type(exc).__name__}"
+                if status is not None:
+                    status.configure(
+                        text="Foto de referência indisponível."
+                    )
+            return
+
+        photo_data = payload.get("photo_data")
+        if not photo_data:
+            return
+        try:
+            photo = tk.PhotoImage(data=photo_data)
+        except Exception:
+            return
+
+        self._mask_preview_photo = photo
+        rendered_width = max(
+            1,
+            int(payload.get("rendered_width", 1) or 1),
+        )
+        rendered_height = max(
+            1,
+            int(payload.get("rendered_height", 1) or 1),
+        )
+        self._mask_preview_rendered_size = (
+            rendered_width,
+            rendered_height,
+        )
+        canvas = self.mask_reference_preview
+        width, height = self._mask_preview_target_size()
+        canvas.delete("all")
+        canvas.create_image(
+            width / 2,
+            height / 2,
+            image=photo,
+            anchor=tk.CENTER,
+            tags=("mask_preview_image",),
+        )
+        canvas.create_rectangle(
+            (width - rendered_width) / 2,
+            (height - rendered_height) / 2,
+            (width + rendered_width) / 2,
+            (height + rendered_height) / 2,
+            outline="#334155",
+            width=1,
+            tags=("mask_preview_border",),
+        )
+        if status is not None:
+            status.configure(
+                text=(
+                    f"Foto estática salva • "
+                    f"{int(payload.get('source_width', 0))}x"
+                    f"{int(payload.get('source_height', 0))} • "
+                    f"{int(payload.get('mask_count', 0))} máscara(s) • "
+                    f"VISUAL {int(payload.get('visual_rotation', 0))}°"
                 )
+            )
 
     def capture_masks_reference_photo(self) -> None:
         name = self._selected_name()
@@ -841,6 +981,8 @@ class DisplayProjectConfigWindow:
         )
 
     def _show_no_project(self) -> None:
+        self._current_project_snapshot = None
+        self._mask_preview_generation += 1
         self.project_title.configure(text="SEM PROJETO")
         self.project_state.configure(
             text="Crie um Projeto Display para definir resolução, máscaras e CHECKS."
@@ -859,6 +1001,7 @@ class DisplayProjectConfigWindow:
         if project is None:
             self._show_no_project()
             return
+        self._current_project_snapshot = project
         self.project_title.configure(text=project["name"])
         resolution = normalizar_resolucao_display(project.get("master_resolution"))
         if resolution is None:
@@ -888,7 +1031,7 @@ class DisplayProjectConfigWindow:
                 + (f"\n{check_names}" if check_names else "")
             )
         )
-        self._render_mask_reference_preview()
+        self._render_mask_reference_preview(project)
 
     def add_project(self) -> None:
         name = simpledialog.askstring(
@@ -1042,6 +1185,27 @@ class DisplayProjectConfigWindow:
         )
 
     def close(self) -> None:
+        for attr in (
+            "_initial_refresh_after_id",
+            "_config_preview_poll_after_id",
+            "_mask_preview_resize_after_id",
+        ):
+            after_id = getattr(self, attr, None)
+            if after_id is not None:
+                try:
+                    self.window.after_cancel(after_id)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        service = self._config_preview_service
+        self._config_preview_service = None
+        self._config_preview_outstanding.clear()
+        if service is not None:
+            try:
+                service.stop()
+            except Exception:
+                pass
+
         manager = self.check_manager
         if manager is not None and manager.visible:
             manager.close()

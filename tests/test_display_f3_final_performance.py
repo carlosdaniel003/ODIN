@@ -68,18 +68,14 @@ class DisplayF3FinalPerformanceTests(unittest.TestCase):
         App._display_f3_configuration_opening = True
         self.assertTrue(performance.configuracao_f3_visivel(App()))
 
-    def test_configuration_open_is_deferred_before_heavy_constructor(self):
-        source = inspect.getsource(performance._install_fast_configuration_open)
-        self.assertIn("_display_f3_configuration_opening = True", source)
-        self.assertIn("root.after(F3_CONFIG_OPEN_DELAY_MS, build)", source)
-        self.assertIn("production_module.DisplayProjectConfigWindow", source)
-        self.assertIn("traceback.print_exc()", source)
+    def test_configuration_open_and_lazy_content_are_not_runtime_patches(self):
+        installer = inspect.getsource(
+            performance.instalar_performance_final_display_f3
+        )
+        self.assertNotIn("_install_fast_configuration_open", installer)
+        self.assertNotIn("_install_lazy_configuration_content", installer)
+        self.assertIn("_install_configuration_runtime_pause", installer)
 
-    def test_initial_project_and_reference_content_are_lazy(self):
-        source = inspect.getsource(performance._install_lazy_configuration_content)
-        self.assertIn("_display_f3_defer_initial_refresh", source)
-        self.assertIn("F3_REFERENCE_PREVIEW_DELAY_MS", source)
-        self.assertIn("after_cancel", source)
 
     def test_fresh_frame_gate_is_before_expensive_runtime(self):
         source = inspect.getsource(performance._install_fresh_frame_outer_gate)
