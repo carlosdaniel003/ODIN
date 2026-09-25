@@ -156,6 +156,7 @@ F3_TRACKING_EXECUTOR_KEY = "latest-frame"
 # chegaram. Geometria antiga pode servir como hint visual, mas nunca deve
 # substituir a câmera atual nem alimentar decisão produtiva muito atrasada.
 F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS = 1200.0
+F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP = 24
 
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
@@ -3587,6 +3588,7 @@ def _run_live_tracking_heavy_job(
     raw_frame,
     generation: int,
     frame_token,
+    submitted_at_s: float,
 ) -> dict:
     """Executa ORB/AKAZE/warp no executor pesado; não toca widgets Tk."""
     started = time.perf_counter()
@@ -3626,6 +3628,10 @@ def _run_live_tracking_heavy_job(
             max(0.0, (time.perf_counter() - started) * 1000.0),
             2,
         ),
+        "age_ms": round(
+            max(0.0, (time.perf_counter() - float(submitted_at_s)) * 1000.0),
+            2,
+        ),
         "raw_frame": raw_frame,
         "result": result,
         "geometry": geometry,
@@ -3653,6 +3659,7 @@ def _submit_live_tracking_job(app, raw_frame):
         frame_snapshot = raw_frame.copy()
     except Exception:
         frame_snapshot = raw_frame
+    submitted_at_s = time.perf_counter()
 
     future = executor.submit(
         lambda: _run_live_tracking_heavy_job(
@@ -3660,6 +3667,7 @@ def _submit_live_tracking_job(app, raw_frame):
             frame_snapshot,
             generation,
             frame_token,
+            submitted_at_s,
         ),
         priority=F3HeavyWorkPriority.HIGH,
         name="f3-live-tracking",
@@ -3669,6 +3677,42 @@ def _submit_live_tracking_job(app, raw_frame):
     )
     app._display_f3_tracking_future = future
     return future
+
+
+def _tracking_result_operationally_fresh(
+    payload: dict,
+    current_token,
+) -> bool:
+    """Impede CHECK automático baseado em frame preso vários segundos no worker."""
+    try:
+        age_ms = float(
+            payload.get(
+                "age_ms",
+                payload.get("elapsed_ms", 0.0),
+            )
+            or 0.0
+        )
+    except (TypeError, ValueError):
+        return False
+    if age_ms > F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS:
+        return False
+
+    payload_token = payload.get("frame_token")
+    if (
+        isinstance(payload_token, tuple)
+        and isinstance(current_token, tuple)
+        and len(payload_token) >= 2
+        and len(current_token) >= 2
+        and payload_token[0] == "camera"
+        and current_token[0] == "camera"
+    ):
+        try:
+            gap = abs(int(current_token[1]) - int(payload_token[1]))
+        except (TypeError, ValueError):
+            return False
+        if gap > F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP:
+            return False
+    return True
 
 
 def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
@@ -3836,7 +3880,6 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     # no worker por vários segundos. A geometria pode continuar
                     # como hint até o próximo job, mas a análise do CHECK espera
                     # um resultado suficientemente recente.
-                    payload_token = payload.get("frame_token")
                     current_token = None
                     token_fn = getattr(self, "_display_auto_frame_token", None)
                     if callable(token_fn) and _valid_frame(raw_latest):
@@ -3844,13 +3887,9 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                             current_token = token_fn(raw_latest)
                         except Exception:
                             current_token = None
-                    operational_fresh = bool(
-                        compute_ms <= F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS
-                        and (
-                            payload_token is None
-                            or current_token is None
-                            or payload_token == current_token
-                        )
+                    operational_fresh = _tracking_result_operationally_fresh(
+                        payload,
+                        current_token,
                     )
 
                     if operational_fresh and _valid_frame(analysis_frame):
