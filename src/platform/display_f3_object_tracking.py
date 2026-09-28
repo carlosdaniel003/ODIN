@@ -1700,11 +1700,46 @@ def _fit_luminous_pose(
     expected_rows,
     luminous_centers,
     coarse_matrices,
+    diagnostics: dict | None = None,
 ) -> dict | None:
+    expected_count = int(len(expected_rows))
+    observed_count = int(len(luminous_centers))
+    required = max(
+        F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
+        int(math.ceil(
+            expected_count * F3_TRACKING_LUMINOUS_MIN_MATCH_RATIO
+        )),
+    )
+
+    diagnostic = diagnostics if isinstance(diagnostics, dict) else None
+    if diagnostic is not None:
+        diagnostic.clear()
+        diagnostic.update(
+            {
+                "expected_on_count": expected_count,
+                "observed_component_count": observed_count,
+                "required_match_count": int(required),
+                "hypothesis_count": 0,
+                "best_coarse_match_count": 0,
+                "best_final_match_count": 0,
+                "failure_stage": "not_started",
+                "stage_counts": {
+                    "coarse_projection_failed": 0,
+                    "coarse_matches_insufficient": 0,
+                    "refined_affine_rejected": 0,
+                    "refined_projection_failed": 0,
+                    "final_matches_insufficient": 0,
+                    "success": 0,
+                },
+            }
+        )
+
     if (
-        len(expected_rows) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS
-        or len(luminous_centers) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+        expected_count < F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+        or observed_count < F3_TRACKING_LUMINOUS_MIN_COMPONENTS
     ):
+        if diagnostic is not None:
+            diagnostic["failure_stage"] = "insufficient_points"
         return None
 
     canonical_points = np.asarray(
@@ -1714,11 +1749,50 @@ def _fit_luminous_pose(
     observed = np.asarray(luminous_centers, dtype=np.float32).reshape(-1, 2)
     board_quad = _quad_from_points(canonical_board)
     if len(board_quad) != 4:
+        if diagnostic is not None:
+            diagnostic["failure_stage"] = "invalid_board_geometry"
         return None
-    canonical_board_array = np.asarray(board_quad, dtype=np.float32).reshape(-1, 1, 2)
+    canonical_board_array = np.asarray(
+        board_quad,
+        dtype=np.float32,
+    ).reshape(-1, 1, 2)
+
+    if diagnostic is not None:
+        diagnostic["expected_centers"] = [
+            {
+                "mask_id": str(row.get("mask_id") or ""),
+                "center": [
+                    round(float(point[0]), 3),
+                    round(float(point[1]), 3),
+                ],
+            }
+            for row, point in zip(expected_rows, canonical_points)
+        ]
+        diagnostic["observed_centers"] = [
+            [round(float(point[0]), 3), round(float(point[1]), 3)]
+            for point in observed
+        ]
+
+    matrices = list(coarse_matrices) if coarse_matrices is not None else []
+    stage_counts = (
+        diagnostic["stage_counts"]
+        if diagnostic is not None
+        else {
+            "coarse_projection_failed": 0,
+            "coarse_matches_insufficient": 0,
+            "refined_affine_rejected": 0,
+            "refined_projection_failed": 0,
+            "final_matches_insufficient": 0,
+            "success": 0,
+        }
+    )
+    best_summary = None
+    best_summary_rank = (-1, -1, float("-inf"))
+    best_coarse_match_count = 0
+    best_final_match_count = 0
 
     best = None
-    for coarse in coarse_matrices or []:
+    for hypothesis_index, coarse in enumerate(matrices):
         try:
             matrix = np.asarray(coarse, dtype=np.float32).reshape(2, 3)
             canonical_to_current = cv2.invertAffineTransform(matrix)
@@ -1731,6 +1805,7 @@ def _fit_luminous_pose(
                 canonical_to_current,
             ).reshape(-1, 2)
         except Exception:
+            stage_counts["coarse_projection_failed"] += 1
             continue
 
         board_diagonal = max(
@@ -1751,7 +1826,48 @@ def _fit_luminous_pose(
             observed,
             coarse_gate,
         )
+        best_coarse_match_count = max(
+            best_coarse_match_count,
+            int(len(coarse_matches)),
+        )
+
+        nearest_distances = [
+            float(np.min(np.linalg.norm(observed - point, axis=1)))
+            for point in predicted
+        ]
+        median_nearest = (
+            float(np.median(np.asarray(nearest_distances, dtype=np.float32)))
+            if nearest_distances
+            else float("inf")
+        )
+        summary = {
+            "hypothesis_index": int(hypothesis_index),
+            "coarse_gate_px": round(float(coarse_gate), 3),
+            "coarse_match_count": int(len(coarse_matches)),
+            "median_nearest_distance_px": (
+                round(median_nearest, 3)
+                if math.isfinite(median_nearest)
+                else None
+            ),
+            "nearest_distance_by_mask": [
+                {
+                    "mask_id": str(expected_rows[index].get("mask_id") or ""),
+                    "distance_px": round(float(distance), 3),
+                }
+                for index, distance in enumerate(nearest_distances)
+            ],
+        }
+        summary_rank = (
+            0,
+            int(len(coarse_matches)),
+            -median_nearest if math.isfinite(median_nearest) else float("-inf"),
+        )
+        if summary_rank > best_summary_rank:
+            best_summary = deepcopy(summary)
+            best_summary_rank = summary_rank
+
         if len(coarse_matches) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS:
+            stage_counts["coarse_matches_insufficient"] += 1
             continue
 
         source_points = [
@@ -1764,6 +1880,11 @@ def _fit_luminous_pose(
         ]
         refined = _estimate_affine_partial(source_points, target_points)
         if refined is None:
+            stage_counts["refined_affine_rejected"] += 1
+            summary["failure_stage"] = "refined_affine_rejected"
+            if summary_rank >= best_summary_rank:
+                best_summary = deepcopy(summary)
+                best_summary_rank = summary_rank
             continue
 
         try:
@@ -1777,6 +1898,10 @@ def _fit_luminous_pose(
                 refined_inverse,
             ).reshape(-1, 2)
         except Exception:
+            stage_counts["refined_projection_failed"] += 1
+            summary["failure_stage"] = "refined_projection_failed"
+            if summary_rank >= best_summary_rank:
+                best_summary = deepcopy(summary)
             continue
 
         refined_diagonal = max(
@@ -1797,16 +1922,34 @@ def _fit_luminous_pose(
             observed,
             final_gate,
         )
-        required = max(
-            F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
-            int(math.ceil(
-                len(expected_rows) * F3_TRACKING_LUMINOUS_MIN_MATCH_RATIO
-            )),
+        best_final_match_count = max(
+            best_final_match_count,
+            int(len(final_matches)),
         )
+        summary.update(
+            {
+                "final_gate_px": round(float(final_gate), 3),
+                "final_match_count": int(len(final_matches)),
+                "required_match_count": int(required),
+            }
+        )
+        summary_rank = (
+            int(len(final_matches)),
+            int(len(coarse_matches)),
+            -median_nearest if math.isfinite(median_nearest) else float("-inf"),
+        )
+        if summary_rank > best_summary_rank:
+            best_summary = deepcopy(summary)
+            best_summary_rank = summary_rank
+
         if len(final_matches) < required:
+            stage_counts["final_matches_insufficient"] += 1
+            summary["failure_stage"] = "final_matches_insufficient"
+            if summary_rank >= best_summary_rank:
+                best_summary = deepcopy(summary)
+                best_summary_rank = summary_rank
             continue
 
-        # Reestima uma vez com todas as correspondências finais.
         final_source = [
             observed[observed_index].tolist()
             for _expected_index, observed_index, _distance in final_matches
@@ -1828,7 +1971,7 @@ def _fit_luminous_pose(
             if final_errors
             else final_gate
         )
-        match_ratio = len(final_matches) / max(1, len(expected_rows))
+        match_ratio = len(final_matches) / max(1, expected_count)
         matched_indices = {
             expected_index
             for expected_index, _observed_index, _distance in final_matches
@@ -1848,12 +1991,24 @@ def _fit_luminous_pose(
             - median_error / max(1.0, final_gate)
         )
 
+        stage_counts["success"] += 1
+        summary.update(
+            {
+                "failure_stage": "",
+                "match_ratio": round(float(match_ratio), 4),
+                "median_error_px": round(float(median_error), 3),
+            }
+        )
+        if summary_rank >= best_summary_rank:
+            best_summary = deepcopy(summary)
+            best_summary_rank = summary_rank
+
         candidate = {
             "matrix": np.asarray(final_matrix, dtype=np.float32).reshape(2, 3),
             "matched_mask_ids": matched_ids,
             "missing_expected_on_mask_ids": missing_ids,
             "matched_count": int(len(final_matches)),
-            "expected_on_count": int(len(expected_rows)),
+            "expected_on_count": expected_count,
             "match_ratio": float(match_ratio),
             "median_error_px": float(median_error),
             "coarse_gate_px": float(coarse_gate),
@@ -1862,6 +2017,26 @@ def _fit_luminous_pose(
         }
         if best is None or float(candidate["score"]) > float(best["score"]):
             best = candidate
+
+    if diagnostic is not None:
+        diagnostic["hypothesis_count"] = int(len(matrices))
+        diagnostic["best_coarse_match_count"] = int(best_coarse_match_count)
+        diagnostic["best_final_match_count"] = int(best_final_match_count)
+        diagnostic["best_hypothesis"] = deepcopy(best_summary)
+        if best is not None:
+            diagnostic["failure_stage"] = ""
+        elif stage_counts["final_matches_insufficient"]:
+            diagnostic["failure_stage"] = "final_matches_insufficient"
+        elif stage_counts["refined_projection_failed"]:
+            diagnostic["failure_stage"] = "refined_projection_failed"
+        elif stage_counts["refined_affine_rejected"]:
+            diagnostic["failure_stage"] = "refined_affine_rejected"
+        elif stage_counts["coarse_matches_insufficient"]:
+            diagnostic["failure_stage"] = "coarse_matches_insufficient"
+        elif stage_counts["coarse_projection_failed"]:
+            diagnostic["failure_stage"] = "coarse_projection_failed"
+        else:
+            diagnostic["failure_stage"] = "no_valid_hypothesis"
 
     return best
 
@@ -1967,11 +2142,26 @@ def _find_luminous_segment_pose(
                 canonical_board,
             )
         )
+        fit_diagnostics: dict = {}
         fit = _fit_luminous_pose(
             canonical_board,
             expected_rows,
             luminous.get("centers") or [],
             coarse_matrices,
+            diagnostics=fit_diagnostics,
+        )
+        attempt["fit_diagnostics"] = deepcopy(fit_diagnostics)
+        attempt["coarse_matched_count"] = int(
+            fit_diagnostics.get("best_coarse_match_count", 0) or 0
+        )
+        attempt["matched_count"] = int(
+            fit_diagnostics.get("best_final_match_count", 0) or 0
+        )
+        attempt["required_match_count"] = int(
+            fit_diagnostics.get("required_match_count", 0) or 0
+        )
+        attempt["fit_failure_stage"] = str(
+            fit_diagnostics.get("failure_stage") or ""
         )
         if fit is None:
             attempt["fit"] = False
@@ -1993,6 +2183,10 @@ def _find_luminous_segment_pose(
                     float(fit.get("median_error_px", 0.0) or 0.0),
                     3,
                 ),
+                "required_match_count": int(
+                    fit_diagnostics.get("required_match_count", 0) or 0
+                ),
+                "fit_failure_stage": "",
             }
         )
         attempts.append(attempt)
@@ -2010,6 +2204,7 @@ def _find_luminous_segment_pose(
             ),
             "threshold_v": luminous.get("threshold_v"),
             "dynamic_range": luminous.get("dynamic_range"),
+            "fit_diagnostics": deepcopy(fit_diagnostics),
         }
         if best is None or float(candidate["score"]) > float(best["score"]):
             best = candidate
@@ -2029,6 +2224,15 @@ def _find_luminous_segment_pose(
                 for reason in reasons
             )
         )
+        best_failed = max(
+            attempts,
+            key=lambda item: (
+                int(item.get("matched_count", 0) or 0),
+                int(item.get("coarse_matched_count", 0) or 0),
+                int(item.get("luminous_component_count", 0) or 0),
+            ),
+            default={},
+        )
         return {
             "available": False,
             "reason": (
@@ -2038,6 +2242,29 @@ def _find_luminous_segment_pose(
             ),
             "filter_candidate_count": int(len(filter_candidates)),
             "attempts": attempts,
+            "expected_on_count": int(len(expected_rows)),
+            "luminous_component_count": max(
+                (
+                    int(item.get("luminous_component_count", 0) or 0)
+                    for item in attempts
+                ),
+                default=0,
+            ),
+            "coarse_matched_count": int(
+                best_failed.get("coarse_matched_count", 0) or 0
+            ),
+            "matched_count": int(
+                best_failed.get("matched_count", 0) or 0
+            ),
+            "required_match_count": int(
+                best_failed.get("required_match_count", 0) or 0
+            ),
+            "fit_failure_stage": str(
+                best_failed.get("fit_failure_stage") or ""
+            ),
+            "fit_diagnostics": deepcopy(
+                best_failed.get("fit_diagnostics") or {}
+            ),
         }
 
     result = dict(best)
@@ -2186,6 +2413,36 @@ def _rescue_luminous_segment_tracking_lock(
     alignment_ready = bool(
         pose.get("available") and pose.get("matrix") is not None
     )
+    luminous_component_count = int(
+        pose.get("luminous_component_count", 0)
+        or max(
+            (
+                int(item.get("luminous_component_count", 0) or 0)
+                for item in attempts
+            ),
+            default=0,
+        )
+    )
+    matched_count = int(
+        pose.get("matched_count", 0)
+        or max(
+            (
+                int(item.get("matched_count", 0) or 0)
+                for item in attempts
+            ),
+            default=0,
+        )
+    )
+    coarse_matched_count = int(
+        pose.get("coarse_matched_count", 0)
+        or max(
+            (
+                int(item.get("coarse_matched_count", 0) or 0)
+                for item in attempts
+            ),
+            default=0,
+        )
+    )
 
     telemetry = {
         key: (
@@ -2217,6 +2474,15 @@ def _rescue_luminous_segment_tracking_lock(
             "fit_space": fit_space,
             "fit_composed_to_canonical": bool(fit_space != "canonical"),
             "expected_on_count": int(len(expected_rows)),
+            "luminous_component_count": luminous_component_count,
+            "coarse_matched_count": coarse_matched_count,
+            "matched_count": matched_count,
+            "required_match_count": int(
+                pose.get("required_match_count", 0) or 0
+            ),
+            "fit_failure_stage": str(
+                pose.get("fit_failure_stage") or ""
+            ),
             "minimum_luminous_components": int(
                 F3_TRACKING_LUMINOUS_MIN_COMPONENTS
             ),

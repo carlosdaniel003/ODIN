@@ -1829,7 +1829,10 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     f"fit_space={luminous_tracking.get('fit_space', '--')}",
                     f"expected_on={luminous_tracking.get('expected_on_count', '--')}",
                     f"components={luminous_tracking.get('luminous_component_count', '--')}",
+                    f"coarse_matched={luminous_tracking.get('coarse_matched_count', '--')}",
                     f"matched={luminous_tracking.get('matched_count', '--')}",
+                    f"required={luminous_tracking.get('required_match_count', '--')}",
+                    f"fit_failure={luminous_tracking.get('fit_failure_stage') or '--'}",
                     f"emission_detected={_yes_no(luminous_tracking.get('luminous_emission_detected'))}",
                     f"alignment_required={_yes_no(luminous_tracking.get('alignment_required'))}",
                     f"alignment_ready={_yes_no(luminous_tracking.get('alignment_ready'))}",
@@ -1837,6 +1840,25 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                 )
             )
         )
+        fit_debug = luminous_tracking.get("fit_diagnostics")
+        if isinstance(fit_debug, dict):
+            best_hypothesis = fit_debug.get("best_hypothesis")
+            if not isinstance(best_hypothesis, dict):
+                best_hypothesis = {}
+            lines.append(
+                "fit_debug="
+                + " | ".join(
+                    (
+                        f"hypotheses={fit_debug.get('hypothesis_count', '--')}",
+                        f"best_coarse={fit_debug.get('best_coarse_match_count', '--')}",
+                        f"best_final={fit_debug.get('best_final_match_count', '--')}",
+                        f"required={fit_debug.get('required_match_count', '--')}",
+                        f"failure_stage={fit_debug.get('failure_stage') or '--'}",
+                        f"best_hypothesis={best_hypothesis.get('hypothesis_index', '--')}",
+                        f"median_nearest_px={best_hypothesis.get('median_nearest_distance_px', '--')}",
+                    )
+                )
+            )
         lines.append(
             "leitura="
             + (
@@ -1882,7 +1904,10 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     f"emission={_yes_no(luminous_tracking.get('luminous_emission_detected'))}",
                     f"alignment={_yes_no(luminous_tracking.get('alignment_ready'))}",
                     f"components={luminous_tracking.get('luminous_component_count', '--')}",
+                    f"coarse={luminous_tracking.get('coarse_matched_count', '--')}",
                     f"matched={luminous_tracking.get('matched_count', '--')}",
+                    f"required={luminous_tracking.get('required_match_count', '--')}",
+                    f"fit_failure={luminous_tracking.get('fit_failure_stage') or '--'}",
                     f"fit_space={luminous_tracking.get('fit_space', '--')}",
                     f"reason={luminous_tracking.get('reason', '--')}",
                 )

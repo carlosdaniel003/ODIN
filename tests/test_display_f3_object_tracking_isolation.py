@@ -1552,6 +1552,141 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             result["matched_count"],
         )
 
+    def test_luminous_fit_diagnostics_explain_coarse_failure(self):
+        board = [
+            [0.0, 0.0],
+            [100.0, 0.0],
+            [100.0, 100.0],
+            [0.0, 100.0],
+        ]
+        rows = [
+            {"mask_id": "MASK_001", "center": [20.0, 20.0]},
+            {"mask_id": "MASK_002", "center": [50.0, 20.0]},
+            {"mask_id": "MASK_003", "center": [80.0, 20.0]},
+        ]
+        observed = [
+            [300.0, 300.0],
+            [330.0, 300.0],
+            [360.0, 300.0],
+        ]
+        diagnostics = {}
+        result = tracking._fit_luminous_pose(
+            board,
+            rows,
+            observed,
+            [
+                np.asarray(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    dtype=np.float32,
+                )
+            ],
+            diagnostics=diagnostics,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(3, diagnostics["expected_on_count"])
+        self.assertEqual(3, diagnostics["observed_component_count"])
+        self.assertEqual(1, diagnostics["hypothesis_count"])
+        self.assertEqual(0, diagnostics["best_coarse_match_count"])
+        self.assertEqual(
+            "coarse_matches_insufficient",
+            diagnostics["failure_stage"],
+        )
+        self.assertEqual(3, len(diagnostics["expected_centers"]))
+        self.assertEqual(3, len(diagnostics["observed_centers"]))
+
+    def test_luminous_grid_failure_preserves_observed_components_in_telemetry(self):
+        frame = np.full((120, 160, 3), 20, dtype=np.uint8)
+        board = [
+            [20.0, 30.0],
+            [140.0, 30.0],
+            [140.0, 90.0],
+            [20.0, 90.0],
+        ]
+        rows = [
+            {
+                "mask_id": f"MASK_{index:03d}",
+                "center": [35.0 + index * 12.0, 55.0],
+            }
+            for index in range(1, 8)
+        ]
+        centers = [
+            [30.0 + index * 9.0, 58.0 + (index % 2) * 4.0]
+            for index in range(10)
+        ]
+
+        def failed_fit(
+            _board,
+            _rows,
+            _centers,
+            _matrices,
+            diagnostics=None,
+        ):
+            diagnostics.update(
+                {
+                    "expected_on_count": 7,
+                    "observed_component_count": 10,
+                    "required_match_count": 4,
+                    "hypothesis_count": 5,
+                    "best_coarse_match_count": 5,
+                    "best_final_match_count": 3,
+                    "failure_stage": "final_matches_insufficient",
+                    "stage_counts": {"final_matches_insufficient": 5},
+                    "best_hypothesis": {
+                        "hypothesis_index": 2,
+                        "coarse_match_count": 5,
+                        "final_match_count": 3,
+                        "required_match_count": 4,
+                        "median_nearest_distance_px": 11.25,
+                    },
+                }
+            )
+            return None
+
+        with (
+            patch.object(
+                tracking,
+                "_detect_luminous_segment_centers",
+                return_value={
+                    "available": True,
+                    "reason": "luminous_segments_detected",
+                    "centers": centers,
+                    "threshold_v": 156.04,
+                    "dynamic_range": 158.0,
+                },
+            ),
+            patch.object(
+                tracking,
+                "_fit_luminous_pose",
+                side_effect=failed_fit,
+            ),
+        ):
+            result = tracking._find_luminous_segment_pose(
+                frame,
+                board,
+                rows,
+                (160, 120),
+                base_matrix=np.asarray(
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    dtype=np.float32,
+                ),
+            )
+
+        self.assertFalse(result["available"])
+        self.assertEqual("luminous_grid_not_fitted", result["reason"])
+        self.assertEqual(10, result["luminous_component_count"])
+        self.assertEqual(5, result["coarse_matched_count"])
+        self.assertEqual(3, result["matched_count"])
+        self.assertEqual(4, result["required_match_count"])
+        self.assertEqual(
+            "final_matches_insufficient",
+            result["fit_failure_stage"],
+        )
+        self.assertEqual(
+            10,
+            result["fit_diagnostics"]["observed_component_count"],
+        )
+
     def test_dark_filter_without_emission_does_not_search_off_segments(self):
         width, height = 640, 480
         canonical_board = [

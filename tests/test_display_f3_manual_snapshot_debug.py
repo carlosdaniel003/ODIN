@@ -278,7 +278,21 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
                     "fit_space": "check:CHECK_001",
                     "expected_on_count": 7,
                     "luminous_component_count": 5,
-                    "matched_count": 0,
+                    "coarse_matched_count": 5,
+                    "matched_count": 3,
+                    "required_match_count": 4,
+                    "fit_failure_stage": "final_matches_insufficient",
+                    "fit_diagnostics": {
+                        "hypothesis_count": 5,
+                        "best_coarse_match_count": 5,
+                        "best_final_match_count": 3,
+                        "required_match_count": 4,
+                        "failure_stage": "final_matches_insufficient",
+                        "best_hypothesis": {
+                            "hypothesis_index": 2,
+                            "median_nearest_distance_px": 11.25,
+                        },
+                    },
                     "luminous_emission_detected": True,
                     "alignment_required": True,
                     "alignment_ready": False,
@@ -304,6 +318,14 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("fit_space=check:CHECK_001", text)
         self.assertIn("emission_detected=SIM", text)
         self.assertIn("alignment_ready=NÃO", text)
+        self.assertIn("components=5", text)
+        self.assertIn("coarse_matched=5", text)
+        self.assertIn("matched=3", text)
+        self.assertIn("required=4", text)
+        self.assertIn("fit_failure=final_matches_insufficient", text)
+        self.assertIn("fit_debug=hypotheses=5", text)
+        self.assertIn("best_final=3", text)
+        self.assertIn("median_nearest_px=11.25", text)
         self.assertIn(
             "DISPLAY COM EMISSÃO; AGUARDANDO GEOMETRIA FINA ANTES DE OK/NG",
             text,
