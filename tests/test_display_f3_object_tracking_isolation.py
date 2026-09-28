@@ -1837,15 +1837,15 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             result["reason"],
         )
 
-    def test_luminous_rescue_encaixa_no_espaco_da_referencia_do_check(self):
+    def test_luminous_rescue_permanece_no_espaco_canonico(self):
         frame = np.full((480, 640, 3), 20, dtype=np.uint8)
-        check_board = [
+        canonical_board = [
             [120.0, 150.0],
             [520.0, 150.0],
             [520.0, 310.0],
             [120.0, 310.0],
         ]
-        check_masks = [
+        canonical_masks = [
             {
                 "id": f"MASK_{index:03d}",
                 "type": "circle",
@@ -1860,19 +1860,15 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             "name": "H1",
             "mask_states": {
                 str(mask["id"]): "on"
-                for mask in check_masks
+                for mask in canonical_masks
             },
         }
         project = {
             "name": "DISPLAY",
             "master_resolution": {"width": 640, "height": 480},
-            "masks": check_masks,
+            "masks": canonical_masks,
         }
-        reference_to_canonical = np.asarray(
-            [[1.0, 0.0, 40.0], [0.0, 1.0, 20.0]],
-            dtype=np.float32,
-        )
-        current_to_check = np.asarray(
+        current_to_canonical = np.asarray(
             [[1.0, 0.0, 10.0], [0.0, 1.0, 15.0]],
             dtype=np.float32,
         )
@@ -1891,12 +1887,17 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
         runtime = SimpleNamespace(
             references={
+                # A referência pode existir, mas não tem autoridade sobre a
+                # geometria usada pelo encaixe luminoso.
                 "check:CHECK_001": {
-                    "reference_to_canonical": reference_to_canonical,
+                    "reference_to_canonical": np.asarray(
+                        [[1.0, 0.0, 40.0], [0.0, 1.0, 20.0]],
+                        dtype=np.float32,
+                    ),
                 }
             },
-            canonical_board=check_board,
-            canonical_masks=check_masks,
+            canonical_board=canonical_board,
+            canonical_masks=canonical_masks,
             store=object(),
             width=640,
             height=480,
@@ -1915,11 +1916,14 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         pose = {
             "available": True,
             "reason": "luminous_segment_grid_fitted",
-            "matrix": current_to_check,
+            "matrix": current_to_canonical,
             "matched_count": 4,
             "expected_on_count": 4,
             "match_ratio": 1.0,
             "luminous_component_count": 4,
+            "matched_mask_ids": [
+                str(mask["id"]) for mask in canonical_masks
+            ],
             "attempts": [
                 {
                     "luminous_reason": "luminous_segments_detected",
@@ -1929,18 +1933,11 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             ],
         }
 
-        with (
-            patch.object(
-                tracking,
-                "_check_reference_geometry",
-                return_value=(check_board, check_masks),
-            ),
-            patch.object(
-                tracking,
-                "_find_luminous_segment_pose",
-                return_value=pose,
-            ) as finder,
-        ):
+        with patch.object(
+            tracking,
+            "_find_luminous_segment_pose",
+            return_value=pose,
+        ) as finder:
             result = tracking._rescue_luminous_segment_tracking_lock(
                 app,
                 frame,
@@ -1951,22 +1948,22 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result.locked)
         self.assertEqual("luminous_segment_grid", result.source_type)
-        self.assertEqual("check:CHECK_001", result.reference)
-        expected_current_to_canonical = tracking.compose_affine(
-            reference_to_canonical,
-            current_to_check,
-        )
+        self.assertEqual("luminous:CHECK_001", result.reference)
         np.testing.assert_allclose(
             result.current_to_canonical,
-            expected_current_to_canonical,
+            current_to_canonical,
             atol=1e-5,
         )
         fit_args = finder.call_args.args
-        self.assertEqual(check_board, fit_args[1])
+        self.assertEqual(canonical_board, fit_args[1])
         self.assertEqual(4, len(fit_args[2]))
         telemetry = app._display_f3_luminous_tracking_debug
-        self.assertEqual("check:CHECK_001", telemetry["fit_space"])
-        self.assertTrue(telemetry["fit_composed_to_canonical"])
+        self.assertEqual("canonical", telemetry["fit_space"])
+        self.assertFalse(telemetry["fit_composed_to_canonical"])
+        self.assertEqual(
+            [str(mask["id"]) for mask in canonical_masks],
+            telemetry["matched_mask_ids"],
+        )
         self.assertTrue(telemetry["luminous_emission_detected"])
         self.assertTrue(telemetry["alignment_ready"])
         self.assertEqual(88, telemetry["frame_id"])
