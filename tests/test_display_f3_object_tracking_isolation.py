@@ -1320,6 +1320,66 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("align_frame_for_f3(app, raw_frame)", worker)
         self.assertIn("_analysis_alignment_for_current_check", worker)
 
+    def test_semantic_worker_preserva_raw_e_geometria_do_mesmo_tracking_snapshot(self):
+        raw = np.zeros((40, 60, 3), dtype=np.uint8)
+        aligned = np.ones((40, 60, 3), dtype=np.uint8)
+        geometry = {
+            "locked": True,
+            "resolution": (60, 40),
+            "geometry_space": "check:CHECK_001",
+            "reference": "check:CHECK_001",
+            "masks": [{"id": "MASK_001"}],
+        }
+
+        class _Analyzer:
+            def __init__(self):
+                self.snapshot_kwargs = None
+
+            def analyze_tracking_snapshot(self, **kwargs):
+                self.snapshot_kwargs = kwargs
+                return {
+                    "ready": True,
+                    "approved": True,
+                    "live_geometry_override": True,
+                    "analysis_frame_source": (
+                        "tracking_raw_with_live_geometry"
+                    ),
+                }
+
+            def analyze(self, **_kwargs):
+                raise AssertionError(
+                    "worker nao pode voltar ao estado mutavel do app"
+                )
+
+        analyzer = _Analyzer()
+        payload = tracking._run_live_semantic_job(
+            analyzer,
+            aligned,
+            raw,
+            geometry,
+            {
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+            },
+            180,
+            7,
+            ("camera", 123),
+            0.0,
+            0.0,
+        )
+
+        self.assertIs(raw, analyzer.snapshot_kwargs["raw_frame"])
+        self.assertIs(aligned, analyzer.snapshot_kwargs["analysis_frame"])
+        self.assertEqual(
+            geometry,
+            analyzer.snapshot_kwargs["tracking_geometry"],
+        )
+        self.assertTrue(payload["analysis"]["live_geometry_override"])
+        self.assertEqual(
+            "tracking_raw_with_live_geometry",
+            payload["analysis"]["analysis_frame_source"],
+        )
+
     def test_semantic_check_analysis_also_runs_in_heavy_executor(self):
         installer = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3

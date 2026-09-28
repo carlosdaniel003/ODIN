@@ -115,6 +115,76 @@ class DisplayF3ContourCheckIdentityTests(unittest.TestCase):
         self.assertEqual("tracking_raw_with_live_geometry", result["analysis_frame_source"])
 
 
+    def test_analisador_rastreado_aceita_snapshot_explicito_sem_estado_mutavel_do_app(self):
+        raw = np.zeros((40, 60, 3), dtype=np.uint8)
+        aligned = np.ones((40, 60, 3), dtype=np.uint8)
+        geometry = {
+            "locked": True,
+            "resolution": (60, 40),
+            "geometry_space": "check:CHECK_001",
+            "reference": "check:CHECK_001",
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 20,
+                    "cy": 20,
+                    "radius": 5,
+                }
+            ],
+        }
+        # Reproduz a corrida real: o app já não possui a geometria/snapshot que
+        # originou o request quando o worker finalmente executa.
+        app = SimpleNamespace(
+            _display_f3_tracking_live_geometry=None,
+            _display_f3_tracking_raw_authority_frame=None,
+            _display_f3_check_geometry_refinement=None,
+        )
+        analyzer = object.__new__(identity.F3TrackedRawCheckAnalyzer)
+        analyzer.repository = object()
+        analyzer.app = app
+        analyzer.semantic = SimpleNamespace(analyze=lambda **_kwargs: {})
+
+        expected = {
+            "ready": True,
+            "approved": True,
+            "mask_results": [],
+            "live_geometry_override": True,
+        }
+        with patch.object(
+            analyzer.semantic,
+            "analyze",
+            return_value=expected,
+        ) as call:
+            result = analyzer.analyze_tracking_snapshot(
+                analysis_frame=aligned,
+                raw_frame=raw,
+                tracking_geometry=geometry,
+                project_name="DISPLAY A",
+                check_id="CHECK_001",
+                visual_rotation=180,
+            )
+
+        kwargs = call.call_args.kwargs
+        self.assertIs(raw, kwargs["frame"])
+        self.assertEqual(
+            geometry["masks"],
+            kwargs["mask_geometry_override"],
+        )
+        self.assertEqual(
+            (60, 40),
+            kwargs["mask_geometry_resolution"],
+        )
+        self.assertEqual(
+            "check:CHECK_001",
+            kwargs["mask_geometry_source"],
+        )
+        self.assertEqual(
+            "tracking_raw_with_live_geometry",
+            result["analysis_frame_source"],
+        )
+        self.assertTrue(result["tracking_snapshot_explicit"])
+
     def test_identidade_e_refinamento_tem_cadencias_independentes(self):
         self.assertGreater(
             identity.F3_CONTOUR_IDENTITY_REFRESH_S,

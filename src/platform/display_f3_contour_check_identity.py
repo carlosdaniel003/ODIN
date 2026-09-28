@@ -744,15 +744,25 @@ class F3TrackedRawCheckAnalyzer:
         except Exception:
             pass
 
-    def analyze(
+    def _analyze_with_tracking_snapshot(
         self,
-        frame,
+        *,
+        analysis_frame,
+        raw_frame,
+        tracking_geometry,
         project_name: str,
         check_id: str,
         visual_rotation: int = 0,
     ) -> dict:
-        geometry = getattr(self.app, "_display_f3_tracking_live_geometry", None)
-        raw = _raw_frame(self.app, frame)
+        """Analisa um snapshot coerente de frame RAW + geometria do tracking.
+
+        O worker HIGH não pode depender de campos mutáveis do app: câmera e
+        tracking continuam avançando enquanto a classificação semântica aguarda
+        no executor. Quando o snapshot traz ROIs móveis válidas, frame e
+        geometria precisam pertencer ao mesmo token capturado.
+        """
+        geometry = tracking_geometry
+        raw = raw_frame
         if (
             isinstance(geometry, dict)
             and bool(geometry.get("locked"))
@@ -766,12 +776,20 @@ class F3TrackedRawCheckAnalyzer:
                 visual_rotation=visual_rotation,
                 mask_geometry_override=geometry.get("masks"),
                 mask_geometry_resolution=geometry.get("resolution"),
-                mask_geometry_source=str(geometry.get("geometry_space") or "tracking_live"),
+                mask_geometry_source=str(
+                    geometry.get("geometry_space") or "tracking_live"
+                ),
             )
             if isinstance(result, dict):
-                result["analysis_frame_source"] = "tracking_raw_with_live_geometry"
-                result["tracking_geometry_reference"] = str(geometry.get("reference") or "")
-                result["tracking_geometry_space"] = str(geometry.get("geometry_space") or "")
+                result["analysis_frame_source"] = (
+                    "tracking_raw_with_live_geometry"
+                )
+                result["tracking_geometry_reference"] = str(
+                    geometry.get("reference") or ""
+                )
+                result["tracking_geometry_space"] = str(
+                    geometry.get("geometry_space") or ""
+                )
                 result["tracking_geometry_refinement"] = deepcopy(
                     getattr(
                         self.app,
@@ -779,17 +797,62 @@ class F3TrackedRawCheckAnalyzer:
                         None,
                     )
                 )
+                result["tracking_snapshot_explicit"] = True
             return result
 
         result = self.semantic.analyze(
-            frame=frame,
+            frame=analysis_frame,
             project_name=project_name,
             check_id=check_id,
             visual_rotation=visual_rotation,
         )
         if isinstance(result, dict):
-            result["analysis_frame_source"] = "legacy_aligned_or_pipeline_frame"
+            result["analysis_frame_source"] = (
+                "legacy_aligned_or_pipeline_frame"
+            )
+            result["tracking_snapshot_explicit"] = True
         return result
+
+    def analyze_tracking_snapshot(
+        self,
+        *,
+        analysis_frame,
+        raw_frame,
+        tracking_geometry,
+        project_name: str,
+        check_id: str,
+        visual_rotation: int = 0,
+    ) -> dict:
+        """API do executor: consome somente os snapshots fornecidos no request."""
+        return self._analyze_with_tracking_snapshot(
+            analysis_frame=analysis_frame,
+            raw_frame=raw_frame,
+            tracking_geometry=deepcopy(tracking_geometry),
+            project_name=project_name,
+            check_id=check_id,
+            visual_rotation=visual_rotation,
+        )
+
+    def analyze(
+        self,
+        frame,
+        project_name: str,
+        check_id: str,
+        visual_rotation: int = 0,
+    ) -> dict:
+        """Compatibilidade síncrona: fotografa o estado atual antes de analisar."""
+        geometry = deepcopy(
+            getattr(self.app, "_display_f3_tracking_live_geometry", None)
+        )
+        raw = _raw_frame(self.app, frame)
+        return self._analyze_with_tracking_snapshot(
+            analysis_frame=frame,
+            raw_frame=raw,
+            tracking_geometry=geometry,
+            project_name=project_name,
+            check_id=check_id,
+            visual_rotation=visual_rotation,
+        )
 
 
 def _publish_identity_status(app, identity: dict | None) -> None:

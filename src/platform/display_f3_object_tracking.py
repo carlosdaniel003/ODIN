@@ -5487,6 +5487,8 @@ def _submit_live_tracking_job(app, raw_frame):
 def _run_live_semantic_job(
     analyzer,
     analysis_frame,
+    raw_frame,
+    tracking_geometry,
     context: dict,
     visual_rotation: int,
     generation: int,
@@ -5494,14 +5496,37 @@ def _run_live_semantic_job(
     source_age_ms: float,
     submitted_at_s: float,
 ) -> dict:
-    """Classificação pesada do CHECK fora do thread Tk."""
+    """Classificação pesada do CHECK fora do thread Tk.
+
+    Frame RAW e geometria são snapshots do MESMO job de tracking. O worker não
+    relê esses dados do app porque eles podem ter avançado antes da execução.
+    """
     started = time.perf_counter()
-    analysis = analyzer.analyze(
-        frame=analysis_frame,
-        project_name=str(context.get("project_name") or ""),
-        check_id=str(context.get("check_id") or ""),
-        visual_rotation=int(visual_rotation or 0),
+    snapshot_analyze = getattr(
+        analyzer,
+        "analyze_tracking_snapshot",
+        None,
     )
+    if (
+        callable(snapshot_analyze)
+        and _valid_frame(raw_frame)
+        and isinstance(tracking_geometry, dict)
+    ):
+        analysis = snapshot_analyze(
+            analysis_frame=analysis_frame,
+            raw_frame=raw_frame,
+            tracking_geometry=tracking_geometry,
+            project_name=str(context.get("project_name") or ""),
+            check_id=str(context.get("check_id") or ""),
+            visual_rotation=int(visual_rotation or 0),
+        )
+    else:
+        analysis = analyzer.analyze(
+            frame=analysis_frame,
+            project_name=str(context.get("project_name") or ""),
+            check_id=str(context.get("check_id") or ""),
+            visual_rotation=int(visual_rotation or 0),
+        )
     elapsed_ms = max(
         0.0,
         (time.perf_counter() - started) * 1000.0,
@@ -5571,11 +5596,18 @@ def _submit_live_semantic_job(
     submitted_at_s = time.perf_counter()
     source_age_ms = float(tracking_payload.get("age_ms", 0.0) or 0.0)
     frame_token = tracking_payload.get("frame_token")
+    # Estes dois objetos nasceram no MESMO _run_live_tracking_heavy_job.
+    # Não substitua por campos do app: camera_frame_atual/geometry podem já
+    # pertencer a outro frame quando o job semântico começar.
+    raw_snapshot = tracking_payload.get("raw_frame")
+    geometry_snapshot = deepcopy(tracking_payload.get("geometry"))
 
     future = executor.submit(
         lambda: _run_live_semantic_job(
             analyzer,
             frame_snapshot,
+            raw_snapshot,
+            geometry_snapshot,
             deepcopy(context),
             visual_rotation,
             generation,
