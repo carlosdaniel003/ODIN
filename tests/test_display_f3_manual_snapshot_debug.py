@@ -278,6 +278,8 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
                     "fit_space": "check:CHECK_001",
                     "expected_on_count": 7,
                     "luminous_component_count": 5,
+                    "local_luminous_landmark_count": 7,
+                    "fit_landmark_source": "expected_on_local_emission",
                     "coarse_matched_count": 5,
                     "matched_count": 3,
                     "required_match_count": 4,
@@ -319,6 +321,8 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("emission_detected=SIM", text)
         self.assertIn("alignment_ready=NÃO", text)
         self.assertIn("components=5", text)
+        self.assertIn("local_landmarks=7", text)
+        self.assertIn("fit_source=expected_on_local_emission", text)
         self.assertIn("coarse_matched=5", text)
         self.assertIn("matched=3", text)
         self.assertIn("required=4", text)
