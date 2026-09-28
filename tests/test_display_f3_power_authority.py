@@ -184,6 +184,50 @@ class DisplayF3PowerAuthorityTests(unittest.TestCase):
         # pertence ao analisador produtivo.
         self.assertFalse(result["physical_matches_expected_check"])
 
+    def test_gate_bloqueado_preserva_bruto_no_debug_e_publica_ui_neutra(self):
+        app = _FakeApp()
+        raw_analysis = {
+            "ready": True,
+            "project_name": "CM-550-L",
+            "check_id": "CHECK_001",
+            "active_mask_count": 2,
+            "matched_mask_count": 0,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_008",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_009",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.99,
+                },
+            ],
+        }
+
+        returned = power_module._publish_blocked_analysis_for_ui(app, raw_analysis)
+
+        self.assertEqual("off", returned["mask_results"][0]["classified"])
+        self.assertEqual(
+            "off",
+            app._display_f3_power_blocked_raw_analysis["mask_results"][0][
+                "classified"
+            ],
+        )
+        ui = app._display_auto_last_analysis
+        self.assertFalse(ui["ui_judgement_ready"])
+        self.assertEqual(
+            {"MASK_008": "unknown", "MASK_009": "unknown"},
+            ui["effective_classifications"],
+        )
+        self.assertEqual((), ui["effective_failed_mask_ids"])
+        self.assertEqual("power_blocked_neutral_ui", ui["presentation_source"])
+
     def test_debug_separa_gate_de_energia_da_analise_bruta(self):
         legacy = getattr(
             debug_clarity_module,

@@ -621,6 +621,35 @@ def aplicar_autoridade_energia_ao_estado_f3(
     return result
 
 
+def _publish_blocked_analysis_for_ui(app, analysis: dict) -> dict:
+    """Preserva a leitura bruta no DEBUG e publica uma cópia neutra na UI.
+
+    Quando a autoridade produtiva está bloqueada, a classificação óptica pode
+    continuar sendo calculada para diagnóstico/energia. Ela não pode, porém,
+    aparecer como OK/NG no overlay ou no visor antes de o runtime devolver
+    autoridade de decisão.
+    """
+    raw = deepcopy(analysis)
+    raw["decision_authority"] = False
+    raw["raw_diagnostic_only"] = True
+    raw["blocked_by_power_gate"] = True
+    app._display_f3_power_blocked_raw_analysis = deepcopy(raw)
+
+    presentation = (
+        runtime_module.DisplayAutomaticCheckF3Mixin
+        ._display_auto_publish_effective_ui_authority(
+            deepcopy(raw),
+            judgement_ready=False,
+        )
+    )
+    presentation["decision_authority"] = False
+    presentation["raw_diagnostic_only"] = False
+    presentation["blocked_by_power_gate"] = True
+    presentation["presentation_source"] = "power_blocked_neutral_ui"
+    app._display_auto_last_analysis = presentation
+    return raw
+
+
 def _raw_analysis_for_overlay(app, frame, context: dict) -> dict | None:
     """Calcula diagnóstico bruto no mesmo frame, sem autoridade de decisão."""
     repository = getattr(app, "display_project_repository", None)
@@ -651,9 +680,7 @@ def _raw_analysis_for_overlay(app, frame, context: dict) -> dict | None:
     analysis["decision_authority"] = False
     analysis["raw_diagnostic_only"] = True
     analysis["blocked_by_power_gate"] = True
-    app._display_auto_last_analysis = analysis
-    app._display_f3_power_blocked_raw_analysis = deepcopy(analysis)
-    return analysis
+    return _publish_blocked_analysis_for_ui(app, analysis)
 
 
 def _blocked_preview_text(state: dict) -> str:

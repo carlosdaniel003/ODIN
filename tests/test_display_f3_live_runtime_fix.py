@@ -5,6 +5,7 @@ import unittest
 
 import numpy as np
 
+import src.platform.display_f3_runtime_contract_fix as contract_module
 from src.platform.display_f3_live_runtime_fix import (
     F3_EMPTY_STABLE_FRAMES,
     F3_TRANSIENT_HOLD_FRAMES,
@@ -303,6 +304,51 @@ class DisplayF3LiveRuntimeFixTests(unittest.TestCase):
         self.assertEqual(1, analyzer.calls)
         self.assertIs(analysis, app._display_auto_last_analysis)
         self.assertEqual("on", analysis["mask_results"][0]["classified"])
+        self.assertTrue(app._display_auto_last_decision)
+        self.assertEqual(7, app._display_auto_stable_frames)
+
+    def test_overlay_fica_neutro_quando_runtime_esta_sem_autoridade(self):
+        repository = object()
+        analyzer = _AnalyzerFake(
+            repository,
+            {
+                "ready": True,
+                "project_name": "DISPLAY_TESTE",
+                "check_id": "CHECK_H1",
+                "active_mask_count": 1,
+                "matched_mask_count": 0,
+                "mask_results": [
+                    {
+                        "mask_id": "M1",
+                        "expected": "on",
+                        "classified": "off",
+                        "matched": False,
+                        "confidence": 0.99,
+                    }
+                ],
+            },
+        )
+        app = _OverlayApp(analyzer, repository)
+        app._display_f3_operational_state = {
+            "kind": "powered",
+            "allow_auto": False,
+            contract_module.F3_DECISION_ALLOWED_KEY: False,
+            "power_gate_blocked": True,
+        }
+
+        analysis = atualizar_classificacao_overlay_f3(app)
+
+        self.assertEqual(1, analyzer.calls)
+        self.assertFalse(analysis["ui_judgement_ready"])
+        self.assertEqual({"M1": "unknown"}, analysis["effective_classifications"])
+        self.assertEqual((), analysis["effective_failed_mask_ids"])
+        self.assertEqual(
+            "off",
+            app._display_f3_overlay_analysis_cache["mask_results"][0][
+                "classified"
+            ],
+        )
+        self.assertIs(analysis, app._display_auto_last_analysis)
         self.assertTrue(app._display_auto_last_decision)
         self.assertEqual(7, app._display_auto_stable_frames)
 

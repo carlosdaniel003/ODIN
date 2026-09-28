@@ -1321,9 +1321,7 @@ def _install_raw_overlay_reuse() -> None:
             analysis["raw_diagnostic_only"] = True
             analysis["blocked_by_power_gate"] = True
             analysis["authority_frame_source"] = authority_frame_source
-            app._display_auto_last_analysis = deepcopy(analysis)
-            app._display_f3_power_blocked_raw_analysis = deepcopy(analysis)
-            return analysis
+            return power_module._publish_blocked_analysis_for_ui(app, analysis)
         return previous_raw(app, authority_frame, context)
 
     power_module._raw_analysis_for_overlay = raw

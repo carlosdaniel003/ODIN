@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import src.platform.display_f3_check_transition_guard as transition_module
 import src.platform.display_f3_operational_status as operational_module
+import src.platform.display_f3_runtime_contract_fix as contract_module
 from src.platform.display_auto_check_analyzer import DisplayAutomaticCheckAnalyzer
 from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 
@@ -279,12 +280,37 @@ def _analysis_matches_context(analysis, context: dict) -> bool:
     )
 
 
-def atualizar_classificacao_overlay_f3(app):
-    """Atualiza apenas as cores da ROI, sem poder avançar/reprovar um CHECK.
+def _presentation_analysis_for_current_authority(app, analysis: dict) -> dict:
+    """Aplica à apresentação a mesma autoridade final do runtime F3."""
+    state = getattr(app, "_display_f3_operational_state", None)
+    if not isinstance(state, dict):
+        return analysis
 
-    O gate físico decide se o CHECK pode ser registrado. A classificação óptica
-    das máscaras é independente e continua rodando para manter verde/vermelho/
-    amarelo na câmera ao vivo mesmo quando o gate está bloqueado.
+    decision_allowed = bool(
+        state.get(
+            contract_module.F3_DECISION_ALLOWED_KEY,
+            state.get("allow_auto", False),
+        )
+    )
+    if decision_allowed:
+        return analysis
+
+    return (
+        DisplayAutomaticCheckF3Mixin
+        ._display_auto_publish_effective_ui_authority(
+            deepcopy(analysis),
+            judgement_ready=False,
+        )
+    )
+
+
+def atualizar_classificacao_overlay_f3(app):
+    """Atualiza a leitura óptica sem transformar gate bloqueado em OK/NG visual.
+
+    A classificação bruta continua rodando para diagnóstico e energia. Overlay
+    e visor só recebem cores de julgamento quando a autoridade produtiva final
+    permite decisão; durante OFF/energia não confirmada/alinhamento pendente a
+    apresentação permanece neutra.
     """
     if not bool(getattr(app, "display_f3_ativo", False)):
         return None
@@ -308,7 +334,12 @@ def atualizar_classificacao_overlay_f3(app):
 
     current_analysis = getattr(app, "_display_auto_last_analysis", None)
     if _analysis_matches_context(current_analysis, context):
-        return current_analysis
+        presentation = _presentation_analysis_for_current_authority(
+            app,
+            current_analysis,
+        )
+        app._display_auto_last_analysis = presentation
+        return presentation
 
     try:
         frame_token = app._display_auto_frame_token(frame)
@@ -322,10 +353,14 @@ def atualizar_classificacao_overlay_f3(app):
     cached_key = getattr(app, "_display_f3_overlay_analysis_cache_key", None)
     cached_analysis = getattr(app, "_display_f3_overlay_analysis_cache", None)
     if cache_key == cached_key and _analysis_matches_context(cached_analysis, context):
-        # O gate pode limpar _display_auto_last_analysis a cada frame bloqueado.
-        # Reaproveitamos a classificação do mesmo frame sem recalcular tudo.
-        app._display_auto_last_analysis = cached_analysis
-        return cached_analysis
+        # O cache preserva a classificação bruta do mesmo frame. A cópia
+        # publicada à UI ainda precisa respeitar a autoridade produtiva atual.
+        presentation = _presentation_analysis_for_current_authority(
+            app,
+            cached_analysis,
+        )
+        app._display_auto_last_analysis = presentation
+        return presentation
 
     repository = getattr(app, "display_project_repository", None)
     if repository is None:
@@ -353,8 +388,9 @@ def atualizar_classificacao_overlay_f3(app):
 
     app._display_f3_overlay_analysis_cache_key = cache_key
     app._display_f3_overlay_analysis_cache = analysis
-    app._display_auto_last_analysis = analysis
-    return analysis
+    presentation = _presentation_analysis_for_current_authority(app, analysis)
+    app._display_auto_last_analysis = presentation
+    return presentation
 
 
 def atualizar_rearme_durante_resultado_f3(app):

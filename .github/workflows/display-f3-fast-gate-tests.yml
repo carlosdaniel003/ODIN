@@ -36,6 +36,8 @@ jobs:
             tests/test_display_f3_fast_expected_gate.py \
             tests/test_display_f3_h1_single_frame_probe.py \
             tests/test_display_f3_auto_check.py \
+            tests/test_display_f3_power_authority.py \
+            tests/test_display_f3_live_runtime_fix.py \
             tests/test_display_f3_runtime_contract_fix.py \
             tests/test_display_f3_config_open_smoke.py
 
@@ -44,6 +46,13 @@ jobs:
           python -m unittest \
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_ui_h1_nao_julga_mascaras_antes_do_primeiro_expected_on \
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_ui_h1_libera_ok_ng_apos_primeiro_expected_on_confirmado \
+            -v
+
+      - name: Validate blocked-gate neutral presentation
+        run: |
+          python -m unittest \
+            tests.test_display_f3_power_authority.DisplayF3PowerAuthorityTests.test_gate_bloqueado_preserva_bruto_no_debug_e_publica_ui_neutra \
+            tests.test_display_f3_live_runtime_fix.DisplayF3LiveRuntimeFixTests.test_overlay_fica_neutro_quando_runtime_esta_sem_autoridade \
             -v
 
       - name: Run fast H1 BLUE tests

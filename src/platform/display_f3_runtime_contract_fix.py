@@ -7,7 +7,8 @@ otimizações posteriores:
 
 1. As máscaras do CHECK atual são diagnóstico óptico contínuo e nunca ficam
    inativas por causa do estado físico da placa. O estado físico pode bloquear
-   avanço/NG, mas não pode impedir classificação ou overlay.
+   avanço/NG sem impedir a classificação bruta; enquanto a autoridade produtiva
+   estiver bloqueada, overlay e visor permanecem neutros e o bruto fica no DEBUG.
 2. Um falso OFF do classificador global pode ser reconciliado pelo CHECK lógico
    atual somente quando a própria análise aprovada comprova segmento ACESO. Isso
    vale para qualquer CHECK presente ou futuro, sem regras por nome/posição.
