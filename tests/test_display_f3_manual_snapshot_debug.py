@@ -339,6 +339,7 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
 
     def test_print_da_tela_e_evidencia_visual_e_nao_fonte_da_visao(self):
         source = inspect.getsource(snapshot_module._capture_f3_production_screen)
+        self.assertIn("_capture_windows_f3_client(target)", source)
         self.assertIn("ImageGrab.grab", source)
         self.assertIn("winfo_rootx", source)
         self.assertIn("winfo_rooty", source)
@@ -347,6 +348,25 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("_capture_f3_production_screen(window)", analyze)
         audit = inspect.getsource(snapshot_module.capturar_snapshot_debug_display_f3)
         self.assertNotIn("_display_f3_manual_screen_capture_image", audit)
+
+    def test_print_windows_captura_area_cliente_sem_bbox_logico(self):
+        source = inspect.getsource(snapshot_module._capture_windows_f3_client)
+        self.assertIn("GetClientRect", source)
+        self.assertIn("PrintWindow", source)
+        self.assertIn("PW_CLIENTONLY", source)
+        self.assertIn("PW_RENDERFULLCONTENT", source)
+        self.assertIn("GetDIBits", source)
+        self.assertIn('biHeight = -height', source)
+        self.assertNotIn("winfo_rootx", source)
+        self.assertNotIn("winfo_rooty", source)
+
+    def test_captura_windows_tem_prioridade_sobre_fallback_imagegrab(self):
+        source = inspect.getsource(snapshot_module._capture_f3_production_screen)
+        native_pos = source.index("_capture_windows_f3_client(target)")
+        fallback_pos = source.index("ImageGrab.grab")
+        self.assertLess(native_pos, fallback_pos)
+        self.assertIn('"windows_printwindow_client"', source)
+        self.assertIn('"imagegrab_bbox_fallback"', source)
 
     def test_interface_remove_debug_antigo_e_toggle_off(self):
         source = inspect.getsource(snapshot_module._install_window_controls)

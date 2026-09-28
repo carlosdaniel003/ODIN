@@ -17,6 +17,7 @@ import hashlib
 import json
 import math
 import queue
+import sys
 import tkinter as tk
 
 import cv2
@@ -61,11 +62,218 @@ DEBUG_ACTION_ACTIVE = "#0891B2"
 
 
 
-def _capture_f3_production_screen(window) -> tuple[object | None, dict]:
-    """Captura os pixels visíveis da tela F3 antes de alterar qualquer botão.
+def _capture_windows_f3_client(target):
+    """Captura a área cliente completa do F3 sem depender de bbox de tela.
 
-    A imagem é evidência visual de UI. Ela não participa da análise óptica e não
-    substitui o frame bruto congelado usado pelos cálculos do relatório.
+    Em Windows com escala de exibição (125%/150% etc.), coordenadas retornadas
+    pelo Tk podem estar em unidades lógicas enquanto o ImageGrab trabalha em
+    pixels físicos. Isso fazia o print/copiar imagem terminar cortado à direita
+    e/ou embaixo. PrintWindow pinta a área cliente inteira diretamente em um
+    bitmap e elimina essa divergência de DPI.
+    """
+    if not sys.platform.startswith("win"):
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+        from PIL import Image
+
+        top = target.winfo_toplevel()
+        hwnd = int(top.winfo_id())
+        if not hwnd:
+            return None
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", wintypes.DWORD),
+                ("biWidth", wintypes.LONG),
+                ("biHeight", wintypes.LONG),
+                ("biPlanes", wintypes.WORD),
+                ("biBitCount", wintypes.WORD),
+                ("biCompression", wintypes.DWORD),
+                ("biSizeImage", wintypes.DWORD),
+                ("biXPelsPerMeter", wintypes.LONG),
+                ("biYPelsPerMeter", wintypes.LONG),
+                ("biClrUsed", wintypes.DWORD),
+                ("biClrImportant", wintypes.DWORD),
+            ]
+
+        class RGBQUAD(ctypes.Structure):
+            _fields_ = [
+                ("rgbBlue", ctypes.c_ubyte),
+                ("rgbGreen", ctypes.c_ubyte),
+                ("rgbRed", ctypes.c_ubyte),
+                ("rgbReserved", ctypes.c_ubyte),
+            ]
+
+        class BITMAPINFO(ctypes.Structure):
+            _fields_ = [
+                ("bmiHeader", BITMAPINFOHEADER),
+                ("bmiColors", RGBQUAD * 1),
+            ]
+
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+
+        user32.GetClientRect.argtypes = [
+            wintypes.HWND,
+            ctypes.POINTER(wintypes.RECT),
+        ]
+        user32.GetClientRect.restype = wintypes.BOOL
+        user32.GetDC.argtypes = [wintypes.HWND]
+        user32.GetDC.restype = wintypes.HDC
+        user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+        user32.ReleaseDC.restype = ctypes.c_int
+        user32.PrintWindow.argtypes = [
+            wintypes.HWND,
+            wintypes.HDC,
+            wintypes.UINT,
+        ]
+        user32.PrintWindow.restype = wintypes.BOOL
+
+        gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+        gdi32.CreateCompatibleDC.restype = wintypes.HDC
+        gdi32.CreateCompatibleBitmap.argtypes = [
+            wintypes.HDC,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        gdi32.CreateCompatibleBitmap.restype = wintypes.HBITMAP
+        gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+        gdi32.SelectObject.restype = wintypes.HGDIOBJ
+        gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+        gdi32.DeleteObject.restype = wintypes.BOOL
+        gdi32.DeleteDC.argtypes = [wintypes.HDC]
+        gdi32.DeleteDC.restype = wintypes.BOOL
+        gdi32.GetDIBits.argtypes = [
+            wintypes.HDC,
+            wintypes.HBITMAP,
+            wintypes.UINT,
+            wintypes.UINT,
+            ctypes.c_void_p,
+            ctypes.POINTER(BITMAPINFO),
+            wintypes.UINT,
+        ]
+        gdi32.GetDIBits.restype = ctypes.c_int
+
+        rect = wintypes.RECT()
+        if not user32.GetClientRect(hwnd, ctypes.byref(rect)):
+            return None
+        width = int(rect.right - rect.left)
+        height = int(rect.bottom - rect.top)
+        if width <= 1 or height <= 1:
+            return None
+
+        window_dc = user32.GetDC(hwnd)
+        if not window_dc:
+            return None
+
+        memory_dc = None
+        bitmap = None
+        old_object = None
+        try:
+            memory_dc = gdi32.CreateCompatibleDC(window_dc)
+            if not memory_dc:
+                return None
+            bitmap = gdi32.CreateCompatibleBitmap(
+                window_dc,
+                width,
+                height,
+            )
+            if not bitmap:
+                return None
+
+            old_object = gdi32.SelectObject(memory_dc, bitmap)
+            if not old_object:
+                return None
+
+            PW_CLIENTONLY = 0x00000001
+            PW_RENDERFULLCONTENT = 0x00000002
+            rendered = bool(
+                user32.PrintWindow(
+                    hwnd,
+                    memory_dc,
+                    PW_CLIENTONLY | PW_RENDERFULLCONTENT,
+                )
+            )
+            if not rendered:
+                rendered = bool(
+                    user32.PrintWindow(
+                        hwnd,
+                        memory_dc,
+                        PW_CLIENTONLY,
+                    )
+                )
+            if not rendered:
+                return None
+
+            # GetDIBits exige que o bitmap não esteja selecionado no DC.
+            gdi32.SelectObject(memory_dc, old_object)
+            old_object = None
+
+            info = BITMAPINFO()
+            info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            info.bmiHeader.biWidth = width
+            # Altura negativa = buffer top-down, sem inversão vertical.
+            info.bmiHeader.biHeight = -height
+            info.bmiHeader.biPlanes = 1
+            info.bmiHeader.biBitCount = 32
+            info.bmiHeader.biCompression = 0  # BI_RGB
+            buffer = ctypes.create_string_buffer(width * height * 4)
+
+            rows = gdi32.GetDIBits(
+                window_dc,
+                bitmap,
+                0,
+                height,
+                buffer,
+                ctypes.byref(info),
+                0,  # DIB_RGB_COLORS
+            )
+            if int(rows) != height:
+                return None
+
+            return Image.frombuffer(
+                "RGBA",
+                (width, height),
+                buffer.raw,
+                "raw",
+                "BGRA",
+                0,
+                1,
+            ).convert("RGB")
+        finally:
+            if old_object and memory_dc:
+                try:
+                    gdi32.SelectObject(memory_dc, old_object)
+                except Exception:
+                    pass
+            if bitmap:
+                try:
+                    gdi32.DeleteObject(bitmap)
+                except Exception:
+                    pass
+            if memory_dc:
+                try:
+                    gdi32.DeleteDC(memory_dc)
+                except Exception:
+                    pass
+            try:
+                user32.ReleaseDC(hwnd, window_dc)
+            except Exception:
+                pass
+    except Exception:
+        return None
+
+
+def _capture_f3_production_screen(window) -> tuple[object | None, dict]:
+    """Captura a tela F3 completa antes de alterar qualquer botão.
+
+    Windows prioriza captura nativa da área cliente da janela, evitando corte
+    causado por escala/DPI. Linux e qualquer falha do caminho nativo usam o
+    ImageGrab por bbox como fallback. A imagem continua sendo apenas evidência
+    visual; o frame RAW congelado permanece a fonte da visão computacional.
     """
     captured_at = datetime.now(timezone.utc).astimezone().isoformat(
         timespec="milliseconds"
@@ -81,6 +289,22 @@ def _capture_f3_production_screen(window) -> tuple[object | None, dict]:
     try:
         if not bool(target.winfo_ismapped()):
             raise RuntimeError("f3_container_nao_visivel")
+        try:
+            target.update_idletasks()
+        except Exception:
+            pass
+
+        native = _capture_windows_f3_client(target)
+        if native is not None:
+            return native, {
+                "available": True,
+                "captured_at": captured_at,
+                "size": [int(native.width), int(native.height)],
+                "source": "f3_production_client_native_at_analyze_click",
+                "capture_mode": "windows_printwindow_client",
+                "dpi_safe": True,
+            }
+
         x = int(target.winfo_rootx())
         y = int(target.winfo_rooty())
         width = max(1, int(target.winfo_width()))
@@ -100,6 +324,8 @@ def _capture_f3_production_screen(window) -> tuple[object | None, dict]:
             "bbox": [int(value) for value in bbox],
             "size": [int(image.width), int(image.height)],
             "source": "f3_production_screen_at_analyze_click",
+            "capture_mode": "imagegrab_bbox_fallback",
+            "dpi_safe": False,
         }
     except Exception as exc:
         return None, {
