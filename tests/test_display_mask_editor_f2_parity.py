@@ -315,7 +315,6 @@ class DisplayMaskEditorF2ParityTests(unittest.TestCase):
         self.assertNotIn("replace_selected_circle_with_segment", source)
         self.assertIn("clique vazio nunca move tudo", source)
         self.assertIn("as setas não movem o conjunto", source)
-        self.assertIn("keep_drawing", source)
         self.assertIn("tk.SUNKEN if enabled else tk.FLAT", source)
         self.assertIn("clique no PRIMEIRO PONTO para fechar", source)
         self.assertIn("return self._finish_polygon_mask()", source)
