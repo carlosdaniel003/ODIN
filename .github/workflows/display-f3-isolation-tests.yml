@@ -93,6 +93,15 @@ jobs:
             tests/test_display_f3_tracking_ui_contract.py \
             tests/test_display_f3_geometry_adjustments.py
 
+      - name: Run luminous F3 tracking regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_segments_refine_pose_inside_moving_filter \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_grid_survives_missing_expected_on_and_extra_light \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_dark_filter_without_emission_does_not_search_off_segments \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_live_tracking_calls_luminous_refinement_after_structural_attempt \
+            -v
+
       - name: Run ROI geometry parity tests
         run: |
           python -m unittest \
