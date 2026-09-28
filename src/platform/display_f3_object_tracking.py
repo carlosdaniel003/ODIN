@@ -496,6 +496,79 @@ def _angle_delta_deg(first: float, second: float) -> float:
     return abs((float(first) - float(second) + 180.0) % 360.0 - 180.0)
 
 
+def _runtime_rotation_anchor_compatible(runtime, matrix) -> tuple[bool, float]:
+    """Primitiva tolerante para runtime real e doubles de teste."""
+    if matrix is None:
+        return False, 0.0
+    anchor = getattr(runtime, "last_verified_rotation_deg", None)
+    if anchor is None:
+        return True, 0.0
+    current = affine_rotation_deg(matrix)
+    delta = _angle_delta_deg(current, float(anchor))
+    return (
+        delta <= F3_TRACKING_MAX_ABRUPT_ROTATION_DELTA_DEG,
+        float(delta),
+    )
+
+
+def _runtime_filter_abrupt_rotation_candidates(
+    runtime,
+    candidates,
+    *,
+    source: str,
+) -> list[dict]:
+    values = [
+        item for item in (candidates or ())
+        if isinstance(item, dict)
+    ]
+    if not values:
+        return []
+
+    accepted = []
+    rejected = []
+    for candidate in values:
+        compatible, delta = _runtime_rotation_anchor_compatible(
+            runtime,
+            candidate.get("matrix"),
+        )
+        if compatible:
+            accepted.append(candidate)
+            continue
+        rejected.append(
+            {
+                "source": str(source or ""),
+                "reference": str(candidate.get("reference") or ""),
+                "rotation_deg": round(
+                    float(
+                        candidate.get(
+                            "rotation_deg",
+                            affine_rotation_deg(candidate.get("matrix")),
+                        )
+                        or 0.0
+                    ),
+                    3,
+                ),
+                "rotation_delta_deg": round(float(delta), 3),
+                "reason": "abrupt_rotation_jump_rejected",
+            }
+        )
+
+    if rejected:
+        history = getattr(
+            runtime,
+            "_last_rotation_jump_rejections",
+            None,
+        )
+        if not isinstance(history, list):
+            history = []
+        history.extend(rejected)
+        try:
+            runtime._last_rotation_jump_rejections = history[-12:]
+        except Exception:
+            pass
+    return accepted
+
+
 def _luminous_refinement_within_coarse_guard(
     refined_matrix,
     coarse_matrix,
@@ -2643,8 +2716,9 @@ def _rescue_luminous_segment_tracking_lock(
     if not np.all(np.isfinite(matrix)):
         return None
 
-    rotation_allowed, rotation_delta = runtime._rotation_anchor_compatible(
-        matrix
+    rotation_allowed, rotation_delta = _runtime_rotation_anchor_compatible(
+        runtime,
+        matrix,
     )
     if not rotation_allowed:
         rejection = {
@@ -3445,18 +3519,7 @@ class F3DisplayObjectTracker:
         return abs(value)
 
     def _rotation_anchor_compatible(self, matrix) -> tuple[bool, float]:
-        """Rejeita saltos angulares impossíveis entre poses verificadas."""
-        if matrix is None:
-            return False, 0.0
-        anchor = self.last_verified_rotation_deg
-        if anchor is None:
-            return True, 0.0
-        current = affine_rotation_deg(matrix)
-        delta = self._angle_delta_deg(current, anchor)
-        return (
-            delta <= F3_TRACKING_MAX_ABRUPT_ROTATION_DELTA_DEG,
-            float(delta),
-        )
+        return _runtime_rotation_anchor_compatible(self, matrix)
 
     def _filter_abrupt_rotation_candidates(
         self,
@@ -3464,52 +3527,11 @@ class F3DisplayObjectTracker:
         *,
         source: str,
     ) -> list[dict]:
-        values = [
-            item for item in (candidates or ())
-            if isinstance(item, dict)
-        ]
-        if not values:
-            return []
-
-        accepted = []
-        rejected = []
-        for candidate in values:
-            compatible, delta = self._rotation_anchor_compatible(
-                candidate.get("matrix")
-            )
-            if compatible:
-                accepted.append(candidate)
-                continue
-            rejected.append(
-                {
-                    "source": str(source or ""),
-                    "reference": str(candidate.get("reference") or ""),
-                    "rotation_deg": round(
-                        float(
-                            candidate.get(
-                                "rotation_deg",
-                                affine_rotation_deg(candidate.get("matrix")),
-                            )
-                            or 0.0
-                        ),
-                        3,
-                    ),
-                    "rotation_delta_deg": round(float(delta), 3),
-                    "reason": "abrupt_rotation_jump_rejected",
-                }
-            )
-
-        if rejected:
-            history = getattr(
-                self,
-                "_last_rotation_jump_rejections",
-                None,
-            )
-            if not isinstance(history, list):
-                history = []
-            history.extend(rejected)
-            self._last_rotation_jump_rejections = history[-12:]
-        return accepted
+        return _runtime_filter_abrupt_rotation_candidates(
+            self,
+            candidates,
+            source=source,
+        )
 
     def _matrix_continuity(self, matrix) -> tuple[bool, float]:
         """Compara a pose nova com a última sem exigir a mesma referência."""
@@ -4509,7 +4531,8 @@ def _rescue_current_check_tracking_lock(
         attempts.append(attempt)
 
     had_structural_candidate = bool(candidates)
-    candidates = runtime._filter_abrupt_rotation_candidates(
+    candidates = _runtime_filter_abrupt_rotation_candidates(
+        runtime,
         candidates,
         source="structural_rescue",
     )
