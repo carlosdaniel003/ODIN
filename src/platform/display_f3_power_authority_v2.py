@@ -745,21 +745,32 @@ def _luminous_tracking_energy_hint(
     ):
         return {"available": False, "reason": "tracking_sem_evidencia_atual"}
 
-    current_frame_id = getattr(app, "camera_ultimo_frame_id", None)
     telemetry_frame_id = telemetry.get("frame_id")
     tracking_frame_id = tracking.get("frame_id")
+    telemetry_token = telemetry.get("frame_token")
+    tracking_token = tracking.get("frame_token")
+    decision_token = getattr(app, "_display_auto_last_frame_token", None)
+
     if (
-        current_frame_id is not None
+        telemetry_token is not None
+        and tracking_token is not None
+        and telemetry_token != tracking_token
+    ):
+        return {"available": False, "reason": "tracking_luminoso_snapshot_divergente"}
+    if (
+        decision_token is not None
+        and telemetry_token is not None
+        and decision_token != telemetry_token
+    ):
+        return {"available": False, "reason": "telemetria_luminosa_snapshot_antigo"}
+    if (
+        telemetry_token is None
+        and tracking_token is None
         and telemetry_frame_id is not None
-        and telemetry_frame_id != current_frame_id
-    ):
-        return {"available": False, "reason": "telemetria_luminosa_frame_antigo"}
-    if (
-        current_frame_id is not None
         and tracking_frame_id is not None
-        and tracking_frame_id != current_frame_id
+        and telemetry_frame_id != tracking_frame_id
     ):
-        return {"available": False, "reason": "tracking_frame_antigo"}
+        return {"available": False, "reason": "tracking_luminoso_frame_divergente"}
 
     alignment_required = bool(telemetry.get("alignment_required"))
     alignment_ready = bool(
@@ -770,6 +781,7 @@ def _luminous_tracking_energy_hint(
         "available": True,
         "source": "f3_luminous_segment_tracking",
         "frame_id": telemetry_frame_id,
+        "frame_token": deepcopy(telemetry_token),
         "project_name": str(project_name or ""),
         "check_id": check_id,
         "emission_detected": bool(

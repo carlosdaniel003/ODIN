@@ -1719,6 +1719,18 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertTrue(telemetry["alignment_ready"])
         self.assertEqual(88, telemetry["frame_id"])
 
+    def test_tracking_worker_preserva_token_do_snapshot_mesmo_se_camera_avanca(self):
+        source = inspect.getsource(tracking._run_live_tracking_heavy_job)
+        self.assertIn("frame_token=frame_token", source)
+
+        align_source = inspect.getsource(tracking.align_frame_for_f3)
+        self.assertIn("analysis_frame_id", align_source)
+        self.assertIn('"frame_token": deepcopy(frame_token)', align_source)
+        self.assertNotIn(
+            '"frame_id": getattr(app, "camera_ultimo_frame_id", None)',
+            align_source,
+        )
+
     def test_live_tracking_calls_luminous_refinement_after_structural_attempt(self):
         source = inspect.getsource(tracking.align_frame_for_f3)
         self.assertIn(

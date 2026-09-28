@@ -2057,6 +2057,8 @@ def _rescue_luminous_segment_tracking_lock(
     frame,
     runtime,
     base_result: "F3TrackingResult | None" = None,
+    *,
+    frame_token=None,
 ):
     """Refina/reconstrói a pose usando somente segmentos ACESOS do CHECK atual.
 
@@ -2200,7 +2202,14 @@ def _rescue_luminous_segment_tracking_lock(
             "project_name": str(project_name or ""),
             "check_id": check_id,
             "check_name": str(check.get("name") or check_id),
-            "frame_id": getattr(app, "camera_ultimo_frame_id", None),
+            "frame_id": (
+                int(frame_token[1])
+                if isinstance(frame_token, tuple)
+                and len(frame_token) >= 2
+                and frame_token[0] == "camera"
+                else getattr(app, "camera_ultimo_frame_id", None)
+            ),
+            "frame_token": deepcopy(frame_token),
             "base_locked": bool(
                 base_result is not None
                 and getattr(base_result, "locked", False)
@@ -2272,7 +2281,13 @@ def _rescue_luminous_segment_tracking_lock(
     runtime.last_matrix = matrix.copy()
     runtime._last_reference = result_reference
     runtime.last_compute_s = now
-    runtime.last_frame_id = getattr(app, "camera_ultimo_frame_id", None)
+    runtime.last_frame_id = (
+        int(frame_token[1])
+        if isinstance(frame_token, tuple)
+        and len(frame_token) >= 2
+        and frame_token[0] == "camera"
+        else getattr(app, "camera_ultimo_frame_id", None)
+    )
     runtime.last_gray = gray.copy() if isinstance(gray, np.ndarray) else None
     runtime.last_verified_s = now
     runtime.consecutive_misses = 0
@@ -4332,13 +4347,26 @@ def _invalidate_spatial_authority_after_tracking_loss(
         app._display_f3_operational_state = updated
 
 
-def align_frame_for_f3(app, frame):
+def align_frame_for_f3(app, frame, *, frame_token=None):
     if not tracking_enabled(app):
         return frame, None
     runtime = get_tracking_runtime(app)
     if runtime is None:
         return frame, None
     project_name = runtime.repository.obter_projeto_ativo()
+    if frame_token is None:
+        try:
+            token_fn = getattr(app, "_display_auto_frame_token", None)
+            frame_token = token_fn(frame) if callable(token_fn) else None
+        except Exception:
+            frame_token = None
+    analysis_frame_id = (
+        int(frame_token[1])
+        if isinstance(frame_token, tuple)
+        and len(frame_token) >= 2
+        and frame_token[0] == "camera"
+        else getattr(app, "camera_ultimo_frame_id", None)
+    )
     configured = runtime.configure(project_name)
     if not configured:
         # Mesmo quando ORB/AKAZE/template não geram uma referência utilizável,
@@ -4354,6 +4382,7 @@ def align_frame_for_f3(app, frame):
             frame,
             runtime,
             base_result=None,
+            frame_token=frame_token,
         )
         if luminous is None:
             status = {
@@ -4367,7 +4396,7 @@ def align_frame_for_f3(app, frame):
     else:
         result = runtime.align(
             frame,
-            frame_id=getattr(app, "camera_ultimo_frame_id", None),
+            frame_id=analysis_frame_id,
         )
         if not bool(result.locked):
             rescued = _rescue_current_check_tracking_lock(
@@ -4386,6 +4415,7 @@ def align_frame_for_f3(app, frame):
             frame,
             runtime,
             base_result=result if bool(result.locked) else None,
+            frame_token=frame_token,
         )
         if luminous is not None:
             result = luminous
@@ -4393,7 +4423,8 @@ def align_frame_for_f3(app, frame):
     app._display_f3_object_tracking_last_status = {
         "enabled": True,
         "locked": bool(result.locked),
-        "frame_id": getattr(app, "camera_ultimo_frame_id", None),
+        "frame_id": analysis_frame_id,
+        "frame_token": deepcopy(frame_token),
         "reference": result.reference,
         "matches": int(result.matches),
         "inliers": int(result.inliers),
@@ -4798,7 +4829,11 @@ def _run_live_tracking_heavy_job(
 ) -> dict:
     """Executa ORB/AKAZE/warp no executor pesado; não toca widgets Tk."""
     started = time.perf_counter()
-    aligned, result = align_frame_for_f3(app, raw_frame)
+    aligned, result = align_frame_for_f3(
+        app,
+        raw_frame,
+        frame_token=frame_token,
+    )
     geometry = None
     analysis_frame = None
     if result is not None and bool(result.locked):
