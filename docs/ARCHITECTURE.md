@@ -426,3 +426,31 @@ Ao substituir uma autoridade histórica:
 6. remova resíduos comprovadamente sem consumidores.
 
 Não mantenha indefinidamente as duas autoridades ativas.
+
+
+### Refinamento luminoso da pose F3
+
+Dentro da autoridade canônica de tracking, o contorno configurado pode representar
+o filtro preto móvel do display. Esse contorno fornece uma região grosseira de
+busca; ele não fixa as 28 ROIs na câmera.
+
+Quando o CHECK atual possui segmentos esperados ACESOS, o job de tracking pode
+usar somente os componentes luminosos encontrados dentro do filtro para refinar
+ou recuperar a transformação do frame atual para o espaço canônico:
+
+~~~text
+frame RAW
+  -> localizar/projetar filtro preto
+  -> recortar somente a ROI do filtro
+  -> detectar emissão luminosa
+  -> encaixar landmarks ON esperados
+  -> atualizar pose corrente
+  -> reprojetar as 28 máscaras
+  -> F3CheckAnalyzerAuthority classifica ON/OFF/POUCA LUZ
+~~~
+
+Segmentos apagados não participam da aquisição da pose. Um segmento ON ausente
+ou uma emissão extra pode permanecer como outlier durante o encaixe; a
+conformidade continua pertencendo ao analyzer, não ao tracker. O refinamento
+não cria nova autoridade, scheduler ou worker.
+
