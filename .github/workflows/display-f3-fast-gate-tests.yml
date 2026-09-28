@@ -35,8 +35,16 @@ jobs:
             src/platform/desktop_production_app.py \
             tests/test_display_f3_fast_expected_gate.py \
             tests/test_display_f3_h1_single_frame_probe.py \
+            tests/test_display_f3_auto_check.py \
             tests/test_display_f3_runtime_contract_fix.py \
             tests/test_display_f3_config_open_smoke.py
+
+      - name: Validate first-ON judgment gate
+        run: |
+          python -m unittest \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_ui_h1_nao_julga_mascaras_antes_do_primeiro_expected_on \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_ui_h1_libera_ok_ng_apos_primeiro_expected_on_confirmado \
+            -v
 
       - name: Run fast H1 BLUE tests
         run: |

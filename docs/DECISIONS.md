@@ -425,6 +425,10 @@ Decisão:
   OK/NG/avanço;
 - somente após o encaixe luminoso publicar geometria atual o analyzer canônico
   volta a ter autoridade para comparar esperado × observado;
+- no primeiro CHECK/H1, nenhuma leitura de máscara é apresentada como OK/NG
+  antes de pelo menos um segmento que o CHECK espera ACESO ser reconhecido como
+  ACESO com confiança válida; até lá a leitura bruta continua disponível no
+  DEBUG, mas visor e overlay permanecem neutros;
 - a telemetria do refinamento luminoso é incluída no DEBUG TÉCNICO para explicar
   componente detectado, espaço de fit, motivo de falha e estado de alinhamento;
 - não é criado novo scheduler, worker ou autoridade paralela.

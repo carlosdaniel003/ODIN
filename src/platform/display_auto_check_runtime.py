@@ -425,8 +425,15 @@ class DisplayAutomaticCheckF3Mixin:
     @staticmethod
     def _display_auto_publish_effective_ui_authority(
         analysis: dict,
+        *,
+        judgement_ready: bool = True,
     ) -> dict:
-        """Publica a unica verdade de mascaras para visor/status/overlay."""
+        """Publica a única verdade de máscaras para visor/status/overlay.
+
+        A leitura óptica bruta continua disponível no DEBUG. Porém, no primeiro
+        CHECK, a UI não transforma OFF/ruído em OK/NG antes de existir ao menos
+        um segmento que o CHECK espera ACESO realmente reconhecido como ACESO.
+        """
         if not isinstance(analysis, dict):
             return analysis
 
@@ -435,20 +442,43 @@ class DisplayAutomaticCheckF3Mixin:
             for item in (analysis.get("mask_results") or ())
             if isinstance(item, dict) and str(item.get("mask_id") or "")
         ]
-        effective_classifications = {
+        raw_classifications = {
             str(item.get("mask_id")): str(item.get("classified") or "")
             .strip()
             .lower()
             for item in rows
             if str(item.get("classified") or "").strip()
         }
-        effective_failed_mask_ids = tuple(
+        raw_failed_mask_ids = tuple(
             sorted(
                 str(item.get("mask_id"))
                 for item in rows
                 if item.get("matched") is False
             )
         )
+
+        analysis["ui_judgement_ready"] = bool(judgement_ready)
+        if not bool(judgement_ready):
+            # Mantém um mapa não vazio para impedir consumidores visuais de
+            # cair por fallback na classificação bruta. "unknown" é neutro:
+            # câmera e visor ficam cinza até a primeira evidência ON válida.
+            analysis["effective_classifications"] = {
+                str(item.get("mask_id")): "unknown"
+                for item in rows
+                if str(item.get("mask_id") or "")
+            }
+            analysis["effective_failed_mask_ids"] = ()
+            analysis["effective_confirmed_failed_mask_ids"] = ()
+            analysis["effective_validating_mask_ids"] = ()
+            analysis["effective_active_mask_count"] = len(rows)
+            analysis["effective_matched_mask_count"] = 0
+            analysis["ui_mask_authority"] = (
+                "blocked_until_first_expected_on_v1"
+            )
+            analysis["ui_judgement_gate_reason"] = (
+                "aguardando_primeiro_segmento_esperado_aceso"
+            )
+            return analysis
 
         intermittent = bool(
             analysis.get("intermittent_phase")
@@ -461,7 +491,7 @@ class DisplayAutomaticCheckF3Mixin:
             )
             if str(mask_id)
         }
-        effective_failed_set = set(effective_failed_mask_ids)
+        effective_failed_set = set(raw_failed_mask_ids)
         confirmed = (
             effective_failed_set.intersection(persistent)
             if intermittent
@@ -473,8 +503,8 @@ class DisplayAutomaticCheckF3Mixin:
             else set()
         )
 
-        analysis["effective_classifications"] = effective_classifications
-        analysis["effective_failed_mask_ids"] = effective_failed_mask_ids
+        analysis["effective_classifications"] = raw_classifications
+        analysis["effective_failed_mask_ids"] = raw_failed_mask_ids
         analysis["effective_confirmed_failed_mask_ids"] = tuple(
             sorted(confirmed)
         )
@@ -484,9 +514,10 @@ class DisplayAutomaticCheckF3Mixin:
         analysis["effective_active_mask_count"] = len(rows)
         analysis["effective_matched_mask_count"] = max(
             0,
-            len(rows) - len(effective_failed_mask_ids),
+            len(rows) - len(raw_failed_mask_ids),
         )
         analysis["ui_mask_authority"] = "effective_mask_results_v1"
+        analysis["ui_judgement_gate_reason"] = "primeiro_segmento_aceso_confirmado"
         return analysis
 
     @staticmethod
@@ -1018,8 +1049,17 @@ class DisplayAutomaticCheckF3Mixin:
                 intermittent_phase.get("persistent_failed_ids") or ()
             )
 
+        reference_judgement_ready = (
+            self._display_auto_has_reference_power_evidence(analysis)
+            if reference_gate
+            else True
+        )
+        analysis["first_expected_on_confirmed"] = bool(
+            reference_judgement_ready
+        )
         analysis = self._display_auto_publish_effective_ui_authority(
-            analysis
+            analysis,
+            judgement_ready=reference_judgement_ready,
         )
         analysis = self._display_auto_publish_segment_signature(
             context,
@@ -1029,11 +1069,9 @@ class DisplayAutomaticCheckF3Mixin:
 
         # O primeiro CHECK/H1 é a trava física do ciclo. Sem pelo menos um
         # segmento que H1 espera ACESO efetivamente classificado como ACESO,
-        # não existe OK, NG nem avanço para Bluetooth/BLUE.
-        if (
-            reference_gate
-            and not self._display_auto_has_reference_power_evidence(analysis)
-        ):
+        # não existe OK, NG nem avanço para Bluetooth/BLUE. O mesmo gate agora
+        # vale também para a apresentação: visor/overlay permanecem neutros.
+        if reference_gate and not reference_judgement_ready:
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
             self._display_auto_set_preview_status(

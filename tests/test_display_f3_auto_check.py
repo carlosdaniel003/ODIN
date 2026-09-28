@@ -314,6 +314,98 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
             self.assertIsNone(result["approved"])
             self.assertEqual("aprendizado_incompleto", result["reason"])
 
+    def test_ui_h1_nao_julga_mascaras_antes_do_primeiro_expected_on(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_ON",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.99,
+                },
+                {
+                    # Simula reflexo/falso ON numa máscara que deveria estar OFF.
+                    # Isso não pode liberar o julgamento do H1.
+                    "mask_id": "MASK_OFF",
+                    "expected": "off",
+                    "classified": "on",
+                    "matched": False,
+                    "confidence": 0.99,
+                },
+            ],
+        }
+
+        self.assertFalse(
+            DisplayAutomaticCheckF3Mixin._display_auto_has_reference_power_evidence(
+                analysis
+            )
+        )
+        result = (
+            DisplayAutomaticCheckF3Mixin._display_auto_publish_effective_ui_authority(
+                analysis,
+                judgement_ready=False,
+            )
+        )
+
+        self.assertFalse(result["ui_judgement_ready"])
+        self.assertEqual(
+            {
+                "MASK_ON": "unknown",
+                "MASK_OFF": "unknown",
+            },
+            result["effective_classifications"],
+        )
+        self.assertEqual((), result["effective_failed_mask_ids"])
+        self.assertEqual(0, result["effective_matched_mask_count"])
+        self.assertEqual(
+            "blocked_until_first_expected_on_v1",
+            result["ui_mask_authority"],
+        )
+
+    def test_ui_h1_libera_ok_ng_apos_primeiro_expected_on_confirmado(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_ON_1",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_ON_2",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.99,
+                },
+            ],
+        }
+
+        ready = (
+            DisplayAutomaticCheckF3Mixin._display_auto_has_reference_power_evidence(
+                analysis
+            )
+        )
+        self.assertTrue(ready)
+        result = (
+            DisplayAutomaticCheckF3Mixin._display_auto_publish_effective_ui_authority(
+                analysis,
+                judgement_ready=ready,
+            )
+        )
+
+        self.assertTrue(result["ui_judgement_ready"])
+        self.assertEqual("on", result["effective_classifications"]["MASK_ON_1"])
+        self.assertEqual("off", result["effective_classifications"]["MASK_ON_2"])
+        self.assertEqual(("MASK_ON_2",), result["effective_failed_mask_ids"])
+        self.assertEqual("effective_mask_results_v1", result["ui_mask_authority"])
+
     def test_runtime_counts_only_fresh_frames_and_auto_confirms_after_stability(self):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app.display_f3_ativo = True
