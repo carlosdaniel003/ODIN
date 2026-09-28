@@ -2,9 +2,9 @@ from __future__ import annotations
 
 """Editor de geometria reutilizável para referências físicas do Display F3.
 
-Reaproveita exatamente a interação visual do editor 90°/180°/270°:
-contorno da placa, máscaras, lupa, zoom, arraste, rotação, escala, histórico e
-redesenho ponto a ponto. Não possui estados ACESO/APAGADO/IGNORAR.
+Reaproveita a base canônica de interação geométrica: contorno da placa, máscaras,
+lupa, zoom, arraste, rotação, escala, histórico e redesenho ponto a ponto.
+Não possui estados ACESO/APAGADO/IGNORAR e não depende de slots angulares.
 """
 
 from copy import deepcopy
@@ -15,7 +15,7 @@ import tkinter as tk
 import numpy as np
 
 from src.platform.display_f3_tracking_orientation_ui import (
-    F3OrientationGeometryEditor,
+    F3GeometryEditorInteractionBase,
     _fit_toplevel_inside_screen,
     _valid_frame,
 )
@@ -206,8 +206,8 @@ def _distance_point_to_segment(
     return math.hypot(float(px) - cx, float(py) - cy)
 
 
-class F3ReferenceGeometryEditor(F3OrientationGeometryEditor):
-    """Mesmo editor geométrico das orientações, sem semântica de CHECK."""
+class F3ReferenceGeometryEditor(F3GeometryEditorInteractionBase):
+    """Editor geométrico canônico de referências, sem semântica de CHECK."""
 
     def __init__(
         self,

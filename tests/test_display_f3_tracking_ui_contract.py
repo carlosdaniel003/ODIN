@@ -8,85 +8,52 @@ import src.platform.display_f3_object_tracking as tracking
 
 
 class F3TrackingUiContractTests(unittest.TestCase):
-    def test_three_cardinal_orientation_slots_are_f3_owned(self):
-        self.assertEqual(
-            (
-                tracking.F3_ORIENTATION_90,
-                tracking.F3_ORIENTATION_180,
-                tracking.F3_ORIENTATION_270,
-            ),
-            tracking.F3_ORIENTATION_SLOTS,
-        )
-        self.assertEqual(
-            {90.0, 180.0, 270.0},
-            set(tracking.F3_ORIENTATION_ANGLE.values()),
-        )
-
-    def test_configuration_exposes_requested_controls(self):
+    def test_configuration_has_no_rotation_slot_controls(self):
         source = inspect.getsource(ui._build_tracking_config_class)
-        for text in (
-            "Ativar rastreamento automático de objetos",
+        self.assertIn("Ativar rastreamento automático de objetos", source)
+        self.assertIn("CONTORNO + SEGMENTOS LUMINOSOS", source)
+        for removed in (
             "Capturar câmera",
             "Carregar imagem",
-            "Desenhar placa",
-            "Remover",
+            "Desenhar placa e máscaras",
+            "Rotação real 90°",
+            "Rotação real 180°",
+            "Rotação real 270°",
+            "CARREGANDO PREVIEW",
         ):
-            self.assertIn(text, source)
+            self.assertNotIn(removed, source)
 
-    def test_editor_exposes_precision_workflow(self):
-        source = inspect.getsource(ui.F3OrientationGeometryEditor)
-        self.assertIn("<Control-z>", source)
-        self.assertIn("<Control-Z>", source)
-        self.assertIn("<MouseWheel>", source)
-        self.assertIn("REDESENHAR PLACA", source)
-        self.assertIn("F3_EDITOR_HISTORY_LIMIT", source)
-        self.assertIn("mask_vertex", source)
-        self.assertIn("radius", source)
+    def test_tracking_store_contract_has_no_orientation_bank(self):
+        source = inspect.getsource(tracking.F3TrackingConfigStore)
+        self.assertNotIn("orientations", source)
+        self.assertNotIn("managed_image_path", source)
+        self.assertNotIn("save_orientation", source)
+        self.assertIn("save_board_points", source)
 
-    def test_guided_capture_uses_existing_f3_frame_provider(self):
-        source = inspect.getsource(ui.F3GuidedOrientationCaptureWindow)
-        self.assertIn("self.owner.frame_provider()", source)
-        self.assertNotIn("VideoCapture(", source)
-
-    def test_configuration_previews_are_loaded_off_tk_opening_path(self):
-        source = inspect.getsource(ui._build_tracking_config_class)
-        self.assertIn("CARREGANDO PREVIEW...", source)
-        self.assertIn("threading.Thread(", source)
-        self.assertIn("_schedule_f3_tracking_previews", source)
-        self.assertIn("_apply_f3_tracking_preview", source)
+    def test_tracker_configuration_does_not_load_angular_images(self):
+        source = inspect.getsource(tracking.F3DisplayObjectTracker.configure)
+        self.assertNotIn("F3_ORIENTATION", source)
+        self.assertNotIn('source_type="orientation"', source)
+        self.assertIn("_calibrated_reference_specs", source)
 
     def test_configuration_marks_tracking_as_paused_while_open(self):
         source = inspect.getsource(ui._build_tracking_config_class)
         self.assertIn("_display_f3_tracking_config_open = True", source)
         self.assertIn("_display_f3_tracking_config_open = False", source)
 
-    def test_capture_window_uses_safe_screen_geometry(self):
-        source = inspect.getsource(ui.F3GuidedOrientationCaptureWindow)
-        self.assertIn("_fit_toplevel_inside_screen", source)
-        self.assertNotIn('geometry(f"{sw}x{sh}+0+0")', source)
-
-    def test_editor_has_live_precision_magnifier_and_cursor_zoom(self):
-        source = inspect.getsource(ui.F3OrientationGeometryEditor)
-        self.assertIn("_precision_cursor", source)
-        self.assertIn("_draw_magnifier", source)
-        self.assertIn("_draw_zoom_badge", source)
-        self.assertIn("F3_EDITOR_ZOOM_STEP", source)
-        self.assertIn("view_pan_x", source)
-        self.assertIn("view_pan_y", source)
-        self.assertIn('self.canvas.bind("<Leave>"', source)
-
     def test_runtime_guard_requires_tracking_lock_before_auto_analysis(self):
-        source = inspect.getsource(
-            tracking.instalar_runtime_rastreamento_objetos_display_f3
-        )
+        source = inspect.getsource(tracking.instalar_runtime_rastreamento_objetos_display_f3)
         self.assertIn("_process_display_auto_check", source)
         self.assertIn('status.get("locked")', source)
         self.assertIn("_display_f3_waiting_empty_rearm", source)
         self.assertIn("_display_f3_waiting_new_board_after_empty", source)
-        self.assertIn(
-            "DisplayAutomaticCheckF3Mixin._atualizar_preview_display_f3",
-            source,
-        )
+
+    def test_runtime_keeps_luminous_segment_refinement(self):
+        source = inspect.getsource(tracking.align_frame_for_f3)
+        self.assertIn("_rescue_luminous_segment_tracking_lock", source)
+        fit_source = inspect.getsource(tracking._find_luminous_segment_pose)
+        self.assertIn("_detect_luminous_segment_centers", fit_source)
+        self.assertIn("_fit_luminous_pose", fit_source)
 
 
 if __name__ == "__main__":

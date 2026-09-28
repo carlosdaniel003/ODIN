@@ -1,56 +1,37 @@
 from __future__ import annotations
 
-"""Configuração, captura guiada e editor das referências angulares do F3.
+"""UI de configuração do tracking F3 e base de interação geométrica.
 
-A UI é instalada como subclasse da classe final de configuração do Projeto Display.
-Nenhuma classe do F2 é alterada. Os três slots 90°/180°/270° usam exclusivamente
-F3TrackingConfigStore e as máscaras/checks já existentes do Projeto Display.
+Os antigos slots angulares 90°/180°/270° foram retirados do produto. Este módulo
+mantém somente:
+- o toggle do tracking automático do Display F3;
+- a base de interação reutilizada pelo editor canônico "Placa + Máscaras".
+
+A pose produtiva é obtida pelo contorno canônico e refinada pelos segmentos
+luminosos do CHECK atual; nenhuma imagem angular é capturada ou carregada.
 """
 
 import math
-import queue
 import tkinter as tk
 from copy import deepcopy
-from datetime import datetime, timezone
-from pathlib import Path
-from tkinter import filedialog, messagebox
 
 import cv2
 import numpy as np
 
 import src.platform.display_production_f3 as production_module
-from src.platform.display_f3_heavy_executor import F3HeavyWorkPriority
 from src.platform.display_f3_object_tracking import (
-    F3_ORIENTATION_ANGLE,
-    F3_ORIENTATION_SLOTS,
-    F3_ORIENTATION_UI,
     F3TrackingConfigStore,
-    _normalize_mask_override,
     _normalize_points,
     _valid_frame,
-    canonical_board_points,
     draw_reference_geometry,
-    matrix_np,
-    nominal_orientation_matrix,
     photo_from_bgr,
-    reference_geometry,
     reset_tracking_runtime,
     set_tracking_enabled,
-    transform_points,
-    transformed_masks,
 )
-from src.platform.display_mask_geometry import (
-    numero_mascara_display,
-    sincronizar_colecao_mascaras_display,
-)
-from src.platform.display_project_repository import (
-    normalizar_mascaras_display,
-    normalizar_nome_projeto_display,
-    normalizar_resolucao_display,
-)
+from src.platform.display_mask_geometry import numero_mascara_display
+from src.platform.display_project_repository import normalizar_nome_projeto_display
 
 
-F3_GUIDED_CAPTURE_INTERVAL_MS = 40
 F3_EDITOR_HISTORY_LIMIT = 5
 F3_EDITOR_MAGNIFIER_SIZE = 210
 F3_EDITOR_VERTEX_HIT_PX = 11.0
@@ -60,7 +41,6 @@ F3_EDITOR_ZOOM_MAX = 5.0
 F3_EDITOR_ZOOM_STEP = 1.16
 F3_SAFE_WINDOW_MARGIN_X = 64
 F3_SAFE_WINDOW_MARGIN_Y = 118
-F3_ORIENTATION_PREVIEW_STYLE_VERSION = 3
 
 _INSTALLED = False
 
@@ -185,488 +165,13 @@ def _point_inside_mask(mask: dict, x: float, y: float) -> bool:
         return False
 
 
-def _save_orientation_image(
-    store: F3TrackingConfigStore,
-    project: dict,
-    slot: str,
-    image,
-    *,
-    calibrated: bool,
-) -> bool:
-    project_name = normalizar_nome_projeto_display(project.get("name"))
-    resolution = normalizar_resolucao_display(project.get("master_resolution"))
-    if not project_name or resolution is None or not _valid_frame(image):
-        return False
-    width, height = int(resolution[0]), int(resolution[1])
-    if image.shape[:2] != (height, width):
-        return False
+class F3GeometryEditorInteractionBase:
+    """Interações comuns de geometria; a subclasse concreta fornece estado e persistência."""
 
-    path = store.managed_image_path(project_name, slot)
-    if not cv2.imwrite(str(path), image):
-        return False
-    matrix = nominal_orientation_matrix(project, store, slot)
-    if matrix is None:
-        return False
-
-    board = transform_points(canonical_board_points(project, store), matrix)
-    masks = transformed_masks(project, matrix)
-    overrides = {
-        str(mask.get("id") or ""): mask
-        for mask in masks
-        if str(mask.get("id") or "")
-    }
-    return store.save_orientation(
-        project_name,
-        slot,
-        {
-            "image_path": str(path),
-            "width": width,
-            "height": height,
-            "angle_deg": float(F3_ORIENTATION_ANGLE[slot]),
-            "canonical_to_reference": matrix.tolist(),
-            "calibrated": bool(calibrated),
-            "board_points_reference": board,
-            "mask_overrides_reference": overrides,
-            "masks_reference": deepcopy(masks),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-
-
-class F3GuidedOrientationCaptureWindow:
-    def __init__(self, owner, slot: str) -> None:
-        self.owner = owner
-        self.store: F3TrackingConfigStore = owner._f3_tracking_store
-        self.slot = slot
-        self.project_name = owner._selected_name() or ""
-        self.project = owner.repository.carregar_projeto(self.project_name)
-        self._photo = None
-        self._after_id = None
-        self._latest_frame = None
-        self._closing = False
-
-        resolution = normalizar_resolucao_display(
-            (self.project or {}).get("master_resolution")
+    def __init__(self, *args, **kwargs) -> None:
+        raise TypeError(
+            "Use F3ReferenceGeometryEditor; slots angulares não existem mais."
         )
-        self.width = int(resolution[0]) if resolution else 0
-        self.height = int(resolution[1]) if resolution else 0
-        self.matrix = (
-            nominal_orientation_matrix(self.project, self.store, slot)
-            if self.project is not None
-            else None
-        )
-        self.board = (
-            transform_points(
-                canonical_board_points(self.project, self.store),
-                self.matrix,
-            )
-            if self.project is not None and self.matrix is not None
-            else []
-        )
-        self.masks = (
-            transformed_masks(self.project, self.matrix)
-            if self.project is not None and self.matrix is not None
-            else []
-        )
-
-        self.window = tk.Toplevel(owner.window)
-        self.window.title(
-            f"ODIN • F3 • Captura guiada {F3_ORIENTATION_UI[slot]['short']}"
-        )
-        self.window.configure(bg="#08111F")
-        _fit_toplevel_inside_screen(self.window)
-        self.window.transient(owner.window)
-        self.window.protocol("WM_DELETE_WINDOW", self.close)
-
-        header = tk.Frame(self.window, bg="#111827")
-        header.pack(fill=tk.X)
-        tk.Label(
-            header,
-            text=(
-                f"DISPLAY F3 • CAPTURA GUIADA • "
-                f"{F3_ORIENTATION_UI[slot]['short']}"
-            ),
-            font=("Segoe UI", 13, "bold"),
-            fg="#E5E7EB",
-            bg="#111827",
-            anchor="w",
-        ).pack(fill=tk.X, padx=16, pady=(12, 3))
-        tk.Label(
-            header,
-            text=(
-                "A guia fica fixa. Posicione fisicamente a placa/display até o "
-                "contorno CIANO e as máscaras AMARELAS coincidirem com os segmentos. "
-                "A captura usa o mesmo frame da câmera do F3; nenhuma segunda câmera é aberta."
-            ),
-            font=("Segoe UI", 9),
-            fg="#CBD5E1",
-            bg="#111827",
-            anchor="w",
-            justify=tk.LEFT,
-        ).pack(fill=tk.X, padx=16, pady=(0, 9))
-
-        self.canvas = tk.Canvas(
-            self.window,
-            bg="#020617",
-            bd=0,
-            highlightthickness=0,
-        )
-        self.canvas.pack(fill=tk.BOTH, expand=True, padx=12, pady=(10, 6))
-        self.canvas.bind("<Configure>", lambda _e: self._render_latest())
-
-        footer = tk.Frame(self.window, bg="#111827")
-        footer.pack(fill=tk.X, padx=12, pady=(0, 12))
-        self.status = tk.Label(
-            footer,
-            text="AGUARDANDO FRAME DA CÂMERA...",
-            font=("Segoe UI", 9, "bold"),
-            fg="#FBBF24",
-            bg="#111827",
-            anchor="w",
-        )
-        self.status.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8, pady=8)
-        tk.Button(
-            footer,
-            text="CANCELAR",
-            command=self.close,
-            font=("Segoe UI", 9, "bold"),
-            bg="#3A151A",
-            fg="#FCA5A5",
-            relief=tk.FLAT,
-            bd=0,
-            padx=16,
-            pady=8,
-        ).pack(side=tk.RIGHT, padx=(4, 8), pady=6)
-        self.capture_button = tk.Button(
-            footer,
-            text="CAPTURAR",
-            command=self.capture,
-            state=tk.DISABLED,
-            font=("Segoe UI", 9, "bold"),
-            bg="#0F3A2B",
-            fg="#86EFAC",
-            disabledforeground="#64748B",
-            relief=tk.FLAT,
-            bd=0,
-            padx=18,
-            pady=8,
-        )
-        self.capture_button.pack(side=tk.RIGHT, padx=4, pady=6)
-
-        self.window.bind("<Return>", lambda _event: self.capture())
-        self.window.bind("<Escape>", lambda _event: self.close())
-        try:
-            self.window.grab_set()
-            self.window.focus_force()
-        except Exception:
-            pass
-        self._schedule(True)
-
-    def _schedule(self, immediate: bool = False) -> None:
-        if self._closing:
-            return
-        try:
-            self._after_id = self.window.after(
-                1 if immediate else F3_GUIDED_CAPTURE_INTERVAL_MS,
-                self._update,
-            )
-        except Exception:
-            self._after_id = None
-
-    def _frame(self):
-        try:
-            return self.owner.frame_provider()
-        except Exception:
-            return None
-
-    def _update(self) -> None:
-        self._after_id = None
-        if self._closing:
-            return
-        frame = self._frame()
-        if not _valid_frame(frame):
-            self._latest_frame = None
-            self.capture_button.configure(state=tk.DISABLED)
-            self.status.configure(
-                text="CÂMERA SEM FRAME • mantenha a câmera ativa",
-                fg="#FBBF24",
-            )
-            self._schedule()
-            return
-
-        h, w = frame.shape[:2]
-        if (w, h) != (self.width, self.height):
-            self._latest_frame = None
-            self.capture_button.configure(state=tk.DISABLED)
-            self.status.configure(
-                text=(
-                    f"RESOLUÇÃO INCOMPATÍVEL • câmera {w}x{h} • "
-                    f"projeto {self.width}x{self.height}"
-                ),
-                fg="#FCA5A5",
-            )
-            self._render(frame, overlay=False)
-            self._schedule()
-            return
-
-        self._latest_frame = frame.copy()
-        self.capture_button.configure(state=tk.NORMAL)
-        self.status.configure(
-            text=(
-                f"ALINHE O DISPLAY EM {F3_ORIENTATION_UI[self.slot]['short']} "
-                "COM A GUIA E PRESSIONE CAPTURAR"
-            ),
-            fg="#86EFAC",
-        )
-        self._render(self._latest_frame, overlay=True)
-        self._schedule()
-
-    def _render(self, frame, *, overlay: bool) -> None:
-        image = (
-            draw_reference_geometry(
-                frame,
-                self.board,
-                self.masks,
-                alpha=0.46,
-            )
-            if overlay
-            else frame
-        )
-        canvas_w = max(120, int(self.canvas.winfo_width()))
-        canvas_h = max(120, int(self.canvas.winfo_height()))
-        self._photo = photo_from_bgr(image, canvas_w, canvas_h)
-        if self._photo is None:
-            return
-        self.canvas.delete("all")
-        self.canvas.create_image(
-            canvas_w / 2.0,
-            canvas_h / 2.0,
-            image=self._photo,
-            anchor="center",
-        )
-
-    def _render_latest(self) -> None:
-        if _valid_frame(self._latest_frame):
-            self._render(self._latest_frame, overlay=True)
-
-    def capture(self) -> None:
-        if not _valid_frame(self._latest_frame) or self.project is None:
-            return
-        if not _save_orientation_image(
-            self.store,
-            self.project,
-            self.slot,
-            self._latest_frame.copy(),
-            calibrated=True,
-        ):
-            messagebox.showerror(
-                "Falha na captura",
-                "Não foi possível salvar a referência angular do Display F3.",
-                parent=self.window,
-            )
-            return
-        self.close(refresh=True)
-
-    def close(self, refresh: bool = False) -> None:
-        if self._closing:
-            return
-        self._closing = True
-        if self._after_id is not None:
-            try:
-                self.window.after_cancel(self._after_id)
-            except Exception:
-                pass
-        try:
-            self.window.grab_release()
-        except Exception:
-            pass
-        try:
-            self.window.destroy()
-        except Exception:
-            pass
-        if refresh:
-            self.owner._render_f3_tracking_panel()
-            self.owner._invalidate_f3_tracking_runtime()
-
-
-class F3OrientationGeometryEditor:
-    def __init__(self, owner, slot: str) -> None:
-        self.owner = owner
-        self.store: F3TrackingConfigStore = owner._f3_tracking_store
-        self.slot = slot
-        self.project_name = owner._selected_name() or ""
-        self.project = owner.repository.carregar_projeto(self.project_name)
-        self.entry = self.store.orientations(self.project_name).get(slot, {})
-        self.image = cv2.imread(
-            str(self.entry.get("image_path") or ""),
-            cv2.IMREAD_COLOR,
-        )
-        resolution = normalizar_resolucao_display(
-            (self.project or {}).get("master_resolution")
-        )
-        self.width = int(resolution[0]) if resolution else 0
-        self.height = int(resolution[1]) if resolution else 0
-
-        stored = matrix_np(self.entry)
-        nominal = (
-            nominal_orientation_matrix(self.project, self.store, slot)
-            if self.project is not None
-            else None
-        )
-        self.nominal = (
-            nominal.copy()
-            if nominal is not None
-            else np.asarray([[1, 0, 0], [0, 1, 0]], dtype=np.float32)
-        )
-        self.matrix = stored.copy() if stored is not None else self.nominal.copy()
-        self.board, self.masks = (
-            reference_geometry(self.project, self.store, slot, self.entry)
-            if self.project is not None
-            else ([], [])
-        )
-        if not self.board and self.project is not None:
-            self.board = transform_points(
-                canonical_board_points(self.project, self.store),
-                self.matrix,
-            )
-        if not self.masks and self.project is not None:
-            self.masks = transformed_masks(self.project, self.matrix)
-
-        self.history: list[dict] = []
-        self.drag_target = None
-        self.drag_last_image = None
-        self.drag_snapshot_pushed = False
-        self.selected = None
-        self.draw_board_mode = False
-        self.draw_board_points: list[list[float]] = []
-        self.redraw_board_committed = False
-        self.view_zoom = 1.0
-        self.view_pan_x = 0.0
-        self.view_pan_y = 0.0
-        self._display_scale = 1.0
-        self._view_tx = 0.0
-        self._view_ty = 0.0
-        self._precision_cursor = None
-        self._photo = None
-        self._magnifier_photo = None
-        self._render_after = None
-        self._last_decorated = None
-
-        self.window = tk.Toplevel(owner.window)
-        self.window.title(
-            f"ODIN • F3 • Desenhar placa {F3_ORIENTATION_UI[slot]['short']}"
-        )
-        self.window.configure(bg="#08111F")
-        _fit_toplevel_inside_screen(self.window)
-        self.window.transient(owner.window)
-        self.window.protocol("WM_DELETE_WINDOW", self.close)
-
-        header = tk.Frame(self.window, bg="#111827")
-        header.pack(fill=tk.X)
-        tk.Label(
-            header,
-            text=(
-                f"F3 • REFERÊNCIA REAL {F3_ORIENTATION_UI[slot]['short']} • "
-                "CONTORNO + SEGMENTOS"
-            ),
-            font=("Segoe UI", 12, "bold"),
-            fg="#E5E7EB",
-            bg="#111827",
-            anchor="w",
-        ).pack(fill=tk.X, padx=16, pady=(10, 2))
-        tk.Label(
-            header,
-            text=(
-                "Arraste pontos do contorno ciano ou das máscaras. A lupa de precisão acompanha "
-                "o cursor/seleção. Círculo: arraste para mover e roda altera o raio. Setas movem 1 px. "
-                "Ctrl+Z desfaz até 5 ações. Ctrl+roda dá zoom ancorado no cursor. "
-                "Roda sem seleção gira 1°; Shift+roda escala 1%."
-            ),
-            font=("Segoe UI", 8),
-            fg="#94A3B8",
-            bg="#111827",
-            anchor="w",
-            justify=tk.LEFT,
-        ).pack(fill=tk.X, padx=16, pady=(0, 8))
-
-        self.canvas = tk.Canvas(
-            self.window,
-            bg="#020617",
-            bd=0,
-            highlightthickness=0,
-            cursor="crosshair",
-        )
-        self.canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=8)
-        self.canvas.bind("<Configure>", lambda _e: self.schedule_render())
-        self.canvas.bind("<ButtonPress-1>", self._press)
-        self.canvas.bind("<B1-Motion>", self._drag)
-        self.canvas.bind("<ButtonRelease-1>", self._release)
-        self.canvas.bind("<Motion>", self._motion)
-        self.canvas.bind("<Leave>", self._leave_canvas)
-        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.canvas.bind(sequence, self._wheel, add="+")
-
-        toolbar = tk.Frame(self.window, bg="#111827")
-        toolbar.pack(fill=tk.X, padx=10, pady=(0, 10))
-
-        def button(text, command, bg="#182231", fg="#E5E7EB"):
-            tk.Button(
-                toolbar,
-                text=text,
-                command=command,
-                font=("Segoe UI", 8, "bold"),
-                bg=bg,
-                fg=fg,
-                relief=tk.FLAT,
-                bd=0,
-                padx=8,
-                pady=7,
-            ).pack(side=tk.LEFT, padx=(0, 4))
-
-        button("← 5px", lambda: self.translate_all(-5, 0))
-        button("→ 5px", lambda: self.translate_all(5, 0))
-        button("↑ 5px", lambda: self.translate_all(0, -5))
-        button("↓ 5px", lambda: self.translate_all(0, 5))
-        button("ROT -1°", lambda: self.rotate_all(-1.0))
-        button("ROT +1°", lambda: self.rotate_all(1.0))
-        button("ESC -1%", lambda: self.scale_all(0.99))
-        button("ESC +1%", lambda: self.scale_all(1.01))
-        button(
-            "REDESENHAR PLACA",
-            self.start_redraw_board,
-            bg="#17314A",
-            fg="#7DD3FC",
-        )
-        button("RESET", self.reset, bg="#3F2B12", fg="#FCD34D")
-        tk.Frame(toolbar, bg="#111827").pack(side=tk.LEFT, fill=tk.X, expand=True)
-        button("CANCELAR", self.close, bg="#3A151A", fg="#FCA5A5")
-        button("SALVAR", self.save, bg="#0F3A2B", fg="#86EFAC")
-
-        self.status = tk.Label(
-            self.window,
-            text="",
-            font=("Segoe UI", 8, "bold"),
-            fg="#94A3B8",
-            bg="#111827",
-            anchor="w",
-        )
-        self.status.pack(fill=tk.X, padx=14, pady=(0, 8))
-
-        self.window.bind("<Escape>", self._escape)
-        self.window.bind("<Return>", self._enter)
-        self.window.bind("<Control-z>", lambda _e: self.undo())
-        self.window.bind("<Control-Z>", lambda _e: self.undo())
-        self.window.bind("<Left>", lambda _e: self._keyboard_move(-1, 0))
-        self.window.bind("<Right>", lambda _e: self._keyboard_move(1, 0))
-        self.window.bind("<Up>", lambda _e: self._keyboard_move(0, -1))
-        self.window.bind("<Down>", lambda _e: self._keyboard_move(0, 1))
-        try:
-            self.window.grab_set()
-            self.window.focus_force()
-            self.canvas.focus_set()
-        except Exception:
-            pass
-        self.schedule_render()
 
     def _snapshot(self) -> dict:
         return {
@@ -1476,74 +981,10 @@ class F3OrientationGeometryEditor:
         )
 
     def save(self) -> None:
-        if self.project is None or not _valid_frame(self.image):
-            return
-        if len(self.board) < 3:
-            messagebox.showwarning(
-                "Contorno necessário",
-                "Defina pelo menos 3 pontos para o contorno da placa/display.",
-                parent=self.window,
-            )
-            return
-        try:
-            inverse = cv2.invertAffineTransform(
-                np.asarray(self.matrix, dtype=np.float32).reshape(2, 3)
-            )
-        except Exception:
-            inverse = None
-
-        if (
-            inverse is not None
-            and (
-                not self.store.board_points(self.project_name)
-                or self.redraw_board_committed
-            )
-        ):
-            canonical = transform_points(self.board, inverse)
-            self.store.save_board_points(self.project_name, canonical)
-
-        overrides = {
-            str(mask.get("id") or ""): _normalize_mask_override(mask)
-            for mask in self.masks
-            if str(mask.get("id") or "")
-        }
-        overrides = {
-            key: value for key, value in overrides.items() if value is not None
-        }
-        current = dict(self.entry)
-        current.update(
-            {
-                "canonical_to_reference": np.asarray(
-                    self.matrix,
-                    dtype=np.float32,
-                ).reshape(2, 3).tolist(),
-                "calibrated": True,
-                "board_points_reference": deepcopy(self.board),
-                "mask_overrides_reference": overrides,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        if not self.store.save_orientation(self.project_name, self.slot, current):
-            messagebox.showerror(
-                "Falha ao salvar",
-                "Não foi possível salvar os ajustes desta orientação.",
-                parent=self.window,
-            )
-            return
-        self.owner._invalidate_f3_tracking_runtime()
-        self.close(refresh=True)
+        raise NotImplementedError
 
     def close(self, refresh: bool = False) -> None:
-        try:
-            self.window.grab_release()
-        except Exception:
-            pass
-        try:
-            self.window.destroy()
-        except Exception:
-            pass
-        if refresh:
-            self.owner._render_f3_tracking_panel()
+        raise NotImplementedError
 
 
 def _build_tracking_config_class(base_cls):
@@ -1561,41 +1002,19 @@ def _build_tracking_config_class(base_cls):
             self._f3_tracking_store = F3TrackingConfigStore(repository)
             self._f3_tracking_app = getattr(frame_provider, "__self__", None)
             self._f3_tracking_panel = None
-            self._f3_tracking_cards = None
-            self._f3_tracking_photos: dict[str, object] = {}
-            self._f3_tracking_preview_canvases: dict[str, tk.Canvas] = {}
-            self._f3_tracking_preview_generation = 0
-            self._f3_tracking_preview_cache: dict[tuple, object] = {}
-            self._f3_tracking_preview_results = queue.Queue(maxsize=2)
-            self._f3_tracking_preview_poll_after = None
-            self._f3_tracking_preview_owner = (
-                f"f3-tracking-preview:{id(self)}"
-            )
+            self._f3_tracking_state_label = None
             self._f3_tracking_enabled_var = tk.BooleanVar(
                 master=root,
                 value=self._f3_tracking_store.enabled(),
             )
-
-            # Ao abrir configurações, suspendemos somente o ORB/RANSAC pesado do
-            # F3. A câmera continua viva para captura de referências, mas nenhuma
-            # decisão automática roda enquanto a janela está aberta.
             if self._f3_tracking_app is not None:
                 self._f3_tracking_app._display_f3_tracking_config_open = True
 
-            # Qualquer alteração normal do Projeto Display (máscaras, CHECKS,
-            # referências, resolução) invalida o banco ORB do F3. Assim o runtime
-            # pode permanecer totalmente cacheado entre frames sem ficar lendo
-            # configuração do disco no Raspberry.
             external_on_change = on_change
             external_on_close = on_close
 
             def on_change_with_tracking_reset():
-                app = self._f3_tracking_app
-                if app is not None:
-                    try:
-                        reset_tracking_runtime(app)
-                    except Exception:
-                        pass
+                self._invalidate_f3_tracking_runtime(notify=False)
                 if callable(external_on_change):
                     external_on_change()
 
@@ -1603,17 +1022,6 @@ def _build_tracking_config_class(base_cls):
                 app = self._f3_tracking_app
                 if app is not None:
                     app._display_f3_tracking_config_open = False
-                self._f3_tracking_preview_generation += 1
-                poll_after = self._f3_tracking_preview_poll_after
-                self._f3_tracking_preview_poll_after = None
-                if poll_after is not None:
-                    try:
-                        self.window.after_cancel(poll_after)
-                    except Exception:
-                        pass
-                executor = getattr(self, "_heavy_executor", None)
-                if executor is not None:
-                    executor.cancel_owner(self._f3_tracking_preview_owner)
                 if callable(external_on_close):
                     external_on_close()
 
@@ -1634,17 +1042,18 @@ def _build_tracking_config_class(base_cls):
             self._install_f3_tracking_panel()
             self._render_f3_tracking_panel()
 
-        def _invalidate_f3_tracking_runtime(self) -> None:
+        def _invalidate_f3_tracking_runtime(self, *, notify: bool = True) -> None:
             app = self._f3_tracking_app
             if app is not None:
                 try:
                     reset_tracking_runtime(app)
                 except Exception:
                     pass
-            try:
-                self._notify_change()
-            except Exception:
-                pass
+            if notify:
+                try:
+                    self._notify_change()
+                except Exception:
+                    pass
 
         def _on_f3_tracking_toggle(self) -> None:
             enabled = bool(self._f3_tracking_enabled_var.get())
@@ -1656,7 +1065,7 @@ def _build_tracking_config_class(base_cls):
             self._render_f3_tracking_panel()
             self.status.configure(
                 text=(
-                    "Rastreamento automático de objetos do F3 ativado."
+                    "Rastreamento F3 por contorno + segmentos luminosos ativado."
                     if enabled
                     else "Rastreamento automático de objetos do F3 desativado."
                 )
@@ -1665,12 +1074,7 @@ def _build_tracking_config_class(base_cls):
         def _install_f3_tracking_panel(self) -> None:
             parent = self.activate_button.master
             panel = tk.Frame(parent, bg="#0F1B2C")
-            panel.pack(
-                fill=tk.X,
-                padx=16,
-                pady=(0, 9),
-                before=self.activate_button,
-            )
+            panel.pack(fill=tk.X, padx=16, pady=(0, 9), before=self.activate_button)
             self._f3_tracking_panel = panel
 
             tk.Label(
@@ -1699,9 +1103,11 @@ def _build_tracking_config_class(base_cls):
             tk.Label(
                 panel,
                 text=(
-                    "Configuração exclusiva do F3. Desativada, o Display F3 continua "
-                    "exatamente no fluxo atual. Ativada, o frame é localizado e alinhado "
-                    "antes de presença, CHECKS, máscaras e análise automática."
+                    "CONTORNO + SEGMENTOS LUMINOSOS • O contorno salvo em "
+                    "'Placa + Máscaras' limita a região de busca. O ODIN procura "
+                    "os segmentos que o CHECK espera acesos, ajusta a pose às "
+                    "emissões encontradas e então reprojeta/classifica as máscaras. "
+                    "Não existem imagens ou slots de rotação 90°/180°/270°."
                 ),
                 font=("Segoe UI", 8),
                 fg=self.MUTED,
@@ -1709,624 +1115,60 @@ def _build_tracking_config_class(base_cls):
                 justify=tk.LEFT,
                 wraplength=620,
                 anchor="w",
-            ).pack(fill=tk.X, padx=12, pady=(0, 8))
+            ).pack(fill=tk.X, padx=12, pady=(0, 5))
 
-            self._f3_tracking_cards = tk.Frame(panel, bg="#0F1B2C")
-            self._f3_tracking_cards.pack(fill=tk.X, padx=8, pady=(0, 9))
+            self._f3_tracking_state_label = tk.Label(
+                panel,
+                text="",
+                font=("Segoe UI", 8, "bold"),
+                fg=self.MUTED,
+                bg="#0F1B2C",
+                justify=tk.LEFT,
+                anchor="w",
+            )
+            self._f3_tracking_state_label.pack(fill=tk.X, padx=12, pady=(0, 9))
 
         def _show_no_project(self) -> None:
             result = super()._show_no_project()
-            if self._f3_tracking_cards is not None:
-                self._render_f3_tracking_panel()
+            self._render_f3_tracking_panel()
             return result
 
         def _load_selected(self) -> None:
             result = super()._load_selected()
-            if self._f3_tracking_cards is not None:
-                self._render_f3_tracking_panel()
+            self._render_f3_tracking_panel()
             return result
 
         def _render_f3_tracking_panel(self) -> None:
-            cards = self._f3_tracking_cards
-            if cards is None:
+            label = self._f3_tracking_state_label
+            if label is None:
                 return
-            self._f3_tracking_preview_generation += 1
-            generation = int(self._f3_tracking_preview_generation)
-            for child in tuple(cards.winfo_children()):
-                try:
-                    child.destroy()
-                except Exception:
-                    pass
-            self._f3_tracking_photos.clear()
-            self._f3_tracking_preview_canvases.clear()
-
             project_name = self._selected_name()
             project = self.repository.carregar_projeto(project_name)
-            enabled = bool(self._f3_tracking_enabled_var.get())
             if project is None:
-                tk.Label(
-                    cards,
-                    text="Selecione um Projeto Display para configurar as orientações.",
-                    font=("Segoe UI", 8, "bold"),
+                label.configure(
+                    text="Selecione um Projeto Display para validar o contorno.",
                     fg=self.MUTED,
-                    bg="#0F1B2C",
-                ).pack(fill=tk.X, padx=4, pady=8)
+                )
                 return
-
-            resolution = normalizar_resolucao_display(project.get("master_resolution"))
-            entries = self._f3_tracking_store.orientations(project_name)
-            for column in range(3):
-                cards.grid_columnconfigure(column, weight=1, uniform="f3_tracking_orientation")
-
-            for column, slot in enumerate(F3_ORIENTATION_SLOTS):
-                ui = F3_ORIENTATION_UI[slot]
-                entry = entries.get(slot, {})
-                card = tk.Frame(
-                    cards,
-                    bg="#0B1728",
-                    highlightthickness=1,
-                    highlightbackground="#253247",
-                )
-                card.grid(
-                    row=0,
-                    column=column,
-                    sticky="nsew",
-                    padx=(0 if column == 0 else 4, 0 if column == 2 else 4),
-                )
-                tk.Label(
-                    card,
-                    text=ui["title"],
-                    font=("Segoe UI", 8, "bold"),
-                    fg=ui["color"],
-                    bg="#0B1728",
-                ).pack(fill=tk.X, padx=7, pady=(7, 4))
-
-                preview = tk.Canvas(
-                    card,
-                    width=190,
-                    height=112,
-                    bg="#020617",
-                    bd=0,
-                    highlightthickness=0,
-                )
-                preview.pack(fill=tk.X, padx=7, pady=(0, 4))
-                self._f3_tracking_preview_canvases[slot] = preview
-                if entry and str(entry.get("image_path") or "").strip():
-                    preview.create_text(
-                        95,
-                        56,
-                        text="CARREGANDO PREVIEW...",
-                        fill="#64748B",
-                        font=("Segoe UI", 7, "bold"),
-                    )
-                else:
-                    preview.create_text(
-                        95,
-                        56,
-                        text="SEM IMAGEM",
-                        fill="#64748B",
-                        font=("Segoe UI", 8, "bold"),
-                    )
-
-                calibrated = bool(entry.get("calibrated")) if entry else False
-                tk.Label(
-                    card,
+            saved_board = self._f3_tracking_store.board_points(project_name)
+            if len(saved_board) >= 3:
+                label.configure(
                     text=(
-                        "CALIBRADA"
-                        if calibrated
-                        else ("AJUSTE PENDENTE" if entry else "SEM REFERÊNCIA")
+                        f"CONTORNO CONFIGURADO • {len(saved_board)} pontos • "
+                        "nenhuma referência angular necessária"
                     ),
-                    font=("Segoe UI", 7, "bold"),
-                    fg="#86EFAC" if calibrated else "#FBBF24",
-                    bg="#0B1728",
-                ).pack(fill=tk.X, padx=7, pady=(0, 4))
-
-                state = (
-                    tk.NORMAL
-                    if enabled and resolution is not None
-                    else tk.DISABLED
+                    fg="#86EFAC",
                 )
-                actions = tk.Frame(card, bg="#0B1728")
-                actions.pack(fill=tk.X, padx=7, pady=(0, 7))
-                self._button(
-                    actions,
-                    "Capturar câmera",
-                    lambda s=slot: self._capture_f3_orientation(s),
-                    primary=True,
-                ).pack(fill=tk.X)
-                self._button(
-                    actions,
-                    "Carregar imagem",
-                    lambda s=slot: self._load_f3_orientation(s),
-                ).pack(fill=tk.X, pady=(3, 0))
-                draw_button = self._button(
-                    actions,
-                    "Desenhar placa e máscaras",
-                    lambda s=slot: self._edit_f3_orientation(s),
-                )
-                draw_button.pack(fill=tk.X, pady=(3, 0))
-
-                for widget in actions.winfo_children():
-                    try:
-                        widget.configure(state=state)
-                    except Exception:
-                        pass
-
-                if entry:
-                    remove = self._button(
-                        actions,
-                        "Remover",
-                        lambda s=slot: self._remove_f3_orientation(s),
-                        danger=True,
-                    )
-                    remove.pack(fill=tk.X, pady=(3, 0))
-                    remove.configure(state=tk.NORMAL if enabled else tk.DISABLED)
-
-            # A janela já está pronta e responsiva neste ponto. As imagens são
-            # decodificadas e desenhadas fora da thread Tk, uma por vez.
-            # O worker não precisa da sequência de CHECKS nem de outros
-            # metadados do projeto. Copiar o projeto inteiro aqui era outro custo
-            # síncrono perceptível em projetos F3 grandes.
-            preview_project = {
-                "name": str(project.get("name") or ""),
-                "master_resolution": deepcopy(project.get("master_resolution")),
-                "masks": deepcopy(project.get("masks", [])),
-                "updated_at": str(project.get("updated_at") or ""),
-            }
-            self._schedule_f3_tracking_previews(
-                generation,
-                project_name,
-                preview_project,
-                entries,
-            )
-
-        @staticmethod
-        def _f3_tracking_preview_key(project_name: str, project: dict, slot: str, entry: dict) -> tuple:
-            path = Path(str(entry.get("image_path") or ""))
-            try:
-                stat = path.stat()
-                file_stamp = (int(stat.st_mtime_ns), int(stat.st_size))
-            except OSError:
-                file_stamp = (0, 0)
-            return (
-                str(project_name or ""),
-                str(slot),
-                str(path),
-                file_stamp,
-                str(entry.get("updated_at") or ""),
-                str(project.get("updated_at") or ""),
-                F3_ORIENTATION_PREVIEW_STYLE_VERSION,
-            )
-
-        def _schedule_f3_tracking_previews(
-            self,
-            generation: int,
-            project_name: str,
-            project: dict,
-            entries: dict,
-        ) -> None:
-            jobs = []
-            for slot in F3_ORIENTATION_SLOTS:
-                entry = entries.get(slot, {}) if isinstance(entries, dict) else {}
-                path = str((entry or {}).get("image_path") or "").strip()
-                if not path:
-                    continue
-                key = self._f3_tracking_preview_key(
-                    project_name,
-                    project,
-                    slot,
-                    entry,
-                )
-                jobs.append((slot, deepcopy(entry), key))
-
-            if not jobs:
-                return
-
-            executor = getattr(self, "_heavy_executor", None)
-            if executor is None:
-                return
-            cache = self._f3_tracking_preview_cache
-            repository = self.repository
-
-            def worker() -> list[tuple]:
-                worker_store = F3TrackingConfigStore(repository)
-                results = []
-                for slot, entry, key in jobs:
-                    thumbnail = cache.get(key)
-                    if thumbnail is None:
-                        image = cv2.imread(
-                            str(entry.get("image_path") or ""),
-                            cv2.IMREAD_COLOR,
-                        )
-                        if _valid_frame(image):
-                            board, masks = reference_geometry(
-                                project,
-                                worker_store,
-                                slot,
-                                entry,
-                            )
-                            h, w = image.shape[:2]
-                            scale = min(
-                                184.0 / max(1, w),
-                                106.0 / max(1, h),
-                            )
-                            tw = max(1, int(round(w * scale)))
-                            th = max(1, int(round(h * scale)))
-                            thumbnail = cv2.resize(
-                                image,
-                                (tw, th),
-                                interpolation=cv2.INTER_AREA,
-                            )
-                            preview_matrix = np.asarray(
-                                [
-                                    [scale, 0.0, 0.0],
-                                    [0.0, scale, 0.0],
-                                ],
-                                dtype=np.float32,
-                            )
-                            board_preview = transform_points(
-                                board,
-                                preview_matrix,
-                            )
-                            masks_preview = [
-                                _transform_reference_mask(
-                                    mask,
-                                    preview_matrix,
-                                )
-                                for mask in tuple(masks or ())
-                                if isinstance(mask, dict)
-                            ]
-                            thumbnail = draw_reference_geometry(
-                                thumbnail,
-                                board_preview,
-                                masks_preview,
-                                alpha=0.74,
-                                board_thickness=2,
-                                mask_thickness=1,
-                            )
-                            cache[key] = thumbnail
-                    results.append((slot, key, thumbnail))
-                return results
-
-            future = executor.submit(
-                worker,
-                priority=F3HeavyWorkPriority.LOW,
-                name="tracking-orientation-previews",
-                owner=self._f3_tracking_preview_owner,
-                key="orientation-previews",
-                replace_pending=True,
-            )
-
-            def completed(done) -> None:
-                if done.cancelled():
-                    return
-                error = ""
-                try:
-                    results = done.result()
-                except Exception as exc:
-                    results = []
-                    error = f"{type(exc).__name__}: {exc}"
-                payload = (generation, results, error)
-                try:
-                    self._f3_tracking_preview_results.put_nowait(payload)
-                    return
-                except queue.Full:
-                    pass
-                try:
-                    self._f3_tracking_preview_results.get_nowait()
-                except queue.Empty:
-                    return
-                try:
-                    self._f3_tracking_preview_results.put_nowait(payload)
-                except queue.Full:
-                    return
-
-            future.add_done_callback(completed)
-            self._schedule_f3_tracking_preview_poll()
-
-        def _schedule_f3_tracking_preview_poll(self) -> None:
-            if self._f3_tracking_preview_poll_after is not None:
-                return
-            try:
-                self._f3_tracking_preview_poll_after = self.window.after(
-                    24,
-                    self._poll_f3_tracking_preview_results,
-                )
-            except Exception:
-                self._f3_tracking_preview_poll_after = None
-
-        def _poll_f3_tracking_preview_results(self) -> None:
-            self._f3_tracking_preview_poll_after = None
-            done_current_generation = False
-            while True:
-                try:
-                    generation, results, _error = (
-                        self._f3_tracking_preview_results.get_nowait()
-                    )
-                except queue.Empty:
-                    break
-
-                if generation != self._f3_tracking_preview_generation:
-                    continue
-                done_current_generation = True
-                for slot, key, thumbnail in results:
-                    self._apply_f3_tracking_preview(
-                        generation,
-                        slot,
-                        key,
-                        thumbnail,
-                    )
-
-            if not done_current_generation:
-                self._schedule_f3_tracking_preview_poll()
-
-        def _apply_f3_tracking_preview(
-            self,
-            generation: int,
-            slot: str,
-            key: tuple,
-            thumbnail,
-        ) -> None:
-            if generation != self._f3_tracking_preview_generation:
-                return
-            canvas = self._f3_tracking_preview_canvases.get(slot)
-            if canvas is None:
-                return
-            try:
-                if not bool(canvas.winfo_exists()):
-                    return
-            except Exception:
-                return
-
-            canvas.delete("all")
-            if not _valid_frame(thumbnail):
-                canvas.create_text(
-                    95,
-                    56,
-                    text="ARQUIVO AUSENTE",
-                    fill="#FCA5A5",
-                    font=("Segoe UI", 7, "bold"),
-                )
-                return
-            photo = photo_from_bgr(thumbnail, 184, 106)
-            if photo is None:
-                return
-            self._f3_tracking_photos[slot] = photo
-            canvas.create_image(95, 56, image=photo, anchor="center")
-
-        def _capture_f3_orientation(self, slot: str) -> None:
-            if not bool(self._f3_tracking_enabled_var.get()):
-                return
-            project_name = self._selected_name()
-            project = self.repository.carregar_projeto(project_name)
-            if project is None or normalizar_resolucao_display(
-                project.get("master_resolution")
-            ) is None:
-                messagebox.showwarning(
-                    "Projeto necessário",
-                    "Selecione um Projeto Display com resolução mestre.",
-                    parent=self.window,
-                )
-                return
-            if not normalizar_mascaras_display(project.get("masks", [])):
-                messagebox.showwarning(
-                    "Máscaras necessárias",
-                    "Configure primeiro as máscaras/segmentos do Display.",
-                    parent=self.window,
-                )
-                return
-            F3GuidedOrientationCaptureWindow(self, slot)
-
-        def _load_f3_orientation(self, slot: str) -> None:
-            if not bool(self._f3_tracking_enabled_var.get()):
-                return
-            project_name = self._selected_name()
-            project = self.repository.carregar_projeto(project_name)
-            if project is None:
-                return
-            resolution = normalizar_resolucao_display(project.get("master_resolution"))
-            if resolution is None:
-                return
-            path = filedialog.askopenfilename(
-                parent=self.window,
-                title=f"Selecionar referência real {F3_ORIENTATION_UI[slot]['short']} • F3",
-                filetypes=[
-                    ("Imagens", "*.png *.jpg *.jpeg *.bmp"),
-                    ("Todos os arquivos", "*.*"),
-                ],
-            )
-            if not path:
-                return
-            image = cv2.imread(path, cv2.IMREAD_COLOR)
-            if not _valid_frame(image):
-                messagebox.showwarning(
-                    "Imagem inválida",
-                    "Não foi possível ler a imagem selecionada.",
-                    parent=self.window,
-                )
-                return
-            if image.shape[:2] != (int(resolution[1]), int(resolution[0])):
-                messagebox.showwarning(
-                    "Resolução incompatível",
-                    (
-                        f"O projeto usa {resolution[0]}x{resolution[1]}, mas a imagem "
-                        f"possui {image.shape[1]}x{image.shape[0]}."
+            else:
+                label.configure(
+                    text=(
+                        "CONTORNO NÃO CONFIGURADO • abra 'Placa + Máscaras', "
+                        "desenhe o contorno e salve antes da produção."
                     ),
-                    parent=self.window,
-                )
-                return
-            if not _save_orientation_image(
-                self._f3_tracking_store,
-                project,
-                slot,
-                image,
-                calibrated=False,
-            ):
-                messagebox.showerror(
-                    "Falha ao salvar",
-                    "Não foi possível salvar a referência angular.",
-                    parent=self.window,
-                )
-                return
-            self._render_f3_tracking_panel()
-            self._invalidate_f3_tracking_runtime()
-
-        def _edit_f3_orientation(self, slot: str) -> None:
-            if not bool(self._f3_tracking_enabled_var.get()):
-                return
-            project_name = self._selected_name() or ""
-            project = self.repository.carregar_projeto(project_name)
-            entry = self._f3_tracking_store.orientations(project_name).get(slot, {})
-            if project is None or not entry:
-                messagebox.showwarning(
-                    "Referência necessária",
-                    "Capture ou carregue primeiro a imagem deste slot.",
-                    parent=self.window,
-                )
-                return
-
-            resolution = normalizar_resolucao_display(
-                project.get("master_resolution")
-            )
-            image = cv2.imread(
-                str(entry.get("image_path") or ""),
-                cv2.IMREAD_COLOR,
-            )
-            if resolution is None or not _valid_frame(image):
-                messagebox.showwarning(
-                    "Imagem indisponível",
-                    "A imagem deste slot não pôde ser carregada.",
-                    parent=self.window,
-                )
-                return
-
-            matrix = matrix_np(entry)
-            if matrix is None:
-                matrix = nominal_orientation_matrix(
-                    project,
-                    self._f3_tracking_store,
-                    slot,
-                )
-            if matrix is None:
-                matrix = np.asarray(
-                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                    dtype=np.float32,
+                    fg="#FBBF24",
                 )
 
-            board, masks = reference_geometry(
-                project,
-                self._f3_tracking_store,
-                slot,
-                entry,
-            )
-            has_full_masks = isinstance(entry, dict) and "masks_reference" in entry
-            if not board:
-                board = transform_points(
-                    canonical_board_points(project, self._f3_tracking_store),
-                    matrix,
-                )
-            if not masks and not has_full_masks:
-                masks = transformed_masks(project, matrix)
-
-            def save_geometry(board_points, edited_masks) -> bool:
-                # O slot angular pode mover/rotacionar as máscaras, mas não
-                # perpetua um tipo antigo. O formato vem sempre de "Máscaras".
-                reference_canonical = transformed_masks(project, matrix)
-                edited_masks = sincronizar_colecao_mascaras_display(
-                    reference_canonical,
-                    edited_masks or [],
-                    somente_ids_locais=True,
-                )
-                overrides = {
-                    str(mask.get("id") or ""): _normalize_mask_override(mask)
-                    for mask in (edited_masks or [])
-                    if isinstance(mask, dict) and str(mask.get("id") or "")
-                }
-                overrides = {
-                    key: value
-                    for key, value in overrides.items()
-                    if value is not None
-                }
-                full_masks = [
-                    normalized
-                    for normalized in (
-                        _normalize_mask_override(mask)
-                        for mask in (edited_masks or [])
-                        if isinstance(mask, dict)
-                    )
-                    if normalized is not None
-                ]
-                current = dict(entry)
-                current.update(
-                    {
-                        "canonical_to_reference": np.asarray(
-                            matrix,
-                            dtype=np.float32,
-                        ).reshape(2, 3).tolist(),
-                        "calibrated": True,
-                        "board_points_reference": deepcopy(board_points),
-                        "mask_overrides_reference": overrides,
-                        "masks_reference": deepcopy(full_masks),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
-                saved = self._f3_tracking_store.save_orientation(
-                    project_name,
-                    slot,
-                    current,
-                )
-                if saved:
-                    self._invalidate_f3_tracking_runtime()
-                    self._render_f3_tracking_panel()
-                return bool(saved)
-
-            from src.platform.display_f3_reference_geometry_editor import (
-                F3ReferenceGeometryEditor,
-            )
-
-            F3ReferenceGeometryEditor(
-                parent=self.window,
-                image=image,
-                width=int(resolution[0]),
-                height=int(resolution[1]),
-                board_points=board,
-                masks=masks,
-                on_save=save_geometry,
-                title=(
-                    f"ODIN • F3 • Desenhar placa "
-                    f"{F3_ORIENTATION_UI[slot]['short']}"
-                ),
-                header_title=(
-                    f"F3 • REFERÊNCIA REAL {F3_ORIENTATION_UI[slot]['short']} • "
-                    "CONTORNO + MÁSCARAS"
-                ),
-                on_close=self._render_f3_tracking_panel,
-                allow_mask_creation=True,
-            )
-
-        def _remove_f3_orientation(self, slot: str) -> None:
-            project_name = self._selected_name()
-            if not project_name:
-                return
-            entry = self._f3_tracking_store.orientations(project_name).get(slot, {})
-            if not entry:
-                return
-            if not messagebox.askyesno(
-                "Remover referência",
-                (
-                    f"Remover a referência real "
-                    f"{F3_ORIENTATION_UI[slot]['short']} do F3?"
-                ),
-                parent=self.window,
-            ):
-                return
-            self._f3_tracking_store.remove_orientation(project_name, slot)
-            self._render_f3_tracking_panel()
-            self._invalidate_f3_tracking_runtime()
-
-    DisplayF3TrackingProjectConfigWindow.__name__ = (
-        "DisplayF3TrackingProjectConfigWindow"
-    )
+    DisplayF3TrackingProjectConfigWindow.__name__ = "DisplayF3TrackingProjectConfigWindow"
     return DisplayF3TrackingProjectConfigWindow
 
 
@@ -2342,33 +1184,16 @@ def _install_project_lifecycle_hooks() -> None:
     def rename(self, old_name: str, new_name: str) -> bool:
         old = normalizar_nome_projeto_display(old_name)
         new = normalizar_nome_projeto_display(new_name)
-        store = F3TrackingConfigStore(self)
-        data = store._load()
-        saved = deepcopy(data.get("projects", {}).get(old))
         changed = previous_rename(self, old_name, new_name)
-        if changed and isinstance(saved, dict) and old != new:
-            data = store._load()
-            data["projects"].pop(old, None)
-            data["projects"][new] = saved
-            store._write(data)
+        if changed and old != new:
+            F3TrackingConfigStore(self).rename_project(old, new)
         return changed
 
     def remove(self, project_name: str) -> bool:
         normalized = normalizar_nome_projeto_display(project_name)
-        store = F3TrackingConfigStore(self)
-        entries = store.orientations(normalized)
         removed = previous_remove(self, project_name)
         if removed:
-            data = store._load()
-            data.get("projects", {}).pop(normalized, None)
-            store._write(data)
-            for entry in entries.values():
-                path = Path(str((entry or {}).get("image_path") or ""))
-                try:
-                    if path.is_file() and store.image_dir.resolve() in path.resolve().parents:
-                        path.unlink()
-                except OSError:
-                    pass
+            F3TrackingConfigStore(self).remove_project(normalized)
         return removed
 
     cls.renomear_projeto = rename
@@ -2377,7 +1202,7 @@ def _install_project_lifecycle_hooks() -> None:
 
 
 def instalar_ui_rastreamento_objetos_display_f3() -> None:
-    """Acrescenta opção + três slots ao Projeto Display final."""
+    """Acrescenta somente a opção de tracking por contorno + segmentos luminosos."""
     global _INSTALLED
     if _INSTALLED:
         return

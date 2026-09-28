@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,100 +71,45 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 imported,
             )
 
-    def test_nominal_cardinal_orientations_keep_display_inside_frame(self):
+    def test_tracking_sidecar_ignores_and_purges_legacy_rotation_payloads(self):
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)
-            project = {
-                "name": "DISPLAY TESTE",
-                "master_resolution": {"width": 640, "height": 480},
-                "masks": [
+            store.config_file.write_text(
+                json.dumps(
                     {
-                        "id": "MASK_001",
-                        "type": "circle",
-                        "cx": 230,
-                        "cy": 210,
-                        "radius": 18,
-                    },
-                    {
-                        "id": "MASK_002",
-                        "type": "circle",
-                        "cx": 410,
-                        "cy": 270,
-                        "radius": 18,
-                    },
-                ],
-                "checks": [],
-            }
-            board = tracking.canonical_board_points(project, store)
-            self.assertGreaterEqual(len(board), 3)
-
-            for slot in tracking.F3_ORIENTATION_SLOTS:
-                matrix = tracking.nominal_orientation_matrix(project, store, slot)
-                self.assertIsNotNone(matrix)
-                rotated = np.asarray(
-                    tracking.transform_points(board, matrix),
-                    dtype=np.float32,
-                )
-                self.assertTrue(np.all(rotated[:, 0] >= 0.0))
-                self.assertTrue(np.all(rotated[:, 0] < 640.0))
-                self.assertTrue(np.all(rotated[:, 1] >= 0.0))
-                self.assertTrue(np.all(rotated[:, 1] < 480.0))
-
-    def test_orientation_mask_override_returns_to_canonical_coordinates(self):
-        with tempfile.TemporaryDirectory() as directory:
-            store = self._store(directory)
-            project = {
-                "name": "DISPLAY TESTE",
-                "master_resolution": {"width": 640, "height": 480},
-                "masks": [
-                    {
-                        "id": "MASK_001",
-                        "type": "circle",
-                        "cx": 100,
-                        "cy": 100,
-                        "radius": 10,
-                    }
-                ],
-                "checks": [],
-            }
-            self.assertTrue(
-                store.save_orientation(
-                    "DISPLAY TESTE",
-                    tracking.F3_ORIENTATION_90,
-                    {
-                        "image_path": str(Path(directory) / "orientation_90.png"),
-                        "width": 640,
-                        "height": 480,
-                        "canonical_to_reference": [
-                            [1.0, 0.0, 50.0],
-                            [0.0, 1.0, 20.0],
-                        ],
-                        "calibrated": True,
-                        "mask_overrides_reference": {
-                            "MASK_001": {
-                                "id": "MASK_001",
-                                "type": "circle",
-                                "cx": 155.0,
-                                "cy": 125.0,
-                                "radius": 12.0,
+                        "schema_version": 1,
+                        tracking.F3_TRACKING_SETTING_KEY: True,
+                        "projects": {
+                            "DISPLAY TESTE": {
+                                "board_points": [[10, 10], [300, 10], [300, 200], [10, 200]],
+                                "orientations": {
+                                    "orientation_90": {
+                                        "image_path": "legacy.png",
+                                        "masks_reference": [{"id": "MASK_001"}],
+                                    }
+                                },
                             }
                         },
-                    },
-                )
+                    }
+                ),
+                encoding="utf-8",
             )
-            runtime = SimpleNamespace(store=store)
-            corrected = tracking._canonical_masks_for_orientation(
-                runtime,
-                project,
-                tracking.F3_ORIENTATION_90,
-            )
+            loaded = store._load_shared()
+            project = loaded["projects"]["DISPLAY TESTE"]
+            self.assertNotIn("orientations", project)
+            self.assertEqual(4, len(project["board_points"]))
+            store.set_enabled(False)
+            persisted = json.loads(store.config_file.read_text(encoding="utf-8"))
+            self.assertEqual(2, persisted["schema_version"])
+            self.assertNotIn("orientations", persisted["projects"]["DISPLAY TESTE"])
 
-            self.assertIsNotNone(corrected)
-            self.assertEqual(1, len(corrected))
-            self.assertEqual("MASK_001", corrected[0]["id"])
-            self.assertAlmostEqual(105.0, float(corrected[0]["cx"]), places=3)
-            self.assertAlmostEqual(105.0, float(corrected[0]["cy"]), places=3)
-            self.assertAlmostEqual(12.0, float(corrected[0]["radius"]), places=3)
+    def test_canonical_board_contour_persists_without_rotation_slots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            contour = [[90, 70], [550, 70], [550, 410], [90, 410]]
+            self.assertTrue(store.save_board_points("DISPLAY TESTE", contour))
+            self.assertEqual(contour, store.board_points("DISPLAY TESTE"))
+            self.assertNotIn("orientations", store.project("DISPLAY TESTE"))
 
     def test_check_reference_geometry_keeps_project_polygon_shape(self):
         project = {
@@ -190,53 +136,6 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertEqual(1, len(masks))
         self.assertEqual("polygon", masks[0]["type"])
         self.assertEqual(3, len(masks[0]["points"]))
-
-    def test_orientation_project_view_keeps_base_shape(self):
-        with tempfile.TemporaryDirectory() as directory:
-            store = self._store(directory)
-            project = {
-                "name": "DISPLAY TESTE",
-                "master_resolution": {"width": 640, "height": 480},
-                "masks": [
-                    {
-                        "id": "MASK_001",
-                        "type": "polygon",
-                        "points": [[20, 20], [80, 20], [50, 60]],
-                    }
-                ],
-                "checks": [],
-            }
-            self.assertTrue(
-                store.save_orientation(
-                    "DISPLAY TESTE",
-                    tracking.F3_ORIENTATION_90,
-                    {
-                        "image_path": str(Path(directory) / "orientation_90.png"),
-                        "width": 640,
-                        "height": 480,
-                        "canonical_to_reference": [[1, 0, 50], [0, 1, 20]],
-                        "calibrated": True,
-                        "masks_reference": [
-                            {
-                                "id": "MASK_001",
-                                "type": "circle",
-                                "cx": 170,
-                                "cy": 140,
-                                "radius": 30,
-                            }
-                        ],
-                    },
-                )
-            )
-            runtime = SimpleNamespace(store=store)
-            corrected = tracking._canonical_masks_for_orientation(
-                runtime,
-                project,
-                tracking.F3_ORIENTATION_90,
-            )
-            self.assertEqual(1, len(corrected))
-            self.assertEqual("polygon", corrected[0]["type"])
-            self.assertEqual(3, len(corrected[0]["points"]))
 
     def test_reference_pose_is_recovered_from_drawn_board_and_masks(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -418,7 +317,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("evidence_current=False", source)
         self.assertIn("locked_temporal", source)
 
-    def test_multiview_bank_includes_mask_board_off_checks_and_rotations(self):
+    def test_multiview_bank_uses_structural_f3_sources_without_rotation_slots(self):
         source = inspect.getsource(
             tracking.F3DisplayObjectTracker._calibrated_reference_specs
         )
@@ -429,8 +328,9 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         configure_source = inspect.getsource(
             tracking.F3DisplayObjectTracker.configure
         )
-        self.assertIn("for slot in F3_ORIENTATION_SLOTS", configure_source)
-        self.assertIn("reference_geometry(project, self.store, slot, entry)", configure_source)
+        self.assertNotIn("F3_ORIENTATION_SLOTS", configure_source)
+        self.assertNotIn("reference_geometry(project, self.store, slot, entry)", configure_source)
+        self.assertNotIn('source_type="orientation"', configure_source)
 
     def test_held_lock_is_visual_only_and_blocks_automatic_decision(self):
         runtime_source = inspect.getsource(
@@ -829,7 +729,6 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                     dtype=np.float32,
                 ),
                 angle=0.0,
-                real_orientation=False,
                 source_type="mask_reference",
                 board_points=board,
             )
@@ -894,7 +793,6 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                     dtype=np.float32,
                 ),
                 angle=0.0,
-                real_orientation=False,
                 source_type="check",
                 board_points=board,
             )
@@ -1068,7 +966,6 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                     dtype=np.float32,
                 ),
                 angle=0.0,
-                real_orientation=False,
                 source_type="board_off",
                 board_points=board,
             )
@@ -1103,7 +1000,6 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                     dtype=np.float32,
                 ),
                 angle=0.0,
-                real_orientation=False,
                 source_type="board_off",
                 board_points=board,
             )

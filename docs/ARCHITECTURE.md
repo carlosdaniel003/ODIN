@@ -161,7 +161,6 @@ Consumidores já migrados:
 - tracking ao vivo ORB/AKAZE/template/warp — `HIGH`;
 - classificação semântica automática do CHECK F3 — `HIGH`;
 - previews da configuração — `LOW`;
-- previews das referências angulares de tracking — `LOW`;
 - análise manual do CHECK atual — `NORMAL`;
 - relatório técnico completo iniciado pelo clique em ANALISAR — `LOW`.
 
@@ -442,6 +441,11 @@ Não mantenha indefinidamente as duas autoridades ativas.
 Dentro da autoridade canônica de tracking, o contorno configurado pode representar
 o filtro preto móvel do display. Esse contorno fornece uma região grosseira de
 busca; ele não fixa as 28 ROIs na câmera.
+
+Não existe banco angular produtivo 90°/180°/270°. A geometria persistida pelo
+tracking é o contorno canônico do projeto; referências estruturais normais do F3
+podem ajudar na localização grosseira, e os segmentos luminosos do CHECK atual
+fazem o alinhamento fino.
 
 Quando o CHECK atual possui segmentos esperados ACESOS, o job de tracking pode
 usar somente os componentes luminosos encontrados dentro do filtro para refinar

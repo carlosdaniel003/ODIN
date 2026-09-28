@@ -607,6 +607,11 @@ O contorno configurado pode representar o filtro preto: ele delimita a região d
 busca, enquanto os segmentos realmente acesos do CHECK atual refinam a posição do
 display dentro dessa região.
 
+O tracking não utiliza mais três slots/imagens dedicadas de rotação 90°/180°/270°.
+O contorno canônico salvo em **Placa + Máscaras** é a geometria estrutural
+persistida; imagens, contornos e máscaras específicos daqueles slots angulares não
+participam mais do runtime.
+
 ```text
 frame RAW
   -> contorno/filtro atual

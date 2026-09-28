@@ -82,7 +82,6 @@ Já passam pelo executor:
 NORMAL  ANALISAR / CHECK atual
 LOW     DEBUG TÉCNICO completo
 LOW     previews de configuração
-LOW     previews das referências angulares de tracking
 ~~~
 
 O executor mantém um único worker, fila limitada, prioridade, cancelamento por

@@ -444,6 +444,41 @@ posições ainda não confiáveis.
 
 ---
 
+## D-023 — F3 não usa banco angular 90°/180°/270°
+
+**Status:** Accepted
+
+Os três slots dedicados de rotação criavam fotografias, contornos e máscaras
+paralelos ao modelo canônico do Projeto Display. Isso aumentava calibração,
+persistência e caminhos de runtime para uma responsabilidade que já pode ser
+resolvida pelo contorno canônico + refinamento luminoso.
+
+Decisão:
+
+- remover da configuração do F3 os slots 90°/180°/270° e suas ações de captura,
+  carregamento, preview, edição e remoção;
+- odin_display_tracking.json persiste somente a flag de tracking e o contorno
+  canônico por projeto; payloads legados de orientations são ignorados e
+  desaparecem na próxima gravação normalizada do sidecar;
+- nenhuma imagem angular entra no banco do F3DisplayObjectTracker, recebe bônus
+  de score ou substitui temporariamente as máscaras do projeto;
+- o contorno salvo em **Placa + Máscaras** permanece como região estrutural de busca;
+- referências físicas/visuais normais do F3 podem continuar ajudando a obter a
+  localização grosseira da placa, sem criar uma geometria angular alternativa;
+- o alinhamento fino continua pertencendo ao tracking por segmentos que o CHECK
+  atual espera ACESOS;
+- após o encaixe, as máscaras canônicas são reprojetadas e
+  F3CheckAnalyzerAuthority continua responsável por classificar ON/OFF/POUCA LUZ.
+
+Consequência: existe uma única geometria canônica de máscaras e contorno para o
+Display F3. Movimento/rotação da placa é resolvido em runtime em vez de exigir
+três bancos manuais de imagens angulares.
+
+Esta decisão remove o caminho de referências angulares da implementação anterior
+e preserva D-020, D-021 e D-022.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:

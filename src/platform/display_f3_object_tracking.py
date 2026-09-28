@@ -5,19 +5,20 @@ from __future__ import annotations
 Este módulo não reutiliza nem modifica estado, arquivos ou classes de runtime do F2.
 O F3 possui:
 - flag própria ``display_f3_object_tracking_enabled``;
-- arquivo próprio ``odin_display_tracking.json``;
-- referências reais 90°/180°/270° por Projeto Display;
-- rastreador ORB/RANSAC próprio;
-- alinhamento do frame atual para o sistema canônico do Projeto Display.
+- arquivo próprio ``odin_display_tracking.json`` para flag + contorno canônico;
+- contorno da placa/display salvo em "Placa + Máscaras";
+- rastreamento estrutural para localizar a região da placa/filtro;
+- refinamento da pose pelos segmentos luminosos esperados no CHECK atual;
+- reprojeção das máscaras antes da classificação semântica ON/OFF/POUCA LUZ.
 
-Quando a opção está desligada, o pipeline F3 recebe literalmente o mesmo frame que
-recebia antes deste módulo.
+Não existe banco produtivo de imagens angulares 90°/180°/270°. Quando a opção
+está desligada, o pipeline F3 recebe literalmente o mesmo frame que recebia antes
+deste módulo.
 """
 
 import base64
 import json
 import math
-import re
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -57,41 +58,9 @@ from src.platform.display_visual_reference_status import (
 )
 
 
-F3_TRACKING_SCHEMA_VERSION = 1
+F3_TRACKING_SCHEMA_VERSION = 2
 F3_TRACKING_CONFIG_FILENAME = "odin_display_tracking.json"
-F3_TRACKING_IMAGE_DIRNAME = "display_tracking_orientations"
 F3_TRACKING_SETTING_KEY = "display_f3_object_tracking_enabled"
-
-F3_ORIENTATION_90 = "orientation_90"
-F3_ORIENTATION_180 = "orientation_180"
-F3_ORIENTATION_270 = "orientation_270"
-F3_ORIENTATION_SLOTS = (
-    F3_ORIENTATION_90,
-    F3_ORIENTATION_180,
-    F3_ORIENTATION_270,
-)
-F3_ORIENTATION_ANGLE = {
-    F3_ORIENTATION_90: 90.0,
-    F3_ORIENTATION_180: 180.0,
-    F3_ORIENTATION_270: 270.0,
-}
-F3_ORIENTATION_UI = {
-    F3_ORIENTATION_90: {
-        "title": "Rotação real 90°",
-        "short": "90°",
-        "color": "#7DD3FC",
-    },
-    F3_ORIENTATION_180: {
-        "title": "Rotação real 180°",
-        "short": "180°",
-        "color": "#C4B5FD",
-    },
-    F3_ORIENTATION_270: {
-        "title": "Rotação real 270°",
-        "short": "270°",
-        "color": "#67E8F9",
-    },
-}
 
 F3_TRACKING_REFRESH_S = 0.12
 # 1200 mantém margem ampla de correspondências nas referências reais e reduz
@@ -192,32 +161,8 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _slug(value: str | None) -> str:
-    text = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip())
-    return text.strip("_").lower() or "display"
-
-
 def _valid_frame(frame) -> bool:
     return frame is not None and getattr(frame, "size", 0) > 0
-
-
-def _normalize_matrix(value) -> list[list[float]] | None:
-    try:
-        matrix = np.asarray(value, dtype=np.float32).reshape(2, 3)
-    except Exception:
-        return None
-    if not np.all(np.isfinite(matrix)):
-        return None
-    return [[float(v) for v in row] for row in matrix]
-
-
-def matrix_np(entry: dict | None) -> np.ndarray | None:
-    if not isinstance(entry, dict):
-        return None
-    normalized = _normalize_matrix(entry.get("canonical_to_reference"))
-    if normalized is None:
-        return None
-    return np.asarray(normalized, dtype=np.float32).reshape(2, 3)
 
 
 def _normalize_points(value, minimum: int = 3) -> list[list[float]]:
@@ -266,55 +211,8 @@ def _normalize_mask_override(mask) -> dict | None:
     return None
 
 
-def _normalize_orientation_entry(value, slot: str) -> dict:
-    if not isinstance(value, dict):
-        return {}
-    image_path = str(value.get("image_path") or "").strip()
-    if not image_path:
-        return {}
-    try:
-        width = max(0, int(value.get("width") or 0))
-        height = max(0, int(value.get("height") or 0))
-    except (TypeError, ValueError):
-        width = height = 0
-
-    matrix = _normalize_matrix(value.get("canonical_to_reference"))
-    board_points = _normalize_points(value.get("board_points_reference"), minimum=3)
-    overrides = {}
-    raw_overrides = value.get("mask_overrides_reference", {})
-    if isinstance(raw_overrides, dict):
-        for key, raw in raw_overrides.items():
-            normalized = _normalize_mask_override(raw)
-            if normalized is not None:
-                normalized["id"] = str(key or normalized.get("id") or "").strip()
-                if normalized["id"]:
-                    overrides[normalized["id"]] = normalized
-
-    result = {
-        "image_path": image_path,
-        "width": width,
-        "height": height,
-        "angle_deg": float(F3_ORIENTATION_ANGLE.get(slot, 0.0)),
-        "canonical_to_reference": matrix,
-        "calibrated": bool(value.get("calibrated", False) and matrix is not None),
-        "updated_at": str(value.get("updated_at") or ""),
-    }
-    if board_points:
-        result["board_points_reference"] = board_points
-    if overrides:
-        result["mask_overrides_reference"] = overrides
-    if "masks_reference" in value:
-        full_masks = []
-        for raw in value.get("masks_reference", []) or []:
-            normalized = _normalize_mask_override(raw)
-            if normalized is not None:
-                full_masks.append(normalized)
-        result["masks_reference"] = full_masks
-    return result
-
-
 class F3TrackingConfigStore:
-    """Sidecar exclusivo do rastreamento do Display F3."""
+    """Sidecar exclusivo do tracking F3: flag global + contorno canônico por projeto."""
 
     def __init__(self, repository: DisplayProjectRepository) -> None:
         self.repository = repository
@@ -322,11 +220,6 @@ class F3TrackingConfigStore:
             getattr(repository, "config_file", "data/config/odin_display_projects.json")
         )
         self.config_file = config_file.parent / F3_TRACKING_CONFIG_FILENAME
-        self.image_dir = config_file.parent / F3_TRACKING_IMAGE_DIRNAME
-        # O painel F3 consulta o mesmo sidecar diversas vezes durante uma única
-        # abertura (estado, projeto, contorno e 3 orientações). No Raspberry,
-        # reler/parsing JSON a cada consulta tornava a abertura da configuração
-        # perceptivelmente lenta. Cache local invalidado por mtime/tamanho.
         self._cache_signature: tuple[int, int] | None = None
         self._cache_data: dict | None = None
 
@@ -347,10 +240,7 @@ class F3TrackingConfigStore:
 
     def _load_shared(self) -> dict:
         signature = self._disk_signature()
-        if (
-            self._cache_data is not None
-            and signature == self._cache_signature
-        ):
+        if self._cache_data is not None and signature == self._cache_signature:
             return self._cache_data
 
         if signature is None:
@@ -379,22 +269,11 @@ class F3TrackingConfigStore:
                 name = normalizar_nome_projeto_display(raw_name)
                 if not name or not isinstance(raw_project, dict):
                     continue
-                board_points = _normalize_points(
-                    raw_project.get("board_points"),
-                    minimum=3,
-                )
-                raw_orientations = raw_project.get("orientations", {})
-                orientations = {}
-                for slot in F3_ORIENTATION_SLOTS:
-                    normalized_entry = _normalize_orientation_entry(
-                        raw_orientations.get(slot) if isinstance(raw_orientations, dict) else None,
-                        slot,
-                    )
-                    if normalized_entry:
-                        orientations[slot] = normalized_entry
                 projects[name] = {
-                    "board_points": board_points,
-                    "orientations": orientations,
+                    "board_points": _normalize_points(
+                        raw_project.get("board_points"),
+                        minimum=3,
+                    ),
                     "updated_at": str(raw_project.get("updated_at") or ""),
                 }
 
@@ -408,8 +287,6 @@ class F3TrackingConfigStore:
         return normalized
 
     def _load(self) -> dict:
-        # Chamadores que irão editar o dicionário recebem uma cópia; consultas
-        # de leitura usam _load_shared()/project() sem copiar o arquivo inteiro.
         return deepcopy(self._load_shared())
 
     def _write(self, data: dict) -> None:
@@ -424,19 +301,11 @@ class F3TrackingConfigStore:
                 name = normalizar_nome_projeto_display(raw_name)
                 if not name or not isinstance(raw_project, dict):
                     continue
-                board_points = _normalize_points(raw_project.get("board_points"), minimum=3)
-                orientations = {}
-                raw_orientations = raw_project.get("orientations", {})
-                for slot in F3_ORIENTATION_SLOTS:
-                    entry = _normalize_orientation_entry(
-                        raw_orientations.get(slot) if isinstance(raw_orientations, dict) else None,
-                        slot,
-                    )
-                    if entry:
-                        orientations[slot] = entry
                 normalized["projects"][name] = {
-                    "board_points": board_points,
-                    "orientations": orientations,
+                    "board_points": _normalize_points(
+                        raw_project.get("board_points"),
+                        minimum=3,
+                    ),
                     "updated_at": str(raw_project.get("updated_at") or ""),
                 }
 
@@ -462,12 +331,14 @@ class F3TrackingConfigStore:
         raw = self._load_shared().get("projects", {}).get(name, {})
         return deepcopy(raw) if isinstance(raw, dict) else {
             "board_points": [],
-            "orientations": {},
             "updated_at": "",
         }
 
     def board_points(self, project_name: str) -> list[list[float]]:
-        return _normalize_points(self.project(project_name).get("board_points"), minimum=3)
+        return _normalize_points(
+            self.project(project_name).get("board_points"),
+            minimum=3,
+        )
 
     def save_board_points(self, project_name: str, points) -> bool:
         name = normalizar_nome_projeto_display(project_name)
@@ -477,62 +348,31 @@ class F3TrackingConfigStore:
         data = self._load()
         project = data["projects"].setdefault(
             name,
-            {"board_points": [], "orientations": {}, "updated_at": ""},
+            {"board_points": [], "updated_at": ""},
         )
         project["board_points"] = normalized
         project["updated_at"] = _utc_now()
         self._write(data)
         return True
 
-    def orientations(self, project_name: str) -> dict[str, dict]:
-        project = self.project(project_name)
-        raw = project.get("orientations", {})
-        return {
-            slot: deepcopy(raw.get(slot, {})) if isinstance(raw, dict) else {}
-            for slot in F3_ORIENTATION_SLOTS
-        }
-
-    def save_orientation(
-        self,
-        project_name: str,
-        slot: str,
-        entry: dict | None,
-    ) -> bool:
-        name = normalizar_nome_projeto_display(project_name)
-        if not name or slot not in F3_ORIENTATION_SLOTS:
-            return False
+    def rename_project(self, old_name: str, new_name: str) -> None:
+        old = normalizar_nome_projeto_display(old_name)
+        new = normalizar_nome_projeto_display(new_name)
+        if not old or not new or old == new:
+            return
         data = self._load()
-        project = data["projects"].setdefault(
-            name,
-            {"board_points": [], "orientations": {}, "updated_at": ""},
-        )
-        orientations = project.setdefault("orientations", {})
-        if entry is None:
-            orientations.pop(slot, None)
-        else:
-            normalized = _normalize_orientation_entry(entry, slot)
-            if not normalized:
-                return False
-            orientations[slot] = normalized
-        project["updated_at"] = _utc_now()
-        self._write(data)
-        return True
+        saved = data.get("projects", {}).pop(old, None)
+        if isinstance(saved, dict):
+            data["projects"][new] = saved
+            self._write(data)
 
-    def managed_image_path(self, project_name: str, slot: str) -> Path:
-        directory = self.image_dir / _slug(project_name)
-        directory.mkdir(parents=True, exist_ok=True)
-        return directory / f"{slot}.png"
-
-    def remove_orientation(self, project_name: str, slot: str) -> bool:
-        entry = self.orientations(project_name).get(slot, {})
-        changed = self.save_orientation(project_name, slot, None)
-        path = Path(str(entry.get("image_path") or ""))
-        try:
-            if path.is_file() and self.image_dir.resolve() in path.resolve().parents:
-                path.unlink()
-        except OSError:
-            pass
-        return changed
+    def remove_project(self, project_name: str) -> None:
+        name = normalizar_nome_projeto_display(project_name)
+        if not name:
+            return
+        data = self._load()
+        if data.get("projects", {}).pop(name, None) is not None:
+            self._write(data)
 
 
 def canonical_board_points(project: dict, store: F3TrackingConfigStore) -> list[list[float]]:
@@ -598,39 +438,6 @@ def affine_rotation_deg(matrix) -> float:
         )
     except Exception:
         return 0.0
-
-
-def nominal_orientation_matrix(
-    project: dict,
-    store: F3TrackingConfigStore,
-    slot: str,
-) -> np.ndarray | None:
-    resolution = normalizar_resolucao_display(project.get("master_resolution"))
-    points = canonical_board_points(project, store)
-    if resolution is None or not points or slot not in F3_ORIENTATION_SLOTS:
-        return None
-    width, height = int(resolution[0]), int(resolution[1])
-    values = np.asarray(points, dtype=np.float32).reshape(-1, 2)
-    center = np.mean(values, axis=0)
-    matrix = cv2.getRotationMatrix2D(
-        (float(center[0]), float(center[1])),
-        float(F3_ORIENTATION_ANGLE[slot]),
-        1.0,
-    ).astype(np.float32)
-
-    rotated = cv2.transform(values.reshape(-1, 1, 2), matrix).reshape(-1, 2)
-    bbox_center = np.asarray(
-        [
-            (float(np.min(rotated[:, 0])) + float(np.max(rotated[:, 0]))) / 2.0,
-            (float(np.min(rotated[:, 1])) + float(np.max(rotated[:, 1]))) / 2.0,
-        ],
-        dtype=np.float32,
-    )
-    target = np.asarray([width / 2.0, height / 2.0], dtype=np.float32)
-    delta = target - bbox_center
-    matrix[0, 2] += float(delta[0])
-    matrix[1, 2] += float(delta[1])
-    return matrix
 
 
 def transform_mask(mask: dict, matrix) -> dict | None:
@@ -934,61 +741,6 @@ def _check_reference_geometry(
         project,
         check.get("mask_overrides_reference", {}),
     )
-    return board, masks
-
-
-def transformed_masks(project: dict, matrix) -> list[dict]:
-    result = []
-    for mask in normalizar_mascaras_display(project.get("masks", [])):
-        item = transform_mask(mask, matrix)
-        if item is not None:
-            result.append(item)
-    return result
-
-
-def reference_geometry(
-    project: dict,
-    store: F3TrackingConfigStore,
-    slot: str,
-    entry: dict | None = None,
-) -> tuple[list[list[float]], list[dict]]:
-    current = entry if isinstance(entry, dict) else store.orientations(
-        str(project.get("name") or "")
-    ).get(slot, {})
-    matrix = matrix_np(current)
-    if matrix is None:
-        matrix = nominal_orientation_matrix(project, store, slot)
-    if matrix is None:
-        return [], []
-
-    board = _normalize_points(
-        (current or {}).get("board_points_reference"),
-        minimum=3,
-    )
-    if not board:
-        board = transform_points(canonical_board_points(project, store), matrix)
-
-    defaults = transformed_masks(project, matrix)
-
-    if isinstance(current, dict) and "masks_reference" in current:
-        local_masks = []
-        for raw in current.get("masks_reference", []) or []:
-            normalized = _normalize_mask_override(raw)
-            if normalized is not None:
-                local_masks.append(normalized)
-        masks = sincronizar_colecao_mascaras_display(
-            defaults,
-            local_masks,
-            somente_ids_locais=True,
-        )
-        return board, masks
-    overrides = (current or {}).get("mask_overrides_reference", {})
-    if not isinstance(overrides, dict):
-        overrides = {}
-    masks = []
-    for mask in defaults:
-        override = _normalize_mask_override(overrides.get(str(mask.get("id") or "")))
-        masks.append(override if override is not None else mask)
     return board, masks
 
 
@@ -2970,7 +2722,6 @@ class F3DisplayObjectTracker:
                         dtype=np.float32,
                     ),
                     "angle": 0.0,
-                    "real_orientation": False,
                     "source_type": "mask_reference",
                 }
             )
@@ -3011,7 +2762,6 @@ class F3DisplayObjectTracker:
                         "masks": masks_ref,
                         "reference_to_canonical": mapping,
                         "angle": affine_rotation_deg(mapping),
-                        "real_orientation": False,
                         "source_type": "board_off",
                     }
                 )
@@ -3056,7 +2806,6 @@ class F3DisplayObjectTracker:
                     "masks": masks_ref,
                     "reference_to_canonical": mapping,
                     "angle": affine_rotation_deg(mapping),
-                    "real_orientation": False,
                     "source_type": "check",
                     "check_id": check_id,
                 }
@@ -3073,7 +2822,7 @@ class F3DisplayObjectTracker:
         except OSError:
             return str(path), 0, 0
 
-    def _signature(self, project: dict, board, orientations) -> tuple:
+    def _signature(self, project: dict, board) -> tuple:
         reference_specs = self._calibrated_reference_specs(project)
         reference_files = tuple(
             (
@@ -3090,26 +2839,12 @@ class F3DisplayObjectTracker:
             )
             for spec in reference_specs
         )
-        orientation_files = []
-        for slot in F3_ORIENTATION_SLOTS:
-            entry = orientations.get(slot, {})
-            orientation_files.append(
-                (
-                    slot,
-                    self._file_signature(str(entry.get("image_path") or "")),
-                    repr(entry.get("canonical_to_reference")),
-                    repr(entry.get("board_points_reference")),
-                    repr(entry.get("mask_overrides_reference")),
-                    repr(entry.get("masks_reference")),
-                )
-            )
         return (
             str(project.get("name") or ""),
             repr(project.get("master_resolution")),
             repr(board),
             repr(project.get("masks", [])),
             reference_files,
-            tuple(orientation_files),
         )
 
     def _add_reference(
@@ -3121,7 +2856,6 @@ class F3DisplayObjectTracker:
         tracking_mask,
         reference_to_canonical,
         angle: float,
-        real_orientation: bool,
         source_type: str = "reference",
         board_points=None,
     ) -> None:
@@ -3254,7 +2988,6 @@ class F3DisplayObjectTracker:
             "akaze_descriptors": akaze_descriptors,
             "akaze_canonical_points": akaze_canonical_points,
             "angle_deg": float(angle),
-            "real_orientation": bool(real_orientation),
             "source_type": str(source_type or "reference"),
             "reference_to_canonical": reference_to_canonical,
             "template_edges": template_edges,
@@ -3876,8 +3609,7 @@ class F3DisplayObjectTracker:
             self.reset()
             self.reason = "display_shape_missing"
             return False
-        orientations = self.store.orientations(name)
-        signature = self._signature(project, board, orientations)
+        signature = self._signature(project, board)
         if signature == self.signature:
             return self.ready
 
@@ -3918,43 +3650,8 @@ class F3DisplayObjectTracker:
                 tracking_mask=tracking_mask,
                 reference_to_canonical=spec.get("reference_to_canonical"),
                 angle=float(spec.get("angle", 0.0) or 0.0),
-                real_orientation=bool(spec.get("real_orientation", False)),
                 source_type=str(spec.get("source_type") or "reference"),
                 board_points=spec.get("board", []),
-            )
-
-        for slot in F3_ORIENTATION_SLOTS:
-            entry = orientations.get(slot, {})
-            matrix = matrix_np(entry)
-            path = str(entry.get("image_path") or "")
-            if not bool(entry.get("calibrated")) or matrix is None or not path:
-                continue
-            image = cv2.imread(path, cv2.IMREAD_COLOR)
-            if not _valid_frame(image) or image.shape[:2] != (height, width):
-                continue
-            board_ref, masks_ref = reference_geometry(project, self.store, slot, entry)
-            tracking_mask = build_tracking_mask(
-                width,
-                height,
-                board_ref,
-                masks_ref,
-            )
-            if tracking_mask is None:
-                continue
-            try:
-                reference_to_canonical = cv2.invertAffineTransform(matrix)
-            except Exception:
-                continue
-            self._add_reference(
-                refs,
-                key=slot,
-                image=image,
-                tracking_mask=tracking_mask,
-                reference_to_canonical=reference_to_canonical,
-                angle=F3_ORIENTATION_ANGLE[slot],
-                real_orientation=True,
-                source_type="orientation",
-                board_points=board_ref,
             )
 
         if not refs:
@@ -4050,9 +3747,7 @@ class F3DisplayObjectTracker:
 
         score = float(inliers) + ratio * 12.0
         source_type = str(ref.get("source_type") or "reference")
-        if bool(ref.get("real_orientation")):
-            score += 5.0
-        elif source_type == "mask_reference":
+        if source_type == "mask_reference":
             score += 4.0
         elif source_type == "check":
             score += 3.0
@@ -4489,163 +4184,6 @@ def tracking_enabled(app) -> bool:
                 "reason": "setting_resynchronized",
             }
     return enabled
-
-
-def _canonical_masks_for_orientation(
-    runtime: F3DisplayObjectTracker,
-    project: dict,
-    reference: str,
-) -> list[dict] | None:
-    """Converte os ajustes locais do slot angular de volta ao sistema canônico.
-
-    Assim os segmentos ajustados em "Desenhar placa" não servem apenas de guia
-    visual/ORB: quando aquele slot real vence o rastreamento, o mesmo ajuste é
-    usado pelo pipeline F3 que lê as máscaras no frame já alinhado.
-    """
-    if reference not in F3_ORIENTATION_SLOTS:
-        return None
-    project_name = normalizar_nome_projeto_display(project.get("name"))
-    entry = runtime.store.orientations(project_name).get(reference, {})
-    matrix = matrix_np(entry)
-    if matrix is None:
-        return None
-    try:
-        inverse = cv2.invertAffineTransform(matrix)
-    except Exception:
-        return None
-
-    if isinstance(entry, dict) and "masks_reference" in entry:
-        local_by_id = {
-            str(mask.get("id") or ""): mask
-            for mask in (
-                _normalize_mask_override(raw)
-                for raw in entry.get("masks_reference", []) or []
-            )
-            if isinstance(mask, dict) and str(mask.get("id") or "")
-        }
-        corrected: list[dict] = []
-        for base_mask in normalizar_mascaras_display(project.get("masks", [])):
-            mask_id = str(base_mask.get("id") or "")
-            local = local_by_id.get(mask_id)
-            if local is None:
-                # Exclusão local do slot continua respeitada.
-                continue
-            canonical_pose = transform_mask(local, inverse)
-            if canonical_pose is None:
-                continue
-            canonical_pose["id"] = mask_id
-            corrected.append(
-                sincronizar_formato_mascara_display(
-                    base_mask,
-                    canonical_pose,
-                )
-            )
-        return corrected
-
-    overrides = entry.get("mask_overrides_reference", {}) if isinstance(entry, dict) else {}
-    if not isinstance(overrides, dict) or not overrides:
-        return None
-    original_masks = normalizar_mascaras_display(project.get("masks", []))
-    corrected: list[dict] = []
-    for original in original_masks:
-        mask_id = str(original.get("id") or "")
-        override = _normalize_mask_override(overrides.get(mask_id))
-        if override is None:
-            corrected.append(deepcopy(original))
-            continue
-        canonical = transform_mask(override, inverse)
-        if canonical is None:
-            corrected.append(deepcopy(original))
-            continue
-        canonical["id"] = mask_id
-        corrected.append(
-            sincronizar_formato_mascara_display(
-                original,
-                canonical,
-            )
-        )
-
-    return corrected if len(corrected) == len(original_masks) else None
-
-
-def _install_orientation_project_view(app, reference: str):
-    """Aplica máscaras angulares somente durante um ciclo do runtime F3.
-
-    Retorna uma função de restauração. O JSON do Projeto Display nunca é alterado.
-    """
-    runtime = get_tracking_runtime(app)
-    repository = getattr(app, "display_project_repository", None)
-    if (
-        runtime is None
-        or repository is None
-        or reference not in F3_ORIENTATION_SLOTS
-    ):
-        return lambda: None
-
-    original_loader = getattr(repository, "carregar_projeto", None)
-    if not callable(original_loader):
-        return lambda: None
-    repository_dict = getattr(repository, "__dict__", {})
-    had_instance_loader = (
-        isinstance(repository_dict, dict)
-        and "carregar_projeto" in repository_dict
-    )
-    previous_instance_loader = (
-        repository_dict.get("carregar_projeto")
-        if had_instance_loader
-        else None
-    )
-
-    active_name = normalizar_nome_projeto_display(repository.obter_projeto_ativo())
-    base_project = original_loader(active_name)
-    if not isinstance(base_project, dict):
-        return lambda: None
-    corrected_masks = _canonical_masks_for_orientation(
-        runtime,
-        base_project,
-        reference,
-    )
-    if not corrected_masks:
-        return lambda: None
-
-    entry = runtime.store.orientations(active_name).get(reference, {})
-    orientation_stamp = str((entry or {}).get("updated_at") or "")
-
-    def load_with_orientation(name: str | None = None):
-        project = original_loader(name)
-        if not isinstance(project, dict):
-            return project
-        project_name = normalizar_nome_projeto_display(project.get("name"))
-        if project_name != active_name:
-            return project
-        result = deepcopy(project)
-        result["masks"] = deepcopy(corrected_masks)
-        result["updated_at"] = (
-            f"{str(project.get('updated_at') or '')}"
-            f"|f3-tracking:{reference}:{orientation_stamp}"
-        )
-        result["_f3_tracking_orientation_reference"] = reference
-        return result
-
-    try:
-        repository.carregar_projeto = load_with_orientation
-    except Exception:
-        return lambda: None
-
-    def restore() -> None:
-        try:
-            if had_instance_loader:
-                repository.carregar_projeto = previous_instance_loader
-            else:
-                delattr(repository, "carregar_projeto")
-        except Exception:
-            # Fallback seguro para objetos/repositórios que não permitem delattr.
-            try:
-                repository.carregar_projeto = original_loader
-            except Exception:
-                pass
-
-    return restore
 
 
 def set_tracking_enabled(app, enabled: bool) -> bool:
@@ -6578,22 +6116,15 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
             self._display_f3_tracking_frame_override_depth = int(
                 getattr(self, "_display_f3_tracking_frame_override_depth", 0) or 0
             ) + 1
-            restore_project = _install_orientation_project_view(
-                self,
-                str(result.reference or ""),
-            )
             try:
                 return preview_previous(self)
             finally:
-                try:
-                    restore_project()
-                finally:
-                    self.camera_frame_atual = raw
-                    self._display_f3_tracking_raw_preview_frame = None
-                    self._display_f3_tracking_frame_override_depth = max(
-                        0,
-                        int(getattr(self, "_display_f3_tracking_frame_override_depth", 1) or 1) - 1,
-                    )
+                self.camera_frame_atual = raw
+                self._display_f3_tracking_raw_preview_frame = None
+                self._display_f3_tracking_frame_override_depth = max(
+                    0,
+                    int(getattr(self, "_display_f3_tracking_frame_override_depth", 1) or 1) - 1,
+                )
 
         preview_with_tracking._odin_f3_object_tracking_runtime = True
         preview_with_tracking._odin_f3_object_tracking_runtime_base = preview_previous
