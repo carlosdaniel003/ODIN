@@ -722,6 +722,71 @@ def resumir_energia_por_analise_bruta_f3(
     }
 
 
+def _luminous_tracking_energy_hint(
+    app,
+    project_name: str,
+    context: dict | None,
+) -> dict:
+    """Usa telemetria luminosa somente para energia física, nunca OK/NG."""
+    telemetry = getattr(app, "_display_f3_luminous_tracking_debug", None)
+    tracking = getattr(app, "_display_f3_object_tracking_last_status", None)
+    if not isinstance(telemetry, dict) or not isinstance(tracking, dict):
+        return {"available": False, "reason": "telemetria_luminosa_indisponivel"}
+
+    check_id = str((context or {}).get("check_id") or "")
+    if (
+        str(telemetry.get("project_name") or "") != str(project_name or "")
+        or str(telemetry.get("check_id") or "") != check_id
+    ):
+        return {"available": False, "reason": "telemetria_luminosa_outro_check"}
+    if not (
+        bool(tracking.get("locked"))
+        and bool(tracking.get("evidence_current"))
+    ):
+        return {"available": False, "reason": "tracking_sem_evidencia_atual"}
+
+    current_frame_id = getattr(app, "camera_ultimo_frame_id", None)
+    telemetry_frame_id = telemetry.get("frame_id")
+    tracking_frame_id = tracking.get("frame_id")
+    if (
+        current_frame_id is not None
+        and telemetry_frame_id is not None
+        and telemetry_frame_id != current_frame_id
+    ):
+        return {"available": False, "reason": "telemetria_luminosa_frame_antigo"}
+    if (
+        current_frame_id is not None
+        and tracking_frame_id is not None
+        and tracking_frame_id != current_frame_id
+    ):
+        return {"available": False, "reason": "tracking_frame_antigo"}
+
+    alignment_required = bool(telemetry.get("alignment_required"))
+    alignment_ready = bool(
+        telemetry.get("alignment_ready")
+        and str(tracking.get("source_type") or "") == "luminous_segment_grid"
+    )
+    return {
+        "available": True,
+        "source": "f3_luminous_segment_tracking",
+        "frame_id": telemetry_frame_id,
+        "project_name": str(project_name or ""),
+        "check_id": check_id,
+        "emission_detected": bool(
+            telemetry.get("luminous_emission_detected")
+        ),
+        "alignment_required": alignment_required,
+        "alignment_ready": alignment_ready,
+        "fit_space": str(telemetry.get("fit_space") or ""),
+        "expected_on_count": int(telemetry.get("expected_on_count", 0) or 0),
+        "luminous_component_count": int(
+            telemetry.get("luminous_component_count", 0) or 0
+        ),
+        "matched_count": int(telemetry.get("matched_count", 0) or 0),
+        "reason": str(telemetry.get("reason") or ""),
+    }
+
+
 def avaliar_evidencia_energia_unificada_display_f3(
     app,
     frame,
@@ -748,12 +813,31 @@ def avaliar_evidencia_energia_unificada_display_f3(
         if isinstance(geometry, dict)
         else "",
     )
+    luminous_debug = getattr(app, "_display_f3_luminous_tracking_debug", None)
+    luminous_token = (
+        str((luminous_debug or {}).get("check_id") or "")
+        if isinstance(luminous_debug, dict)
+        else "",
+        (luminous_debug or {}).get("frame_id")
+        if isinstance(luminous_debug, dict)
+        else None,
+        bool((luminous_debug or {}).get("luminous_emission_detected"))
+        if isinstance(luminous_debug, dict)
+        else False,
+        bool((luminous_debug or {}).get("alignment_ready"))
+        if isinstance(luminous_debug, dict)
+        else False,
+        str((luminous_debug or {}).get("fit_space") or "")
+        if isinstance(luminous_debug, dict)
+        else "",
+    )
     cache_key = (
         str(project_name or ""),
         check_id,
         authority_frame_source,
         _frame_token(app, authority_frame),
         geometry_token,
+        luminous_token,
     )
     cached = getattr(app, "_display_f3_unified_power_cache", None)
     if isinstance(cached, dict) and cached.get("key") == cache_key:
@@ -812,6 +896,34 @@ def avaliar_evidencia_energia_unificada_display_f3(
         fallback["fallback_reason"] = str((evidence or {}).get("reason") or "")
         evidence = fallback
 
+    luminous_hint = _luminous_tracking_energy_hint(
+        app,
+        project_name,
+        context,
+    )
+    if bool(luminous_hint.get("available")):
+        evidence["luminous_tracking_evidence"] = deepcopy(luminous_hint)
+        if bool(luminous_hint.get("alignment_required")):
+            evidence["spatial_alignment_ready"] = bool(
+                luminous_hint.get("alignment_ready")
+            )
+        if bool(luminous_hint.get("emission_detected")):
+            evidence["mask_vote_energy_state_before_luminous_hint"] = str(
+                evidence.get("energy_state") or ""
+            )
+            evidence.update(
+                {
+                    "energy_state": power_module.F3_POWER_STATE_POWERED,
+                    "powered_confirmed": True,
+                    "off_confirmed": False,
+                    "coarse_luminous_emission_confirmed": True,
+                    "power_confirmation_source": (
+                        "luminous_segments_inside_locked_filter"
+                    ),
+                }
+            )
+
+    evidence.setdefault("spatial_alignment_ready", True)
     evidence["project_name"] = str(project_name or "")
     evidence["check_id"] = check_id
     evidence["same_mask_comparison"] = True
@@ -898,23 +1010,36 @@ def aplicar_autoridade_energia_unificada_ao_estado_f3(
     check_name = str((context or {}).get("check_name") or check_id or "CHECK").strip().upper()
 
     if bool(evidence.get("powered_confirmed")):
+        spatial_ready = evidence.get("spatial_alignment_ready") is not False
         result.update(
             {
                 "kind": "powered",
-                "text": f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}",
+                "text": (
+                    f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}"
+                    if spatial_ready
+                    else f"PLACA NO SUPORTE • LIGADA • ALINHANDO {check_name}"
+                ),
                 "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["check"],
-                "allow_auto": True,
-                "physical_state_key": "powered:live_same_mask_learning",
+                "allow_auto": bool(spatial_ready),
+                "physical_state_key": (
+                    "powered:live_same_mask_learning"
+                    if spatial_ready
+                    else "powered:awaiting_luminous_alignment"
+                ),
                 "expected_check_id": check_id,
                 "physical_matches_expected_check": False,
                 "powered_board_confirmed": True,
-                "power_gate_blocked": False,
-                "power_gate_reason": "energia_confirmada_pelas_mascaras_fisicas_live",
-                contract_module.F3_DECISION_ALLOWED_KEY: True,
+                "power_gate_blocked": not bool(spatial_ready),
+                "power_gate_reason": (
+                    "energia_confirmada_pelas_mascaras_fisicas_live"
+                    if spatial_ready
+                    else "energia_confirmada_aguardando_alinhamento_segmentos"
+                ),
+                contract_module.F3_DECISION_ALLOWED_KEY: bool(spatial_ready),
                 contract_module.F3_MASK_LIVE_KEY: True,
             }
         )
-        decision_allowed = True
+        decision_allowed = bool(spatial_ready)
     else:
         is_off = bool(evidence.get("off_confirmed"))
         result.update(

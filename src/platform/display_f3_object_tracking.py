@@ -2060,10 +2060,13 @@ def _rescue_luminous_segment_tracking_lock(
 ):
     """Refina/reconstrói a pose usando somente segmentos ACESOS do CHECK atual.
 
-    O detector nunca procura os segmentos apagados. Ausência de um ON esperado
-    não destrói o tracking: se os demais landmarks sustentarem a pose, as ROIs
-    móveis são publicadas e o analyzer normal decide depois se o segmento
-    faltante é NG.
+    O encaixe luminoso prefere o espaço da própria foto de referência do CHECK.
+    Isso impede que um lock estrutural obtido por AUX/USB/BOARD_OFF transfira
+    pequenos erros de pose para as máscaras do H1.
+
+    O detector nunca procura segmentos apagados. Se um ON esperado estiver
+    ausente, os landmarks restantes ainda podem sustentar a geometria; o
+    analyzer produtivo decide depois se a ausência é NG.
     """
     if runtime is None or not _valid_frame(frame):
         return None
@@ -2085,31 +2088,103 @@ def _rescue_luminous_segment_tracking_lock(
     if not isinstance(check, dict):
         check = current
 
-    masks = _canonical_check_masks_for_luminous_tracking(
-        runtime,
-        project,
-        check,
+    fit_board = (
+        getattr(runtime, "canonical_board", None)
+        or canonical_board_points(project, runtime.store)
     )
-    expected_rows = _expected_on_rows(
-        masks,
-        check.get("mask_states", {}),
+    fit_masks = _canonical_check_masks_for_luminous_tracking(
+        runtime, project, check,
     )
-    base_matrix = (
-        getattr(base_result, "current_to_canonical", None)
-        if base_result is not None and bool(getattr(base_result, "locked", False))
+    fit_to_canonical = np.asarray(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        dtype=np.float32,
+    )
+    fit_space = "canonical"
+
+    reference_key = f"check:{check_id}"
+    reference = (
+        runtime.references.get(reference_key)
+        if isinstance(getattr(runtime, "references", None), dict)
         else None
     )
+    reference_to_canonical = (
+        reference.get("reference_to_canonical")
+        if isinstance(reference, dict)
+        else None
+    )
+    check_board, check_masks = _check_reference_geometry(project, check)
+    if (
+        reference_to_canonical is not None
+        and len(check_board) >= 3
+        and bool(check_masks)
+    ):
+        try:
+            candidate_mapping = np.asarray(
+                reference_to_canonical, dtype=np.float32
+            ).reshape(2, 3)
+        except Exception:
+            candidate_mapping = None
+        if candidate_mapping is not None and np.all(np.isfinite(candidate_mapping)):
+            fit_board = check_board
+            fit_masks = check_masks
+            fit_to_canonical = candidate_mapping
+            fit_space = reference_key
+
+    expected_rows = _expected_on_rows(
+        fit_masks,
+        check.get("mask_states", {}),
+    )
+
+    base_matrix = None
+    if (
+        base_result is not None
+        and bool(getattr(base_result, "locked", False))
+        and getattr(base_result, "current_to_canonical", None) is not None
+    ):
+        try:
+            base_current_to_canonical = np.asarray(
+                base_result.current_to_canonical,
+                dtype=np.float32,
+            ).reshape(2, 3)
+            if fit_space == "canonical":
+                base_matrix = base_current_to_canonical
+            else:
+                canonical_to_fit = cv2.invertAffineTransform(fit_to_canonical)
+                base_matrix = compose_affine(
+                    canonical_to_fit,
+                    base_current_to_canonical,
+                )
+        except Exception:
+            base_matrix = None
 
     pose = _find_luminous_segment_pose(
         frame,
-        getattr(runtime, "canonical_board", None) or canonical_board_points(
-            project,
-            runtime.store,
-        ),
+        fit_board,
         expected_rows,
         (int(runtime.width), int(runtime.height)),
         base_matrix=base_matrix,
     )
+    attempts = [
+        item for item in (pose.get("attempts") or ())
+        if isinstance(item, dict)
+    ]
+    luminous_emission_detected = bool(
+        pose.get("available")
+        or any(
+            str(item.get("luminous_reason") or "")
+            == "luminous_segments_detected"
+            and int(item.get("luminous_component_count", 0) or 0)
+            >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+            for item in attempts
+        )
+    )
+    alignment_required = bool(
+        len(expected_rows) >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+    )
+    alignment_ready = bool(
+        pose.get("available") and pose.get("matrix") is not None
+    )
+
     telemetry = {
         key: (
             value.tolist()
@@ -2125,26 +2200,46 @@ def _rescue_luminous_segment_tracking_lock(
             "project_name": str(project_name or ""),
             "check_id": check_id,
             "check_name": str(check.get("name") or check_id),
+            "frame_id": getattr(app, "camera_ultimo_frame_id", None),
             "base_locked": bool(
                 base_result is not None
                 and getattr(base_result, "locked", False)
             ),
+            "fit_space": fit_space,
+            "fit_composed_to_canonical": bool(fit_space != "canonical"),
+            "expected_on_count": int(len(expected_rows)),
+            "minimum_luminous_components": int(
+                F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+            ),
+            "luminous_emission_detected": luminous_emission_detected,
+            "alignment_required": alignment_required,
+            "alignment_ready": alignment_ready,
             "uses_only_luminous_segments": True,
             "searches_off_segments": False,
         }
     )
     app._display_f3_luminous_tracking_debug = telemetry
 
-    if not bool(pose.get("available")) or pose.get("matrix") is None:
+    if not alignment_ready:
         return None
 
     try:
-        matrix = np.asarray(
-            pose.get("matrix"),
-            dtype=np.float32,
+        fit_matrix = np.asarray(
+            pose.get("matrix"), dtype=np.float32
         ).reshape(2, 3)
     except Exception:
         return None
+    if not np.all(np.isfinite(fit_matrix)):
+        return None
+
+    matrix = (
+        fit_matrix
+        if fit_space == "canonical"
+        else compose_affine(fit_to_canonical, fit_matrix)
+    )
+    if matrix is None:
+        return None
+    matrix = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
     if not np.all(np.isfinite(matrix)):
         return None
 
@@ -2169,13 +2264,13 @@ def _rescue_luminous_segment_tracking_lock(
 
     now = time.monotonic()
     gray = runtime._gray(frame)
-    reference_key = (
-        f"check:{check_id}"
-        if f"check:{check_id}" in getattr(runtime, "references", {})
+    result_reference = (
+        reference_key
+        if reference_key in getattr(runtime, "references", {})
         else str(getattr(base_result, "reference", "") or f"luminous:{check_id}")
     )
     runtime.last_matrix = matrix.copy()
-    runtime._last_reference = reference_key
+    runtime._last_reference = result_reference
     runtime.last_compute_s = now
     runtime.last_frame_id = getattr(app, "camera_ultimo_frame_id", None)
     runtime.last_gray = gray.copy() if isinstance(gray, np.ndarray) else None
@@ -2192,7 +2287,7 @@ def _rescue_luminous_segment_tracking_lock(
     result = F3TrackingResult(
         True,
         aligned,
-        reference=reference_key,
+        reference=result_reference,
         matches=int(pose.get("matched_count", 0) or 0),
         inliers=int(pose.get("matched_count", 0) or 0),
         inlier_ratio=float(pose.get("match_ratio", 0.0) or 0.0),
@@ -2205,7 +2300,6 @@ def _rescue_luminous_segment_tracking_lock(
     )
     runtime.last_result = result
     return result
-
 
 
 @dataclass
@@ -4299,6 +4393,7 @@ def align_frame_for_f3(app, frame):
     app._display_f3_object_tracking_last_status = {
         "enabled": True,
         "locked": bool(result.locked),
+        "frame_id": getattr(app, "camera_ultimo_frame_id", None),
         "reference": result.reference,
         "matches": int(result.matches),
         "inliers": int(result.inliers),

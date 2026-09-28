@@ -218,8 +218,9 @@ class F3PowerAuthority:
             signature = (str(project_name or ""), check_id)
             now = time.monotonic()
 
+            spatial_ready = evidence.get("spatial_alignment_ready") is not False
             if evidence.get("powered_confirmed"):
-                if intermittent:
+                if intermittent and spatial_ready:
                     self._intermittent_latch = {
                         "signature": signature,
                         "powered_at_s": now,
@@ -230,6 +231,11 @@ class F3PowerAuthority:
                 if isinstance(latch, dict) and tuple(latch.get("signature") or ()) == signature:
                     age = now - float(latch.get("powered_at_s", 0.0) or 0.0)
                     if 0.0 <= age <= float(presence_module.F3_INTERMITTENT_POWER_HOLD_S):
+                        held_evidence = (
+                            latch.get("evidence")
+                            if isinstance(latch.get("evidence"), dict)
+                            else {}
+                        )
                         evidence.update(
                             intermittent_phase_hold=True,
                             intermittent_live_energy_state=str(
@@ -239,6 +245,10 @@ class F3PowerAuthority:
                             energy_state=power_module.F3_POWER_STATE_POWERED,
                             powered_confirmed=True,
                             off_confirmed=False,
+                            spatial_alignment_ready=(
+                                held_evidence.get("spatial_alignment_ready")
+                                is not False
+                            ),
                         )
                     elif age > float(presence_module.F3_INTERMITTENT_POWER_HOLD_S):
                         self._intermittent_latch = None
@@ -246,24 +256,40 @@ class F3PowerAuthority:
                 self._intermittent_latch = None
 
             if evidence.get("powered_confirmed"):
+                spatial_ready = (
+                    evidence.get("spatial_alignment_ready") is not False
+                )
                 output.update(
                     kind="powered",
                     text=(
                         f"PLACA NO SUPORTE • LIGADA • {check_name} • FASE OFF INTERMITENTE"
                         if bool(evidence.get("intermittent_phase_hold"))
-                        else f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}"
+                        and spatial_ready
+                        else (
+                            f"PLACA NO SUPORTE • LIGADA • ANALISANDO {check_name}"
+                            if spatial_ready
+                            else f"PLACA NO SUPORTE • LIGADA • ALINHANDO {check_name}"
+                        )
                     ),
                     color=operational_module.F3_OPERATIONAL_STATUS_COLORS["check"],
-                    allow_auto=True,
-                    physical_state_key="check:powered_by_runtime_authority",
+                    allow_auto=bool(spatial_ready),
+                    physical_state_key=(
+                        "check:powered_by_runtime_authority"
+                        if spatial_ready
+                        else "check:powered_waiting_luminous_alignment"
+                    ),
                     expected_check_id=check_id,
                     powered_board_confirmed=True,
-                    power_gate_blocked=False,
-                    power_gate_reason="presenca_estavel_e_energia_confirmada",
+                    power_gate_blocked=not bool(spatial_ready),
+                    power_gate_reason=(
+                        "presenca_estavel_e_energia_confirmada"
+                        if spatial_ready
+                        else "energia_confirmada_aguardando_alinhamento_segmentos"
+                    ),
                     power_authority_source=F3_RUNTIME_AUTHORITIES_SOURCE,
                     power_evidence=deepcopy(evidence),
                 )
-                decision_allowed = True
+                decision_allowed = bool(spatial_ready)
             else:
                 is_off = bool(evidence.get("off_confirmed"))
                 output.update(

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -1583,6 +1584,140 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             "filter_found_without_luminous_segments",
             result["reason"],
         )
+
+    def test_luminous_rescue_encaixa_no_espaco_da_referencia_do_check(self):
+        frame = np.full((480, 640, 3), 20, dtype=np.uint8)
+        check_board = [
+            [120.0, 150.0],
+            [520.0, 150.0],
+            [520.0, 310.0],
+            [120.0, 310.0],
+        ]
+        check_masks = [
+            {
+                "id": f"MASK_{index:03d}",
+                "type": "circle",
+                "cx": float(180 + index * 45),
+                "cy": float(220 + (index % 2) * 25),
+                "radius": 8.0,
+            }
+            for index in range(1, 5)
+        ]
+        check = {
+            "id": "CHECK_001",
+            "name": "H1",
+            "mask_states": {
+                str(mask["id"]): "on"
+                for mask in check_masks
+            },
+        }
+        project = {
+            "name": "DISPLAY",
+            "master_resolution": {"width": 640, "height": 480},
+            "masks": check_masks,
+        }
+        reference_to_canonical = np.asarray(
+            [[1.0, 0.0, 40.0], [0.0, 1.0, 20.0]],
+            dtype=np.float32,
+        )
+        current_to_check = np.asarray(
+            [[1.0, 0.0, 10.0], [0.0, 1.0, 15.0]],
+            dtype=np.float32,
+        )
+
+        repository = SimpleNamespace(
+            obter_projeto_ativo=lambda: "DISPLAY",
+            carregar_projeto=lambda _name: project,
+            carregar_check=lambda _name, _check_id: check,
+        )
+        app = SimpleNamespace(
+            display_project_repository=repository,
+            display_check_runtime=SimpleNamespace(
+                snapshot=lambda: {"current_check": check}
+            ),
+            camera_ultimo_frame_id=88,
+        )
+        runtime = SimpleNamespace(
+            references={
+                "check:CHECK_001": {
+                    "reference_to_canonical": reference_to_canonical,
+                }
+            },
+            canonical_board=check_board,
+            canonical_masks=check_masks,
+            store=object(),
+            width=640,
+            height=480,
+            _gray=lambda image: cv2.cvtColor(image, cv2.COLOR_BGR2GRAY),
+            last_matrix=None,
+            _last_reference="",
+            last_compute_s=0.0,
+            last_frame_id=None,
+            last_gray=None,
+            last_verified_s=0.0,
+            consecutive_misses=0,
+            ready=True,
+            reason="ready",
+            last_result=None,
+        )
+        pose = {
+            "available": True,
+            "reason": "luminous_segment_grid_fitted",
+            "matrix": current_to_check,
+            "matched_count": 4,
+            "expected_on_count": 4,
+            "match_ratio": 1.0,
+            "luminous_component_count": 4,
+            "attempts": [
+                {
+                    "luminous_reason": "luminous_segments_detected",
+                    "luminous_component_count": 4,
+                    "fit": True,
+                }
+            ],
+        }
+
+        with (
+            patch.object(
+                tracking,
+                "_check_reference_geometry",
+                return_value=(check_board, check_masks),
+            ),
+            patch.object(
+                tracking,
+                "_find_luminous_segment_pose",
+                return_value=pose,
+            ) as finder,
+        ):
+            result = tracking._rescue_luminous_segment_tracking_lock(
+                app,
+                frame,
+                runtime,
+                base_result=None,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.locked)
+        self.assertEqual("luminous_segment_grid", result.source_type)
+        self.assertEqual("check:CHECK_001", result.reference)
+        expected_current_to_canonical = tracking.compose_affine(
+            reference_to_canonical,
+            current_to_check,
+        )
+        np.testing.assert_allclose(
+            result.current_to_canonical,
+            expected_current_to_canonical,
+            atol=1e-5,
+        )
+        fit_args = finder.call_args.args
+        self.assertEqual(check_board, fit_args[1])
+        self.assertEqual(4, len(fit_args[2]))
+        telemetry = app._display_f3_luminous_tracking_debug
+        self.assertEqual("check:CHECK_001", telemetry["fit_space"])
+        self.assertTrue(telemetry["fit_composed_to_canonical"])
+        self.assertTrue(telemetry["luminous_emission_detected"])
+        self.assertTrue(telemetry["alignment_ready"])
+        self.assertEqual(88, telemetry["frame_id"])
 
     def test_live_tracking_calls_luminous_refinement_after_structural_attempt(self):
         source = inspect.getsource(tracking.align_frame_for_f3)

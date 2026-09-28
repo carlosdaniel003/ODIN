@@ -175,6 +175,40 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         )
         self.assertEqual("presence:unknown", result["physical_state_key"])
 
+    def test_energia_confirmada_sem_alinhamento_nao_libera_ok_ng(self):
+        app = _App()
+        owner = authorities.F3PowerAuthority(app)
+        result = owner.apply(
+            {"kind": "unknown"},
+            {
+                "board_present": True,
+                "presence_confirmed": True,
+                "empty_confirmed": False,
+            },
+            {
+                "powered_confirmed": True,
+                "off_confirmed": False,
+                "energy_state": "powered",
+                "spatial_alignment_ready": False,
+                "coarse_luminous_emission_confirmed": True,
+            },
+            project_name="CM_500_L",
+            context={"check_id": "CHECK_001", "check_name": "H1"},
+        )
+
+        self.assertEqual("powered", result["kind"])
+        self.assertTrue(result["powered_board_confirmed"])
+        self.assertFalse(result["allow_auto"])
+        self.assertFalse(
+            result[authorities.contract_module.F3_DECISION_ALLOWED_KEY]
+        )
+        self.assertTrue(result["power_gate_blocked"])
+        self.assertEqual(
+            "energia_confirmada_aguardando_alinhamento_segmentos",
+            result["power_gate_reason"],
+        )
+        self.assertIn("ALINHANDO H1", result["text"])
+
     def test_state_machine_authority_delegates_to_single_runtime(self):
         runtime = DisplayCheckSequenceRuntime()
         runtime.configurar_checks(

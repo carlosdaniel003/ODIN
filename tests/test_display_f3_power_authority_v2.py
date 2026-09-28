@@ -337,6 +337,88 @@ class DisplayF3UnifiedPowerAuthorityTests(unittest.TestCase):
         self.assertEqual(3, result["required_powered_votes"])
         legacy_raw.assert_not_called()
 
+    def test_emissao_luminosa_impede_falso_off_sem_liberar_decisao_espacial(self):
+        class _Frame:
+            size = 1
+
+        class _App(_FakeApp):
+            camera_ultimo_frame_id = 250
+            camera_service = object()
+            _display_f3_object_tracking_last_status = {
+                "enabled": True,
+                "locked": True,
+                "evidence_current": True,
+                "frame_id": 250,
+                "source_type": "check",
+                "reference": "check:CHECK_003",
+            }
+            _display_f3_luminous_tracking_debug = {
+                "source": "f3_luminous_segment_tracking",
+                "project_name": "CM_500_L",
+                "check_id": "CHECK_001",
+                "frame_id": 250,
+                "fit_space": "check:CHECK_001",
+                "expected_on_count": 7,
+                "luminous_component_count": 5,
+                "luminous_emission_detected": True,
+                "alignment_required": True,
+                "alignment_ready": False,
+                "reason": "luminous_grid_not_fitted",
+            }
+
+            @staticmethod
+            def _display_auto_frame_token(frame):
+                return ("object", id(frame))
+
+            @staticmethod
+            def _obter_rotacao_visual_display_f3():
+                return 180
+
+        app = _App()
+        frame = _Frame()
+        context = {"check_id": "CHECK_001", "check_name": "H1"}
+        false_off = {
+            "available": True,
+            "source": power_v2.F3_UNIFIED_POWER_SOURCE,
+            "energy_state": legacy_power.F3_POWER_STATE_OFF,
+            "powered_confirmed": False,
+            "off_confirmed": True,
+            "logical_check_independent": True,
+            "energy_scope": "all_discriminative_live_masks",
+            "minimum_discriminative_on_count": 7,
+            "required_powered_votes": 4,
+            "powered_votes": 0,
+            "off_votes": 26,
+            "tie_votes": 0,
+            "valid_votes": 26,
+            "details": [],
+        }
+
+        with patch.object(
+            power_v2,
+            "_generic_live_mask_energy",
+            return_value=false_off,
+        ):
+            result = power_v2.avaliar_evidencia_energia_unificada_display_f3(
+                app,
+                frame,
+                "CM_500_L",
+                context,
+            )
+
+        self.assertTrue(result["powered_confirmed"])
+        self.assertFalse(result["off_confirmed"])
+        self.assertEqual(
+            legacy_power.F3_POWER_STATE_POWERED,
+            result["energy_state"],
+        )
+        self.assertTrue(result["coarse_luminous_emission_confirmed"])
+        self.assertFalse(result["spatial_alignment_ready"])
+        self.assertEqual(
+            "luminous_segments_inside_locked_filter",
+            result["power_confirmation_source"],
+        )
+
     def test_energia_generica_indisponivel_cai_no_fallback_do_check_atual(self):
         class _Frame:
             size = 1

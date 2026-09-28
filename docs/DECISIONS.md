@@ -403,6 +403,38 @@ autoridade e sem permitir que geometria residual esconda suporte vazio.
 
 ---
 
+## D-022 — Energia luminosa e autoridade espacial são estados distintos
+
+**Status:** Accepted
+
+O filtro preto pode estar corretamente localizado enquanto as 28 máscaras ainda
+não estão finamente alinhadas com os segmentos reais. Nesse intervalo, declarar
+a placa DESLIGADA apenas porque ROIs desalinhadas leem OFF cria um falso negativo.
+
+Decisão:
+
+- o refinamento por segmentos ACESOS usa preferencialmente a geometria desenhada
+  na própria foto de referência do CHECK lógico atual;
+- um lock estrutural obtido por AUX, USB, BOARD_OFF ou outra referência pode
+  fornecer somente a pista grosseira do filtro; ele não fixa a identidade
+  espacial das máscaras de H1;
+- três ou mais componentes luminosos válidos dentro do filtro localizado podem
+  confirmar **energia física**, mesmo antes do encaixe fino;
+- energia confirmada sem alinhamento espacial resulta em
+  `LIGADA • ALINHANDO <CHECK>`, com `allow_auto=false` e sem autoridade de
+  OK/NG/avanço;
+- somente após o encaixe luminoso publicar geometria atual o analyzer canônico
+  volta a ter autoridade para comparar esperado × observado;
+- a telemetria do refinamento luminoso é incluída no DEBUG TÉCNICO para explicar
+  componente detectado, espaço de fit, motivo de falha e estado de alinhamento;
+- não é criado novo scheduler, worker ou autoridade paralela.
+
+Consequência: presença, energia e geometria deixam de ser confundidas. O sistema
+pode reconhecer que o display está claramente aceso sem julgar máscaras em
+posições ainda não confiáveis.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:

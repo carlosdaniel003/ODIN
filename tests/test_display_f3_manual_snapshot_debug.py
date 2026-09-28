@@ -155,6 +155,11 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn('snapshot["overlay_context"]', source)
         self.assertIn('snapshot["camera_settings_at_frame"]', source)
 
+    def test_debug_captura_telemetria_do_refinamento_luminoso(self):
+        source = inspect.getsource(snapshot_module._runtime_state_at_frame)
+        self.assertIn('"luminous_tracking"', source)
+        self.assertIn("_display_f3_luminous_tracking_debug", source)
+
     def test_estado_visual_do_debug_herda_energia_e_analise_do_runtime(self):
         visual = {
             "readout_context": {

@@ -459,6 +459,9 @@ def _runtime_state_at_frame(app) -> dict:
             "tracking_rescue": _safe_deepcopy(
                 runtime_debug.get("tracking_rescue")
             ),
+            "luminous_tracking": _safe_deepcopy(
+                runtime_debug.get("luminous_tracking")
+            ),
             "live_performance": _safe_deepcopy(
                 runtime_debug.get("live_performance")
             ),
@@ -524,6 +527,9 @@ def _runtime_state_at_frame(app) -> dict:
         ),
         "tracking_rescue": _safe_deepcopy(
             getattr(app, "_display_f3_tracking_rescue_debug", None)
+        ),
+        "luminous_tracking": _safe_deepcopy(
+            getattr(app, "_display_f3_luminous_tracking_debug", None)
         ),
         "live_performance": _safe_deepcopy(
             getattr(app, "_display_f3_live_performance", None)

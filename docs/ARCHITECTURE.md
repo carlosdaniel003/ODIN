@@ -200,6 +200,12 @@ Contratos atuais:
   de placa somente quando `locked=true` e `evidence_current=true`; EMPTY
   confirmado continua tendo precedência e lock mantido/stale não promove presença;
 - energia recebe presença como entrada e não pode ignorá-la;
+- tracking estrutural localiza o filtro, mas o refinamento luminoso do CHECK
+  atual prefere o espaço da própria referência daquele CHECK antes de compor
+  novamente para o espaço canônico;
+- emissão luminosa detectada dentro do filtro pode provar **energia física** sem
+  provar conformidade; enquanto o encaixe fino dos segmentos não estiver pronto,
+  a autoridade de energia mantém OK/NG e avanço de CHECK bloqueados;
 - analyzer produtivo possui uma única instância/cache por sessão;
 - mutações de sequência passam pela facade da state machine;
 - estado físico + presença + energia são calculados uma vez por
