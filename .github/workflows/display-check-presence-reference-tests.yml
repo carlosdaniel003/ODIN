@@ -125,6 +125,7 @@ jobs:
           python -m unittest \
             tests.test_display_f3_runtime_authorities \
             tests.test_display_f3_power_authority_v2.DisplayF3UnifiedPowerAuthorityTests.test_emissao_luminosa_impede_falso_off_sem_liberar_decisao_espacial \
+            tests.test_display_f3_power_authority_v2.DisplayF3UnifiedPowerAuthorityTests.test_telemetria_luminosa_de_outro_snapshot_nao_altera_energia \
             -v
 
       - name: Run F3 check transition guard tests
