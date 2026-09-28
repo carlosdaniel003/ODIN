@@ -4,7 +4,6 @@ from copy import deepcopy
 
 import src.platform.display_f3_check_transition_guard as transition_module
 import src.platform.display_f3_operational_status as operational_module
-import src.platform.display_f3_runtime_contract_fix as contract_module
 from src.platform.display_auto_check_analyzer import DisplayAutomaticCheckAnalyzer
 from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 
@@ -286,9 +285,16 @@ def _presentation_analysis_for_current_authority(app, analysis: dict) -> dict:
     if not isinstance(state, dict):
         return analysis
 
+    # Import local evita ciclo:
+    # live_runtime -> runtime_contract -> physical_policy -> mask_status
+    # -> live_runtime.
+    from src.platform.display_f3_runtime_contract_fix import (
+        F3_DECISION_ALLOWED_KEY,
+    )
+
     decision_allowed = bool(
         state.get(
-            contract_module.F3_DECISION_ALLOWED_KEY,
+            F3_DECISION_ALLOWED_KEY,
             state.get("allow_auto", False),
         )
     )
