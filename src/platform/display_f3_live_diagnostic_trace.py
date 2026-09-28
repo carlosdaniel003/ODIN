@@ -192,14 +192,8 @@ def _probe_expected_check(app, frame, context: dict | None) -> dict | None:
 
 
 def _probe_required_frames(app, context: dict | None) -> int:
-    if not isinstance(context, dict):
-        return 2
-    try:
-        if app._display_auto_is_transient_check(context):
-            return 1
-    except Exception:
-        pass
-    return 2
+    """O trace observa o mesmo contrato produtivo: um frame conforme."""
+    return 1
 
 
 def _update_positive_probe_stability(app, context: dict | None, analysis: dict | None) -> dict:

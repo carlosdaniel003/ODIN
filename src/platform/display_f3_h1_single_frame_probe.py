@@ -17,22 +17,8 @@ F3_POSITIVE_PROBE_MODE_FULL_MASKS = "full_check_mask_conformity"
 
 
 def frames_necessarios_sonda_positiva_f3(app, context: dict | None) -> int:
-    """H1 exige estabilidade; BLUE continua rápido por ser transitório.
-
-    O falso positivo real AUX->H1 mostrou que um único frame não é margem segura
-    para o CHECK de referência. H1 e CHECKS estáveis usam dois frames positivos
-    consecutivos. BLUE/BT continua em um frame porque é fisicamente transitório.
-    """
-    if not isinstance(context, dict):
-        return 2
-
-    try:
-        if app._display_auto_is_transient_check(context):
-            return 1
-    except Exception:
-        pass
-
-    return 2
+    """Um frame com conformidade completa confirma qualquer CHECK positivo."""
+    return 1
 
 
 def _contexto_sonda_positiva_rapida_f3(app, context: dict | None) -> bool:

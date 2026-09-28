@@ -60,10 +60,10 @@ class DisplayAutomaticCheckF3Mixin:
     # mantém resposta rápida dos CHECKS sem segurar cada repaint da câmera.
     DISPLAY_F3_ANALYSIS_INTERVAL_MS = 90
 
-    # H1 precisa ser rápido, mas ainda exige dois frames consecutivos. Bluetooth
-    # é um evento transitório/piscante e é confirmado na primeira leitura OK.
-    # NG continua deliberadamente mais conservador.
-    DISPLAY_AUTO_OK_STABLE_FRAMES = 2
+    # Aprovação positiva é imediata: qualquer CHECK usa exatamente um frame
+    # integralmente conforme. H1 28/28 deve avançar no próprio frame que fechou
+    # a leitura. NG continua deliberadamente mais conservador e independente.
+    DISPLAY_AUTO_OK_STABLE_FRAMES = 1
     DISPLAY_AUTO_NG_STABLE_FRAMES = 6
     DISPLAY_AUTO_TRANSITION_FRAMES = 1
     DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES = 3

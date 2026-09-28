@@ -59,12 +59,12 @@ def _exact_analysis(*, failed_on: bool = False, off_mismatches: int = 0) -> dict
 
 
 class DisplayF3H1SingleFrameProbeTests(unittest.TestCase):
-    def test_h1_first_check_needs_two_positive_frames(self):
+    def test_h1_first_check_needs_one_positive_frame(self):
         result = module.frames_necessarios_sonda_positiva_f3(
             _App(),
             {"current_index": 0, "check_name": "H1"},
         )
-        self.assertEqual(2, result)
+        self.assertEqual(1, result)
 
     def test_blue_keeps_one_frame_because_it_is_transient(self):
         result = module.frames_necessarios_sonda_positiva_f3(
@@ -112,13 +112,13 @@ class DisplayF3H1SingleFrameProbeTests(unittest.TestCase):
         )
 
         self.assertFalse(stability["confirm"])
-        self.assertEqual(2, stability["required"])
+        self.assertEqual(1, stability["required"])
         self.assertFalse(analysis["approved"])
         self.assertEqual(original_reason, analysis["reason"])
         self.assertTrue(analysis["positive_probe_requires_full_mask_conformity"])
         self.assertFalse(analysis["positive_probe_approved"])
 
-    def test_h1_requires_two_consecutive_full_approvals(self):
+    def test_h1_confirma_primeira_aprovacao_completa(self):
         app = _App()
         context = {
             "project_name": "CM-550-L",
@@ -129,12 +129,9 @@ class DisplayF3H1SingleFrameProbeTests(unittest.TestCase):
         first = module.atualizar_estabilidade_sonda_positiva_f3(
             app, context, _exact_analysis()
         )
-        second = module.atualizar_estabilidade_sonda_positiva_f3(
-            app, context, _exact_analysis()
-        )
-        self.assertFalse(first["confirm"])
-        self.assertTrue(second["confirm"])
-        self.assertEqual(2, second["required"])
+        self.assertTrue(first["confirm"])
+        self.assertEqual(1, first["frames"])
+        self.assertEqual(1, first["required"])
 
     def test_blue_can_confirm_one_full_approval_frame(self):
         app = _App()

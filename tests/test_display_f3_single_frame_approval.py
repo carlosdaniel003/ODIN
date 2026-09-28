@@ -29,9 +29,10 @@ class DisplayF3SingleFrameApprovalTests(unittest.TestCase):
         trace_module._probe_required_frames = self.original_trace_function
         module._INSTALLED = self.original_installed
 
-    def test_h1_e_checks_estaveis_exigem_dois_frames(self):
+    def test_todos_os_checks_usam_um_frame_para_ok(self):
         contexts = [
             {"current_index": 0, "check_name": "H1"},
+            {"current_index": 1, "check_name": "BLUE"},
             {"current_index": 2, "check_name": "USB"},
             {"current_index": 3, "check_name": "AUX"},
             {"current_index": 4, "check_name": "CHECK_FUTURO_5"},
@@ -39,24 +40,15 @@ class DisplayF3SingleFrameApprovalTests(unittest.TestCase):
         for context in contexts:
             with self.subTest(context=context):
                 self.assertEqual(
-                    2,
+                    1,
                     module.frames_necessarios_aprovacao_f3(_App(), context),
                 )
 
-    def test_blue_transitorio_continua_em_um_frame(self):
-        self.assertEqual(
-            1,
-            module.frames_necessarios_aprovacao_f3(
-                _App(),
-                {"current_index": 1, "check_name": "BLUE"},
-            ),
-        )
-
-    def test_instalador_unifica_runtime_e_sonda_sem_reduzir_h1_para_um_frame(self):
-        DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES = 1
+    def test_instalador_unifica_runtime_e_sonda_em_um_frame(self):
+        DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES = 2
         module.instalar_aprovacao_um_frame_display_f3()
 
-        self.assertEqual(2, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES)
+        self.assertEqual(1, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_OK_STABLE_FRAMES)
         self.assertIs(
             module.frames_necessarios_aprovacao_f3,
             probe_module.frames_necessarios_sonda_positiva_f3,

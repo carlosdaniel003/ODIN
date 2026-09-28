@@ -494,6 +494,38 @@ e preserva D-020, D-021 e D-022.
 
 ---
 
+## D-024 — Um frame integralmente conforme aprova qualquer CHECK F3
+
+**Status:** Accepted
+
+A aprovação positiva do Display F3 não usa mais debounce de dois frames.
+
+Decisão:
+
+- todo CHECK produtivo usa exatamente **1 frame** para aprovação positiva;
+- a regra vale para H1, BLUE/BT, USB, AUX e CHECKS futuros;
+- o frame precisa ser uma análise canônica pronta e integralmente conforme:
+  todas as máscaras ativas ACESO/APAGADO precisam estar corretas;
+- no primeiro CHECK/H1, uma leitura completa 28/28 é evidência suficiente para
+  registrar o CHECK como OK no próprio frame, mesmo que a identidade auxiliar
+  por contorno ainda não tenha convergido;
+- 27/28, análise incompleta, máscara incerta ou análise pertencente a outro
+  CHECK não podem usar esse atalho;
+- o contorno continua sendo fallback de localização/identidade enquanto a
+  conformidade completa ainda não existe;
+- CHECKS posteriores continuam sujeitos ao gate de transição física entre
+  funções; esta decisão reduz somente o número de frames positivos necessários
+  depois que o CHECK atual está autorizado;
+- o debounce de NG permanece separado e não é reduzido por esta decisão;
+- CHECK intermitente continua exigindo sua evidência temporal própria antes de
+  poder ser considerado integralmente conforme.
+
+Consequência: ao mostrar H1 com as 28 máscaras corretas no mesmo frame, o ODIN
+registra imediatamente CHECK OK em vez de aguardar um segundo frame ou uma
+segunda confirmação de identidade que contradiga a própria leitura 28/28.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:

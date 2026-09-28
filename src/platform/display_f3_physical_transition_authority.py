@@ -34,6 +34,9 @@ from src.platform.display_f3_contour_check_identity import (
 F3_PHYSICAL_TRANSITION_AUTHORITY_SOURCE = (
     "f3_previous_to_current_check_physical_transition_authority"
 )
+F3_FIRST_CHECK_FULL_MASK_AUTHORITY_SOURCE = (
+    "f3_first_check_full_mask_conformity"
+)
 
 
 def _context(app) -> dict | None:
@@ -59,11 +62,57 @@ def _check_id_from_row(row: dict | None) -> str:
     return str((row or {}).get("id") or "").strip()
 
 
+def _analise_completa_check_atual(
+    analysis: dict | None,
+    context: dict | None,
+) -> dict | None:
+    """Aceita somente análise atual, pronta e 100% conforme nas máscaras ativas."""
+    if not isinstance(analysis, dict) or not isinstance(context, dict):
+        return None
+    if not bool(analysis.get("ready")) or analysis.get("approved") is not True:
+        return None
+    if (
+        str(analysis.get("project_name") or "").strip()
+        != str(context.get("project_name") or "").strip()
+        or str(analysis.get("check_id") or "").strip()
+        != str(context.get("check_id") or "").strip()
+    ):
+        return None
+
+    try:
+        active = int(analysis.get("active_mask_count", 0) or 0)
+        matched = int(analysis.get("matched_mask_count", 0) or 0)
+    except (TypeError, ValueError):
+        active = 0
+        matched = 0
+
+    if active <= 0:
+        results = [
+            item
+            for item in (analysis.get("mask_results") or ())
+            if isinstance(item, dict)
+            and str(item.get("expected") or "").strip().lower() != "ignore"
+        ]
+        if not results or not all(bool(item.get("matched")) for item in results):
+            return None
+        active = len(results)
+        matched = active
+
+    if matched != active:
+        return None
+
+    return {
+        "active_mask_count": int(active),
+        "matched_mask_count": int(matched),
+    }
+
+
 def avaliar_entrada_fisica_check_f3(
     app,
     *,
     frame=None,
     context: dict | None = None,
+    analysis: dict | None = None,
 ) -> dict:
     """Confirma se o CHECK lógico atual já existe fisicamente no frame."""
     ctx = context if isinstance(context, dict) else _context(app)
@@ -87,10 +136,29 @@ def avaliar_entrada_fisica_check_f3(
         (ctx or {}).get("check_name") or current.get("name") or current_id
     ).strip().upper()
 
-    # H1 não possui CHECK anterior, mas isso não significa que qualquer função
-    # ligada seja H1. Quando o tracking tem contorno atual, exigimos que a
-    # identidade visual independente reconheça literalmente o CHECK esperado.
+    # H1/primeiro CHECK não possui transição anterior. Se o analisador canônico
+    # já fechou TODAS as máscaras ativas como conformes no frame atual, essa
+    # evidência é suficiente: 28/28 no H1 significa CHECK OK. O contorno fica
+    # como fallback de entrada enquanto a análise completa ainda não fechou.
     if index <= 0:
+        current_analysis = (
+            analysis
+            if isinstance(analysis, dict)
+            else getattr(app, "_display_auto_last_analysis", None)
+        )
+        conformity = _analise_completa_check_atual(current_analysis, ctx)
+        if isinstance(conformity, dict):
+            return {
+                "source": F3_FIRST_CHECK_FULL_MASK_AUTHORITY_SOURCE,
+                "available": True,
+                "confirmed": True,
+                "reason": "primeiro_check_conforme_por_todas_mascaras",
+                "current_check_id": current_id,
+                "current_check_name": current_name,
+                "current_index": index,
+                **conformity,
+            }
+
         identity = getattr(app, "_display_f3_check_identity_status", None)
         if not isinstance(identity, dict) or not identity.get("available"):
             try:
@@ -311,6 +379,7 @@ def _install_manual_entry_gate() -> None:
         evidence = avaliar_entrada_fisica_check_f3(
             self,
             frame=getattr(self, "camera_frame_atual", None),
+            analysis=analysis,
         )
         self._display_f3_physical_transition_authority_status = deepcopy(evidence)
         if not bool(evidence.get("confirmed")):
@@ -344,6 +413,7 @@ def _install_instance_result_guard(app) -> None:
             self,
             frame=getattr(self, "camera_frame_atual", None),
             context=context,
+            analysis=getattr(self, "_display_auto_last_analysis", None),
         )
         self._display_f3_physical_transition_authority_status = deepcopy(evidence)
 

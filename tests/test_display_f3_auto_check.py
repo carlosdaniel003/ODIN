@@ -406,7 +406,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         self.assertEqual(("MASK_ON_2",), result["effective_failed_mask_ids"])
         self.assertEqual("effective_mask_results_v1", result["ui_mask_authority"])
 
-    def test_runtime_counts_only_fresh_frames_and_auto_confirms_after_stability(self):
+    def test_runtime_approves_on_first_fully_conforming_frame(self):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app.display_f3_ativo = True
         app.display_f3_result_after_id = None
@@ -459,13 +459,8 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         )
 
         app._process_display_auto_check()
-        app._process_display_auto_check()
-        self.assertEqual([], events)
-        self.assertEqual(1, app._display_auto_stable_frames)
-
-        app.camera_ultimo_frame_id = 2
-        app._process_display_auto_check()
         self.assertEqual([True], events)
+        self.assertEqual(0, app._display_auto_stable_frames)
 
     def test_auto_mixin_is_before_f3_runtime_and_does_not_replace_trigger_methods(self):
         mro = DesktopProductionApp.__mro__

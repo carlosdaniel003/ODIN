@@ -7,7 +7,7 @@ from src.platform.display_f3_final_check_stability import estabilizar_check_fina
 
 
 class _FakeApp:
-    DISPLAY_AUTO_OK_STABLE_FRAMES = 2
+    DISPLAY_AUTO_OK_STABLE_FRAMES = 1
 
     def __init__(self, *, check_id="CHECK_005", check_name="NOVO CHECK"):
         self.display_f3_ativo = True
@@ -76,27 +76,16 @@ class _FakeApp:
 
 
 class DisplayF3FinalCheckStabilityTests(unittest.TestCase):
-    def test_future_check_accumulates_two_frames_even_if_legacy_counter_was_zero(self):
+    def test_future_check_registers_on_first_fully_approved_frame(self):
         app = _FakeApp(check_id="CHECK_005", check_name="HDMI")
         context = app._display_auto_current_context()
 
         first = estabilizar_check_final_f3(app, context)
         self.assertTrue(first["counted"])
         self.assertEqual(first["frames"], 1)
-        self.assertFalse(first["registered"])
-        self.assertEqual(app._display_auto_stable_frames, 1)
-        self.assertEqual(app.registered, [])
-
-        # Simula exatamente o bug: outra camada histórica volta a zerar o campo
-        # legado entre frames. A estabilidade final própria não pode se perder.
-        app._display_auto_stable_frames = 0
-        app._display_auto_last_decision = None
-        app.camera_ultimo_frame_id = 101
-
-        second = estabilizar_check_final_f3(app, context)
-        self.assertEqual(second["frames"], 2)
-        self.assertTrue(second["registered"])
-        self.assertEqual(second["register_event"], "check_advanced")
+        self.assertEqual(first["required"], 1)
+        self.assertTrue(first["registered"])
+        self.assertEqual(first["register_event"], "check_advanced")
         self.assertEqual(app.registered, [True])
 
     def test_intermitente_nao_registra_enquanto_fase_acesa_nao_foi_observada(self):

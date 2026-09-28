@@ -186,7 +186,7 @@ class DisplayF3PhysicalTransitionAuthorityTests(unittest.TestCase):
             result["reason"],
         )
 
-    def test_h1_nao_confirma_se_contorno_identifica_aux(self):
+    def test_h1_nao_confirma_se_contorno_identifica_aux_sem_28_28(self):
         app = _App()
         app.display_check_runtime = _Runtime(current_index=0)
         app._display_f3_check_identity_status = {
@@ -198,6 +198,70 @@ class DisplayF3PhysicalTransitionAuthorityTests(unittest.TestCase):
             "margin": 0.11,
         }
         result = authority.avaliar_entrada_fisica_check_f3(app)
+
+        self.assertFalse(result["confirmed"])
+        self.assertEqual("contorno_identificou_outro_check", result["reason"])
+
+    def test_h1_28_de_28_confirma_mesmo_se_contorno_ainda_prefere_aux(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=0)
+        app._display_f3_check_identity_status = {
+            "available": True,
+            "confirmed": True,
+            "best_check_id": "CHECK_003",
+            "best_check_name": "AUX",
+            "best_score": 0.84,
+            "margin": 0.11,
+        }
+        analysis = {
+            "ready": True,
+            "approved": True,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_001",
+            "check_name": "H1",
+            "active_mask_count": 28,
+            "matched_mask_count": 28,
+        }
+
+        result = authority.avaliar_entrada_fisica_check_f3(
+            app,
+            analysis=analysis,
+        )
+
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(
+            authority.F3_FIRST_CHECK_FULL_MASK_AUTHORITY_SOURCE,
+            result["source"],
+        )
+        self.assertEqual(
+            "primeiro_check_conforme_por_todas_mascaras",
+            result["reason"],
+        )
+        self.assertEqual(28, result["matched_mask_count"])
+        self.assertEqual(28, result["active_mask_count"])
+
+    def test_h1_27_de_28_nao_bypassa_identidade_do_contorno(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=0)
+        app._display_f3_check_identity_status = {
+            "available": True,
+            "confirmed": True,
+            "best_check_id": "CHECK_003",
+            "best_check_name": "AUX",
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_001",
+            "active_mask_count": 28,
+            "matched_mask_count": 27,
+        }
+
+        result = authority.avaliar_entrada_fisica_check_f3(
+            app,
+            analysis=analysis,
+        )
 
         self.assertFalse(result["confirmed"])
         self.assertEqual("contorno_identificou_outro_check", result["reason"])
