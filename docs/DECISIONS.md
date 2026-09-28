@@ -458,8 +458,10 @@ Decisão:
 - remover da configuração do F3 os slots 90°/180°/270° e suas ações de captura,
   carregamento, preview, edição e remoção;
 - odin_display_tracking.json persiste somente a flag de tracking e o contorno
-  canônico por projeto; payloads legados de orientations são ignorados e
-  desaparecem na próxima gravação normalizada do sidecar;
+  canônico por projeto; payloads legados de orientations são migrados e removidos
+  na primeira abertura do store com schema 2;
+- a pasta gerenciada legada display_tracking_orientations é removida nessa mesma
+  migração, eliminando as fotos 90°/180°/270° que deixaram de ter consumidores;
 - nenhuma imagem angular entra no banco do F3DisplayObjectTracker, recebe bônus
   de score ou substitui temporariamente as máscaras do projeto;
 - o contorno salvo em **Placa + Máscaras** permanece como região estrutural de busca;

@@ -23,10 +23,12 @@ from src.platform.display_f3_object_tracking import (
     F3TrackingConfigStore,
     _normalize_points,
     _valid_frame,
+    canonical_board_points,
     draw_reference_geometry,
     photo_from_bgr,
     reset_tracking_runtime,
     set_tracking_enabled,
+    transform_points,
 )
 from src.platform.display_mask_geometry import numero_mascara_display
 from src.platform.display_project_repository import normalizar_nome_projeto_display

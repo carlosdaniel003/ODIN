@@ -19,6 +19,7 @@ deste módulo.
 import base64
 import json
 import math
+import shutil
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -222,6 +223,45 @@ class F3TrackingConfigStore:
         self.config_file = config_file.parent / F3_TRACKING_CONFIG_FILENAME
         self._cache_signature: tuple[int, int] | None = None
         self._cache_data: dict | None = None
+        self._migrate_legacy_rotation_state()
+
+    def _migrate_legacy_rotation_state(self) -> None:
+        """Remove definitivamente o banco angular legado sem tocar outras referências."""
+
+        legacy_image_dir = self.config_file.parent / "display_tracking_orientations"
+        try:
+            if legacy_image_dir.is_dir():
+                shutil.rmtree(legacy_image_dir)
+        except OSError:
+            # Falha de limpeza não pode impedir a abertura do Projeto Display.
+            pass
+
+        if not self.config_file.is_file():
+            return
+        try:
+            data = json.loads(self.config_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+
+        try:
+            schema_version = int(data.get("schema_version", 0) or 0)
+        except (TypeError, ValueError):
+            schema_version = 0
+
+        projects = data.get("projects", {})
+        has_legacy_orientations = bool(
+            isinstance(projects, dict)
+            and any(
+                isinstance(project, dict) and "orientations" in project
+                for project in projects.values()
+            )
+        )
+        if schema_version < F3_TRACKING_SCHEMA_VERSION or has_legacy_orientations:
+            # _write normaliza para flag + contorno canônico e elimina
+            # imagens/contornos/máscaras pertencentes aos antigos slots.
+            self._write(data)
 
     @staticmethod
     def _empty() -> dict:

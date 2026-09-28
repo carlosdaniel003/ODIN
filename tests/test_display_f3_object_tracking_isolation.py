@@ -73,8 +73,15 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
 
     def test_tracking_sidecar_ignores_and_purges_legacy_rotation_payloads(self):
         with tempfile.TemporaryDirectory() as directory:
-            store = self._store(directory)
-            store.config_file.write_text(
+            config_file = Path(directory) / tracking.F3_TRACKING_CONFIG_FILENAME
+            legacy_image_dir = (
+                Path(directory)
+                / "display_tracking_orientations"
+                / "display_teste"
+            )
+            legacy_image_dir.mkdir(parents=True)
+            (legacy_image_dir / "orientation_90.png").write_bytes(b"legacy")
+            config_file.write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
@@ -84,7 +91,15 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                                 "board_points": [[10, 10], [300, 10], [300, 200], [10, 200]],
                                 "orientations": {
                                     "orientation_90": {
-                                        "image_path": "legacy.png",
+                                        "image_path": str(
+                                            legacy_image_dir / "orientation_90.png"
+                                        ),
+                                        "board_points_reference": [
+                                            [10, 10],
+                                            [200, 10],
+                                            [200, 150],
+                                            [10, 150],
+                                        ],
                                         "masks_reference": [{"id": "MASK_001"}],
                                     }
                                 },
@@ -94,13 +109,19 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+
+            store = self._store(directory)
             loaded = store._load_shared()
             project = loaded["projects"]["DISPLAY TESTE"]
             self.assertNotIn("orientations", project)
             self.assertEqual(4, len(project["board_points"]))
-            store.set_enabled(False)
-            persisted = json.loads(store.config_file.read_text(encoding="utf-8"))
+            self.assertFalse(
+                (Path(directory) / "display_tracking_orientations").exists()
+            )
+
+            persisted = json.loads(config_file.read_text(encoding="utf-8"))
             self.assertEqual(2, persisted["schema_version"])
+            self.assertTrue(persisted[tracking.F3_TRACKING_SETTING_KEY])
             self.assertNotIn("orientations", persisted["projects"]["DISPLAY TESTE"])
 
     def test_canonical_board_contour_persists_without_rotation_slots(self):
