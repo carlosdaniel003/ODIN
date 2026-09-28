@@ -152,6 +152,13 @@ def preparar_gate_decisao_sonda_exata_f3(
     }
     app._display_f3_exact_decision_bridge_last = info
 
+    # No produto final a decisão pertence ao F3CheckAnalyzerAuthority. Este
+    # bridge continua apenas para composições legadas/testes sem a autoridade
+    # canônica e nunca pode promover estado ou registrar CHECK em paralelo.
+    if bool(getattr(app, "_display_f3_runtime_authorities_installed", False)):
+        info["blocked_reason"] = "autoridade_canonica_runtime_ativa"
+        return False
+
     if not bool(getattr(app, "display_f3_ativo", False)):
         info["blocked_reason"] = "f3_inativo"
         return False

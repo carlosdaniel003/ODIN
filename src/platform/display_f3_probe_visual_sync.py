@@ -8,10 +8,10 @@ máscaras e atualizar o estado operacional, mas `_display_auto_last_analysis`
 continuava vazio. Como o overlay ao vivo lê esse atributo, todas as ROIs eram
 renderizadas em cinza mesmo com o CHECK reconhecido.
 
-Esta camada publica somente a análise óptica já calculada pela sonda; não executa
-nova análise e não cria uma segunda autoridade de OK/NG. Se o registro do CHECK
-for bloqueado pelo gate físico, também corrige o retorno enganoso `advanced=True`
-e conserva a análise visual para o próximo frame produtivo.
+Esta camada é compatibilidade para composições legadas. Quando
+`F3RuntimeAuthorities` está instalado, a sonda permanece somente diagnóstica:
+não substitui `_display_auto_last_analysis`, não muda o overlay e não participa
+de OK/NG. Assim a UI sempre reflete a análise canônica com geometria rastreada.
 """
 
 import src.platform.display_f3_live_diagnostic_trace as trace_module
@@ -40,6 +40,9 @@ def _current_context(app) -> dict | None:
 
 
 def _runtime_blocks_visual_probe(app) -> bool:
+    # D-008/D-015: debug/sonda não pode sobrescrever a autoridade canônica.
+    if bool(getattr(app, "_display_f3_runtime_authorities_installed", False)):
+        return True
     if not bool(getattr(app, "display_f3_ativo", False)):
         return True
     if getattr(app, "display_f3_result_after_id", None) is not None:

@@ -144,6 +144,45 @@ class DisplayF3ProbeVisualSyncTests(unittest.TestCase):
         self.assertIsNone(app._display_auto_last_analysis)
         self.assertEqual("CHECK_002", app.current["check_id"])
 
+    def test_canonical_runtime_preserves_tracked_analysis_instead_of_probe(self):
+        app = _App()
+        app._display_f3_runtime_authorities_installed = True
+        canonical = {
+            "ready": True,
+            "approved": True,
+            "project_name": "TESTE",
+            "check_id": "CHECK_001",
+            "check_name": "H1",
+            "matched_mask_count": 28,
+            "active_mask_count": 28,
+            "live_geometry_override": True,
+            "analysis_frame_source": "tracking_raw_with_live_geometry",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_008",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                }
+            ],
+        }
+        app._display_auto_last_analysis = canonical
+        stale_probe = self._analysis()
+        stale_probe["approved"] = False
+        stale_probe["matched_mask_count"] = 22
+
+        published = module.publicar_analise_visual_sonda_f3(
+            app,
+            app._display_auto_current_context(),
+            stale_probe,
+        )
+
+        self.assertFalse(published)
+        self.assertIs(canonical, app._display_auto_last_analysis)
+        self.assertEqual(28, app._display_auto_last_analysis["matched_mask_count"])
+        self.assertTrue(app._display_auto_last_analysis["live_geometry_override"])
+        self.assertIsNone(app._display_f3_overlay_analysis_cache)
+
     def test_rearm_never_publishes_probe_colors(self):
         app = _App()
         app._display_f3_waiting_empty_rearm = True

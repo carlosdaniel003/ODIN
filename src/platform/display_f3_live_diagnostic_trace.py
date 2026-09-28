@@ -63,6 +63,13 @@ def _context(app):
     return deepcopy(value) if isinstance(value, dict) else None
 
 
+def _canonical_runtime_owns_check_analysis(app) -> bool:
+    """True quando o F3 produtivo já instalou sua autoridade canônica."""
+    return bool(
+        getattr(app, "_display_f3_runtime_authorities_installed", False)
+    )
+
+
 def _project_name(app) -> str:
     repository = getattr(app, "display_project_repository", None)
     if repository is None:
@@ -191,6 +198,44 @@ def _probe_expected_check(app, frame, context: dict | None) -> dict | None:
         }
 
 
+def _select_live_trace_analysis(
+    app,
+    frame,
+    token,
+    context: dict | None,
+) -> tuple[dict | None, str]:
+    """Seleciona telemetria sem criar uma segunda análise produtiva.
+
+    No runtime canônico o resultado semântico pode pertencer a um frame de
+    worker ligeiramente anterior ao frame latest da câmera. Isso é esperado no
+    pipeline assíncrono. Nesse caso reutilizamos a última análise canônica do
+    mesmo CHECK e jamais executamos o gabarito exato estático sobre o frame RAW.
+    """
+    core_token = getattr(app, "_display_auto_last_frame_token", None)
+    core_analysis = getattr(app, "_display_auto_last_analysis", None)
+    same_context = bool(
+        isinstance(context, dict)
+        and isinstance(core_analysis, dict)
+        and str(core_analysis.get("project_name") or "")
+        == str(context.get("project_name") or "")
+        and str(core_analysis.get("check_id") or "")
+        == str(context.get("check_id") or "")
+    )
+
+    if _canonical_runtime_owns_check_analysis(app):
+        if same_context:
+            return deepcopy(core_analysis), "canonical_runtime_analysis"
+        return None, "canonical_runtime_analysis_pending"
+
+    if core_token == token and same_context:
+        return deepcopy(core_analysis), "core_auto_analysis"
+
+    return (
+        _probe_expected_check(app, frame, context),
+        "hidden_exact_probe",
+    )
+
+
 def _probe_required_frames(app, context: dict | None) -> int:
     """O trace observa o mesmo contrato produtivo: um frame conforme."""
     return 1
@@ -249,6 +294,16 @@ def _advance_positive_probe_if_needed(
 ) -> dict | None:
     if not bool(stability.get("confirm")) or not isinstance(context_before, dict):
         return None
+
+    # Com F3RuntimeAuthorities instalado, esta sonda é estritamente observadora.
+    # Somente F3CheckAnalyzerAuthority + state machine podem registrar o CHECK.
+    if _canonical_runtime_owns_check_analysis(app):
+        return {
+            "advanced": False,
+            "reason": "runtime_canonical_owns_check_decision",
+            "source": F3_EXACT_PROBE_SOURCE,
+            "observer_only": True,
+        }
 
     context_after = _context(app)
     if not isinstance(context_after, dict):
@@ -587,21 +642,16 @@ def _install_live_trace_runtime() -> None:
         if getattr(self, "_display_f3_live_trace_last_token", None) == token:
             return result
 
-        # Se o core já analisou este mesmo frame, reaproveitamos o resultado para
-        # não duplicar custo. Se o gate físico bloqueou o core, executamos uma
-        # sonda positiva invisível com o gabarito exato do CHECK esperado.
-        core_token = getattr(self, "_display_auto_last_frame_token", None)
-        core_analysis = getattr(self, "_display_auto_last_analysis", None)
-        if (
-            core_token == token
-            and isinstance(core_analysis, dict)
-            and str(core_analysis.get("check_id") or "") == str(context_before.get("check_id") or "")
-        ):
-            analysis = deepcopy(core_analysis)
-            analysis_source = "core_auto_analysis"
-        else:
-            analysis = _probe_expected_check(self, frame, context_before)
-            analysis_source = "hidden_exact_probe"
+        # O runtime final possui um único dono da classificação do CHECK. O
+        # trace apenas observa essa análise, mesmo que a câmera latest já tenha
+        # avançado alguns frames. A sonda exata histórica só permanece como
+        # fallback em composições legadas que não instalaram as autoridades.
+        analysis, analysis_source = _select_live_trace_analysis(
+            self,
+            frame,
+            token,
+            context_before,
+        )
 
         stability = _update_positive_probe_stability(self, context_before, analysis)
         advance = _advance_positive_probe_if_needed(

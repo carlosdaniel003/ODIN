@@ -82,6 +82,25 @@ class DisplayF3PoweredCycleLatchTests(unittest.TestCase):
         self.assertTrue(state["exact_probe_decision_bridge"])
         self.assertEqual("off", state["physical_reference_kind_before_bridge"])
 
+    def test_runtime_canonico_desativa_bridge_de_decisao_da_sonda(self):
+        app = _App()
+        app._display_f3_runtime_authorities_installed = True
+        original_state = dict(app._display_f3_operational_state)
+
+        used = module.preparar_gate_decisao_sonda_exata_f3(
+            app,
+            app._display_auto_current_context(),
+            self._h1_analysis(),
+            {"confirm": True, "frames": 1, "required": 1},
+        )
+
+        self.assertFalse(used)
+        self.assertEqual(original_state, app._display_f3_operational_state)
+        self.assertEqual(
+            "autoridade_canonica_runtime_ativa",
+            app._display_f3_exact_decision_bridge_last["blocked_reason"],
+        )
+
     def test_sonda_parcial_nao_libera_registro(self):
         app = _App()
         context = app._display_auto_current_context()

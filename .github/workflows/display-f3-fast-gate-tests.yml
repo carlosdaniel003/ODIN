@@ -34,6 +34,9 @@ jobs:
             src/platform/display_f3_single_frame_approval.py \
             src/platform/display_f3_final_check_stability.py \
             src/platform/display_f3_physical_transition_authority.py \
+            src/platform/display_f3_live_diagnostic_trace.py \
+            src/platform/display_f3_probe_visual_sync.py \
+            src/platform/display_f3_powered_cycle_latch.py \
             src/platform/display_f3_runtime_contract_fix.py \
             src/platform/desktop_production_app.py \
             tests/test_display_f3_fast_expected_gate.py \
@@ -41,6 +44,9 @@ jobs:
             tests/test_display_f3_single_frame_approval.py \
             tests/test_display_f3_final_check_stability.py \
             tests/test_display_f3_physical_transition_authority.py \
+            tests/test_display_f3_live_diagnostic_trace.py \
+            tests/test_display_f3_probe_visual_sync.py \
+            tests/test_display_f3_powered_cycle_latch.py \
             tests/test_display_f3_auto_check.py \
             tests/test_display_f3_power_authority.py \
             tests/test_display_f3_live_runtime_fix.py \
@@ -73,6 +79,16 @@ jobs:
             tests.test_display_f3_final_check_stability.DisplayF3FinalCheckStabilityTests.test_future_check_registers_on_first_fully_approved_frame \
             tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_h1_28_de_28_confirma_mesmo_se_contorno_ainda_prefere_aux \
             tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_h1_27_de_28_nao_bypassa_identidade_do_contorno \
+            -v
+
+      - name: Validate canonical CHECK analyzer ownership
+        run: |
+          python -m unittest \
+            tests.test_display_f3_live_diagnostic_trace.DisplayF3LiveDiagnosticTraceTests.test_h1_probe_confirms_on_first_positive_frame \
+            tests.test_display_f3_live_diagnostic_trace.DisplayF3LiveDiagnosticTraceTests.test_canonical_runtime_reuses_core_analysis_when_latest_frame_advanced \
+            tests.test_display_f3_live_diagnostic_trace.DisplayF3LiveDiagnosticTraceTests.test_canonical_runtime_makes_exact_probe_observer_only \
+            tests.test_display_f3_probe_visual_sync.DisplayF3ProbeVisualSyncTests.test_canonical_runtime_preserves_tracked_analysis_instead_of_probe \
+            tests.test_display_f3_powered_cycle_latch.DisplayF3PoweredCycleLatchTests.test_runtime_canonico_desativa_bridge_de_decisao_da_sonda \
             -v
 
       - name: Run fast H1 BLUE tests

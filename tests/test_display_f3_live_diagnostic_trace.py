@@ -210,18 +210,16 @@ class DisplayF3LiveDiagnosticTraceTests(unittest.TestCase):
         self.assertEqual("full_resolution_roi_first", result["comparison_mode"])
         self.assertTrue(result["board_references_complete"])
 
-    def test_h1_probe_requires_two_positive_frames(self):
+    def test_h1_probe_confirms_on_first_positive_frame(self):
         app = _ProbeApp(transient=False)
         context = {"project_name": "TESTE", "check_id": "CHECK_001", "check_name": "H1"}
         analysis = {"approved": True}
 
         first = trace_module._update_positive_probe_stability(app, context, analysis)
-        second = trace_module._update_positive_probe_stability(app, context, analysis)
 
-        self.assertFalse(first["confirm"])
+        self.assertTrue(first["confirm"])
         self.assertEqual(1, first["frames"])
-        self.assertTrue(second["confirm"])
-        self.assertEqual(2, second["frames"])
+        self.assertEqual(1, first["required"])
 
     def test_blue_probe_can_confirm_in_first_exact_frame(self):
         app = _ProbeApp(transient=True)
@@ -242,7 +240,7 @@ class DisplayF3LiveDiagnosticTraceTests(unittest.TestCase):
     def test_exact_positive_probe_can_advance_even_if_global_physical_gate_was_wrong(self):
         app = _AdvanceApp()
         context = dict(app.current)
-        stability = {"confirm": True, "frames": 2, "required": 2}
+        stability = {"confirm": True, "frames": 1, "required": 1}
         event = trace_module._advance_positive_probe_if_needed(
             app,
             context,
@@ -254,6 +252,56 @@ class DisplayF3LiveDiagnosticTraceTests(unittest.TestCase):
         self.assertEqual([True], app.events)
         self.assertEqual("CHECK_002", app.current["check_id"])
         self.assertEqual(trace_module.F3_EXACT_PROBE_SOURCE, app._display_f3_operational_state["source"])
+
+    def test_canonical_runtime_reuses_core_analysis_when_latest_frame_advanced(self):
+        app = _AdvanceApp()
+        app._display_f3_runtime_authorities_installed = True
+        app._display_auto_last_frame_token = ("camera", 2026)
+        app._display_auto_last_analysis = {
+            "ready": True,
+            "approved": True,
+            "project_name": "TESTE",
+            "check_id": "CHECK_001",
+            "matched_mask_count": 28,
+            "active_mask_count": 28,
+            "live_geometry_override": True,
+            "mask_results": [],
+        }
+        context = dict(app.current)
+
+        with patch.object(
+            trace_module,
+            "_probe_expected_check",
+            side_effect=AssertionError("sonda estática não pode rodar no runtime canônico"),
+        ):
+            analysis, source = trace_module._select_live_trace_analysis(
+                app,
+                object(),
+                ("camera", 2035),
+                context,
+            )
+
+        self.assertEqual("canonical_runtime_analysis", source)
+        self.assertTrue(analysis["live_geometry_override"])
+        self.assertEqual(28, analysis["matched_mask_count"])
+
+    def test_canonical_runtime_makes_exact_probe_observer_only(self):
+        app = _AdvanceApp()
+        app._display_f3_runtime_authorities_installed = True
+        context = dict(app.current)
+
+        event = trace_module._advance_positive_probe_if_needed(
+            app,
+            context,
+            {"approved": True},
+            {"confirm": True, "frames": 1, "required": 1},
+        )
+
+        self.assertFalse(event["advanced"])
+        self.assertTrue(event["observer_only"])
+        self.assertEqual("runtime_canonical_owns_check_decision", event["reason"])
+        self.assertEqual([], app.events)
+        self.assertEqual("CHECK_001", app.current["check_id"])
 
     def test_debug_contains_live_mask_data_and_historical_frames(self):
         text = trace_module._append_live_trace_debug(_DebugApp(), "DEBUG BASE")
