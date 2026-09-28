@@ -1382,5 +1382,219 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertNotIn("renderizar_preview_claro_display_f3", no_lock)
 
 
+
+    @staticmethod
+    def _luminous_tracking_scene(*, missing_index: int | None = None):
+        width, height = 640, 480
+        canonical_board = [
+            [120.0, 150.0],
+            [520.0, 150.0],
+            [520.0, 310.0],
+            [120.0, 310.0],
+        ]
+        expected_centers = [
+            [185.0, 190.0],
+            [225.0, 245.0],
+            [275.0, 190.0],
+            [330.0, 245.0],
+            [380.0, 190.0],
+            [430.0, 245.0],
+            [475.0, 190.0],
+        ]
+        rows = [
+            {
+                "mask_id": f"MASK_{index + 1:03d}",
+                "center": center,
+            }
+            for index, center in enumerate(expected_centers)
+        ]
+
+        frame = np.full((height, width, 3), 175, dtype=np.uint8)
+        filter_to_current = cv2.getRotationMatrix2D(
+            (320.0, 230.0),
+            -7.0,
+            0.96,
+        ).astype(np.float32)
+        filter_to_current[0, 2] += 18.0
+        filter_to_current[1, 2] += 24.0
+        filter_points = tracking.transform_points(
+            canonical_board,
+            filter_to_current,
+        )
+        cv2.fillConvexPoly(
+            frame,
+            np.rint(np.asarray(filter_points)).astype(np.int32),
+            (18, 18, 18),
+            lineType=cv2.LINE_AA,
+        )
+
+        # O display se move alguns pixels em relação ao próprio filtro. A pose
+        # final precisa vir dos segmentos luminosos, não do offset do retângulo.
+        display_to_current = filter_to_current.copy()
+        display_to_current[0, 2] += 26.0
+        display_to_current[1, 2] -= 11.0
+
+        canonical = np.asarray(expected_centers, dtype=np.float32).reshape(-1, 1, 2)
+        observed = cv2.transform(
+            canonical,
+            display_to_current,
+        ).reshape(-1, 2)
+        for index, point in enumerate(observed):
+            if missing_index is not None and index == int(missing_index):
+                continue
+            cx, cy = int(round(float(point[0]))), int(round(float(point[1])))
+            cv2.rectangle(
+                frame,
+                (cx - 12, cy - 4),
+                (cx + 12, cy + 4),
+                (250, 250, 250),
+                -1,
+            )
+
+        # Emissão extra simula segmento indevido/reflexo: ela não pode impedir
+        # o encaixe do padrão esperado.
+        extra = cv2.transform(
+            np.asarray([[[455.0, 275.0]]], dtype=np.float32),
+            display_to_current,
+        ).reshape(2)
+        ex, ey = int(round(float(extra[0]))), int(round(float(extra[1])))
+        cv2.rectangle(
+            frame,
+            (ex - 12, ey - 4),
+            (ex + 12, ey + 4),
+            (245, 245, 245),
+            -1,
+        )
+        return (
+            frame,
+            canonical_board,
+            rows,
+            filter_to_current,
+            display_to_current,
+            observed,
+        )
+
+    def test_luminous_segments_refine_pose_inside_moving_filter(self):
+        (
+            frame,
+            canonical_board,
+            rows,
+            filter_to_current,
+            display_to_current,
+            observed,
+        ) = self._luminous_tracking_scene()
+
+        coarse_current_to_canonical = cv2.invertAffineTransform(
+            filter_to_current
+        )
+        result = tracking._find_luminous_segment_pose(
+            frame,
+            canonical_board,
+            rows,
+            (640, 480),
+            base_matrix=coarse_current_to_canonical,
+        )
+
+        self.assertTrue(result["available"], result)
+        self.assertGreaterEqual(result["matched_count"], 6)
+        self.assertEqual("tracked_filter", result["filter_source"])
+
+        estimated = np.asarray(result["matrix"], dtype=np.float32).reshape(2, 3)
+        recovered = cv2.transform(
+            observed.reshape(-1, 1, 2),
+            estimated,
+        ).reshape(-1, 2)
+        canonical = np.asarray(
+            [row["center"] for row in rows],
+            dtype=np.float32,
+        )
+        error = np.linalg.norm(recovered - canonical, axis=1)
+        self.assertLess(float(np.median(error)), 6.0)
+
+        # A transformação final deve acompanhar o display, que foi deslocado
+        # em relação ao filtro, e não permanecer na pose grosseira do contorno.
+        coarse_recovered = cv2.transform(
+            observed.reshape(-1, 1, 2),
+            coarse_current_to_canonical,
+        ).reshape(-1, 2)
+        coarse_error = np.linalg.norm(coarse_recovered - canonical, axis=1)
+        self.assertLess(
+            float(np.median(error)),
+            float(np.median(coarse_error)),
+        )
+
+    def test_luminous_grid_survives_missing_expected_on_and_extra_light(self):
+        (
+            frame,
+            canonical_board,
+            rows,
+            _filter_to_current,
+            _display_to_current,
+            _observed,
+        ) = self._luminous_tracking_scene(missing_index=3)
+
+        result = tracking._find_luminous_segment_pose(
+            frame,
+            canonical_board,
+            rows,
+            (640, 480),
+        )
+
+        self.assertTrue(result["available"], result)
+        self.assertGreaterEqual(result["matched_count"], 5)
+        self.assertIn(
+            "MASK_004",
+            result["missing_expected_on_mask_ids"],
+        )
+        self.assertGreaterEqual(
+            result["luminous_component_count"],
+            result["matched_count"],
+        )
+
+    def test_dark_filter_without_emission_does_not_search_off_segments(self):
+        width, height = 640, 480
+        canonical_board = [
+            [120.0, 150.0],
+            [520.0, 150.0],
+            [520.0, 310.0],
+            [120.0, 310.0],
+        ]
+        rows = [
+            {"mask_id": "MASK_001", "center": [190.0, 190.0]},
+            {"mask_id": "MASK_002", "center": [260.0, 240.0]},
+            {"mask_id": "MASK_003", "center": [390.0, 190.0]},
+        ]
+        frame = np.full((height, width, 3), 180, dtype=np.uint8)
+        cv2.fillConvexPoly(
+            frame,
+            np.asarray(canonical_board, dtype=np.int32),
+            (20, 20, 20),
+        )
+
+        result = tracking._find_luminous_segment_pose(
+            frame,
+            canonical_board,
+            rows,
+            (width, height),
+        )
+
+        self.assertFalse(result["available"])
+        self.assertEqual(
+            "filter_found_without_luminous_segments",
+            result["reason"],
+        )
+
+    def test_live_tracking_calls_luminous_refinement_after_structural_attempt(self):
+        source = inspect.getsource(tracking.align_frame_for_f3)
+        self.assertIn(
+            "_rescue_luminous_segment_tracking_lock",
+            source,
+        )
+        self.assertIn(
+            "base_result=result if bool(result.locked) else None",
+            source,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

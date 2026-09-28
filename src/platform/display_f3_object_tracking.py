@@ -45,6 +45,7 @@ from src.platform.display_mask_geometry import (
     sincronizar_formato_mascara_display,
 )
 from src.platform.display_project_repository import (
+    DISPLAY_CHECK_STATE_ON,
     DisplayProjectRepository,
     normalizar_mascaras_display,
     normalizar_nome_projeto_display,
@@ -162,6 +163,24 @@ F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP = 24
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
 F3_TRACKING_SELECTED_BGR = (94, 234, 212)
+
+# Reaquisição/refino guiado somente pelos segmentos que realmente emitem luz.
+# O contorno salvo passa a representar o filtro preto: ele limita a busca, mas
+# nunca fixa as 28 máscaras no frame atual. As máscaras configuradas são o
+# modelo canônico que os pontos luminosos precisam reencontrar.
+F3_TRACKING_FILTER_SEARCH_MAX_WIDTH = 960
+F3_TRACKING_FILTER_MIN_AREA_FACTOR = 0.28
+F3_TRACKING_FILTER_MAX_AREA_FACTOR = 3.60
+F3_TRACKING_FILTER_MIN_RECTANGULARITY = 0.46
+F3_TRACKING_FILTER_MIN_ASPECT_SCORE = 0.50
+F3_TRACKING_FILTER_MAX_CANDIDATES = 6
+F3_TRACKING_LUMINOUS_MIN_DYNAMIC_RANGE = 32.0
+F3_TRACKING_LUMINOUS_MIN_COMPONENTS = 3
+F3_TRACKING_LUMINOUS_MIN_MATCH_RATIO = 0.55
+F3_TRACKING_LUMINOUS_COARSE_GATE_FRACTION = 0.16
+F3_TRACKING_LUMINOUS_FINAL_GATE_FRACTION = 0.055
+F3_TRACKING_LUMINOUS_MIN_COMPONENT_AREA_FRACTION = 0.00010
+F3_TRACKING_LUMINOUS_MAX_COMPONENT_AREA_FRACTION = 0.055
 
 
 def _utc_now() -> str:
@@ -1128,6 +1147,1031 @@ def build_tracking_mask(
     if int(cv2.countNonZero(mask)) < 500:
         return None
     return mask
+
+
+
+def _quad_from_points(points) -> list[list[float]]:
+    """Reduz um contorno salvo ao retângulo orientado usado como filtro."""
+    normalized = _normalize_points(points, minimum=3)
+    if len(normalized) < 3:
+        return []
+    try:
+        rect = cv2.minAreaRect(
+            np.asarray(normalized, dtype=np.float32).reshape(-1, 1, 2)
+        )
+        box = cv2.boxPoints(rect)
+    except Exception:
+        return []
+    return [
+        [float(point[0]), float(point[1])]
+        for point in np.asarray(box, dtype=np.float32).reshape(-1, 2)
+    ]
+
+
+def _quad_metrics(points) -> tuple[float, float, float]:
+    quad = _quad_from_points(points)
+    if len(quad) != 4:
+        return 0.0, 0.0, 0.0
+    try:
+        rect = cv2.minAreaRect(
+            np.asarray(quad, dtype=np.float32).reshape(-1, 1, 2)
+        )
+        width, height = float(rect[1][0]), float(rect[1][1])
+    except Exception:
+        return 0.0, 0.0, 0.0
+    major = max(width, height)
+    minor = min(width, height)
+    area = major * minor
+    return major, minor, area
+
+
+def _filter_board_matrix_candidates(current_board, canonical_board) -> list[np.ndarray]:
+    """Gera CURRENT -> CANÔNICO para as orientações possíveis do filtro.
+
+    Um retângulo isolado é ambíguo em 0/90/180/270 graus. A etapa luminosa
+    escolhe depois qual hipótese faz os segmentos ACESOS coincidirem com o
+    padrão ON do CHECK atual.
+    """
+    current = _quad_from_points(current_board)
+    canonical = _quad_from_points(canonical_board)
+    if len(current) != 4 or len(canonical) != 4:
+        return []
+
+    cur = np.asarray(current, dtype=np.float32)
+    can = np.asarray(canonical, dtype=np.float32)
+    matrices: list[np.ndarray] = []
+    signatures: set[tuple] = set()
+
+    for reverse in (False, True):
+        ordered = cur[::-1].copy() if reverse else cur.copy()
+        for shift in range(4):
+            candidate = np.roll(ordered, shift, axis=0)
+            matrix = _estimate_affine_partial(candidate, can)
+            if matrix is None:
+                continue
+            key = tuple(
+                np.asarray(matrix, dtype=np.float32).round(4).reshape(-1).tolist()
+            )
+            if key in signatures:
+                continue
+            signatures.add(key)
+            matrices.append(
+                np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+            )
+    return matrices
+
+
+def _detect_dark_filter_candidates(
+    frame,
+    canonical_board,
+    canonical_resolution,
+) -> list[dict]:
+    """Localiza o retângulo preto sem usar a posição salva como posição atual."""
+    if not _valid_frame(frame):
+        return []
+    resolution = normalizar_resolucao_display(canonical_resolution)
+    if resolution is None:
+        return []
+
+    canonical_major, canonical_minor, canonical_area = _quad_metrics(
+        canonical_board
+    )
+    if canonical_area <= 1.0 or canonical_minor <= 1.0:
+        return []
+
+    frame_h, frame_w = frame.shape[:2]
+    canonical_frame_area = max(1.0, float(resolution[0] * resolution[1]))
+    expected_area_fraction = canonical_area / canonical_frame_area
+    expected_aspect = canonical_major / max(1.0, canonical_minor)
+
+    search_scale = min(
+        1.0,
+        float(F3_TRACKING_FILTER_SEARCH_MAX_WIDTH) / max(1.0, float(frame_w)),
+    )
+    if search_scale < 0.999:
+        search = cv2.resize(
+            frame,
+            (
+                max(1, int(round(frame_w * search_scale))),
+                max(1, int(round(frame_h * search_scale))),
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+    else:
+        search = frame
+
+    try:
+        gray = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        _threshold, dark = cv2.threshold(
+            gray,
+            0,
+            255,
+            cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU,
+        )
+        dark = cv2.morphologyEx(
+            dark,
+            cv2.MORPH_CLOSE,
+            np.ones((5, 5), dtype=np.uint8),
+            iterations=1,
+        )
+        contours, _hierarchy = cv2.findContours(
+            dark,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+    except Exception:
+        return []
+
+    search_h, search_w = gray.shape[:2]
+    search_area = max(1.0, float(search_w * search_h))
+    candidates: list[dict] = []
+
+    for contour in contours:
+        try:
+            contour_area = float(cv2.contourArea(contour))
+            rect = cv2.minAreaRect(contour)
+            rw, rh = float(rect[1][0]), float(rect[1][1])
+        except Exception:
+            continue
+        if contour_area <= 0.0 or rw <= 2.0 or rh <= 2.0:
+            continue
+
+        major = max(rw, rh)
+        minor = min(rw, rh)
+        rect_area = major * minor
+        area_fraction = rect_area / search_area
+        area_factor = area_fraction / max(1e-9, expected_area_fraction)
+        if not (
+            F3_TRACKING_FILTER_MIN_AREA_FACTOR
+            <= area_factor
+            <= F3_TRACKING_FILTER_MAX_AREA_FACTOR
+        ):
+            continue
+
+        rectangularity = contour_area / max(1.0, rect_area)
+        if rectangularity < F3_TRACKING_FILTER_MIN_RECTANGULARITY:
+            continue
+
+        aspect = major / max(1.0, minor)
+        aspect_score = math.exp(
+            -abs(math.log(max(1e-6, aspect / expected_aspect)))
+        )
+        if aspect_score < F3_TRACKING_FILTER_MIN_ASPECT_SCORE:
+            continue
+
+        box = cv2.boxPoints(rect).astype(np.float32)
+        region = np.zeros_like(gray, dtype=np.uint8)
+        cv2.fillConvexPoly(
+            region,
+            np.rint(box).astype(np.int32),
+            255,
+            lineType=cv2.LINE_AA,
+        )
+        pixels = gray[region > 0]
+        if pixels.size < 64:
+            continue
+        darkness_score = max(
+            0.0,
+            min(1.0, 1.0 - float(np.median(pixels)) / 255.0),
+        )
+        area_score = math.exp(abs(math.log(max(1e-6, area_factor))) * -1.0)
+        score = (
+            aspect_score * 2.0
+            + rectangularity
+            + area_score
+            + darkness_score
+        )
+
+        inv_scale = 1.0 / max(1e-9, search_scale)
+        points = [
+            [float(point[0]) * inv_scale, float(point[1]) * inv_scale]
+            for point in box
+        ]
+        candidates.append(
+            {
+                "points": points,
+                "score": float(score),
+                "area_factor": float(area_factor),
+                "aspect_score": float(aspect_score),
+                "rectangularity": float(rectangularity),
+                "darkness_score": float(darkness_score),
+                "source": "dark_filter_detector",
+            }
+        )
+
+    candidates.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+    return candidates[:F3_TRACKING_FILTER_MAX_CANDIDATES]
+
+
+def _detect_luminous_segment_centers(frame, filter_points) -> dict:
+    """Detecta somente emissão luminosa dentro do filtro preto.
+
+    Segmentos apagados não são procurados. Eles serão julgados depois pelo
+    classificador normal nas ROIs que a pose luminosa reposicionar.
+    """
+    if not _valid_frame(frame):
+        return {
+            "available": False,
+            "reason": "invalid_frame",
+            "centers": [],
+        }
+    points = _normalize_points(filter_points, minimum=3)
+    if len(points) < 3:
+        return {
+            "available": False,
+            "reason": "filter_geometry_missing",
+            "centers": [],
+        }
+
+    h, w = frame.shape[:2]
+    polygon = np.rint(
+        np.asarray(points, dtype=np.float32)
+    ).astype(np.int32)
+    filter_mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(filter_mask, [polygon], 255, lineType=cv2.LINE_AA)
+    if int(cv2.countNonZero(filter_mask)) < 128:
+        return {
+            "available": False,
+            "reason": "filter_area_too_small",
+            "centers": [],
+        }
+
+    # Remove a borda do filtro, que costuma produzir reflexo forte.
+    erode_px = max(
+        2,
+        int(
+            round(
+                min(
+                    max(1.0, _quad_metrics(points)[0]),
+                    max(1.0, _quad_metrics(points)[1]),
+                )
+                * 0.018
+            )
+        ),
+    )
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (erode_px * 2 + 1, erode_px * 2 + 1),
+    )
+    inner_mask = cv2.erode(filter_mask, kernel, iterations=1)
+    if int(cv2.countNonZero(inner_mask)) < 128:
+        inner_mask = filter_mask
+
+    try:
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        value = hsv[:, :, 2]
+    except Exception:
+        return {
+            "available": False,
+            "reason": "hsv_prepare_failed",
+            "centers": [],
+        }
+
+    samples = value[inner_mask > 0]
+    if samples.size < 128:
+        return {
+            "available": False,
+            "reason": "filter_samples_insufficient",
+            "centers": [],
+        }
+
+    median_v = float(np.percentile(samples, 50))
+    p95_v = float(np.percentile(samples, 95))
+    p995_v = float(np.percentile(samples, 99.5))
+    dynamic_range = p995_v - median_v
+    if dynamic_range < F3_TRACKING_LUMINOUS_MIN_DYNAMIC_RANGE:
+        return {
+            "available": False,
+            "reason": "no_luminous_emission",
+            "centers": [],
+            "median_v": round(median_v, 3),
+            "p95_v": round(p95_v, 3),
+            "p995_v": round(p995_v, 3),
+            "dynamic_range": round(dynamic_range, 3),
+        }
+
+    threshold = median_v + max(24.0, dynamic_range * 0.38)
+    threshold = max(45.0, min(p995_v - 2.0, threshold))
+    binary = np.zeros((h, w), dtype=np.uint8)
+    binary[
+        (value.astype(np.float32) >= float(threshold))
+        & (inner_mask > 0)
+    ] = 255
+    binary = cv2.morphologyEx(
+        binary,
+        cv2.MORPH_OPEN,
+        np.ones((2, 2), dtype=np.uint8),
+        iterations=1,
+    )
+    binary = cv2.morphologyEx(
+        binary,
+        cv2.MORPH_CLOSE,
+        np.ones((3, 3), dtype=np.uint8),
+        iterations=1,
+    )
+
+    try:
+        contours, _hierarchy = cv2.findContours(
+            binary,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+    except Exception:
+        contours = []
+
+    filter_area = max(
+        1.0,
+        abs(float(cv2.contourArea(polygon.reshape(-1, 1, 2)))),
+    )
+    filter_major, filter_minor, _filter_rect_area = _quad_metrics(points)
+    centers: list[list[float]] = []
+    components: list[dict] = []
+
+    for contour in contours:
+        try:
+            area = float(cv2.contourArea(contour))
+            rect = cv2.minAreaRect(contour)
+            (cx, cy), (rw, rh), angle = rect
+        except Exception:
+            continue
+        if area <= 0.0 or rw <= 1.0 or rh <= 1.0:
+            continue
+        area_fraction = area / filter_area
+        if not (
+            F3_TRACKING_LUMINOUS_MIN_COMPONENT_AREA_FRACTION
+            <= area_fraction
+            <= F3_TRACKING_LUMINOUS_MAX_COMPONENT_AREA_FRACTION
+        ):
+            continue
+
+        major = max(float(rw), float(rh))
+        minor = min(float(rw), float(rh))
+        elongation = major / max(1.0, minor)
+        if elongation < 1.18:
+            continue
+        if major > max(12.0, filter_major * 0.38):
+            continue
+        if minor > max(10.0, filter_minor * 0.34):
+            continue
+
+        rectangularity = area / max(1.0, float(rw) * float(rh))
+        if rectangularity < 0.18:
+            continue
+
+        center = [float(cx), float(cy)]
+        centers.append(center)
+        components.append(
+            {
+                "center": center,
+                "area": round(area, 3),
+                "area_fraction": round(area_fraction, 6),
+                "elongation": round(elongation, 4),
+                "rectangularity": round(rectangularity, 4),
+                "angle": round(float(angle), 3),
+            }
+        )
+
+    return {
+        "available": len(centers) >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
+        "reason": (
+            "luminous_segments_detected"
+            if len(centers) >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+            else "luminous_components_insufficient"
+        ),
+        "centers": centers,
+        "components": components,
+        "threshold_v": round(float(threshold), 3),
+        "median_v": round(median_v, 3),
+        "p95_v": round(p95_v, 3),
+        "p995_v": round(p995_v, 3),
+        "dynamic_range": round(dynamic_range, 3),
+    }
+
+
+def _canonical_check_masks_for_luminous_tracking(
+    runtime,
+    project: dict,
+    check: dict,
+) -> list[dict]:
+    """Resolve as máscaras do CHECK no espaço canônico sem fixá-las no frame."""
+    check_id = str(check.get("id") or "")
+    reference = (
+        runtime.references.get(f"check:{check_id}")
+        if isinstance(getattr(runtime, "references", None), dict)
+        else None
+    )
+    mapping = (
+        reference.get("reference_to_canonical")
+        if isinstance(reference, dict)
+        else None
+    )
+
+    local_masks = _reference_masks_from_overrides(
+        project,
+        check.get("mask_overrides_reference", {}),
+    )
+    if mapping is None:
+        board_ref, _masks_ref = _check_reference_geometry(project, check)
+        pose_masks = _reference_masks_from_overrides(
+            project,
+            check.get("mask_overrides_reference", {}),
+            explicit_only=True,
+        )
+        mapping = estimate_reference_to_canonical(
+            project,
+            runtime.store,
+            board_ref,
+            pose_masks,
+        )
+
+    if mapping is not None and local_masks:
+        transformed: list[dict] = []
+        for local in local_masks:
+            item = transform_mask(local, mapping)
+            if item is not None:
+                transformed.append(item)
+        if transformed:
+            return transformed
+
+    masks = getattr(runtime, "canonical_masks", None)
+    if masks:
+        return [
+            converter_mascara_legada_para_editor(mask)
+            for mask in masks
+            if isinstance(mask, dict)
+        ]
+    return [
+        converter_mascara_legada_para_editor(mask)
+        for mask in (project.get("masks", []) or [])
+        if isinstance(mask, dict)
+    ]
+
+
+def _expected_on_rows(masks, states) -> list[dict]:
+    state_map = states if isinstance(states, dict) else {}
+    rows: list[dict] = []
+    for mask in masks or []:
+        if not isinstance(mask, dict):
+            continue
+        mask_id = str(mask.get("id") or "")
+        if state_map.get(mask_id) != DISPLAY_CHECK_STATE_ON:
+            continue
+        center = _mask_center(mask)
+        if center is None:
+            continue
+        rows.append(
+            {
+                "mask_id": mask_id,
+                "center": [float(center[0]), float(center[1])],
+            }
+        )
+    return rows
+
+
+def _greedy_point_matches(
+    expected_points,
+    observed_points,
+    gate_px: float,
+) -> list[tuple[int, int, float]]:
+    expected = np.asarray(expected_points, dtype=np.float32).reshape(-1, 2)
+    observed = np.asarray(observed_points, dtype=np.float32).reshape(-1, 2)
+    if not len(expected) or not len(observed):
+        return []
+
+    pairs: list[tuple[float, int, int]] = []
+    for expected_index, expected_point in enumerate(expected):
+        distances = np.linalg.norm(observed - expected_point, axis=1)
+        for observed_index, distance in enumerate(distances):
+            if float(distance) <= float(gate_px):
+                pairs.append(
+                    (float(distance), int(expected_index), int(observed_index))
+                )
+    pairs.sort(key=lambda item: item[0])
+
+    used_expected: set[int] = set()
+    used_observed: set[int] = set()
+    matched: list[tuple[int, int, float]] = []
+    for distance, expected_index, observed_index in pairs:
+        if expected_index in used_expected or observed_index in used_observed:
+            continue
+        used_expected.add(expected_index)
+        used_observed.add(observed_index)
+        matched.append((expected_index, observed_index, distance))
+    return matched
+
+
+def _fit_luminous_pose(
+    canonical_board,
+    expected_rows,
+    luminous_centers,
+    coarse_matrices,
+) -> dict | None:
+    if (
+        len(expected_rows) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+        or len(luminous_centers) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+    ):
+        return None
+
+    canonical_points = np.asarray(
+        [row["center"] for row in expected_rows],
+        dtype=np.float32,
+    ).reshape(-1, 2)
+    observed = np.asarray(luminous_centers, dtype=np.float32).reshape(-1, 2)
+    board_quad = _quad_from_points(canonical_board)
+    if len(board_quad) != 4:
+        return None
+    canonical_board_array = np.asarray(board_quad, dtype=np.float32).reshape(-1, 1, 2)
+
+    best = None
+    for coarse in coarse_matrices or []:
+        try:
+            matrix = np.asarray(coarse, dtype=np.float32).reshape(2, 3)
+            canonical_to_current = cv2.invertAffineTransform(matrix)
+            predicted = cv2.transform(
+                canonical_points.reshape(-1, 1, 2),
+                canonical_to_current,
+            ).reshape(-1, 2)
+            current_board = cv2.transform(
+                canonical_board_array,
+                canonical_to_current,
+            ).reshape(-1, 2)
+        except Exception:
+            continue
+
+        board_diagonal = max(
+            1.0,
+            float(
+                np.linalg.norm(
+                    np.max(current_board, axis=0)
+                    - np.min(current_board, axis=0)
+                )
+            ),
+        )
+        coarse_gate = max(
+            10.0,
+            board_diagonal * F3_TRACKING_LUMINOUS_COARSE_GATE_FRACTION,
+        )
+        coarse_matches = _greedy_point_matches(
+            predicted,
+            observed,
+            coarse_gate,
+        )
+        if len(coarse_matches) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS:
+            continue
+
+        source_points = [
+            observed[observed_index].tolist()
+            for _expected_index, observed_index, _distance in coarse_matches
+        ]
+        target_points = [
+            canonical_points[expected_index].tolist()
+            for expected_index, _observed_index, _distance in coarse_matches
+        ]
+        refined = _estimate_affine_partial(source_points, target_points)
+        if refined is None:
+            continue
+
+        try:
+            refined_inverse = cv2.invertAffineTransform(refined)
+            predicted_refined = cv2.transform(
+                canonical_points.reshape(-1, 1, 2),
+                refined_inverse,
+            ).reshape(-1, 2)
+            refined_board = cv2.transform(
+                canonical_board_array,
+                refined_inverse,
+            ).reshape(-1, 2)
+        except Exception:
+            continue
+
+        refined_diagonal = max(
+            1.0,
+            float(
+                np.linalg.norm(
+                    np.max(refined_board, axis=0)
+                    - np.min(refined_board, axis=0)
+                )
+            ),
+        )
+        final_gate = max(
+            6.0,
+            refined_diagonal * F3_TRACKING_LUMINOUS_FINAL_GATE_FRACTION,
+        )
+        final_matches = _greedy_point_matches(
+            predicted_refined,
+            observed,
+            final_gate,
+        )
+        required = max(
+            F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
+            int(math.ceil(
+                len(expected_rows) * F3_TRACKING_LUMINOUS_MIN_MATCH_RATIO
+            )),
+        )
+        if len(final_matches) < required:
+            continue
+
+        # Reestima uma vez com todas as correspondências finais.
+        final_source = [
+            observed[observed_index].tolist()
+            for _expected_index, observed_index, _distance in final_matches
+        ]
+        final_target = [
+            canonical_points[expected_index].tolist()
+            for expected_index, _observed_index, _distance in final_matches
+        ]
+        final_matrix = _estimate_affine_partial(
+            final_source,
+            final_target,
+        )
+        if final_matrix is None:
+            final_matrix = refined
+
+        final_errors = [float(item[2]) for item in final_matches]
+        median_error = (
+            float(np.median(np.asarray(final_errors, dtype=np.float32)))
+            if final_errors
+            else final_gate
+        )
+        match_ratio = len(final_matches) / max(1, len(expected_rows))
+        matched_indices = {
+            expected_index
+            for expected_index, _observed_index, _distance in final_matches
+        }
+        matched_ids = [
+            str(expected_rows[index]["mask_id"])
+            for index in sorted(matched_indices)
+        ]
+        missing_ids = [
+            str(row["mask_id"])
+            for index, row in enumerate(expected_rows)
+            if index not in matched_indices
+        ]
+        score = (
+            float(len(final_matches)) * 3.0
+            + float(match_ratio) * 12.0
+            - median_error / max(1.0, final_gate)
+        )
+
+        candidate = {
+            "matrix": np.asarray(final_matrix, dtype=np.float32).reshape(2, 3),
+            "matched_mask_ids": matched_ids,
+            "missing_expected_on_mask_ids": missing_ids,
+            "matched_count": int(len(final_matches)),
+            "expected_on_count": int(len(expected_rows)),
+            "match_ratio": float(match_ratio),
+            "median_error_px": float(median_error),
+            "coarse_gate_px": float(coarse_gate),
+            "final_gate_px": float(final_gate),
+            "score": float(score),
+        }
+        if best is None or float(candidate["score"]) > float(best["score"]):
+            best = candidate
+
+    return best
+
+
+def _find_luminous_segment_pose(
+    frame,
+    canonical_board,
+    expected_rows,
+    canonical_resolution,
+    *,
+    base_matrix=None,
+) -> dict:
+    """Filtro preto -> emissão -> encaixe dos ON esperados -> pose dinâmica."""
+    if not _valid_frame(frame):
+        return {
+            "available": False,
+            "reason": "invalid_frame",
+        }
+    resolution = normalizar_resolucao_display(canonical_resolution)
+    if resolution is None:
+        return {
+            "available": False,
+            "reason": "master_resolution_missing",
+        }
+    if len(expected_rows) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS:
+        return {
+            "available": False,
+            "reason": "expected_on_segments_insufficient",
+            "expected_on_count": int(len(expected_rows)),
+        }
+
+    filter_candidates: list[dict] = []
+    if base_matrix is not None:
+        try:
+            inverse = cv2.invertAffineTransform(
+                np.asarray(base_matrix, dtype=np.float32).reshape(2, 3)
+            )
+            projected = transform_points(canonical_board, inverse)
+        except Exception:
+            projected = []
+        if len(projected) >= 3:
+            filter_candidates.append(
+                {
+                    "points": projected,
+                    "score": 100.0,
+                    "source": "tracked_filter",
+                }
+            )
+    else:
+        filter_candidates.extend(
+            _detect_dark_filter_candidates(
+                frame,
+                canonical_board,
+                resolution,
+            )
+        )
+
+    if not filter_candidates:
+        return {
+            "available": False,
+            "reason": "filter_not_found",
+            "filter_candidate_count": 0,
+        }
+
+    best = None
+    attempts = []
+    for filter_candidate in filter_candidates:
+        filter_points = filter_candidate.get("points") or []
+        luminous = _detect_luminous_segment_centers(
+            frame,
+            filter_points,
+        )
+        attempt = {
+            "filter_source": str(
+                filter_candidate.get("source") or "unknown"
+            ),
+            "filter_score": round(
+                float(filter_candidate.get("score", 0.0) or 0.0),
+                4,
+            ),
+            "luminous_reason": str(luminous.get("reason") or ""),
+            "luminous_component_count": int(
+                len(luminous.get("centers") or [])
+            ),
+            "threshold_v": luminous.get("threshold_v"),
+            "dynamic_range": luminous.get("dynamic_range"),
+        }
+        if not bool(luminous.get("available")):
+            attempts.append(attempt)
+            continue
+
+        coarse_matrices = []
+        if base_matrix is not None:
+            try:
+                coarse_matrices.append(
+                    np.asarray(base_matrix, dtype=np.float32).reshape(2, 3)
+                )
+            except Exception:
+                pass
+        coarse_matrices.extend(
+            _filter_board_matrix_candidates(
+                filter_points,
+                canonical_board,
+            )
+        )
+        fit = _fit_luminous_pose(
+            canonical_board,
+            expected_rows,
+            luminous.get("centers") or [],
+            coarse_matrices,
+        )
+        if fit is None:
+            attempt["fit"] = False
+            attempts.append(attempt)
+            continue
+
+        attempt.update(
+            {
+                "fit": True,
+                "matched_count": int(fit.get("matched_count", 0) or 0),
+                "expected_on_count": int(
+                    fit.get("expected_on_count", 0) or 0
+                ),
+                "match_ratio": round(
+                    float(fit.get("match_ratio", 0.0) or 0.0),
+                    4,
+                ),
+                "median_error_px": round(
+                    float(fit.get("median_error_px", 0.0) or 0.0),
+                    3,
+                ),
+            }
+        )
+        attempts.append(attempt)
+        candidate = {
+            **fit,
+            "filter_points": deepcopy(filter_points),
+            "filter_source": str(
+                filter_candidate.get("source") or "unknown"
+            ),
+            "filter_score": float(
+                filter_candidate.get("score", 0.0) or 0.0
+            ),
+            "luminous_component_count": int(
+                len(luminous.get("centers") or [])
+            ),
+            "threshold_v": luminous.get("threshold_v"),
+            "dynamic_range": luminous.get("dynamic_range"),
+        }
+        if best is None or float(candidate["score"]) > float(best["score"]):
+            best = candidate
+
+    if best is None:
+        reasons = [
+            str(item.get("luminous_reason") or "")
+            for item in attempts
+        ]
+        no_emission = bool(
+            reasons
+            and all(
+                reason in {
+                    "no_luminous_emission",
+                    "luminous_components_insufficient",
+                }
+                for reason in reasons
+            )
+        )
+        return {
+            "available": False,
+            "reason": (
+                "filter_found_without_luminous_segments"
+                if no_emission
+                else "luminous_grid_not_fitted"
+            ),
+            "filter_candidate_count": int(len(filter_candidates)),
+            "attempts": attempts,
+        }
+
+    result = dict(best)
+    result.update(
+        {
+            "available": True,
+            "reason": "luminous_segment_grid_fitted",
+            "filter_candidate_count": int(len(filter_candidates)),
+            "attempts": attempts,
+        }
+    )
+    return result
+
+
+def _rescue_luminous_segment_tracking_lock(
+    app,
+    frame,
+    runtime,
+    base_result: "F3TrackingResult | None" = None,
+):
+    """Refina/reconstrói a pose usando somente segmentos ACESOS do CHECK atual.
+
+    O detector nunca procura os segmentos apagados. Ausência de um ON esperado
+    não destrói o tracking: se os demais landmarks sustentarem a pose, as ROIs
+    móveis são publicadas e o analyzer normal decide depois se o segmento
+    faltante é NG.
+    """
+    if runtime is None or not _valid_frame(frame):
+        return None
+
+    repository = getattr(app, "display_project_repository", None)
+    if repository is None:
+        return None
+    project_name = repository.obter_projeto_ativo()
+    project = repository.carregar_projeto(project_name)
+    current = _current_check(app)
+    if not isinstance(project, dict) or not isinstance(current, dict):
+        return None
+
+    check_id = str(current.get("id") or "")
+    try:
+        check = repository.carregar_check(project_name, check_id)
+    except Exception:
+        check = current
+    if not isinstance(check, dict):
+        check = current
+
+    masks = _canonical_check_masks_for_luminous_tracking(
+        runtime,
+        project,
+        check,
+    )
+    expected_rows = _expected_on_rows(
+        masks,
+        check.get("mask_states", {}),
+    )
+    base_matrix = (
+        getattr(base_result, "current_to_canonical", None)
+        if base_result is not None and bool(getattr(base_result, "locked", False))
+        else None
+    )
+
+    pose = _find_luminous_segment_pose(
+        frame,
+        getattr(runtime, "canonical_board", None) or canonical_board_points(
+            project,
+            runtime.store,
+        ),
+        expected_rows,
+        (int(runtime.width), int(runtime.height)),
+        base_matrix=base_matrix,
+    )
+    telemetry = {
+        key: (
+            value.tolist()
+            if isinstance(value, np.ndarray)
+            else deepcopy(value)
+        )
+        for key, value in pose.items()
+        if key != "matrix"
+    }
+    telemetry.update(
+        {
+            "source": "f3_luminous_segment_tracking",
+            "project_name": str(project_name or ""),
+            "check_id": check_id,
+            "check_name": str(check.get("name") or check_id),
+            "base_locked": bool(
+                base_result is not None
+                and getattr(base_result, "locked", False)
+            ),
+            "uses_only_luminous_segments": True,
+            "searches_off_segments": False,
+        }
+    )
+    app._display_f3_luminous_tracking_debug = telemetry
+
+    if not bool(pose.get("available")) or pose.get("matrix") is None:
+        return None
+
+    try:
+        matrix = np.asarray(
+            pose.get("matrix"),
+            dtype=np.float32,
+        ).reshape(2, 3)
+    except Exception:
+        return None
+    if not np.all(np.isfinite(matrix)):
+        return None
+
+    scale = affine_scale(matrix)
+    if not (F3_TRACKING_MIN_SCALE <= scale <= F3_TRACKING_MAX_SCALE):
+        return None
+    if abs(float(matrix[0, 2])) > runtime.width * F3_TRACKING_MAX_TRANSLATION_FRACTION:
+        return None
+    if abs(float(matrix[1, 2])) > runtime.height * F3_TRACKING_MAX_TRANSLATION_FRACTION:
+        return None
+
+    try:
+        aligned = cv2.warpAffine(
+            frame,
+            matrix,
+            (int(runtime.width), int(runtime.height)),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT101,
+        )
+    except Exception:
+        return None
+
+    now = time.monotonic()
+    gray = runtime._gray(frame)
+    reference_key = (
+        f"check:{check_id}"
+        if f"check:{check_id}" in getattr(runtime, "references", {})
+        else str(getattr(base_result, "reference", "") or f"luminous:{check_id}")
+    )
+    runtime.last_matrix = matrix.copy()
+    runtime._last_reference = reference_key
+    runtime.last_compute_s = now
+    runtime.last_frame_id = getattr(app, "camera_ultimo_frame_id", None)
+    runtime.last_gray = gray.copy() if isinstance(gray, np.ndarray) else None
+    runtime.last_verified_s = now
+    runtime.consecutive_misses = 0
+    runtime.ready = True
+    runtime.reason = "ready"
+
+    reason = (
+        "locked_luminous_segments_refined"
+        if base_matrix is not None
+        else "locked_luminous_segments_reacquired"
+    )
+    result = F3TrackingResult(
+        True,
+        aligned,
+        reference=reference_key,
+        matches=int(pose.get("matched_count", 0) or 0),
+        inliers=int(pose.get("matched_count", 0) or 0),
+        inlier_ratio=float(pose.get("match_ratio", 0.0) or 0.0),
+        rotation_deg=float(affine_rotation_deg(matrix)),
+        scale=float(scale),
+        reason=reason,
+        current_to_canonical=matrix.copy(),
+        source_type="luminous_segment_grid",
+        evidence_current=True,
+    )
+    runtime.last_result = result
+    return result
+
 
 
 @dataclass
@@ -3167,27 +4211,56 @@ def align_frame_for_f3(app, frame):
     if runtime is None:
         return frame, None
     project_name = runtime.repository.obter_projeto_ativo()
-    if not runtime.configure(project_name):
-        status = {
-            "enabled": True,
-            "locked": False,
-            "reason": runtime.reason,
-        }
-        app._display_f3_object_tracking_last_status = status
-        return frame, F3TrackingResult(False, frame, reason=runtime.reason)
-
-    result = runtime.align(
-        frame,
-        frame_id=getattr(app, "camera_ultimo_frame_id", None),
-    )
-    if not bool(result.locked):
-        rescued = _rescue_current_check_tracking_lock(
+    configured = runtime.configure(project_name)
+    if not configured:
+        # Mesmo quando ORB/AKAZE/template não geram uma referência utilizável,
+        # o projeto pode ter contorno + máscaras + estados suficientes para
+        # reencontrar o display pelos segmentos que realmente acenderam.
+        result = F3TrackingResult(
+            False,
+            frame,
+            reason=runtime.reason,
+        )
+        luminous = _rescue_luminous_segment_tracking_lock(
             app,
             frame,
             runtime,
+            base_result=None,
         )
-        if rescued is not None:
-            result = rescued
+        if luminous is None:
+            status = {
+                "enabled": True,
+                "locked": False,
+                "reason": runtime.reason,
+            }
+            app._display_f3_object_tracking_last_status = status
+            return frame, result
+        result = luminous
+    else:
+        result = runtime.align(
+            frame,
+            frame_id=getattr(app, "camera_ultimo_frame_id", None),
+        )
+        if not bool(result.locked):
+            rescued = _rescue_current_check_tracking_lock(
+                app,
+                frame,
+                runtime,
+            )
+            if rescued is not None:
+                result = rescued
+
+        # Com ou sem lock estrutural, os segmentos ACESOS podem corrigir a pose
+        # fina. Isso é o que permite às 28 máscaras seguirem o display móvel em
+        # vez de permanecerem presas às coordenadas configuradas.
+        luminous = _rescue_luminous_segment_tracking_lock(
+            app,
+            frame,
+            runtime,
+            base_result=result if bool(result.locked) else None,
+        )
+        if luminous is not None:
+            result = luminous
 
     app._display_f3_object_tracking_last_status = {
         "enabled": True,

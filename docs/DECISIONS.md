@@ -337,6 +337,40 @@ Consequências:
 
 ---
 
+## D-020 — Segmentos luminosos refinam a geometria móvel do F3
+
+**Status:** Accepted
+
+No Display F3, câmera fixa não implica posição fixa da placa, do filtro preto ou
+dos segmentos.
+
+Decisão:
+
+- o contorno configurado no F3 representa a região estrutural do filtro preto;
+- a posição salva das 28 máscaras é um **modelo canônico**, não a coordenada
+  produtiva obrigatória;
+- quando existe emissão, o tracking usa somente os segmentos **ACESOS** do CHECK
+  lógico atual como landmarks para refinar ou recuperar a pose;
+- o filtro limita a região de busca; os segmentos luminosos determinam o
+  alinhamento fino do display dentro dessa região;
+- segmentos apagados não são procurados para obter pose;
+- um ON esperado ausente ou uma emissão extra não invalida automaticamente o
+  tracking se os demais landmarks sustentarem a geometria;
+- após o encaixe, as 28 ROIs são reprojetadas para o frame RAW e o analyzer
+  canônico continua sendo a única autoridade para ON/OFF/POUCA LUZ e OK/NG;
+- quando não há emissão, este refinamento luminoso simplesmente não executa
+  classificação de segmentos apagados;
+- a implementação pertence à autoridade de tracking existente e roda dentro do
+  job HIGH do `F3HeavyVisionExecutor`; não cria scheduler, thread ou autoridade
+  paralela.
+
+Consequência: o operador ensina **o que procurar** por meio de foto, contorno,
+máscaras e estados do CHECK; o runtime reencontra a geometria no frame atual em
+vez de exigir que as máscaras permaneçam nas coordenadas em que foram
+configuradas.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:
