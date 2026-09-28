@@ -599,6 +599,31 @@ algoritmos e adaptação durante a migração. Eles não representam novas
 autoridades. A remoção dos resíduos comprovadamente substituídos é uma etapa
 posterior e separada.
 
+
+## 5.16 Tracking guiado por segmentos luminosos
+
+No F3, as coordenadas desenhadas são geometria canônica, não posição fixa na câmera.
+O contorno configurado pode representar o filtro preto: ele delimita a região de
+busca, enquanto os segmentos realmente acesos do CHECK atual refinam a posição do
+display dentro dessa região.
+
+```text
+frame RAW
+  -> contorno/filtro atual
+  -> detectar somente emissão dentro do filtro
+  -> encaixar o padrão ON esperado
+  -> pose corrente
+  -> reprojetar as 28 máscaras
+  -> classificar ON/OFF/POUCA LUZ
+```
+
+O refinamento não procura segmentos apagados. Um ON esperado ausente ou uma
+emissão extra não derruba automaticamente a pose quando os demais landmarks
+sustentam o encaixe; o analyzer canônico continua responsável por decidir a
+conformidade das 28 máscaras. O processamento usa o mesmo job de tracking no
+`F3HeavyVisionExecutor`, sem criar outro loop ou worker.
+
+
 ---
 
 # 6. F2 x F3
