@@ -566,7 +566,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn('result["energy_state"]', clarity_source)
         self.assertIn('result["readout_mask_ids"]', clarity_source)
 
-    def test_tracking_preview_uses_semantic_mask_renderer_instead_of_cyan_only(self):
+    def test_tracking_preview_uses_classic_luminous_mask_presentation(self):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3
         )
@@ -574,10 +574,14 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("_project_preview_context", source)
         self.assertIn("_mask_snapshot_for_current_check", source)
         self.assertIn('semantic_context["classifications"]', source)
-        self.assertIn("VERDE ACESO", source)
-        self.assertIn("AZUL/CINZA APAGADO", source)
-        self.assertIn("AMARELO VALIDANDO", source)
-        self.assertIn("VERMELHO FALHA", source)
+        self.assertIn("MÁSCARA CLÁSSICA", source)
+        self.assertIn("VERDE = LUZ IDENTIFICADA", source)
+
+        context_source = inspect.getsource(
+            preview_clarity._project_preview_context
+        )
+        self.assertIn('"live_luminous_only": True', context_source)
+        self.assertIn('"luminous_mask_ids"', context_source)
 
     def test_live_semantic_renderer_draws_mask_numbers_without_solid_badge(self):
         renderer_source = inspect.getsource(
@@ -1340,10 +1344,61 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("_display_f3_tracking_job_generation", source)
         self.assertIn("_display_f3_tracking_future = None", source)
 
-    def test_live_geometry_no_longer_generates_discarded_full_frame_warp(self):
+    def test_live_geometry_uses_canonical_shape_without_check_local_warp(self):
         source = inspect.getsource(tracking._update_tracking_live_geometry)
-        self.assertIn("_analysis_transform_for_current_check", source)
+        self.assertIn("canonical_board_points", source)
+        self.assertIn("project.get(\"masks\"", source)
+        self.assertIn("sincronizar_formato_mascara_display", source)
+        self.assertNotIn("_check_reference_geometry", source)
+        self.assertNotIn("_analysis_transform_for_current_check", source)
         self.assertNotIn("_analysis_alignment_for_current_check", source)
+
+    def test_luminous_tracking_uses_canonical_mask_geometry(self):
+        source = inspect.getsource(
+            tracking._canonical_check_masks_for_luminous_tracking
+        )
+        self.assertIn("canonical_masks", source)
+        self.assertIn('project.get("masks"', source)
+        self.assertNotIn("mask_overrides_reference", source)
+        self.assertNotIn("reference_to_canonical", source)
+
+        rescue = inspect.getsource(
+            tracking._rescue_luminous_segment_tracking_lock
+        )
+        self.assertIn('fit_space = "canonical"', rescue)
+        self.assertNotIn("canonical_to_fit", rescue)
+        self.assertNotIn("fit_to_canonical", rescue)
+
+    def test_luminous_refinement_guard_rejects_large_twist(self):
+        board = [[100, 100], [500, 100], [500, 300], [100, 300]]
+        coarse = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+        allowed = coarse.copy()
+        allowed[0, 2] = 18.0
+        allowed[1, 2] = -10.0
+        ok, details = tracking._luminous_refinement_within_coarse_guard(
+            allowed,
+            coarse,
+            board,
+        )
+        self.assertTrue(ok, details)
+
+        center = (300.0, 200.0)
+        twisted = cv2.getRotationMatrix2D(center, 28.0, 1.0).astype(
+            np.float32
+        )
+        ok, details = tracking._luminous_refinement_within_coarse_guard(
+            twisted,
+            coarse,
+            board,
+        )
+        self.assertFalse(ok)
+        self.assertEqual(
+            "refinement_outside_structural_guard",
+            details["reason"],
+        )
 
 
     def test_tracking_search_preview_skips_semantic_project_render_until_lock(self):

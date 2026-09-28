@@ -157,6 +157,14 @@ F3_TRACKING_LUMINOUS_MAX_COMPONENT_AREA_FRACTION = 0.055
 F3_TRACKING_LUMINOUS_LOCAL_GATE_FRACTION = 0.09
 F3_TRACKING_LUMINOUS_LOCAL_MIN_HOT_PIXELS = 6
 
+# O contorno/filtro é a autoridade da pose grossa. A luz pode corrigir o
+# alinhamento fino, mas nunca pode torcer o conjunto inteiro por um casamento
+# errado entre poucos segmentos.
+F3_TRACKING_LUMINOUS_MAX_ROTATION_DELTA_DEG = 8.0
+F3_TRACKING_LUMINOUS_MIN_SCALE_RATIO_TO_COARSE = 0.88
+F3_TRACKING_LUMINOUS_MAX_SCALE_RATIO_TO_COARSE = 1.12
+F3_TRACKING_LUMINOUS_MAX_CENTER_SHIFT_FRACTION = 0.10
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -478,6 +486,79 @@ def affine_rotation_deg(matrix) -> float:
         )
     except Exception:
         return 0.0
+
+
+def _angle_delta_deg(first: float, second: float) -> float:
+    return abs((float(first) - float(second) + 180.0) % 360.0 - 180.0)
+
+
+def _luminous_refinement_within_coarse_guard(
+    refined_matrix,
+    coarse_matrix,
+    canonical_board,
+) -> tuple[bool, dict]:
+    """Impede que landmarks luminosos substituam a pose estrutural por uma torta."""
+
+    try:
+        refined = np.asarray(refined_matrix, dtype=np.float32).reshape(2, 3)
+        coarse = np.asarray(coarse_matrix, dtype=np.float32).reshape(2, 3)
+        if not np.all(np.isfinite(refined)) or not np.all(np.isfinite(coarse)):
+            raise ValueError("non_finite_matrix")
+
+        refined_scale = affine_scale(refined)
+        coarse_scale = affine_scale(coarse)
+        scale_ratio = refined_scale / max(1e-6, coarse_scale)
+        rotation_delta = _angle_delta_deg(
+            affine_rotation_deg(refined),
+            affine_rotation_deg(coarse),
+        )
+
+        board = np.asarray(
+            _quad_from_points(canonical_board),
+            dtype=np.float32,
+        ).reshape(-1, 2)
+        if len(board) != 4:
+            raise ValueError("invalid_board")
+        center = np.mean(board, axis=0).reshape(1, 1, 2)
+        board_column = board.reshape(-1, 1, 2)
+
+        coarse_to_current = cv2.invertAffineTransform(coarse)
+        refined_to_current = cv2.invertAffineTransform(refined)
+        coarse_center = cv2.transform(center, coarse_to_current).reshape(2)
+        refined_center = cv2.transform(center, refined_to_current).reshape(2)
+        coarse_board = cv2.transform(
+            board_column,
+            coarse_to_current,
+        ).reshape(-1, 2)
+        board_diagonal = max(
+            1.0,
+            float(
+                np.linalg.norm(
+                    np.max(coarse_board, axis=0)
+                    - np.min(coarse_board, axis=0)
+                )
+            ),
+        )
+        center_shift = float(np.linalg.norm(refined_center - coarse_center))
+        center_shift_fraction = center_shift / board_diagonal
+    except Exception:
+        return False, {"reason": "guard_geometry_invalid"}
+
+    accepted = bool(
+        rotation_delta <= F3_TRACKING_LUMINOUS_MAX_ROTATION_DELTA_DEG
+        and F3_TRACKING_LUMINOUS_MIN_SCALE_RATIO_TO_COARSE
+        <= scale_ratio
+        <= F3_TRACKING_LUMINOUS_MAX_SCALE_RATIO_TO_COARSE
+        and center_shift_fraction
+        <= F3_TRACKING_LUMINOUS_MAX_CENTER_SHIFT_FRACTION
+    )
+    return accepted, {
+        "reason": "" if accepted else "refinement_outside_structural_guard",
+        "rotation_delta_deg": round(float(rotation_delta), 3),
+        "scale_ratio_to_coarse": round(float(scale_ratio), 5),
+        "center_shift_px": round(float(center_shift), 3),
+        "center_shift_fraction": round(float(center_shift_fraction), 5),
+    }
 
 
 def transform_mask(mask: dict, matrix) -> dict | None:
@@ -1588,45 +1669,7 @@ def _canonical_check_masks_for_luminous_tracking(
     project: dict,
     check: dict,
 ) -> list[dict]:
-    """Resolve as máscaras do CHECK no espaço canônico sem fixá-las no frame."""
-    check_id = str(check.get("id") or "")
-    reference = (
-        runtime.references.get(f"check:{check_id}")
-        if isinstance(getattr(runtime, "references", None), dict)
-        else None
-    )
-    mapping = (
-        reference.get("reference_to_canonical")
-        if isinstance(reference, dict)
-        else None
-    )
-
-    local_masks = _reference_masks_from_overrides(
-        project,
-        check.get("mask_overrides_reference", {}),
-    )
-    if mapping is None:
-        board_ref, _masks_ref = _check_reference_geometry(project, check)
-        pose_masks = _reference_masks_from_overrides(
-            project,
-            check.get("mask_overrides_reference", {}),
-            explicit_only=True,
-        )
-        mapping = estimate_reference_to_canonical(
-            project,
-            runtime.store,
-            board_ref,
-            pose_masks,
-        )
-
-    if mapping is not None and local_masks:
-        transformed: list[dict] = []
-        for local in local_masks:
-            item = transform_mask(local, mapping)
-            if item is not None:
-                transformed.append(item)
-        if transformed:
-            return transformed
+    """Retorna sempre a máscara canônica; o CHECK fornece somente ON/OFF esperado."""
 
     masks = getattr(runtime, "canonical_masks", None)
     if masks:
@@ -1727,6 +1770,7 @@ def _fit_luminous_pose(
                     "coarse_projection_failed": 0,
                     "coarse_matches_insufficient": 0,
                     "refined_affine_rejected": 0,
+                    "refined_pose_outside_filter_guard": 0,
                     "refined_projection_failed": 0,
                     "final_matches_insufficient": 0,
                     "success": 0,
@@ -1781,6 +1825,7 @@ def _fit_luminous_pose(
             "coarse_projection_failed": 0,
             "coarse_matches_insufficient": 0,
             "refined_affine_rejected": 0,
+            "refined_pose_outside_filter_guard": 0,
             "refined_projection_failed": 0,
             "final_matches_insufficient": 0,
             "success": 0,
@@ -1887,6 +1932,22 @@ def _fit_luminous_pose(
                 best_summary_rank = summary_rank
             continue
 
+        refinement_allowed, refinement_guard = (
+            _luminous_refinement_within_coarse_guard(
+                refined,
+                matrix,
+                canonical_board,
+            )
+        )
+        summary["refinement_guard"] = deepcopy(refinement_guard)
+        if not refinement_allowed:
+            stage_counts["refined_pose_outside_filter_guard"] += 1
+            summary["failure_stage"] = "refined_pose_outside_filter_guard"
+            if summary_rank >= best_summary_rank:
+                best_summary = deepcopy(summary)
+                best_summary_rank = summary_rank
+            continue
+
         try:
             refined_inverse = cv2.invertAffineTransform(refined)
             predicted_refined = cv2.transform(
@@ -1965,6 +2026,20 @@ def _fit_luminous_pose(
         if final_matrix is None:
             final_matrix = refined
 
+        final_allowed, final_guard = _luminous_refinement_within_coarse_guard(
+            final_matrix,
+            matrix,
+            canonical_board,
+        )
+        summary["final_refinement_guard"] = deepcopy(final_guard)
+        if not final_allowed:
+            stage_counts["refined_pose_outside_filter_guard"] += 1
+            summary["failure_stage"] = "refined_pose_outside_filter_guard"
+            if summary_rank >= best_summary_rank:
+                best_summary = deepcopy(summary)
+                best_summary_rank = summary_rank
+            continue
+
         final_errors = [float(item[2]) for item in final_matches]
         median_error = (
             float(np.median(np.asarray(final_errors, dtype=np.float32)))
@@ -2029,6 +2104,8 @@ def _fit_luminous_pose(
             diagnostic["failure_stage"] = "final_matches_insufficient"
         elif stage_counts["refined_projection_failed"]:
             diagnostic["failure_stage"] = "refined_projection_failed"
+        elif stage_counts["refined_pose_outside_filter_guard"]:
+            diagnostic["failure_stage"] = "refined_pose_outside_filter_guard"
         elif stage_counts["refined_affine_rejected"]:
             diagnostic["failure_stage"] = "refined_affine_rejected"
         elif stage_counts["coarse_matches_insufficient"]:
@@ -2406,42 +2483,11 @@ def _rescue_luminous_segment_tracking_lock(
         or canonical_board_points(project, runtime.store)
     )
     fit_masks = _canonical_check_masks_for_luminous_tracking(
-        runtime, project, check,
-    )
-    fit_to_canonical = np.asarray(
-        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-        dtype=np.float32,
+        runtime,
+        project,
+        check,
     )
     fit_space = "canonical"
-
-    reference_key = f"check:{check_id}"
-    reference = (
-        runtime.references.get(reference_key)
-        if isinstance(getattr(runtime, "references", None), dict)
-        else None
-    )
-    reference_to_canonical = (
-        reference.get("reference_to_canonical")
-        if isinstance(reference, dict)
-        else None
-    )
-    check_board, check_masks = _check_reference_geometry(project, check)
-    if (
-        reference_to_canonical is not None
-        and len(check_board) >= 3
-        and bool(check_masks)
-    ):
-        try:
-            candidate_mapping = np.asarray(
-                reference_to_canonical, dtype=np.float32
-            ).reshape(2, 3)
-        except Exception:
-            candidate_mapping = None
-        if candidate_mapping is not None and np.all(np.isfinite(candidate_mapping)):
-            fit_board = check_board
-            fit_masks = check_masks
-            fit_to_canonical = candidate_mapping
-            fit_space = reference_key
 
     expected_rows = _expected_on_rows(
         fit_masks,
@@ -2455,18 +2501,10 @@ def _rescue_luminous_segment_tracking_lock(
         and getattr(base_result, "current_to_canonical", None) is not None
     ):
         try:
-            base_current_to_canonical = np.asarray(
+            base_matrix = np.asarray(
                 base_result.current_to_canonical,
                 dtype=np.float32,
             ).reshape(2, 3)
-            if fit_space == "canonical":
-                base_matrix = base_current_to_canonical
-            else:
-                canonical_to_fit = cv2.invertAffineTransform(fit_to_canonical)
-                base_matrix = compose_affine(
-                    canonical_to_fit,
-                    base_current_to_canonical,
-                )
         except Exception:
             base_matrix = None
 
@@ -2597,14 +2635,7 @@ def _rescue_luminous_segment_tracking_lock(
     if not np.all(np.isfinite(fit_matrix)):
         return None
 
-    matrix = (
-        fit_matrix
-        if fit_space == "canonical"
-        else compose_affine(fit_to_canonical, fit_matrix)
-    )
-    if matrix is None:
-        return None
-    matrix = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+    matrix = np.asarray(fit_matrix, dtype=np.float32).reshape(2, 3)
     if not np.all(np.isfinite(matrix)):
         return None
 
@@ -2629,11 +2660,7 @@ def _rescue_luminous_segment_tracking_lock(
 
     now = time.monotonic()
     gray = runtime._gray(frame)
-    result_reference = (
-        reference_key
-        if reference_key in getattr(runtime, "references", {})
-        else str(getattr(base_result, "reference", "") or f"luminous:{check_id}")
-    )
+    result_reference = f"luminous:{check_id}"
     runtime.last_matrix = matrix.copy()
     runtime._last_reference = result_reference
     runtime.last_compute_s = now
@@ -4689,61 +4716,29 @@ def _update_tracking_live_geometry(
         for mask in (project.get("masks", []) or [])
         if isinstance(mask, dict)
     ]
-    source_to_current = None
-    geometry_space = "canonical"
-
-    current = _current_check(app)
-    if isinstance(current, dict):
-        check_id = str(current.get("id") or "")
-        try:
-            check = repository.carregar_check(project_name, check_id)
-        except Exception:
-            check = None
-        reference = runtime.references.get(f"check:{check_id}")
-        ref_to_canonical = (
-            reference.get("reference_to_canonical")
-            if isinstance(reference, dict)
-            else None
+    try:
+        source_to_current = cv2.invertAffineTransform(
+            np.asarray(
+                result.current_to_canonical,
+                dtype=np.float32,
+            ).reshape(2, 3)
         )
-        if isinstance(check, dict) and ref_to_canonical is not None:
-            check_board, check_masks = _check_reference_geometry(project, check)
-            if check_board:
-                source_board = check_board
-            if check_masks:
-                source_masks = check_masks
-            current_to_check, transform_space = (
-                _analysis_transform_for_current_check(
-                    app,
-                    result,
-                )
-            )
-            if current_to_check is not None:
-                try:
-                    source_to_current = cv2.invertAffineTransform(
-                        np.asarray(current_to_check, dtype=np.float32).reshape(2, 3)
-                    )
-                    geometry_space = str(transform_space or f"check:{check_id}")
-                except Exception:
-                    source_to_current = None
+    except Exception:
+        app._display_f3_tracking_live_geometry = None
+        return
 
-    if source_to_current is None:
-        try:
-            source_to_current = cv2.invertAffineTransform(
-                np.asarray(
-                    result.current_to_canonical,
-                    dtype=np.float32,
-                ).reshape(2, 3)
-            )
-        except Exception:
-            app._display_f3_tracking_live_geometry = None
-            return
-
+    geometry_space = "canonical"
     board_current = transform_points(source_board, source_to_current)
     masks_current = []
     for mask in source_masks:
         transformed = transform_mask(mask, source_to_current)
-        if transformed is not None:
-            masks_current.append(transformed)
+        if transformed is None:
+            continue
+        # A pose pode mover/rotacionar/escalar o conjunto, mas o desenho volta
+        # sempre ao formato canônico da máscara (segmento continua segmento).
+        masks_current.append(
+            sincronizar_formato_mascara_display(mask, transformed)
+        )
 
     h, w = raw_frame.shape[:2]
     app._display_f3_tracking_live_geometry = {
@@ -5620,8 +5615,8 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 except Exception:
                     decorated = source
             else:
-                # Com LOCK, use o renderer semântico normal da câmera F3
-                # (verde/vermelho/amarelo + números) sobre a geometria móvel.
+                # Com LOCK, o preview operacional usa a máscara clássica:
+                # geometria canônica móvel e verde somente onde existe luz.
                 try:
                     from src.platform.display_f3_preview_clarity_fix import (
                         _effective_phase_mask_ids_for_current_check,
@@ -5749,8 +5744,8 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             if locked:
                 if bool(status.get("evidence_current", False)):
                     legend = (
-                        "LOCK ESTÁVEL • VERDE ACESO • AZUL/CINZA APAGADO • "
-                        "AMARELO VALIDANDO • VERMELHO FALHA"
+                        "LOCK ESTÁVEL • MÁSCARA CLÁSSICA • "
+                        "VERDE = LUZ IDENTIFICADA"
                     )
                     color = "#E2E8F0"
                 else:

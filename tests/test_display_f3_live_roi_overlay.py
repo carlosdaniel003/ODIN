@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 
 import numpy as np
@@ -9,6 +10,7 @@ from src.platform.display_live_roi_overlay import (
     renderizar_overlay_rois_display_f3,
 )
 from src.platform.display_production_f3_window import DisplayProductionF3Window
+import src.platform.display_f3_preview_clarity_fix as preview_clarity
 
 
 class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
@@ -102,6 +104,44 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertEqual("warning", validating)
         self.assertEqual("ng", confirmed)
         self.assertEqual("on", conform)
+
+    def test_preview_operacional_classico_so_pinta_luz_em_verde(self):
+        frame = np.zeros((80, 180, 3), dtype=np.uint8)
+        context = {
+            "resolution": (180, 80),
+            "masks": (
+                {"id": "LIT", "type": "circle", "cx": 45, "cy": 40, "radius": 12},
+                {"id": "DARK", "type": "circle", "cx": 135, "cy": 40, "radius": 12},
+            ),
+            "classifications": {
+                "LIT": "off",
+                "DARK": "low_light",
+            },
+            "live_luminous_only": True,
+            "luminous_mask_ids": ("LIT",),
+            "board_points": (),
+        }
+
+        rendered = preview_clarity.renderizar_preview_claro_display_f3(
+            frame,
+            context,
+        )
+
+        lit = rendered[40, 45]
+        dark = rendered[40, 135]
+        self.assertGreater(int(lit[1]), int(lit[2]))
+        self.assertGreater(int(lit[1]), int(lit[0]))
+        # O centro da máscara sem luz não recebe preenchimento vermelho/amarelo.
+        self.assertLess(int(dark[0]) + int(dark[1]) + int(dark[2]), 20)
+
+    def test_visor_luminoso_so_mostra_segmentos_identificados_com_luz(self):
+        source = inspect.getsource(
+            DisplayProductionF3Window._draw_fixed_semantic_digit
+        )
+        self.assertIn('context.get("live_luminous_only")', source)
+        self.assertIn('context.get("luminous_mask_ids")', source)
+        self.assertIn('else "neutral"', source)
+        self.assertIn('classifications.get(mask_id) == "on"', source)
 
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(

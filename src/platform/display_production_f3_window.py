@@ -585,6 +585,14 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 "ui_mask_authority": str(
                     context.get("ui_mask_authority") or ""
                 ),
+                "live_luminous_only": bool(
+                    context.get("live_luminous_only")
+                ),
+                "luminous_mask_ids": {
+                    str(mask_id)
+                    for mask_id in (context.get("luminous_mask_ids") or ())
+                    if str(mask_id)
+                },
                 "has_any_on": bool(context.get("has_any_on")),
                 "intermittent": bool(context.get("intermittent", False)),
                 "power_confirmed": bool(context.get("power_confirmed")),
@@ -685,17 +693,37 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         }
         effective_authority = bool(context.get("ui_mask_authority"))
 
+        live_luminous_only = bool(context.get("live_luminous_only"))
+        luminous_mask_ids = {
+            str(mask_id)
+            for mask_id in (context.get("luminous_mask_ids") or ())
+            if str(mask_id)
+        }
+
         for segment_name, mask_id in zip(segment_order, mask_ids):
-            state = self._display_readout_semantic_state(
-                classifications.get(mask_id),
-                expected_states.get(mask_id),
-                mask_id in failed,
-                ready=ready,
-                intermittent=bool(context.get("intermittent", False)),
-                has_any_on=bool(context.get("has_any_on")),
-                validating=mask_id in validating,
-                effective_authority=effective_authority,
-            )
+            if live_luminous_only:
+                # Visor operacional: somente emissão identificada aparece verde.
+                # OFF/LOW/NG continuam pertencendo ao motor e ao debug, não ao
+                # desenho simplificado usado para localizar o display.
+                state = (
+                    "on"
+                    if (
+                        mask_id in luminous_mask_ids
+                        or classifications.get(mask_id) == "on"
+                    )
+                    else "neutral"
+                )
+            else:
+                state = self._display_readout_semantic_state(
+                    classifications.get(mask_id),
+                    expected_states.get(mask_id),
+                    mask_id in failed,
+                    ready=ready,
+                    intermittent=bool(context.get("intermittent", False)),
+                    has_any_on=bool(context.get("has_any_on")),
+                    validating=mask_id in validating,
+                    effective_authority=effective_authority,
+                )
             fill, outline, _number = self._display_readout_color(state)
             points = polygons[segment_name]
 

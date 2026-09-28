@@ -64,6 +64,9 @@ F3_PREVIEW_ALERT_ALPHA = 0.18
 F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 3
 F3_PREVIEW_TRACKING_GUIDE_BGR = (139, 116, 100)
 F3_PREVIEW_TRACKING_GUIDE_THICKNESS = 1
+F3_PREVIEW_CLASSIC_MASK_BGR = (184, 163, 148)  # cinza/azul neutro #94A3B8
+F3_PREVIEW_CLASSIC_LIGHT_BGR = (94, 197, 34)   # verde #22C55E
+F3_PREVIEW_CLASSIC_LIGHT_ALPHA = 0.16
 F3_PREVIEW_STARTUP_NUMBER_BGR = (203, 213, 225)
 F3_PREVIEW_FAILURE_BADGE_BGR = (68, 68, 239)
 F3_PREVIEW_FAILURE_BADGE_TEXT_BGR = (255, 255, 255)
@@ -246,6 +249,11 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                 visual_board = []
                 visual_resolution = (raw_width, raw_height)
 
+            luminous_mask_ids = _luminous_mask_ids_for_current_check(
+                app,
+                project_name=project_name,
+                check_id=check_id,
+            )
             return {
                 "project_name": project_name,
                 "check_id": check_id,
@@ -264,6 +272,8 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                 "tracking_space": str(
                     live_geometry.get("geometry_space") or ""
                 ),
+                "live_luminous_only": True,
+                "luminous_mask_ids": luminous_mask_ids,
             }
 
     if tracking_enabled:
@@ -296,6 +306,8 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
             "tracking_locked": False,
             "tracking_reference": "",
             "tracking_space": "",
+            "live_luminous_only": True,
+            "luminous_mask_ids": (),
         }
 
     # Modo legado/desligado: geometria fixa do Projeto Display.
@@ -344,10 +356,38 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "readout_slot_mask_ids": readout_slot_mask_ids,
         "tracking_active": False,
         "tracking_locked": False,
+        "live_luminous_only": False,
+        "luminous_mask_ids": (),
     }
     window._display_f3_clear_preview_project_key = cache_key
     window._display_f3_clear_preview_project_context = deepcopy(result)
     return result
+
+
+def _luminous_mask_ids_for_current_check(
+    app,
+    *,
+    project_name: str,
+    check_id: str,
+) -> tuple[str, ...]:
+    telemetry = getattr(app, "_display_f3_luminous_tracking_debug", None)
+    if not isinstance(telemetry, dict):
+        return ()
+    if str(telemetry.get("project_name") or "") != str(project_name or ""):
+        return ()
+    if str(telemetry.get("check_id") or "") != str(check_id or ""):
+        return ()
+    if not bool(telemetry.get("alignment_ready")):
+        return ()
+    return tuple(
+        sorted(
+            {
+                str(mask_id)
+                for mask_id in (telemetry.get("matched_mask_ids") or ())
+                if str(mask_id)
+            }
+        )
+    )
 
 
 def _analysis_matches_current(
@@ -596,6 +636,12 @@ def _contexto_preview_claro(original):
         result["tracking_space"] = str(
             project_context.get("tracking_space") or ""
         )
+        result["live_luminous_only"] = bool(
+            project_context.get("live_luminous_only")
+        )
+        result["luminous_mask_ids"] = tuple(
+            project_context.get("luminous_mask_ids") or ()
+        )
 
         classifications, failed_mask_ids = _mask_snapshot_for_current_check(
             window,
@@ -656,7 +702,7 @@ def _contexto_preview_claro(original):
     return build
 
 
-def _draw_mask(tint, mask: dict, sx: float, sy: float, color):
+def _mask_geometry(mask: dict, sx: float, sy: float):
     kind = str(mask.get("type") or "").lower()
     if kind == "circle":
         center = (
@@ -667,14 +713,25 @@ def _draw_mask(tint, mask: dict, sx: float, sy: float, color):
             max(1, int(round(float(mask.get("radius", 1)) * sx))),
             max(1, int(round(float(mask.get("radius", 1)) * sy))),
         )
-        cv2.ellipse(tint, center, axes, 0, 0, 360, color, -1, cv2.LINE_AA)
         return ("circle", center, axes)
 
     polygon = overlay_module._scaled_polygon(mask, sx, sy)
     if polygon is None or len(polygon) < 3:
         return None
-    cv2.fillPoly(tint, [polygon], color, lineType=cv2.LINE_AA)
     return ("polygon", polygon)
+
+
+def _draw_mask(tint, mask: dict, sx: float, sy: float, color):
+    geometry = _mask_geometry(mask, sx, sy)
+    if geometry is None:
+        return None
+    if geometry[0] == "circle":
+        _kind, center, axes = geometry
+        cv2.ellipse(tint, center, axes, 0, 0, 360, color, -1, cv2.LINE_AA)
+    else:
+        _kind, polygon = geometry
+        cv2.fillPoly(tint, [polygon], color, lineType=cv2.LINE_AA)
+    return geometry
 
 
 def _draw_contour(result, geometry, color, thickness: int) -> None:
@@ -811,6 +868,106 @@ def _presentation_for_effective_mask(
         has_any_on=has_any_on,
         intermittent=intermittent,
     )
+
+
+def _render_classic_luminous_preview(
+    frame,
+    context: dict,
+    sx: float,
+    sy: float,
+):
+    """Preview operacional simples: forma canônica + verde somente onde há luz."""
+
+    result = frame.copy()
+    masks = tuple(context.get("masks") or ())
+    classifications = {
+        str(key): str(value).strip().lower()
+        for key, value in dict(
+            context.get("effective_classifications")
+            or context.get("classifications")
+            or {}
+        ).items()
+    }
+    luminous_ids = {
+        str(mask_id)
+        for mask_id in (context.get("luminous_mask_ids") or ())
+        if str(mask_id)
+    }
+    luminous_ids.update(
+        mask_id
+        for mask_id, state in classifications.items()
+        if state == DISPLAY_CHECK_STATE_ON
+    )
+
+    board_points = context.get("board_points") or ()
+    if len(board_points) >= 3:
+        try:
+            board = np.asarray(
+                [
+                    [
+                        round(float(point[0]) * sx),
+                        round(float(point[1]) * sy),
+                    ]
+                    for point in board_points
+                ],
+                dtype=np.int32,
+            )
+            cv2.polylines(
+                result,
+                [board],
+                True,
+                F3_PREVIEW_TRACKING_GUIDE_BGR,
+                1,
+                cv2.LINE_AA,
+            )
+        except Exception:
+            pass
+
+    green_tint = result.copy()
+    green_geometries = []
+    for mask in masks:
+        if not isinstance(mask, dict):
+            continue
+        mask_id = str(mask.get("id") or "")
+        geometry = _mask_geometry(mask, sx, sy)
+        if geometry is None:
+            continue
+        if mask_id in luminous_ids:
+            geometry = _draw_mask(
+                green_tint,
+                mask,
+                sx,
+                sy,
+                F3_PREVIEW_CLASSIC_LIGHT_BGR,
+            )
+            if geometry is not None:
+                green_geometries.append(geometry)
+        else:
+            _draw_contour(
+                result,
+                geometry,
+                F3_PREVIEW_CLASSIC_MASK_BGR,
+                1,
+            )
+
+    if green_geometries:
+        cv2.addWeighted(
+            green_tint,
+            F3_PREVIEW_CLASSIC_LIGHT_ALPHA,
+            result,
+            1.0 - F3_PREVIEW_CLASSIC_LIGHT_ALPHA,
+            0.0,
+            dst=result,
+        )
+        for geometry in green_geometries:
+            _draw_contour(
+                result,
+                geometry,
+                F3_PREVIEW_CLASSIC_LIGHT_BGR,
+                2,
+            )
+
+    return result
 
 
 def _mask_bbox_pixels(mask: dict, sx: float, sy: float):
@@ -1128,6 +1285,14 @@ def renderizar_preview_claro_display_f3(frame, context):
     frame_height, frame_width = frame.shape[:2]
     sx = frame_width / float(source_width)
     sy = frame_height / float(source_height)
+
+    if bool(context.get("live_luminous_only")):
+        return _render_classic_luminous_preview(
+            frame,
+            context,
+            sx,
+            sy,
+        )
 
     classifications = {
         str(key): str(value).strip().lower()

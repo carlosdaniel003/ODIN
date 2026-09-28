@@ -469,8 +469,21 @@ Decisão:
   localização grosseira da placa, sem criar uma geometria angular alternativa;
 - o alinhamento fino continua pertencendo ao tracking por segmentos que o CHECK
   atual espera ACESOS;
-- após o encaixe, as máscaras canônicas são reprojetadas e
-  F3CheckAnalyzerAuthority continua responsável por classificar ON/OFF/POUCA LUZ.
+- esse refinamento luminoso é limitado pela pose estrutural do contorno: ele pode
+  corrigir deslocamento fino, mas não pode impor salto grande de rotação, escala
+  ou centro que deixe o conjunto de máscaras visualmente torto;
+- a geometria ao vivo é sempre derivada das máscaras canônicas de **Placa +
+  Máscaras**; geometria local de foto/CHECK não substitui o formato canônico;
+- após a transformação, o formato canônico é reconstruído explicitamente:
+  segmento continua segmento, círculo continua círculo e polígono preserva sua
+  topologia;
+- no preview produtivo com tracking, a apresentação é propositalmente simples:
+  máscaras neutras e verde somente nos segmentos onde existe emissão identificada;
+  o visor 88:88 acende somente esses segmentos. Vermelho/amarelo continuam
+  disponíveis para decisão/diagnóstico, mas não deformam nem poluem a localização;
+- após o encaixe, F3CheckAnalyzerAuthority continua responsável por classificar
+  ON/OFF/POUCA LUZ e decidir conformidade; detectar luz para tracking não equivale
+  a aprovar o CHECK.
 
 Consequência: existe uma única geometria canônica de máscaras e contorno para o
 Display F3. Movimento/rotação da placa é resolvido em runtime em vez de exigir
