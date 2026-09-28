@@ -380,3 +380,20 @@ comparar
 ~~~
 
 Não adicionar uma camada de "performance fix" se o gargalo pode ser removido no proprietário canônico.
+
+
+### Tracking luminoso limitado à ROI do filtro
+
+O refinamento por segmentos luminosos pertence ao mesmo job `HIGH` do tracking
+F3 no `F3HeavyVisionExecutor`.
+
+Invariantes de custo:
+
+- não cria thread, timer ou fila própria;
+- sem lock, a procura do filtro reduz a imagem para largura máxima de 960 px;
+- depois de localizado/projetado o filtro, HSV, threshold, morfologia e busca de
+  componentes luminosos operam somente no crop delimitado pelo filtro;
+- segmentos apagados não são procurados;
+- com lock existente, o contorno já projetado é reutilizado como ROI grosseira;
+- resultados continuam sujeitos a latest-frame-wins e ao limite de idade
+  operacional do tracking.
