@@ -33,6 +33,7 @@ jobs:
             src/platform/display_f3_heavy_executor.py \
             src/platform/display_f3_config_service.py \
             src/platform/display_check_presence_reference.py \
+            src/platform/display_f3_check_reference_zoom.py \
             src/platform/display_visual_reference_status.py \
             src/platform/display_reference_roi.py \
             src/platform/display_reference_roi_runtime_fix.py \
@@ -49,6 +50,7 @@ jobs:
             tests/test_display_f3_config_architecture.py \
             tests/test_display_f3_config_open_smoke.py \
             tests/test_display_check_presence_reference.py \
+            tests/test_display_f3_check_reference_zoom.py \
             tests/test_display_visual_reference_status.py \
             tests/test_display_reference_roi.py \
             tests/test_display_reference_roi_runtime_fix.py \
@@ -144,6 +146,12 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_reference_roi \
+            -v
+
+      - name: Validate CHECK zoom local geometry
+        run: |
+          python -m unittest \
+            tests.test_display_f3_check_reference_zoom.DisplayF3CheckReferenceZoomGeometryTests.test_preview_ampliada_usa_geometria_local_salva_no_check \
             -v
 
       - name: Run presence reference tests
