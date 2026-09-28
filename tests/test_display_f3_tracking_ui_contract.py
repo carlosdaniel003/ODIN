@@ -25,9 +25,11 @@ class F3TrackingUiContractTests(unittest.TestCase):
 
     def test_tracking_store_contract_has_no_orientation_bank(self):
         source = inspect.getsource(tracking.F3TrackingConfigStore)
-        self.assertNotIn("orientations", source)
+        self.assertNotIn("def orientations(", source)
         self.assertNotIn("managed_image_path", source)
-        self.assertNotIn("save_orientation", source)
+        self.assertNotIn("def save_orientation(", source)
+        self.assertIn("_migrate_legacy_rotation_state", source)
+        self.assertIn("shutil.rmtree(legacy_image_dir)", source)
         self.assertIn("save_board_points", source)
 
     def test_tracker_configuration_does_not_load_angular_images(self):
