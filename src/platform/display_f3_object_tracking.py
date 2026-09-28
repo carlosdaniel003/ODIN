@@ -1367,8 +1367,9 @@ def _detect_dark_filter_candidates(
 def _detect_luminous_segment_centers(frame, filter_points) -> dict:
     """Detecta somente emissão luminosa dentro do filtro preto.
 
-    Segmentos apagados não são procurados. Eles serão julgados depois pelo
-    classificador normal nas ROIs que a pose luminosa reposicionar.
+    Depois que o filtro foi localizado, nenhum processamento óptico de segmentos
+    percorre a cena inteira: HSV, threshold, morfologia e componentes trabalham
+    somente no bounding crop do filtro. Segmentos apagados não são procurados.
     """
     if not _valid_frame(frame):
         return {
@@ -1384,11 +1385,46 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
             "centers": [],
         }
 
-    h, w = frame.shape[:2]
-    polygon = np.rint(
+    frame_h, frame_w = frame.shape[:2]
+    polygon_global = np.rint(
         np.asarray(points, dtype=np.float32)
     ).astype(np.int32)
-    filter_mask = np.zeros((h, w), dtype=np.uint8)
+    try:
+        bx, by, bw, bh = cv2.boundingRect(
+            polygon_global.reshape(-1, 1, 2)
+        )
+    except Exception:
+        return {
+            "available": False,
+            "reason": "filter_crop_invalid",
+            "centers": [],
+        }
+
+    pad = max(2, int(round(max(bw, bh) * 0.01)))
+    x1 = max(0, int(bx) - pad)
+    y1 = max(0, int(by) - pad)
+    x2 = min(int(frame_w), int(bx + bw) + pad)
+    y2 = min(int(frame_h), int(by + bh) + pad)
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return {
+            "available": False,
+            "reason": "filter_crop_too_small",
+            "centers": [],
+        }
+
+    crop = frame[y1:y2, x1:x2]
+    if not _valid_frame(crop):
+        return {
+            "available": False,
+            "reason": "filter_crop_invalid",
+            "centers": [],
+        }
+
+    polygon = polygon_global.copy()
+    polygon[:, 0] -= int(x1)
+    polygon[:, 1] -= int(y1)
+    crop_h, crop_w = crop.shape[:2]
+    filter_mask = np.zeros((crop_h, crop_w), dtype=np.uint8)
     cv2.fillPoly(filter_mask, [polygon], 255, lineType=cv2.LINE_AA)
     if int(cv2.countNonZero(filter_mask)) < 128:
         return {
@@ -1398,17 +1434,10 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
         }
 
     # Remove a borda do filtro, que costuma produzir reflexo forte.
+    filter_major, filter_minor, _filter_rect_area = _quad_metrics(points)
     erode_px = max(
         2,
-        int(
-            round(
-                min(
-                    max(1.0, _quad_metrics(points)[0]),
-                    max(1.0, _quad_metrics(points)[1]),
-                )
-                * 0.018
-            )
-        ),
+        int(round(min(filter_major, filter_minor) * 0.018)),
     )
     kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
@@ -1419,7 +1448,7 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
         inner_mask = filter_mask
 
     try:
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
         value = hsv[:, :, 2]
     except Exception:
         return {
@@ -1449,11 +1478,12 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
             "p95_v": round(p95_v, 3),
             "p995_v": round(p995_v, 3),
             "dynamic_range": round(dynamic_range, 3),
+            "analysis_roi": (int(x1), int(y1), int(x2), int(y2)),
         }
 
     threshold = median_v + max(24.0, dynamic_range * 0.38)
     threshold = max(45.0, min(p995_v - 2.0, threshold))
-    binary = np.zeros((h, w), dtype=np.uint8)
+    binary = np.zeros((crop_h, crop_w), dtype=np.uint8)
     binary[
         (value.astype(np.float32) >= float(threshold))
         & (inner_mask > 0)
@@ -1484,7 +1514,6 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
         1.0,
         abs(float(cv2.contourArea(polygon.reshape(-1, 1, 2)))),
     )
-    filter_major, filter_minor, _filter_rect_area = _quad_metrics(points)
     centers: list[list[float]] = []
     components: list[dict] = []
 
@@ -1492,7 +1521,7 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
         try:
             area = float(cv2.contourArea(contour))
             rect = cv2.minAreaRect(contour)
-            (cx, cy), (rw, rh), angle = rect
+            (cx_local, cy_local), (rw, rh), angle = rect
         except Exception:
             continue
         if area <= 0.0 or rw <= 1.0 or rh <= 1.0:
@@ -1519,7 +1548,10 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
         if rectangularity < 0.18:
             continue
 
-        center = [float(cx), float(cy)]
+        center = [
+            float(cx_local) + float(x1),
+            float(cy_local) + float(y1),
+        ]
         centers.append(center)
         components.append(
             {
@@ -1546,8 +1578,10 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
         "p95_v": round(p95_v, 3),
         "p995_v": round(p995_v, 3),
         "dynamic_range": round(dynamic_range, 3),
+        "analysis_roi": (int(x1), int(y1), int(x2), int(y2)),
+        "analysis_width": int(crop_w),
+        "analysis_height": int(crop_h),
     }
-
 
 def _canonical_check_masks_for_luminous_tracking(
     runtime,
