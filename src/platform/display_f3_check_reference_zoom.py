@@ -115,7 +115,13 @@ def _current_rotation(owner) -> int:
 
 
 def preparar_imagem_ampliada_check_f3(owner, image_raw, metadata: dict | None):
-    """Usa a mesma orientação/máscaras da miniatura sem reduzir a foto primeiro."""
+    """Usa a mesma orientação/geometria da miniatura sem reduzir a foto primeiro.
+
+    A miniatura de "Gerenciar CHECKS" injeta a geometria local salva no próprio
+    CHECK (contorno + mask_overrides_reference). A visualização ampliada precisa
+    consumir exatamente a mesma fonte; usar somente project["masks"] fazia a
+    máscara voltar para a posição canônica ao clicar na preview.
+    """
     if not _valid_image(image_raw):
         return image_raw, 0, 0
 
@@ -129,14 +135,55 @@ def preparar_imagem_ampliada_check_f3(owner, image_raw, metadata: dict | None):
         except Exception:
             project = None
 
-    resolution = (
-        normalizar_resolucao_display(project.get("master_resolution"))
-        if isinstance(project, dict)
-        else None
+    preview_metadata = deepcopy(metadata) if isinstance(metadata, dict) else {}
+    check_id = ""
+    try:
+        check_id = str(owner._selected_id() or "")
+    except Exception:
+        check_id = ""
+    if repository is not None and project_name and check_id:
+        try:
+            check = repository.carregar_check(project_name, check_id)
+        except Exception:
+            check = None
+        if isinstance(check, dict):
+            if check.get("board_points_reference"):
+                preview_metadata["board_points_reference"] = deepcopy(
+                    check.get("board_points_reference")
+                )
+            if isinstance(check.get("mask_overrides_reference"), dict):
+                preview_metadata["mask_overrides_reference"] = deepcopy(
+                    check.get("mask_overrides_reference")
+                )
+
+    try:
+        from src.platform.display_f3_reference_preview_rotation import (
+            _metadata_com_mascaras_do_projeto,
+        )
+        preview_metadata = _metadata_com_mascaras_do_projeto(
+            repository,
+            project_name,
+            preview_metadata,
+        )
+    except Exception:
+        pass
+
+    resolution = normalizar_resolucao_display(
+        preview_metadata.get("_display_master_resolution")
     )
+    if resolution is None:
+        resolution = (
+            normalizar_resolucao_display(project.get("master_resolution"))
+            if isinstance(project, dict)
+            else None
+        )
+
     masks = [
         deepcopy(mask)
-        for mask in ((project or {}).get("masks", []) or [])
+        for mask in (
+            preview_metadata.get("_display_mask_regions")
+            or ((project or {}).get("masks", []) or [])
+        )
         if isinstance(mask, dict) and mask.get("id") is not None
     ]
 
@@ -165,7 +212,7 @@ def preparar_imagem_ampliada_check_f3(owner, image_raw, metadata: dict | None):
     try:
         import src.platform.display_reference_roi as roi_module
 
-        decorated_metadata = deepcopy(metadata) if isinstance(metadata, dict) else {}
+        decorated_metadata = deepcopy(preview_metadata)
         decorated_metadata["_display_master_resolution"] = tuple(visual_resolution)
         decorated_metadata["_display_mask_regions"] = list(visual_masks)
         decorated_metadata["mask_region_count"] = len(visual_masks)
