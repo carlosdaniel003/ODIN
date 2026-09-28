@@ -209,6 +209,33 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         )
         self.assertIn("ALINHANDO H1", result["text"])
 
+    def test_cycle_reset_clears_tracking_orientation_for_next_board(self):
+        owner = authorities.F3RuntimeAuthorities.__new__(
+            authorities.F3RuntimeAuthorities
+        )
+        owner.app = _App()
+        owner.tracking = Mock()
+        owner.presence = Mock()
+        owner.power = Mock()
+        owner._stable_key = "check:powered"
+        owner._stable_state = {"kind": "powered"}
+        owner._pending_key = "check:powered"
+        owner._pending_frames = 2
+        owner._cache_key = ("frame", 1)
+        owner._cache_value = {"kind": "powered"}
+
+        with patch.object(
+            authorities,
+            "reset_tracking_runtime",
+        ) as reset_tracking:
+            owner.reset_cycle_state()
+
+        reset_tracking.assert_called_once_with(owner.app)
+        owner.presence.reset.assert_called_once_with()
+        owner.power.reset.assert_called_once_with()
+        self.assertEqual("", owner._stable_key)
+        self.assertIsNone(owner._cache_key)
+
     def test_state_machine_authority_delegates_to_single_runtime(self):
         runtime = DisplayCheckSequenceRuntime()
         runtime.configurar_checks(

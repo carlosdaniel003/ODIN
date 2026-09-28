@@ -20,7 +20,10 @@ import src.platform.display_f3_presence_stability_fix as presence_module
 import src.platform.display_f3_runtime_contract_fix as contract_module
 import src.platform.display_f3_check_transition_guard as transition_module
 from src.platform.display_f3_contour_check_identity import F3TrackedRawCheckAnalyzer
-from src.platform.display_f3_object_tracking import get_tracking_runtime
+from src.platform.display_f3_object_tracking import (
+    get_tracking_runtime,
+    reset_tracking_runtime,
+)
 
 
 F3_RUNTIME_AUTHORITIES_SOURCE = "f3_runtime_authorities"
@@ -397,6 +400,13 @@ class F3RuntimeAuthorities:
         self.cache_hits = 0
 
     def reset_cycle_state(self) -> None:
+        # EMPTY encerra a identidade física da placa anterior. Além dos latches
+        # de presença/energia, descarte a pose e o anchor angular para que a
+        # próxima placa possa ser adquirida novamente sem herdar geometria.
+        try:
+            reset_tracking_runtime(self.app)
+        except Exception:
+            self.tracking.reset()
         self.presence.reset()
         self.power.reset()
         self._stable_key = ""

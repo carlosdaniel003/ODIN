@@ -1369,6 +1369,98 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertNotIn("canonical_to_fit", rescue)
         self.assertNotIn("fit_to_canonical", rescue)
 
+    def test_rotation_anchor_rejects_90_degree_pose_flip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            tracker.last_verified_rotation_deg = 0.0
+
+            stable = {
+                "reference": "check:CHECK_001",
+                "matrix": cv2.getRotationMatrix2D(
+                    (320.0, 240.0),
+                    8.0,
+                    1.0,
+                ).astype(np.float32),
+                "rotation_deg": -8.0,
+            }
+            wrong_90 = {
+                "reference": "board_off",
+                "matrix": cv2.getRotationMatrix2D(
+                    (320.0, 240.0),
+                    90.0,
+                    1.0,
+                ).astype(np.float32),
+                "rotation_deg": -90.0,
+            }
+
+            accepted = tracker._filter_abrupt_rotation_candidates(
+                [wrong_90, stable],
+                source="test",
+            )
+
+            self.assertEqual(1, len(accepted))
+            self.assertIs(stable, accepted[0])
+            self.assertEqual(
+                "abrupt_rotation_jump_rejected",
+                tracker._last_rotation_jump_rejections[-1]["reason"],
+            )
+            self.assertGreater(
+                tracker._last_rotation_jump_rejections[-1][
+                    "rotation_delta_deg"
+                ],
+                80.0,
+            )
+
+    def test_rotation_anchor_survives_temporary_lock_loss(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            tracker.last_verified_rotation_deg = 3.0
+            tracker.last_matrix = None
+
+            vertical = cv2.getRotationMatrix2D(
+                (320.0, 240.0),
+                90.0,
+                1.0,
+            ).astype(np.float32)
+            compatible, delta = tracker._rotation_anchor_compatible(
+                vertical
+            )
+
+            self.assertFalse(compatible)
+            self.assertGreater(delta, 80.0)
+
+            tracker.reset()
+            compatible, _delta = tracker._rotation_anchor_compatible(
+                vertical
+            )
+            self.assertTrue(compatible)
+
+    def test_structural_and_luminous_rescues_use_rotation_anchor(self):
+        structural = inspect.getsource(
+            tracking._rescue_current_check_tracking_lock
+        )
+        luminous = inspect.getsource(
+            tracking._rescue_luminous_segment_tracking_lock
+        )
+        self.assertIn(
+            "_filter_abrupt_rotation_candidates",
+            structural,
+        )
+        self.assertIn(
+            "_rotation_anchor_compatible",
+            luminous,
+        )
+        self.assertIn(
+            "luminous_pose_rotation_jump_rejected",
+            luminous,
+        )
+
     def test_luminous_refinement_guard_rejects_large_twist(self):
         board = [[100, 100], [500, 100], [500, 300], [100, 300]]
         coarse = np.asarray(

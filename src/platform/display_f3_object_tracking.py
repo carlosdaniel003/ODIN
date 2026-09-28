@@ -120,6 +120,10 @@ F3_TRACKING_LOCK_GRACE_FRAMES = 5
 F3_TRACKING_LOCK_GRACE_S = 0.72
 F3_TRACKING_REFERENCE_STICK_BONUS = 2.5
 F3_TRACKING_CONTINUITY_BONUS = 5.0
+# A placa pode deslocar e girar gradualmente, mas um salto instantâneo próximo de
+# 90° entre duas poses verificadas é uma hipótese geométrica ambígua, não movimento
+# físico plausível do suporte. O anchor é limpo somente no reset/rearme do ciclo.
+F3_TRACKING_MAX_ABRUPT_ROTATION_DELTA_DEG = 35.0
 
 F3_TRACKING_EXECUTOR_OWNER = "f3-live-tracking"
 F3_TRACKING_EXECUTOR_KEY = "latest-frame"
@@ -2639,6 +2643,43 @@ def _rescue_luminous_segment_tracking_lock(
     if not np.all(np.isfinite(matrix)):
         return None
 
+    rotation_allowed, rotation_delta = runtime._rotation_anchor_compatible(
+        matrix
+    )
+    if not rotation_allowed:
+        rejection = {
+            "source": "luminous_rescue",
+            "reference": f"luminous:{check_id}",
+            "rotation_deg": round(
+                float(affine_rotation_deg(matrix)),
+                3,
+            ),
+            "rotation_delta_deg": round(float(rotation_delta), 3),
+            "reason": "abrupt_rotation_jump_rejected",
+        }
+        history = getattr(
+            runtime,
+            "_last_rotation_jump_rejections",
+            None,
+        )
+        if not isinstance(history, list):
+            history = []
+        history.append(rejection)
+        runtime._last_rotation_jump_rejections = history[-12:]
+        telemetry.update(
+            {
+                "available": False,
+                "alignment_ready": False,
+                "reason": "luminous_pose_rotation_jump_rejected",
+                "rotation_jump_delta_deg": round(
+                    float(rotation_delta),
+                    3,
+                ),
+            }
+        )
+        app._display_f3_luminous_tracking_debug = telemetry
+        return None
+
     scale = affine_scale(matrix)
     if not (F3_TRACKING_MIN_SCALE <= scale <= F3_TRACKING_MAX_SCALE):
         return None
@@ -2662,6 +2703,9 @@ def _rescue_luminous_segment_tracking_lock(
     gray = runtime._gray(frame)
     result_reference = f"luminous:{check_id}"
     runtime.last_matrix = matrix.copy()
+    runtime.last_verified_rotation_deg = float(
+        affine_rotation_deg(matrix)
+    )
     runtime._last_reference = result_reference
     runtime.last_compute_s = now
     runtime.last_frame_id = (
@@ -2744,6 +2788,8 @@ class F3DisplayObjectTracker:
         self.canonical_masks: list[dict] = []
         self.last_gray = None
         self.last_verified_s = 0.0
+        self.last_verified_rotation_deg: float | None = None
+        self._last_rotation_jump_rejections: list[dict] = []
         self.consecutive_misses = 0
 
     @staticmethod
@@ -3398,6 +3444,73 @@ class F3DisplayObjectTracker:
         value = (float(first) - float(second) + 180.0) % 360.0 - 180.0
         return abs(value)
 
+    def _rotation_anchor_compatible(self, matrix) -> tuple[bool, float]:
+        """Rejeita saltos angulares impossíveis entre poses verificadas."""
+        if matrix is None:
+            return False, 0.0
+        anchor = self.last_verified_rotation_deg
+        if anchor is None:
+            return True, 0.0
+        current = affine_rotation_deg(matrix)
+        delta = self._angle_delta_deg(current, anchor)
+        return (
+            delta <= F3_TRACKING_MAX_ABRUPT_ROTATION_DELTA_DEG,
+            float(delta),
+        )
+
+    def _filter_abrupt_rotation_candidates(
+        self,
+        candidates,
+        *,
+        source: str,
+    ) -> list[dict]:
+        values = [
+            item for item in (candidates or ())
+            if isinstance(item, dict)
+        ]
+        if not values:
+            return []
+
+        accepted = []
+        rejected = []
+        for candidate in values:
+            compatible, delta = self._rotation_anchor_compatible(
+                candidate.get("matrix")
+            )
+            if compatible:
+                accepted.append(candidate)
+                continue
+            rejected.append(
+                {
+                    "source": str(source or ""),
+                    "reference": str(candidate.get("reference") or ""),
+                    "rotation_deg": round(
+                        float(
+                            candidate.get(
+                                "rotation_deg",
+                                affine_rotation_deg(candidate.get("matrix")),
+                            )
+                            or 0.0
+                        ),
+                        3,
+                    ),
+                    "rotation_delta_deg": round(float(delta), 3),
+                    "reason": "abrupt_rotation_jump_rejected",
+                }
+            )
+
+        if rejected:
+            history = getattr(
+                self,
+                "_last_rotation_jump_rejections",
+                None,
+            )
+            if not isinstance(history, list):
+                history = []
+            history.extend(rejected)
+            self._last_rotation_jump_rejections = history[-12:]
+        return accepted
+
     def _matrix_continuity(self, matrix) -> tuple[bool, float]:
         """Compara a pose nova com a última sem exigir a mesma referência."""
         if self.last_matrix is None or matrix is None or not self.canonical_board:
@@ -4022,6 +4135,7 @@ class F3DisplayObjectTracker:
             return result
 
         gray = self._gray(frame)
+        self._last_rotation_jump_rejections = []
         if gray is None:
             self.consecutive_misses += 1
             held = self._held_lock_result(frame, now)
@@ -4064,6 +4178,10 @@ class F3DisplayObjectTracker:
                 candidate = self._candidate(current_kp, current_desc, key)
                 if candidate is not None:
                     candidates.append(candidate)
+            candidates = self._filter_abrupt_rotation_candidates(
+                candidates,
+                source="orb",
+            )
 
         # Quando nenhuma referência absoluta vence, tente continuidade óptica
         # entre o último frame confirmado e o atual, restrita ao contorno da placa.
@@ -4098,10 +4216,15 @@ class F3DisplayObjectTracker:
                     )
                     if candidate is not None:
                         candidates.append(candidate)
+                candidates = self._filter_abrupt_rotation_candidates(
+                    candidates,
+                    source="akaze",
+                )
 
         # Câmera e suporte são fixos: se o PCB tiver poucos corners ORB, use as
-        # bordas do contorno desenhado como fallback de translação. Os slots
-        # 0/90/180/270 e CHECKS fornecem as orientações reais disponíveis.
+        # bordas do contorno desenhado como fallback de translação. O contorno
+        # retangular é angularmente ambíguo; a pose aceita precisa permanecer
+        # coerente com a última orientação verificada da placa.
         if not candidates:
             try:
                 current_edges = cv2.Canny(gray, 45, 135)
@@ -4111,6 +4234,10 @@ class F3DisplayObjectTracker:
                 candidate = self._template_candidate(current_edges, key)
                 if candidate is not None:
                     candidates.append(candidate)
+            candidates = self._filter_abrupt_rotation_candidates(
+                candidates,
+                source="edge_template",
+            )
 
         if not candidates:
             self.consecutive_misses += 1
@@ -4156,6 +4283,9 @@ class F3DisplayObjectTracker:
             ).astype(np.float32)
 
         self.last_matrix = matrix
+        self.last_verified_rotation_deg = float(
+            affine_rotation_deg(matrix)
+        )
         self._last_reference = str(best["reference"])
         self.last_compute_s = now
         self.last_frame_id = frame_id
@@ -4378,12 +4508,24 @@ def _rescue_current_check_tracking_lock(
             candidates.append(enriched)
         attempts.append(attempt)
 
+    had_structural_candidate = bool(candidates)
+    candidates = runtime._filter_abrupt_rotation_candidates(
+        candidates,
+        source="structural_rescue",
+    )
     if not candidates:
         app._display_f3_tracking_rescue_debug = {
             "available": False,
-            "reason": "no_structural_rescue_candidate",
+            "reason": (
+                "structural_rescue_rotation_jump_rejected"
+                if had_structural_candidate
+                else "no_structural_rescue_candidate"
+            ),
             "check_id": check_id,
             "attempts": attempts,
+            "rotation_jump_rejections": deepcopy(
+                getattr(runtime, "_last_rotation_jump_rejections", [])
+            ),
         }
         return None
 
@@ -4419,6 +4561,9 @@ def _rescue_current_check_tracking_lock(
     gray = runtime._gray(frame)
 
     runtime.last_matrix = matrix.copy()
+    runtime.last_verified_rotation_deg = float(
+        affine_rotation_deg(matrix)
+    )
     runtime._last_reference = key
     runtime.last_compute_s = now
     runtime.last_frame_id = getattr(app, "camera_ultimo_frame_id", None)
@@ -4604,6 +4749,14 @@ def align_frame_for_f3(app, frame, *, frame_token=None):
         "reason": result.reason,
         "evidence_current": bool(result.evidence_current),
         "misses": int(getattr(runtime, "consecutive_misses", 0) or 0),
+        "rotation_anchor_deg": getattr(
+            runtime,
+            "last_verified_rotation_deg",
+            None,
+        ),
+        "rotation_jump_rejections": deepcopy(
+            getattr(runtime, "_last_rotation_jump_rejections", [])
+        ),
     }
     if not bool(result.locked):
         _invalidate_spatial_authority_after_tracking_loss(
