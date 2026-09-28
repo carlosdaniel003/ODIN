@@ -69,6 +69,7 @@ class DisplayF3TransientBluetoothTests(unittest.TestCase):
                 "current_check": {
                     "id": "CHECK_002",
                     "name": "BLUETOOTH",
+                    "intermittent": True,
                 },
             }
         )
@@ -254,17 +255,13 @@ class DisplayF3TransientBluetoothTests(unittest.TestCase):
             any("aguardando botão / mudança de função" in text for text, _ in statuses)
         )
 
-        # O botão foi pressionado e o padrão USB apareceu: libera o gate e usa
-        # a estabilidade normal de dois frames para concluir o USB.
+        # O botão foi pressionado e o padrão USB apareceu: libera o gate e,
+        # pelo contrato global, o primeiro frame integralmente conforme conclui
+        # o USB imediatamente.
         app.camera_ultimo_frame_id = 21
         app._process_display_auto_check()
-        self.assertEqual([], events)
-        self.assertIsNone(app._display_auto_manual_entry_signature)
-        self.assertEqual(1, app._display_auto_stable_frames)
-
-        app.camera_ultimo_frame_id = 22
-        app._process_display_auto_check()
         self.assertEqual([True], events)
+        self.assertEqual(0, app._display_auto_stable_frames)
 
         # Como USB também depende de novo clique físico, a entrada no AUX fica
         # protegida até aparecer evidência visual da função AUX.

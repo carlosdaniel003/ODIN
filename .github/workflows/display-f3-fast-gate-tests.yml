@@ -31,10 +31,16 @@ jobs:
           python -m py_compile \
             src/platform/display_f3_fast_expected_gate.py \
             src/platform/display_f3_h1_single_frame_probe.py \
+            src/platform/display_f3_single_frame_approval.py \
+            src/platform/display_f3_final_check_stability.py \
+            src/platform/display_f3_physical_transition_authority.py \
             src/platform/display_f3_runtime_contract_fix.py \
             src/platform/desktop_production_app.py \
             tests/test_display_f3_fast_expected_gate.py \
             tests/test_display_f3_h1_single_frame_probe.py \
+            tests/test_display_f3_single_frame_approval.py \
+            tests/test_display_f3_final_check_stability.py \
+            tests/test_display_f3_physical_transition_authority.py \
             tests/test_display_f3_auto_check.py \
             tests/test_display_f3_power_authority.py \
             tests/test_display_f3_live_runtime_fix.py \
@@ -55,6 +61,18 @@ jobs:
             tests.test_display_f3_power_authority.DisplayF3PowerAuthorityTests.test_preview_explica_energia_confirmada_aguardando_alinhamento \
             tests.test_display_f3_power_authority.DisplayF3PowerAuthorityTests.test_debug_nao_diz_check_liberado_quando_alinhamento_bloqueia \
             tests.test_display_f3_live_runtime_fix.DisplayF3LiveRuntimeFixTests.test_overlay_fica_neutro_quando_runtime_esta_sem_autoridade \
+            -v
+
+      - name: Validate one-frame CHECK approval contract
+        run: |
+          python -m unittest \
+            tests.test_display_f3_single_frame_approval \
+            tests.test_display_f3_h1_single_frame_probe.DisplayF3H1SingleFrameProbeTests.test_h1_first_check_needs_one_positive_frame \
+            tests.test_display_f3_h1_single_frame_probe.DisplayF3H1SingleFrameProbeTests.test_h1_confirma_primeira_aprovacao_completa \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_runtime_approves_on_first_fully_conforming_frame \
+            tests.test_display_f3_final_check_stability.DisplayF3FinalCheckStabilityTests.test_future_check_registers_on_first_fully_approved_frame \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_h1_28_de_28_confirma_mesmo_se_contorno_ainda_prefere_aux \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_h1_27_de_28_nao_bypassa_identidade_do_contorno \
             -v
 
       - name: Run fast H1 BLUE tests
