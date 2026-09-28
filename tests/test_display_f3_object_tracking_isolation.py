@@ -1552,6 +1552,91 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             result["matched_count"],
         )
 
+    def test_luminous_blooming_recovers_expected_on_landmarks_with_structural_lock(self):
+        board = [
+            [100.0, 120.0],
+            [540.0, 120.0],
+            [540.0, 330.0],
+            [100.0, 330.0],
+        ]
+        centers = [
+            [180.0, 175.0],
+            [230.0, 250.0],
+            [285.0, 175.0],
+            [340.0, 250.0],
+            [390.0, 175.0],
+            [445.0, 250.0],
+            [490.0, 175.0],
+        ]
+        rows = [
+            {
+                "mask_id": f"MASK_{index + 1:03d}",
+                "center": center,
+            }
+            for index, center in enumerate(centers)
+        ]
+        frame = np.full((480, 640, 3), 170, dtype=np.uint8)
+        cv2.fillConvexPoly(
+            frame,
+            np.rint(np.asarray(board)).astype(np.int32),
+            (18, 18, 18),
+            lineType=cv2.LINE_AA,
+        )
+        for cx, cy in centers:
+            cv2.rectangle(
+                frame,
+                (int(cx) - 10, int(cy) - 4),
+                (int(cx) + 10, int(cy) + 4),
+                (250, 250, 250),
+                -1,
+            )
+
+        # Reproduz a condição observada no equipamento: blooming/morfologia
+        # devolvem só 4 componentes globais e apenas 3 encaixam; o quorum H1
+        # continua sendo 4, então somente dividir a emissão local pode recuperar
+        # a geometria sem afrouxar a regra.
+        global_components = [
+            centers[0],
+            centers[1],
+            centers[2],
+            [115.0, 315.0],
+        ]
+        identity = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+        with patch.object(
+            tracking,
+            "_detect_luminous_segment_centers",
+            return_value={
+                "available": True,
+                "reason": "luminous_segments_detected",
+                "centers": global_components,
+                "threshold_v": 120.0,
+                "dynamic_range": 220.0,
+            },
+        ):
+            result = tracking._find_luminous_segment_pose(
+                frame,
+                board,
+                rows,
+                (640, 480),
+                base_matrix=identity,
+            )
+
+        self.assertTrue(result["available"], result)
+        self.assertEqual(4, result["luminous_component_count"])
+        self.assertGreaterEqual(
+            result["local_luminous_landmark_count"],
+            4,
+        )
+        self.assertGreaterEqual(result["matched_count"], 4)
+        self.assertEqual(
+            "expected_on_local_emission",
+            result["fit_landmark_source"],
+        )
+        self.assertEqual("", result["fit_diagnostics"]["failure_stage"])
+
     def test_luminous_fit_diagnostics_explain_coarse_failure(self):
         board = [
             [0.0, 0.0],

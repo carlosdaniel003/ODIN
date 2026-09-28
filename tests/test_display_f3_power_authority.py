@@ -228,6 +228,67 @@ class DisplayF3PowerAuthorityTests(unittest.TestCase):
         self.assertEqual((), ui["effective_failed_mask_ids"])
         self.assertEqual("power_blocked_neutral_ui", ui["presentation_source"])
 
+    def test_preview_explica_energia_confirmada_aguardando_alinhamento(self):
+        state = {
+            "power_gate_reason": (
+                "energia_confirmada_aguardando_alinhamento_segmentos"
+            )
+        }
+
+        self.assertEqual(
+            "AUTO • energia confirmada • alinhando segmentos do CHECK",
+            power_module._blocked_preview_text(state),
+        )
+
+    def test_debug_nao_diz_check_liberado_quando_alinhamento_bloqueia(self):
+        legacy = getattr(
+            debug_clarity_module,
+            "_legacy_power_summary_builder",
+            None,
+        )
+        debug_clarity_module._legacy_power_summary_builder = lambda _snapshot: {
+            "check_name": "H1",
+            "check_id": "CHECK_001",
+            "productive_text": "--",
+            "waiting_empty_rearm": False,
+            "waiting_new_board_after_empty": False,
+            "cycle_rearm_waiting": False,
+            "cycle_rearmed_waiting_new_board": False,
+        }
+        snapshot = {
+            "runtime_at_click": {
+                "power_authority": {
+                    "board_present": True,
+                    "decision_allowed": False,
+                    "reason": (
+                        "energia_confirmada_aguardando_alinhamento_segmentos"
+                    ),
+                    "energy": {
+                        "energy_state": power_module.F3_POWER_STATE_POWERED,
+                        "expected_on_mask_count": 7,
+                        "powered_votes": 7,
+                        "off_votes": 19,
+                    },
+                },
+            },
+        }
+
+        try:
+            summary = power_module.construir_resumo_energia_debug_f3(snapshot)
+        finally:
+            if legacy is None:
+                delattr(debug_clarity_module, "_legacy_power_summary_builder")
+            else:
+                debug_clarity_module._legacy_power_summary_builder = legacy
+
+        self.assertTrue(summary["flow_blocked"])
+        self.assertFalse(summary["decision_allowed"])
+        self.assertIn(
+            "aguardando alinhamento espacial",
+            summary["flow_reason"],
+        )
+        self.assertNotIn("CHECK produtivo liberado", summary["flow_reason"])
+
     def test_debug_separa_gate_de_energia_da_analise_bruta(self):
         legacy = getattr(
             debug_clarity_module,

@@ -52,6 +52,8 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_f3_power_authority.DisplayF3PowerAuthorityTests.test_gate_bloqueado_preserva_bruto_no_debug_e_publica_ui_neutra \
+            tests.test_display_f3_power_authority.DisplayF3PowerAuthorityTests.test_preview_explica_energia_confirmada_aguardando_alinhamento \
+            tests.test_display_f3_power_authority.DisplayF3PowerAuthorityTests.test_debug_nao_diz_check_liberado_quando_alinhamento_bloqueia \
             tests.test_display_f3_live_runtime_fix.DisplayF3LiveRuntimeFixTests.test_overlay_fica_neutro_quando_runtime_esta_sem_autoridade \
             -v
 

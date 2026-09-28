@@ -691,6 +691,8 @@ def _blocked_preview_text(state: dict) -> str:
         return "AUTO • energia não confirmada • buscando segmento aceso"
     if reason == "placa_nao_confirmada_no_suporte":
         return "AUTO • aguardando placa no suporte"
+    if reason == "energia_confirmada_aguardando_alinhamento_segmentos":
+        return "AUTO • energia confirmada • alinhando segmentos do CHECK"
     return "AUTO • gate físico bloqueado • aguardando condição segura"
 
 
@@ -768,8 +770,20 @@ def _install_final_process_gate() -> None:
 
         if window is not None:
             try:
+                if str(state.get("power_gate_reason") or "") == (
+                    "energia_confirmada_aguardando_alinhamento_segmentos"
+                ):
+                    mask_status = (
+                        "MÁSCARAS • ENERGIA CONFIRMADA • "
+                        "ALINHANDO SEGMENTOS DO CHECK"
+                    )
+                else:
+                    mask_status = (
+                        "MÁSCARAS • LEITURA BRUTA • "
+                        "SEM AUTORIDADE ATÉ CONFIRMAR ENERGIA"
+                    )
                 window.set_mask_analysis_status(
-                    "MÁSCARAS • LEITURA BRUTA • SEM AUTORIDADE ATÉ CONFIRMAR ENERGIA",
+                    mask_status,
                     "#FDE68A",
                 )
             except Exception:
@@ -864,6 +878,17 @@ def construir_resumo_energia_debug_f3(snapshot: dict) -> dict:
         flow_reason = "display sem energia; aguardando ao menos 1 segmento aceso"
     elif energy_state == F3_POWER_STATE_UNCONFIRMED:
         flow_reason = "display ainda não confirmado como ligado"
+    elif not decision_allowed:
+        gate_reason = str(status.get("reason") or "")
+        if gate_reason == "energia_confirmada_aguardando_alinhamento_segmentos":
+            flow_reason = (
+                "energia confirmada; aguardando alinhamento espacial "
+                "dos segmentos do CHECK"
+            )
+        else:
+            flow_reason = (
+                "energia confirmada; aguardando liberação do gate produtivo"
+            )
     else:
         flow_reason = "energia confirmada; CHECK produtivo liberado"
 
