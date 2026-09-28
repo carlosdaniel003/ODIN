@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import numpy as np
+
+import src.platform.display_f3_check_reference_zoom as zoom_module
 from src.platform.display_f3_check_reference_zoom import (
     F3_CHECK_REFERENCE_ZOOM_MAX,
     F3_CHECK_REFERENCE_ZOOM_MIN,
@@ -59,3 +64,81 @@ def test_zoom_ancorado_mantem_pixel_sob_ponteiro() -> None:
 
     assert math.isclose(source_before_x, source_after_x, rel_tol=1e-9)
     assert math.isclose(source_before_y, source_after_y, rel_tol=1e-9)
+
+
+
+def test_preview_ampliada_usa_geometria_local_salva_no_check() -> None:
+    project = {
+        "name": "DISPLAY TESTE",
+        "master_resolution": {"width": 120, "height": 80},
+        "masks": [
+            {
+                "id": "MASK_001",
+                "type": "circle",
+                "cx": 25,
+                "cy": 30,
+                "radius": 8,
+            }
+        ],
+    }
+    check = {
+        "id": "CHECK_001",
+        "name": "H1",
+        "mask_overrides_reference": {
+            "MASK_001": {
+                "id": "MASK_001",
+                "type": "circle",
+                "cx": 82,
+                "cy": 48,
+                "radius": 9,
+            }
+        },
+        "board_points_reference": [
+            [55, 20],
+            [110, 20],
+            [110, 70],
+            [55, 70],
+        ],
+    }
+
+    class Repository:
+        def carregar_projeto(self, _name):
+            return project
+
+        def carregar_check(self, _project_name, _check_id):
+            return check
+
+    owner = SimpleNamespace(
+        project_name="DISPLAY TESTE",
+        repository=Repository(),
+        _selected_id=lambda: "CHECK_001",
+        frame_provider=None,
+    )
+    image = np.zeros((80, 120, 3), dtype=np.uint8)
+    captured = {}
+
+    def prepare(frame, resolution, masks, angle):
+        captured["resolution"] = resolution
+        captured["masks"] = masks
+        captured["angle"] = angle
+        return frame.copy(), resolution, masks
+
+    with patch.object(
+        zoom_module,
+        "preparar_check_visual_display",
+        side_effect=prepare,
+    ):
+        rendered, rotation, mask_count = zoom_module.preparar_imagem_ampliada_check_f3(
+            owner,
+            image,
+            {"width": 120, "height": 80},
+        )
+
+    assert rendered.shape == image.shape
+    assert rotation == 0
+    assert mask_count == 1
+    assert captured["masks"][0]["id"] == "MASK_001"
+    assert int(captured["masks"][0]["cx"]) == 82
+    assert int(captured["masks"][0]["cy"]) == 48
+    assert int(captured["masks"][0]["radius"]) == 9
+    assert int(captured["masks"][0]["cx"]) != int(project["masks"][0]["cx"])
