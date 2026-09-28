@@ -270,7 +270,21 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
             "check_configuration": [],
             "mask_configuration": [],
             "check_analyses": [],
-            "runtime_at_click": {},
+            "runtime_at_click": {
+                "luminous_tracking": {
+                    "check_id": "CHECK_001",
+                    "check_name": "H1",
+                    "frame_id": 88,
+                    "fit_space": "check:CHECK_001",
+                    "expected_on_count": 7,
+                    "luminous_component_count": 5,
+                    "matched_count": 0,
+                    "luminous_emission_detected": True,
+                    "alignment_required": True,
+                    "alignment_ready": False,
+                    "reason": "luminous_grid_not_fitted",
+                }
+            },
             "errors": [],
         }
 
@@ -286,6 +300,15 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("[ANÁLISE FÍSICA - SEM DEBOUNCE / MESMO FRAME]", text)
         self.assertIn("[COMPARAÇÃO DO MESMO FRAME CONTRA TODOS OS CHECKS]", text)
         self.assertIn("[RUNTIME PRODUTIVO OBSERVADO NO MESMO CLIQUE]", text)
+        self.assertIn("[REFINAMENTO LUMINOSO DO CHECK]", text)
+        self.assertIn("fit_space=check:CHECK_001", text)
+        self.assertIn("emission_detected=SIM", text)
+        self.assertIn("alignment_ready=NÃO", text)
+        self.assertIn(
+            "DISPLAY COM EMISSÃO; AGUARDANDO GEOMETRIA FINA ANTES DE OK/NG",
+            text,
+        )
+        self.assertIn("luminous_tracking=emission=SIM", text)
 
 
     def test_analisar_captura_tela_e_inicia_check_e_relatorio_no_mesmo_clique(self):

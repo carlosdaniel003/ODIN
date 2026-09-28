@@ -1814,6 +1814,47 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
         lines.append("indisponível neste snapshot")
     lines.append("")
 
+    luminous_tracking = (
+        runtime_context.get("luminous_tracking")
+        if isinstance(runtime_context, dict)
+        else None
+    )
+    lines.append("[REFINAMENTO LUMINOSO DO CHECK]")
+    if isinstance(luminous_tracking, dict):
+        lines.append(
+            " | ".join(
+                (
+                    f"check={luminous_tracking.get('check_name') or luminous_tracking.get('check_id') or '--'}",
+                    f"frame_id={luminous_tracking.get('frame_id', '--')}",
+                    f"fit_space={luminous_tracking.get('fit_space', '--')}",
+                    f"expected_on={luminous_tracking.get('expected_on_count', '--')}",
+                    f"components={luminous_tracking.get('luminous_component_count', '--')}",
+                    f"matched={luminous_tracking.get('matched_count', '--')}",
+                    f"emission_detected={_yes_no(luminous_tracking.get('luminous_emission_detected'))}",
+                    f"alignment_required={_yes_no(luminous_tracking.get('alignment_required'))}",
+                    f"alignment_ready={_yes_no(luminous_tracking.get('alignment_ready'))}",
+                    f"reason={luminous_tracking.get('reason', '--')}",
+                )
+            )
+        )
+        lines.append(
+            "leitura="
+            + (
+                "DISPLAY COM EMISSÃO; AGUARDANDO GEOMETRIA FINA ANTES DE OK/NG"
+                if bool(luminous_tracking.get("luminous_emission_detected"))
+                and bool(luminous_tracking.get("alignment_required"))
+                and not bool(luminous_tracking.get("alignment_ready"))
+                else (
+                    "GEOMETRIA LUMINOSA PRONTA PARA O ANALYZER"
+                    if bool(luminous_tracking.get("alignment_ready"))
+                    else "SEM EVIDÊNCIA LUMINOSA CONCLUSIVA NESTE FRAME"
+                )
+            )
+        )
+    else:
+        lines.append("indisponível neste snapshot")
+    lines.append("")
+
     lines.append("[RUNTIME PRODUTIVO OBSERVADO NO MESMO CLIQUE]")
     lines.append(
         "Este bloco é apenas contexto do runtime. Ele NÃO é usado para recalcular o snapshot acima."
@@ -1833,6 +1874,20 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
     lines.append(f"physical_for_logical_check_kind={contextual.get('kind', '--')}")
     lines.append(f"physical_for_logical_check_allow_auto={contextual.get('allow_auto', '--')}")
     lines.append(f"unknown_off_candidate_kind={unknown_candidate.get('kind', '--')}")
+    if isinstance(luminous_tracking, dict):
+        lines.append(
+            "luminous_tracking="
+            + " | ".join(
+                (
+                    f"emission={_yes_no(luminous_tracking.get('luminous_emission_detected'))}",
+                    f"alignment={_yes_no(luminous_tracking.get('alignment_ready'))}",
+                    f"components={luminous_tracking.get('luminous_component_count', '--')}",
+                    f"matched={luminous_tracking.get('matched_count', '--')}",
+                    f"fit_space={luminous_tracking.get('fit_space', '--')}",
+                    f"reason={luminous_tracking.get('reason', '--')}",
+                )
+            )
+        )
     if rows:
         lines.append(
             "best_reference="
