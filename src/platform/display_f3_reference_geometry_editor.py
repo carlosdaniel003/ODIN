@@ -1072,7 +1072,7 @@ class F3ReferenceGeometryEditor(F3GeometryEditorInteractionBase):
             self.schedule_render()
             return
 
-        # Modo selecionar: handles > máscara > placa. Clique vazio nunca move tudo.
+        # Modo selecionar: handles > máscara > placa. clique vazio nunca move tudo.
         self.canvas.focus_set()
         image_pos = self._canvas_to_image(event.x, event.y)
         ctrl = bool(int(getattr(event, "state", 0) or 0) & 0x0004)
