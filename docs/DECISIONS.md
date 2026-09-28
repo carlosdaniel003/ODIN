@@ -371,6 +371,38 @@ configuradas.
 
 ---
 
+## D-021 — Lock atual do tracking pode confirmar presença física no F3
+
+**Status:** Accepted
+
+O filtro/display localizado pelo tracking é uma evidência física de que existe
+placa no suporte, mesmo quando os scores globais das fotos de presença ficam
+ambíguos por mudança de foco, posição ou enquadramento.
+
+Decisão:
+
+- `F3PresenceAuthority` continua sendo a única autoridade de presença;
+- quando a presença visual não consegue confirmar placa, um tracking com
+  `locked=true` e `evidence_current=true` pode confirmar
+  `board_present=true`;
+- a referência que obteve o lock (`H1`, `BLUE`, `USB`, `AUX`, board-off ou outra
+  referência estrutural válida) não muda essa semântica: presença responde apenas
+  se o objeto físico foi localizado;
+- `empty_confirmed=true` possui precedência e nunca é sobrescrito pelo tracking;
+- lock mantido por grace period ou qualquer resultado com
+  `evidence_current=false` não confirma presença;
+- presença confirmada exclusivamente pelo tracking não alimenta o latch visual de
+  ambiguidade, evitando que um lock stale prolongue artificialmente a presença;
+- o cache canônico inclui o estado relevante do tracking para que a chegada de um
+  lock atual invalide imediatamente um snapshot anterior de presença no mesmo
+  frame/contexto.
+
+Consequência: presença deixa de bloquear energia quando o próprio tracker já
+localizou fisicamente o filtro/display com evidência atual, sem criar nova
+autoridade e sem permitir que geometria residual esconda suporte vazio.
+
+---
+
 ## Como adicionar uma decisão
 
 Use:

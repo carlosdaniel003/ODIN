@@ -24,6 +24,7 @@ from src.platform.display_f3_object_tracking import get_tracking_runtime
 
 
 F3_RUNTIME_AUTHORITIES_SOURCE = "f3_runtime_authorities"
+F3_TRACKING_PRESENCE_SOURCE = "f3_tracking_current_lock_presence"
 
 
 def _valid_frame(frame) -> bool:
@@ -41,14 +42,34 @@ class F3TrackingAuthority:
         if self.runtime is not None:
             self.runtime.reset()
 
+    def presence_evidence(self) -> dict:
+        """Expõe somente evidência óptica atual que pode provar presença física."""
+        result = (
+            getattr(self.runtime, "last_result", None)
+            if self.runtime is not None
+            else None
+        )
+        return {
+            "available": result is not None,
+            "source": F3_TRACKING_PRESENCE_SOURCE,
+            "locked": bool(getattr(result, "locked", False)),
+            "evidence_current": bool(
+                getattr(result, "evidence_current", False)
+            ),
+            "reference": str(getattr(result, "reference", "") or ""),
+            "reason": str(getattr(result, "reason", "") or ""),
+        }
+
     def stats(self) -> dict:
-        result = getattr(self.runtime, "last_result", None) if self.runtime is not None else None
+        evidence = self.presence_evidence()
         return {
             "owner": "F3TrackingAuthority",
             "ready": bool(getattr(self.runtime, "ready", False)),
             "project": str(getattr(self.runtime, "project", "") or ""),
-            "locked": bool(getattr(result, "locked", False)),
-            "reference": str(getattr(result, "reference", "") or ""),
+            "locked": bool(evidence.get("locked")),
+            "evidence_current": bool(evidence.get("evidence_current")),
+            "reference": str(evidence.get("reference") or ""),
+            "reason": str(evidence.get("reason") or ""),
         }
 
 
@@ -61,16 +82,48 @@ class F3PresenceAuthority:
     def reset(self) -> None:
         self._latch = None
 
-    def evaluate(self, state: dict | None) -> dict:
+    def evaluate(
+        self,
+        state: dict | None,
+        tracking: dict | None = None,
+    ) -> dict:
         evidence = presence_module.avaliar_presenca_melhor_ocupado_f3(state)
         result = deepcopy(evidence)
 
+        # EMPTY confirmado tem precedência sobre qualquer pose do tracker. O
+        # rearme físico nunca pode ser mascarado por geometria residual.
         if result.get("empty_confirmed"):
             self._latch = None
             return result
 
+        # A presença visual explícita continua válida e alimenta somente a
+        # memória curta já existente para ambiguidade entre frames.
         if result.get("board_present") and result.get("presence_confirmed"):
             self._latch = {"frames": 0, "evidence": deepcopy(result)}
+            return result
+
+        # O filtro/display já localizado pelo tracker é evidência física positiva
+        # de placa no suporte. Somente lock confirmado no frame atual possui
+        # autoridade: lock mantido por grace period (evidence_current=False) não
+        # promove presença e não alimenta o latch visual.
+        tracking_evidence = tracking if isinstance(tracking, dict) else {}
+        if (
+            bool(tracking_evidence.get("locked"))
+            and bool(tracking_evidence.get("evidence_current"))
+        ):
+            result.update(
+                available=True,
+                source=F3_TRACKING_PRESENCE_SOURCE,
+                board_present=True,
+                presence_confirmed=True,
+                empty_confirmed=False,
+                tracking_presence_confirmed=True,
+                tracking_reference=str(
+                    tracking_evidence.get("reference") or ""
+                ),
+                tracking_reason=str(tracking_evidence.get("reason") or ""),
+                reason="tracking_lock_atual_confirma_placa",
+            )
             return result
 
         latch = self._latch
@@ -387,7 +440,14 @@ class F3RuntimeAuthorities:
         self.app._display_f3_physical_pending_frames = 0
         return deepcopy(raw_state)
 
-    def _cache_signature(self, frame, project_name: str, context: dict | None):
+    def _cache_signature(
+        self,
+        frame,
+        project_name: str,
+        context: dict | None,
+        tracking: dict | None,
+    ):
+        tracking_evidence = tracking if isinstance(tracking, dict) else {}
         return (
             self._frame_token(frame),
             str(project_name or ""),
@@ -400,6 +460,10 @@ class F3RuntimeAuthorities:
                     False,
                 )
             ),
+            bool(tracking_evidence.get("locked")),
+            bool(tracking_evidence.get("evidence_current")),
+            str(tracking_evidence.get("reference") or ""),
+            str(tracking_evidence.get("reason") or ""),
         )
 
     def build_operational_state(
@@ -419,7 +483,13 @@ class F3RuntimeAuthorities:
                 "source": F3_RUNTIME_AUTHORITIES_SOURCE,
             }
 
-        signature = self._cache_signature(frame, project_name, context)
+        tracking_evidence = self.tracking.presence_evidence()
+        signature = self._cache_signature(
+            frame,
+            project_name,
+            context,
+            tracking_evidence,
+        )
         if signature == self._cache_key and isinstance(self._cache_value, dict):
             self.cache_hits += 1
             return deepcopy(self._cache_value)
@@ -455,7 +525,10 @@ class F3RuntimeAuthorities:
             dict,
         )
 
-        presence = self.presence.evaluate(state)
+        presence = self.presence.evaluate(
+            state,
+            tracking_evidence,
+        )
         energy = (
             self.power.evaluate(frame, project_name, context)
             if bool(presence.get("board_present"))

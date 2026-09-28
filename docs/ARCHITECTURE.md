@@ -196,6 +196,9 @@ Contratos atuais:
 - cada responsabilidade possui um proprietário explícito;
 - tracking reutiliza uma única instância stateful do tracker;
 - presença possui uma única memória de estabilidade curta;
+- `F3PresenceAuthority` pode aceitar um lock de tracking como evidência positiva
+  de placa somente quando `locked=true` e `evidence_current=true`; EMPTY
+  confirmado continua tendo precedência e lock mantido/stale não promove presença;
 - energia recebe presença como entrada e não pode ignorá-la;
 - analyzer produtivo possui uma única instância/cache por sessão;
 - mutações de sequência passam pela facade da state machine;

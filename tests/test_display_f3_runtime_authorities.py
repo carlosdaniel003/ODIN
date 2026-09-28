@@ -78,6 +78,79 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
             self.assertTrue(owner.evaluate({})["empty_confirmed"])
         self.assertIsNone(owner._latch)
 
+    def test_presence_owner_accepts_only_current_tracking_lock(self):
+        owner = authorities.F3PresenceAuthority()
+        ambiguous = {
+            "available": False,
+            "board_present": False,
+            "presence_confirmed": False,
+            "empty_confirmed": False,
+            "reason": "scores_de_presenca_indisponiveis",
+        }
+        current_lock = {
+            "locked": True,
+            "evidence_current": True,
+            "reference": "check:CHECK_003",
+            "reason": "locked",
+        }
+        held_lock = {
+            "locked": True,
+            "evidence_current": False,
+            "reference": "check:CHECK_003",
+            "reason": "lock_held",
+        }
+
+        with patch.object(
+            authorities.presence_module,
+            "avaliar_presenca_melhor_ocupado_f3",
+            return_value=ambiguous,
+        ):
+            present = owner.evaluate({}, current_lock)
+            stale = owner.evaluate({}, held_lock)
+
+        self.assertTrue(present["board_present"])
+        self.assertTrue(present["presence_confirmed"])
+        self.assertTrue(present["tracking_presence_confirmed"])
+        self.assertEqual(
+            authorities.F3_TRACKING_PRESENCE_SOURCE,
+            present["source"],
+        )
+        self.assertEqual(
+            "tracking_lock_atual_confirma_placa",
+            present["reason"],
+        )
+        self.assertFalse(stale["board_present"])
+        self.assertFalse(stale["presence_confirmed"])
+        self.assertIsNone(owner._latch)
+
+    def test_empty_presence_has_priority_over_current_tracking_lock(self):
+        owner = authorities.F3PresenceAuthority()
+        empty = {
+            "available": True,
+            "board_present": False,
+            "presence_confirmed": True,
+            "empty_confirmed": True,
+            "reason": "suporte_vazio_confirmado",
+        }
+        current_lock = {
+            "locked": True,
+            "evidence_current": True,
+            "reference": "check:CHECK_001",
+            "reason": "locked",
+        }
+
+        with patch.object(
+            authorities.presence_module,
+            "avaliar_presenca_melhor_ocupado_f3",
+            return_value=empty,
+        ):
+            result = owner.evaluate({}, current_lock)
+
+        self.assertTrue(result["empty_confirmed"])
+        self.assertFalse(result["board_present"])
+        self.assertNotIn("tracking_presence_confirmed", result)
+        self.assertIsNone(owner._latch)
+
     def test_power_owner_never_lets_energy_bypass_missing_presence(self):
         app = _App()
         owner = authorities.F3PowerAuthority(app)
@@ -121,7 +194,17 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         matcher = SimpleNamespace(
             check_store=SimpleNamespace(get=Mock(return_value={})),
         )
-        tracking_owner = SimpleNamespace(stats=lambda: {"owner": "tracking"})
+        tracking_owner = SimpleNamespace(
+            stats=lambda: {"owner": "tracking"},
+            presence_evidence=Mock(
+                return_value={
+                    "locked": False,
+                    "evidence_current": False,
+                    "reference": "",
+                    "reason": "object_not_locked",
+                }
+            ),
+        )
         analyzer_owner = SimpleNamespace(
             analyzer=object(),
             rebuild=Mock(return_value=object()),
@@ -217,6 +300,110 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
             authorities.F3_RUNTIME_AUTHORITIES_SOURCE,
             first["runtime_authority_owner"],
         )
+
+    def test_same_frame_rebuilds_when_current_tracking_lock_confirms_presence(self):
+        app = _App()
+        matcher = SimpleNamespace(
+            check_store=SimpleNamespace(get=Mock(return_value={})),
+        )
+        tracking_state = {
+            "locked": False,
+            "evidence_current": False,
+            "reference": "",
+            "reason": "object_not_locked",
+        }
+        tracking_owner = SimpleNamespace(
+            stats=lambda: {"owner": "tracking"},
+            presence_evidence=Mock(side_effect=lambda: dict(tracking_state)),
+        )
+        analyzer_owner = SimpleNamespace(
+            analyzer=object(),
+            rebuild=Mock(return_value=object()),
+        )
+        with (
+            patch.object(
+                authorities,
+                "F3TrackingAuthority",
+                return_value=tracking_owner,
+            ),
+            patch.object(
+                authorities,
+                "F3CheckAnalyzerAuthority",
+                return_value=analyzer_owner,
+            ),
+            patch.object(
+                authorities.operational_module,
+                "DisplayVisualReferenceMatcher",
+                return_value=matcher,
+            ),
+        ):
+            owner = authorities.F3RuntimeAuthorities(app)
+
+        owner.power.evaluate = Mock(
+            return_value={
+                "powered_confirmed": True,
+                "off_confirmed": False,
+                "energy_state": "powered",
+            }
+        )
+        ambiguous = {
+            "available": False,
+            "board_present": False,
+            "presence_confirmed": False,
+            "empty_confirmed": False,
+            "reason": "scores_de_presenca_indisponiveis",
+        }
+        raw = {
+            "kind": "unknown",
+            "allow_auto": False,
+            "reference_scores": {},
+        }
+        frame = _Frame()
+        context = {"check_id": "CHECK_001", "check_name": "H1"}
+
+        with (
+            patch.object(
+                authorities.transition_module,
+                "classificar_estado_fisico_referencias_f3",
+                return_value=raw,
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "corrigir_falso_check_ligado_pelas_mascaras_f3",
+                side_effect=lambda **kwargs: kwargs["state"],
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "aplicar_contexto_ao_estado_fisico_f3",
+                side_effect=lambda state, **kwargs: state,
+            ),
+            patch.object(
+                authorities.presence_module,
+                "avaliar_presenca_melhor_ocupado_f3",
+                return_value=ambiguous,
+            ),
+            patch.object(
+                authorities.live_runtime_module,
+                "aplicar_gate_rearme_ciclo_f3",
+                side_effect=lambda app, state: state,
+            ),
+        ):
+            before_lock = owner.build_operational_state(frame, "P", context)
+            tracking_state.update(
+                locked=True,
+                evidence_current=True,
+                reference="check:CHECK_003",
+                reason="locked",
+            )
+            after_lock = owner.build_operational_state(frame, "P", context)
+
+        self.assertEqual("unknown", before_lock["kind"])
+        self.assertEqual("powered", after_lock["kind"])
+        self.assertTrue(
+            after_lock["board_presence_evidence"]["tracking_presence_confirmed"]
+        )
+        self.assertEqual(1, owner.power.evaluate.call_count)
+        self.assertEqual(2, owner.build_count)
 
     def test_authority_module_owns_no_timer_or_thread(self):
         source = inspect.getsource(authorities)
