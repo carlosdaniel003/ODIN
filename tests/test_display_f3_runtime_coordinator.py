@@ -80,6 +80,11 @@ class _HeavyExecutor:
         }
 
 
+class _CompletedFuture:
+    def done(self):
+        return True
+
+
 class _App:
     DISPLAY_F3_PREVIEW_INTERVAL_MS = 16
 
@@ -97,6 +102,7 @@ class _App:
         self._display_f3_tracking_config_open = False
         self._display_f3_tracking_result = object()
         self._display_f3_tracking_future = None
+        self._display_f3_semantic_future = None
         self._display_f3_tracking_analysis_pending = False
         self.analysis_due = True
         self.full_cycles = 0
@@ -295,6 +301,35 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
         self.assertEqual(1, app.renders)
         self.assertEqual(
             "heavy_executor_busy",
+            coordinator.stats()["last_reason"],
+        )
+
+    def test_primeiro_lock_concluido_e_drenado_antes_do_backpressure(self):
+        app, coordinator = self._install()
+        app._display_f3_object_tracking_enabled = True
+        app._display_f3_tracking_result = None
+        app._display_f3_tracking_future = _CompletedFuture()
+        app._display_f3_heavy_executor = _HeavyExecutor(active=0, pending=0)
+
+        app.root.run_next()
+
+        self.assertEqual(1, app.full_cycles)
+        self.assertEqual(
+            "tracking_result_ready",
+            coordinator.stats()["last_reason"],
+        )
+
+    def test_semantic_concluido_e_drenado_mesmo_com_frame_repetido(self):
+        app, coordinator = self._install()
+        app.root.run_next()
+        app.analysis_due = False
+        app._display_f3_semantic_future = _CompletedFuture()
+
+        app.root.run_next()
+
+        self.assertEqual(2, app.full_cycles)
+        self.assertEqual(
+            "semantic_result_ready",
             coordinator.stats()["last_reason"],
         )
 

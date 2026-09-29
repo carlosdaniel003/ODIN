@@ -263,6 +263,27 @@ class F3RuntimeCoordinator:
             or int(stats.get("pending_jobs", 0) or 0) > 0
         )
 
+    def _completed_async_result_reason(self) -> str:
+        """Retorna o resultado HIGH concluído que o callback F3 precisa drenar.
+
+        Future concluído não é trabalho pesado em voo. A publicação continua no
+        full_cycle/Tk, que já é o consumidor canônico dos resultados versionados.
+        """
+        for attr_name, reason in (
+            ("_display_f3_tracking_future", "tracking_result_ready"),
+            ("_display_f3_semantic_future", "semantic_result_ready"),
+        ):
+            future = getattr(self.app, attr_name, None)
+            done = getattr(future, "done", None)
+            if not callable(done):
+                continue
+            try:
+                if bool(done()):
+                    return reason
+            except Exception:
+                continue
+        return ""
+
     @staticmethod
     def _idle_after_cycle(elapsed_ms: float) -> int:
         elapsed = max(0.0, float(elapsed_ms))
@@ -288,6 +309,14 @@ class F3RuntimeCoordinator:
             )
         ):
             return "full_cycle", "tracking_analysis_pending"
+
+        # O worker HIGH pode terminar entre dois ticks. O resultado precisa ser
+        # consumido antes de repeated-frame/backpressure; caso contrário um
+        # Future concluído permanece não-nulo, _display_f3_tracking_result fica
+        # None e o startup pode permanecer indefinidamente em IDENTIFICANDO.
+        completed_reason = self._completed_async_result_reason()
+        if completed_reason:
+            return "full_cycle", completed_reason
 
         new_frame = frame_token != self._last_frame_token
         if not new_frame:

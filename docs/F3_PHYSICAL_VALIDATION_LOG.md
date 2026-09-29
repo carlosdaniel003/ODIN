@@ -272,3 +272,107 @@ sem backlog visual
 sem queda perceptível de responsividade
 sem alterar a regra produtiva de OK/NG
 ~~~
+
+---
+
+## 29/09/2026 — Reteste D-029 / runtime preso em IDENTIFICANDO
+
+**Resultado físico:** FAIL.
+
+### Sintoma observado
+
+Após a correção de sincronia visual D-029, o Display F3 abriu normalmente, mas
+permaneceu indefinidamente em `IDENTIFICANDO...` no H1. A câmera continuava ao
+vivo e o operador conseguia acionar ANALISAR, porém o runtime produtivo não
+publicava um novo lock de tracking nem liberava a sequência.
+
+### Evidência objetiva do DEBUG
+
+No clique analisado:
+
+- câmera ao vivo: frame 811, com fluxo ativo em aproximadamente 15 FPS;
+- último estado publicado de object tracking: frame 36;
+- tracking: `locked=false`, `reason=object_not_locked`,
+  `evidence_current=false`;
+- energia produtiva: indisponível por `object_not_locked`;
+- `last_auto_analysis=null`;
+- CHECK atual permaneceu H1 e nenhum CHECK foi concluído.
+
+A diferença extrema entre o frame atual da câmera e o frame ainda publicado pelo
+tracking confirmou que o problema não era falta de atualização da câmera.
+
+### Causa identificada
+
+A otimização de aquisição inicial de D-029 introduziu um deadlock de publicação
+no `F3RuntimeCoordinator`:
+
+~~~text
+primeiro full_cycle
+  -> submete tracking HIGH
+  -> _display_f3_tracking_future != None
+  -> worker termina
+  -> executor deixa de estar busy
+  -> Future continua armazenado até o full_cycle consumi-lo
+
+_choose_path()
+  -> initial_lock_needed = True
+  -> Future existe
+  -> executor não está busy
+  -> tracking_initial_lock_in_flight
+  -> render_only
+  -> nunca chama o consumidor do Future
+  -> _display_f3_tracking_result continua None
+  -> IDENTIFICANDO para sempre
+~~~
+
+O coordinator distinguia apenas `Future is None` de `Future existe`; não
+distinguia um Future ainda em execução de um Future já concluído.
+
+### Correção aplicada
+
+O coordinator passa a verificar resultados assíncronos concluídos antes de:
+
+- coalescer frame repetido;
+- aplicar backpressure do executor;
+- tratar o primeiro lock como ainda em voo.
+
+Um Future concluído de tracking ou classificação semântica força exatamente um
+`full_cycle` para que o consumidor canônico publique o resultado no thread Tk.
+Nenhum novo scheduler, thread, worker ou fila foi criado.
+
+A política de desempenho permanece:
+
+~~~text
+worker em voo -> render_only / backpressure
+worker concluído -> full_cycle curto para drenar/publicar
+próximo trabalho pesado -> continua no executor único
+~~~
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Validação automatizada adicionada
+
+- Future de tracking inicial concluído precisa ser drenado antes do backpressure;
+- Future semântico concluído precisa ser drenado mesmo quando o frame visual se
+  repete;
+- o teste existente de tracking ainda em voo continua exigindo
+  `render_only`/backpressure.
+
+### Reteste esperado
+
+~~~text
+abrir F3
+-> primeiro tracking HIGH é submetido
+-> worker termina
+-> coordinator drena o resultado concluído
+-> tracking passa a acompanhar frames atuais
+-> IDENTIFICANDO deixa de ficar preso
+
+com LOCK válido:
+-> câmera, máscaras verdes e VISOR usam a mesma amostra visual latest-frame
+-> sem backlog visual
+-> sem alterar OK/NG, energia ou sequência
+~~~
+
