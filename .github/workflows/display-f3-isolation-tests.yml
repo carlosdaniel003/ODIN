@@ -162,6 +162,7 @@ jobs:
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_referencia_lazy_materializa_uma_vez_e_fica_em_cache \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_reset_de_ciclo_apaga_pose_mas_preserva_banco_calibrado \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_align_prioriza_referencias_do_check_sem_materializar_restante \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_board_off_recupera_lock_quando_check_atual_nao_localiza \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_cycle_reset_usa_reset_pose_sem_descartar_referencias \
             tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_cycle_reset_clears_tracking_orientation_for_next_board \
             tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_primeiro_lock_high_pode_ser_enfileirado_mesmo_com_executor_ocupado \

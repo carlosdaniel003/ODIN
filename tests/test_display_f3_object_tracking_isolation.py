@@ -1350,8 +1350,8 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
 
             self.assertTrue(result.locked)
             materialized = [call.args[0] for call in materialize.call_args_list]
-            self.assertIn("check:CHECK_001", materialized)
-            self.assertIn("board_off", materialized)
+            self.assertEqual(["check:CHECK_001"], materialized)
+            self.assertNotIn("board_off", materialized)
             self.assertNotIn("check:CHECK_002", materialized)
 
     def test_reference_bank_materializa_akaze_somente_no_fallback(self):

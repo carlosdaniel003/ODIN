@@ -5513,7 +5513,10 @@ class F3DisplayObjectTracker:
             key for key in all_reference_keys if key not in preferred_keys
         ]
         reference_groups = (
-            [preferred_keys, remaining_keys]
+            [
+                *[[key] for key in preferred_keys],
+                *([remaining_keys] if remaining_keys else []),
+            ]
             if preferred_keys
             else [all_reference_keys]
         )
@@ -5846,6 +5849,19 @@ def reset_tracking_cycle(app) -> None:
     )
 
 
+def _runtime_reference_available(runtime, key: str) -> bool:
+    """Consulta referência sem exigir materialização prévia.
+
+    O tracker real expõe has_reference() para o banco lazy. O fallback por
+    references preserva compatibilidade com adapters/test doubles estruturais.
+    """
+    checker = getattr(runtime, "has_reference", None)
+    if callable(checker):
+        return bool(checker(key))
+    references = getattr(runtime, "references", None)
+    return bool(isinstance(references, dict) and str(key or "") in references)
+
+
 def _rescue_current_check_tracking_lock(
     app,
     frame,
@@ -5883,7 +5899,7 @@ def _rescue_current_check_tracking_lock(
     unique_specs: list[tuple[str, float]] = []
     seen = set()
     for key, threshold in specs:
-        if key in seen or not runtime.has_reference(key):
+        if key in seen or not _runtime_reference_available(runtime, key):
             continue
         seen.add(key)
         unique_specs.append((key, threshold))
