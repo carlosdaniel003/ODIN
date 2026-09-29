@@ -353,10 +353,16 @@ class DisplayAutomaticCheckF3Mixin:
                 confidence = float(item.get("confidence", 0.0) or 0.0)
             except (TypeError, ValueError):
                 confidence = 0.0
+            luminous_core_confirmed = bool(
+                item.get("luminous_core_confirmed")
+            )
             if (
-                confidence >= DISPLAY_AUTO_MIN_CONFIDENCE
-                and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
+                str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
                 and item.get("matched") is not False
+                and (
+                    luminous_core_confirmed
+                    or confidence >= DISPLAY_AUTO_MIN_CONFIDENCE
+                )
             ):
                 return True
         return False

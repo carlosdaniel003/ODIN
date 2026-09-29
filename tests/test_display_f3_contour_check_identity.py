@@ -75,6 +75,111 @@ class DisplayF3ContourCheckIdentityTests(unittest.TestCase):
         self.assertLess(result["comparison_height"], 300)
         self.assertGreater(result["score"], 0.90)
 
+    def test_emissao_no_nucleo_exato_promove_on_sem_aprovar_mascara_off_errada(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "reason": "check_nao_conforme_aprendizado_fotos_checks",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_008",
+                    "expected": "on",
+                    "expected_label": "ACESO",
+                    "classified": "off",
+                    "classified_label": "APAGADO",
+                    "matched": False,
+                    "confidence": 0.20,
+                },
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "off",
+                    "expected_label": "APAGADO",
+                    "classified": "off",
+                    "classified_label": "APAGADO",
+                    "matched": True,
+                    "confidence": 0.90,
+                },
+            ],
+        }
+        geometry = {
+            "locked": True,
+            "source_type": "luminous_segment_grid",
+            "check_id": "CHECK_001",
+            "spatial_alignment_ready": True,
+            "luminous_evidence_current": True,
+            "luminous_alignment_mode": "base_core_verified",
+            "luminous_core_validated_mask_ids": ["MASK_008"],
+        }
+
+        result = identity._apply_luminous_core_mask_evidence(
+            analysis,
+            geometry,
+            "CHECK_001",
+        )
+
+        self.assertTrue(result["approved"])
+        self.assertEqual(2, result["matched_mask_count"])
+        on_row = result["mask_results"][0]
+        self.assertEqual("on", on_row["classified"])
+        self.assertTrue(on_row["matched"])
+        self.assertTrue(on_row["luminous_core_confirmed"])
+        self.assertEqual(
+            "luminous_core_identity_over_learned",
+            on_row["classification_source"],
+        )
+
+        wrong_off = {
+            **analysis,
+            "mask_results": [
+                dict(analysis["mask_results"][0]),
+                {
+                    **analysis["mask_results"][1],
+                    "classified": "on",
+                    "classified_label": "ACESO",
+                    "matched": False,
+                },
+            ],
+        }
+        still_ng = identity._apply_luminous_core_mask_evidence(
+            wrong_off,
+            geometry,
+            "CHECK_001",
+        )
+        self.assertFalse(still_ng["approved"])
+        self.assertFalse(still_ng["mask_results"][1]["matched"])
+
+    def test_evidencia_luminosa_nao_promove_on_sem_lock_do_mesmo_check(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_008",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.95,
+                }
+            ],
+        }
+        geometry = {
+            "locked": True,
+            "source_type": "check",
+            "check_id": "CHECK_002",
+            "spatial_alignment_ready": False,
+            "luminous_evidence_current": False,
+            "luminous_core_validated_mask_ids": ["MASK_008"],
+        }
+
+        result = identity._apply_luminous_core_mask_evidence(
+            analysis,
+            geometry,
+            "CHECK_001",
+        )
+
+        self.assertEqual("off", result["mask_results"][0]["classified"])
+        self.assertFalse(result["mask_results"][0]["matched"])
+
     def test_analisador_rastreado_usa_frame_raw_e_mascaras_moveis(self):
         raw = np.zeros((40, 60, 3), dtype=np.uint8)
         aligned = np.ones((40, 60, 3), dtype=np.uint8)

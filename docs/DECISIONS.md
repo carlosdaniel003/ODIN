@@ -725,6 +725,56 @@ Por isso, nesta etapa diagnóstica:
 - esta guarda continua sem autoridade produtiva e não altera energia, OK/NG,
   avanço de CHECK ou rearme.
 
+### Registro de validação física — 29/09/2026
+
+A investigação no equipamento real passou pelas seguintes tentativas e
+observações. Este histórico deve ser preservado para evitar repetir soluções já
+testadas sem considerar seus limites:
+
+1. **Máscaras fixas**: funcionaram bem quando a placa coincidia com a posição
+   ensinada, mas deixaram de servir quando a placa/filtro entrou deslocado ou
+   rotacionado no campo da câmera.
+2. **Tracking estrutural do filtro/placa**: recuperou uma pose grosseira, porém
+   reflexos no filtro desligado chegaram a ser confundidos com landmarks
+   luminosos. Foram adicionados veto por OFF confirmado, suporte dentro da máscara
+   projetada, limite de erro local e rejeição de poses com residual alto.
+3. **Refinamento luminoso por landmarks individuais**: conseguiu localizar
+   emissão, mas em alguns frames tentava torcer/deslocar o grid ou recusava uma
+   pose visualmente boa por ganho fino insuficiente.
+4. **Homografia + registro H1 (D-025)**: foi criada como caminho experimental
+   isolado. A primeira execução real parou em `filter_not_found`, embora o
+   tracking produtivo já exibisse LOCK estrutural. O experimento passou então a
+   reutilizar os quatro pontos do filtro já localizados pelo proprietário
+   canônico de tracking.
+5. **Ambiente com iluminação reduzida**: ao apagar a luz externa, os segmentos
+   ficaram mais destacados e o alinhamento estrutural/luminoso ficou visualmente
+   muito melhor, mesmo com a foto H1 de referência tendo sido capturada com a luz
+   ambiente acesa. Isso mostrou que localização geométrica por emissão pode ser
+   mais robusta à iluminação global do que matching da fotografia inteira.
+6. **ECC piorando uma base boa**: em teste real, a base apresentava
+   aproximadamente `Dice=0,597` e erro médio `4,37 px`, enquanto o candidato ECC
+   caiu para `Dice=0,313` e erro médio `18,07 px`. A partir disso ECC virou apenas
+   candidato: qualquer regressão preserva a homografia/base.
+7. **ECC sem convergência**: outro teste retornou
+   `h1_registration_not_converged`. Foi corrigido para que falha do ECC ou
+   transformação fora do guard nunca apaguem uma homografia válida; o DEBUG
+   passou a registrar `ecc_failed_base_preserved` ou motivo equivalente.
+8. **Geometria adquirida em BLUE e reutilizada no H1**: no teste real mais
+   recente, o clique ocorreu em H1 no frame 373, mas a geometria ainda vinha de
+   `check:CHECK_002`/BLUE, obtida anteriormente. Visualmente as máscaras estavam
+   sobre os segmentos, porém o refinamento H1 atual registrava seis landmarks
+   locais e falhava em `fine_gain_insufficient`. Isso demonstrou que uma pose já
+   correta pode ser rejeitada simplesmente porque não existe movimento adicional
+   suficiente para justificar um refinamento.
+9. **Conclusão desta rodada**: alinhamento e movimento não são sinônimos. Se a
+   matriz atual já coloca emissão dentro do núcleo geométrico exato das máscaras
+   ON identificadas, o runtime deve poder confirmar `LOCK_SEGMENTOS` mantendo a
+   própria matriz, em vez de exigir uma nova transformação.
+
+A integração produtiva da homografia D-025 continua bloqueada. A regra derivada
+do item 9 é registrada separadamente em D-026 porque usa a autoridade produtiva
+de tracking já existente e não transforma o experimento D-025 em autoridade.
+
 ### Validação antes de integrar ao ciclo produtivo
 
 A primeira implementação deve ser um experimento isolado de geometria, sem
@@ -777,6 +827,67 @@ O filtro responde apenas **onde está a região do display**. O H1 inteiro respo
 **onde está o grid real dos segmentos dentro dessa região**. Depois da aquisição
 H1, a inspeção recupera a estabilidade das máscaras fixas em um espaço canônico
 e evita recalcular a pose durante os demais CHECKS do mesmo ciclo.
+
+---
+## D-026 — Pose já alinhada pode ser confirmada pelo núcleo luminoso sem novo movimento
+
+**Status:** Accepted
+
+### Contexto
+
+O teste físico mostrou um caso em que as máscaras estavam visualmente
+posicionadas sobre os segmentos do H1, mas o refinamento fino continuava
+bloqueando a autoridade espacial por `fine_gain_insufficient`. A exigência de
+ganho geométrico era inadequada nesse cenário: quando a pose de entrada já está
+correta, a melhor correção pode ser exatamente zero.
+
+Também foi observado que uma pose herdada de BLUE pode permanecer geometricamente
+útil ao voltar para H1. Essa pose não deve ganhar autoridade para H1 apenas por
+ter sido boa em BLUE; o H1 atual precisa reconfirmá-la com evidência luminosa dos
+seus próprios IDs.
+
+### Decisão
+
+- com lock estrutural existente, antes/depois de tentar o refinamento fino, o
+  tracking testa a matriz base contra o **núcleo geométrico exato**, sem padding,
+  das máscaras que o CHECK atual espera ACESAS;
+- se o quorum de núcleos identificados contiver emissão suficiente, a matriz base
+  pode ser publicada novamente **sem qualquer movimento** como lock luminoso do
+  CHECK atual;
+- esse caminho recebe modo `base_core_verified` e continua usando
+  `source_type=luminous_segment_grid`, tornando explícito que a autoridade atual
+  veio da prova luminosa dos IDs, e não apenas da referência estrutural anterior;
+- os IDs confirmados no núcleo são carregados no mesmo snapshot
+  frame+geometria usado pelo worker semântico;
+- para esses IDs, quando o estado esperado é ON, a evidência geométrica/luminosa
+  atual pode reconciliar uma classificação aprendida OFF/ambígua para ON. Assim,
+  um segmento realmente aceso dentro da sua própria máscara pode aparecer
+  **verde** sem depender exclusivamente de semelhança fotométrica com imagens
+  tiradas sob outra iluminação;
+- essa reconciliação é permitida somente para `expected=ON`, no mesmo CHECK, com
+  `spatial_alignment_ready=true`, `luminous_evidence_current=true` e geometria
+  publicada por `luminous_segment_grid`;
+- segmentos esperados OFF **nunca** são promovidos por essa regra. Eles continuam
+  pertencendo ao analyzer canônico, preservando a detecção de segmento indevido;
+- o CHECK só avança quando todas as máscaras ativas estiverem conformes. Portanto,
+  confirmar os ON luminosos não cria atalho para 27/28, não ignora um OFF que
+  acendeu e não altera D-024;
+- CHECK intermitente mantém sua autoridade temporal própria e não usa essa
+  reconciliação direta;
+- uma geometria antiga de BLUE pode servir como matriz base, mas só se torna
+  autoridade espacial de H1 depois que o próprio H1 atual valida emissão dentro
+  dos seus núcleos identificados.
+
+### Consequência
+
+Quando as máscaras já estão corretamente em cima dos segmentos, o sistema deixa
+de exigir uma transformação artificial para provar alinhamento. O H1 pode
+confirmar a geometria no próprio frame, pintar em verde os ON cuja emissão foi
+identificada dentro da máscara correta e, se os 28 estados estiverem conformes,
+registrar H1 OK e liberar a transição para o próximo CHECK.
+
+Esta decisão complementa D-022, D-023 e D-024. D-025 permanece experimental e
+não se torna autoridade produtiva por causa desta mudança.
 
 ---
 ## Como adicionar uma decisão

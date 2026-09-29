@@ -646,6 +646,22 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         }
         self.assertTrue(helper(powered_analysis))
 
+        luminous_core_analysis = {
+            "ready": True,
+            "approved": True,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                    "confidence": 0.01,
+                    "luminous_core_confirmed": True,
+                }
+            ],
+        }
+        self.assertTrue(helper(luminous_core_analysis))
+
         decision = auto_policy.decidir_analise_display_f3(
             off_analysis,
             reference_gate=True,

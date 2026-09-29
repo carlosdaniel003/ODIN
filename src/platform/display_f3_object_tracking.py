@@ -3232,10 +3232,27 @@ def _find_luminous_segment_pose(
         # que três landmarks confirmados corrijam a pose fina de TODAS as 28 ROIs.
         # Isso roda mesmo quando o fit global já encontrou uma pose, porque o
         # objetivo aqui é remover o erro residual do contorno.
+        #
+        # Antes de exigir movimento, validamos também a pose estrutural atual
+        # contra o núcleo EXATO das máscaras ON. Se a luz já cai dentro das ROIs
+        # corretas, não existe razão para rejeitar a pose apenas porque um ajuste
+        # adicional teve ganho pequeno. Nesse caso publicamos a MESMA matriz como
+        # lock luminoso atual, sem deslocar/rotacionar o grid.
+        base_core_validation: dict = {}
         if (
             normalized_base_matrix is not None
             and luminous.get("threshold_v") is not None
         ):
+            base_core_validation = _validate_luminous_pose_core_support(
+                frame,
+                expected_rows,
+                normalized_base_matrix,
+                luminous.get("threshold_v"),
+            )
+            attempt["base_core_validation"] = deepcopy(
+                base_core_validation
+            )
+
             local_landmarks = _detect_expected_on_luminous_landmarks(
                 frame,
                 filter_points,
@@ -3300,12 +3317,94 @@ def _find_luminous_segment_pose(
                     fit_diagnostics = fine_fit_diagnostics
                     fit_landmark_source = "expected_on_id_anchored_fine"
                 else:
-                    # Com lock estrutural, não publique fallback sem identidade.
-                    # Se os IDs locais não provarem a pose, preserve a geometria
-                    # estrutural e continue procurando no próximo frame.
                     fit = None
                     fit_diagnostics = fine_fit_diagnostics
                     fit_landmark_source = "expected_on_id_anchored_fine"
+
+            if (
+                fit is None
+                and bool(base_core_validation.get("enforced"))
+                and bool(base_core_validation.get("available"))
+            ):
+                validated_ids = [
+                    str(mask_id)
+                    for mask_id in (
+                        base_core_validation.get("validated_mask_ids") or ()
+                    )
+                    if str(mask_id)
+                ]
+                validated_set = set(validated_ids)
+                local_errors = []
+                for detail in local_landmarks.get("details") or ():
+                    if not isinstance(detail, dict):
+                        continue
+                    if str(detail.get("mask_id") or "") not in validated_set:
+                        continue
+                    try:
+                        local_errors.append(
+                            float(detail.get("median_prediction_error_px"))
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                median_error = (
+                    float(np.median(local_errors))
+                    if local_errors
+                    else 0.0
+                )
+                validated_count = int(
+                    base_core_validation.get("validated_count", 0) or 0
+                )
+                expected_count = int(len(expected_rows))
+                previous_failure = str(
+                    fit_diagnostics.get("failure_stage") or ""
+                )
+                required_count = int(
+                    base_core_validation.get("required_count", 0) or 0
+                )
+                fit_diagnostics = {
+                    "expected_on_count": expected_count,
+                    "observed_component_count": int(
+                        len(local_landmarks.get("centers") or [])
+                    ),
+                    "required_match_count": required_count,
+                    "best_coarse_match_count": validated_count,
+                    "best_final_match_count": validated_count,
+                    "failure_stage": "",
+                    "refinement_failure_stage": previous_failure,
+                    "fit_mode": "base_core_verified",
+                    "matched_mask_ids": list(validated_ids),
+                    "base_core_validation": deepcopy(
+                        base_core_validation
+                    ),
+                }
+                fit = {
+                    "matrix": normalized_base_matrix.copy(),
+                    "matched_mask_ids": list(validated_ids),
+                    "missing_expected_on_mask_ids": [
+                        str(row.get("mask_id") or "")
+                        for row in expected_rows
+                        if str(row.get("mask_id") or "")
+                        and str(row.get("mask_id") or "")
+                        not in validated_set
+                    ],
+                    "matched_count": validated_count,
+                    "expected_on_count": expected_count,
+                    "match_ratio": (
+                        validated_count / max(1, expected_count)
+                    ),
+                    "median_error_px": median_error,
+                    "coarse_median_error_px": median_error,
+                    "fine_alignment_gain_px": 0.0,
+                    "fine_fit_mode": "base_core_verified",
+                    "score": (
+                        validated_count * 4.0
+                        - median_error * 0.15
+                    ),
+                    "core_validated_mask_ids": list(validated_ids),
+                    "core_validated_count": validated_count,
+                    "core_required_count": required_count,
+                }
+                fit_landmark_source = "expected_on_core_validated_base"
 
         attempt["fit_landmark_source"] = fit_landmark_source
         attempt["local_luminous_landmark_count"] = int(
@@ -3886,6 +3985,20 @@ def _rescue_luminous_segment_tracking_lock(
         current_to_canonical=matrix.copy(),
         source_type="luminous_segment_grid",
         evidence_current=True,
+        luminous_validated_mask_ids=tuple(
+            str(mask_id)
+            for mask_id in (
+                pose.get("core_validated_mask_ids")
+                or pose.get("matched_mask_ids")
+                or ()
+            )
+            if str(mask_id)
+        ),
+        luminous_alignment_mode=str(
+            pose.get("fine_fit_mode")
+            or pose.get("fit_landmark_source")
+            or ""
+        ),
     )
     runtime.last_result = result
     return result
@@ -3905,6 +4018,8 @@ class F3TrackingResult:
     current_to_canonical: object | None = None
     source_type: str = ""
     evidence_current: bool = False
+    luminous_validated_mask_ids: tuple[str, ...] = ()
+    luminous_alignment_mode: str = ""
 
 
 class F3DisplayObjectTracker:
@@ -6062,6 +6177,16 @@ def _update_tracking_live_geometry(
         "alignment_required": bool(alignment_required),
         "spatial_alignment_ready": bool(spatial_alignment_ready),
         "spatial_alignment_source": spatial_alignment_source,
+        "luminous_core_validated_mask_ids": list(
+            getattr(result, "luminous_validated_mask_ids", ()) or ()
+        ),
+        "luminous_alignment_mode": str(
+            getattr(result, "luminous_alignment_mode", "") or ""
+        ),
+        "luminous_evidence_current": bool(
+            str(result.source_type or "") == "luminous_segment_grid"
+            and bool(result.evidence_current)
+        ),
         "resolution": (int(w), int(h)),
         "board_points": board_current,
         "masks": masks_current,

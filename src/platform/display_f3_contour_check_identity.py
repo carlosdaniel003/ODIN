@@ -730,6 +730,112 @@ def refinar_geometria_check_identificado_f3(
     return telemetry
 
 
+def _apply_luminous_core_mask_evidence(
+    analysis: dict | None,
+    tracking_geometry: dict | None,
+    check_id: str,
+) -> dict | None:
+    """Concilia ON somente quando a luz ocupa a própria máscara identificada.
+
+    A evidência vem do mesmo snapshot RAW + geometria publicado pelo tracking
+    luminoso. Ela não transforma brilho genérico em ON: o ID precisa ter sido
+    validado dentro do núcleo exato da sua ROI. Estados OFF continuam pertencendo
+    ao analisador aprendido, portanto um CHECK só aprova se TODAS as máscaras
+    ativas permanecerem conformes.
+    """
+    if not isinstance(analysis, dict):
+        return analysis
+    if not isinstance(tracking_geometry, dict):
+        return analysis
+    if not bool(analysis.get("ready")):
+        return analysis
+    if bool(analysis.get("intermittent", False)):
+        return analysis
+    if str(tracking_geometry.get("source_type") or "") != "luminous_segment_grid":
+        return analysis
+    if not bool(tracking_geometry.get("luminous_evidence_current")):
+        return analysis
+    if not bool(tracking_geometry.get("spatial_alignment_ready")):
+        return analysis
+    geometry_check = str(tracking_geometry.get("check_id") or "")
+    if geometry_check and geometry_check != str(check_id or ""):
+        return analysis
+
+    validated_ids = {
+        str(mask_id)
+        for mask_id in (
+            tracking_geometry.get("luminous_core_validated_mask_ids") or ()
+        )
+        if str(mask_id)
+    }
+    if not validated_ids:
+        return analysis
+
+    result = deepcopy(analysis)
+    rows = [
+        item
+        for item in (result.get("mask_results") or ())
+        if isinstance(item, dict)
+    ]
+    confirmed_ids = []
+    for item in rows:
+        mask_id = str(item.get("mask_id") or "")
+        expected = str(item.get("expected") or "").strip().lower()
+        if expected != "on" or mask_id not in validated_ids:
+            continue
+
+        item["semantic_classified_before_luminous_core"] = str(
+            item.get("classified") or ""
+        )
+        item["semantic_matched_before_luminous_core"] = item.get("matched")
+        item["luminous_core_confirmed"] = True
+        item["classification_source"] = (
+            "luminous_core_identity_over_learned"
+        )
+        item["classified"] = "on"
+        item["classified_label"] = str(
+            item.get("expected_label") or "ACESO"
+        )
+        item["matched"] = True
+        item["raw_matched"] = True
+        item["intermittent_tolerated"] = False
+        confirmed_ids.append(mask_id)
+
+    if not confirmed_ids:
+        return result
+
+    result["matched_mask_count"] = sum(
+        1 for item in rows if bool(item.get("matched"))
+    )
+    result["active_mask_count"] = len(rows)
+    result["positive_on_matched_count"] = sum(
+        1
+        for item in rows
+        if (
+            str(item.get("expected") or "").strip().lower() == "on"
+            and str(item.get("classified") or "").strip().lower() == "on"
+            and bool(item.get("matched"))
+        )
+    )
+    result["approved"] = bool(rows) and all(
+        bool(item.get("matched")) for item in rows
+    )
+    if result["approved"]:
+        result["reason"] = (
+            "check_conforme_com_emissao_identificada_na_mascara"
+        )
+    result["luminous_core_confirmed_mask_ids"] = tuple(
+        sorted(set(confirmed_ids))
+    )
+    result["luminous_core_confirmation_source"] = (
+        "tracking_exact_mask_core"
+    )
+    result["luminous_alignment_mode"] = str(
+        tracking_geometry.get("luminous_alignment_mode") or ""
+    )
+    return result
+
+
 class F3TrackedRawCheckAnalyzer:
     """Classifica segmentos no frame RAW usando ROIs móveis do contorno."""
 
@@ -779,6 +885,11 @@ class F3TrackedRawCheckAnalyzer:
                 mask_geometry_source=str(
                     geometry.get("geometry_space") or "tracking_live"
                 ),
+            )
+            result = _apply_luminous_core_mask_evidence(
+                result,
+                geometry,
+                check_id,
             )
             if isinstance(result, dict):
                 result["analysis_frame_source"] = (
