@@ -1531,6 +1531,16 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             {
                 "mask_id": f"MASK_{index + 1:03d}",
                 "center": center,
+                "mask": {
+                    "id": f"MASK_{index + 1:03d}",
+                    "type": "polygon",
+                    "points": [
+                        [center[0] - 20.0, center[1] - 7.0],
+                        [center[0] + 20.0, center[1] - 7.0],
+                        [center[0] + 20.0, center[1] + 7.0],
+                        [center[0] - 20.0, center[1] + 7.0],
+                    ],
+                },
             }
             for index, center in enumerate(expected_centers)
         ]
@@ -2194,6 +2204,16 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             {
                 "mask_id": f"MASK_{index + 1:03d}",
                 "center": center,
+                "mask": {
+                    "id": f"MASK_{index + 1:03d}",
+                    "type": "polygon",
+                    "points": [
+                        [center[0] - 14.0, center[1] - 7.0],
+                        [center[0] + 14.0, center[1] - 7.0],
+                        [center[0] + 14.0, center[1] + 7.0],
+                        [center[0] - 14.0, center[1] + 7.0],
+                    ],
+                },
             }
             for index, center in enumerate(centers)
         ]
