@@ -2278,14 +2278,40 @@ def _fit_id_anchored_luminous_pose(
     coarse_errors = np.linalg.norm(coarse_projected - target, axis=1)
     coarse_median = float(np.median(coarse_errors))
     if coarse_median <= F3_TRACKING_LUMINOUS_FINE_ALREADY_ALIGNED_PX:
+        missing_ids = [
+            mask_id
+            for mask_id in by_id
+            if mask_id not in seen
+        ]
+        match_ratio = anchor_count / max(1, len(by_id))
+        score = anchor_count * 4.0 - coarse_median * 0.15
         if diag is not None:
             diag.update(
                 {
-                    "failure_stage": "coarse_already_precise",
+                    "failure_stage": "",
+                    "best_final_match_count": int(anchor_count),
+                    "matched_mask_ids": list(matched_ids),
+                    "rejected_mask_ids": list(dict.fromkeys(rejected_ids)),
+                    "fit_mode": "coarse_verified",
                     "coarse_median_error_px": round(coarse_median, 3),
+                    "refined_median_error_px": round(coarse_median, 3),
+                    "gain_px": 0.0,
+                    "translation_consensus_count": int(anchor_count),
                 }
             )
-        return None
+        return {
+            "matrix": np.asarray(coarse, dtype=np.float32).reshape(2, 3),
+            "matched_mask_ids": list(matched_ids),
+            "missing_expected_on_mask_ids": missing_ids,
+            "matched_count": int(anchor_count),
+            "expected_on_count": int(len(by_id)),
+            "match_ratio": float(match_ratio),
+            "median_error_px": float(coarse_median),
+            "coarse_median_error_px": float(coarse_median),
+            "fine_alignment_gain_px": 0.0,
+            "fine_fit_mode": "coarse_verified",
+            "score": float(score),
+        }
 
     board = np.asarray(
         _quad_from_points(canonical_board),
