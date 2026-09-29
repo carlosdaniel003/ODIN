@@ -135,41 +135,30 @@ def preparar_imagem_ampliada_check_f3(owner, image_raw, metadata: dict | None):
         except Exception:
             project = None
 
-    preview_metadata = deepcopy(metadata) if isinstance(metadata, dict) else {}
     check_id = ""
     try:
         check_id = str(owner._selected_id() or "")
     except Exception:
         check_id = ""
+
+    geometry = {}
     if repository is not None and project_name and check_id:
         try:
-            check = repository.carregar_check(project_name, check_id)
+            from src.platform.display_f3_reference_preview_rotation import (
+                resolver_geometria_referencia_check_f3,
+            )
+            geometry = resolver_geometria_referencia_check_f3(
+                repository,
+                project_name,
+                check_id,
+            )
         except Exception:
-            check = None
-        if isinstance(check, dict):
-            if check.get("board_points_reference"):
-                preview_metadata["board_points_reference"] = deepcopy(
-                    check.get("board_points_reference")
-                )
-            if isinstance(check.get("mask_overrides_reference"), dict):
-                preview_metadata["mask_overrides_reference"] = deepcopy(
-                    check.get("mask_overrides_reference")
-                )
-
-    try:
-        from src.platform.display_f3_reference_preview_rotation import (
-            _metadata_com_mascaras_do_projeto,
-        )
-        preview_metadata = _metadata_com_mascaras_do_projeto(
-            repository,
-            project_name,
-            preview_metadata,
-        )
-    except Exception:
-        pass
+            geometry = {}
 
     resolution = normalizar_resolucao_display(
-        preview_metadata.get("_display_master_resolution")
+        geometry.get("resolution")
+        if isinstance(geometry, dict)
+        else None
     )
     if resolution is None:
         resolution = (
@@ -181,7 +170,12 @@ def preparar_imagem_ampliada_check_f3(owner, image_raw, metadata: dict | None):
     masks = [
         deepcopy(mask)
         for mask in (
-            preview_metadata.get("_display_mask_regions")
+            (
+                geometry.get("masks")
+                if isinstance(geometry, dict)
+                and geometry.get("available")
+                else None
+            )
             or ((project or {}).get("masks", []) or [])
         )
         if isinstance(mask, dict) and mask.get("id") is not None

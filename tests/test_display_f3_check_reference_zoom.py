@@ -134,7 +134,11 @@ class DisplayF3CheckReferenceZoomGeometryTests(unittest.TestCase):
             rendered, rotation, mask_count = zoom_module.preparar_imagem_ampliada_check_f3(
                 owner,
                 image,
-                {"width": 120, "height": 80},
+                {
+                    "width": 120,
+                    "height": 80,
+                    "_display_mask_regions": deepcopy(project["masks"]),
+                },
             )
 
         assert rendered.shape == image.shape

@@ -23,6 +23,7 @@ from src.platform.display_mask_geometry import (
     sincronizar_colecao_mascaras_display,
 )
 from src.platform.display_project_repository import (
+    mascaras_geometria_check_display,
     normalizar_mascaras_display,
     normalizar_resolucao_display,
 )
@@ -167,6 +168,59 @@ def _metadata_com_mascaras_do_projeto(
     return result
 
 
+def resolver_geometria_referencia_check_f3(
+    repository,
+    project_name: str,
+    check_id: str,
+) -> dict:
+    """Resolve a mesma geometria efetiva usada por EDITAR CHECK PELAS MÁSCARAS."""
+    try:
+        project = repository.carregar_projeto(project_name)
+        check = repository.carregar_check(project_name, check_id)
+    except Exception:
+        project = None
+        check = None
+
+    if not isinstance(project, dict) or not isinstance(check, dict):
+        return {
+            "available": False,
+            "resolution": None,
+            "masks": [],
+            "board_points": [],
+        }
+
+    resolution = normalizar_resolucao_display(
+        project.get("master_resolution")
+    )
+    masks = mascaras_geometria_check_display(project, check)
+
+    board = deepcopy(check.get("board_points_reference") or [])
+    if not (isinstance(board, (list, tuple)) and len(board) >= 3):
+        try:
+            from src.platform.display_f3_object_tracking import (
+                F3TrackingConfigStore,
+                canonical_board_points,
+            )
+            board = canonical_board_points(
+                project,
+                F3TrackingConfigStore(repository),
+            )
+        except Exception:
+            board = []
+
+    return {
+        "available": bool(resolution is not None),
+        "resolution": tuple(resolution) if resolution is not None else None,
+        "masks": [
+            deepcopy(mask)
+            for mask in masks
+            if isinstance(mask, dict)
+        ],
+        "board_points": deepcopy(board),
+        "check": deepcopy(check),
+    }
+
+
 def _fit_preview(image, target_width: int, target_height: int):
     if image is None or getattr(image, "size", 0) == 0:
         return image
@@ -196,6 +250,9 @@ def preparar_preview_referencia_com_mascaras_f3(
     rotacao: int,
     target_width: int,
     target_height: int,
+    mask_regions=None,
+    board_points=None,
+    master_resolution=None,
 ):
     """Miniatura de presença com o MESMO visual da preview de Máscaras.
 
@@ -216,12 +273,26 @@ def preparar_preview_referencia_com_mascaras_f3(
         project_name,
         metadata,
     )
-    masks = list(enriched.get("_display_mask_regions", []) or [])
-    board_original = list(
-        enriched.get("_display_board_points_reference", []) or []
+    masks = (
+        [
+            deepcopy(mask)
+            for mask in (mask_regions or [])
+            if isinstance(mask, dict)
+        ]
+        if mask_regions is not None
+        else list(enriched.get("_display_mask_regions", []) or [])
     )
-    resolution = normalizar_resolucao_display(
-        enriched.get("_display_master_resolution")
+    board_original = (
+        deepcopy(list(board_points or []))
+        if board_points is not None
+        else list(enriched.get("_display_board_points_reference", []) or [])
+    )
+    resolution = (
+        normalizar_resolucao_display(master_resolution)
+        if master_resolution is not None
+        else normalizar_resolucao_display(
+            enriched.get("_display_master_resolution")
+        )
     )
     angle = normalizar_rotacao_visual(rotacao)
 
@@ -402,24 +473,11 @@ def _install_check_reference_preview() -> None:
             return
 
         metadata = store.get(self.project_name, check_id)
-        if metadata is not None:
-            metadata = deepcopy(metadata)
-            try:
-                check = self.repository.carregar_check(
-                    self.project_name,
-                    check_id,
-                )
-            except Exception:
-                check = None
-            if isinstance(check, dict):
-                if check.get("board_points_reference"):
-                    metadata["board_points_reference"] = deepcopy(
-                        check.get("board_points_reference")
-                    )
-                if isinstance(check.get("mask_overrides_reference"), dict):
-                    metadata["mask_overrides_reference"] = deepcopy(
-                        check.get("mask_overrides_reference")
-                    )
+        geometry = resolver_geometria_referencia_check_f3(
+            self.repository,
+            self.project_name,
+            check_id,
+        )
         if metadata is None:
             status.configure(text="Nenhuma referência visual anexada.", fg=self.MUTED)
             canvas.create_text(
@@ -431,7 +489,7 @@ def _install_check_reference_preview() -> None:
             )
             label = getattr(self, "reference_roi_status", None)
             if label is not None:
-                label.configure(text="MÁSCARAS DO PROJETO", fg="#94A3B8")
+                label.configure(text="MÁSCARAS DO CHECK", fg="#94A3B8")
             return
 
         path = Path(str(metadata.get("image_path") or ""))
@@ -459,6 +517,24 @@ def _install_check_reference_preview() -> None:
             rotacao=angle,
             target_width=326,
             target_height=88,
+            mask_regions=(
+                geometry.get("masks")
+                if isinstance(geometry, dict)
+                and geometry.get("available")
+                else None
+            ),
+            board_points=(
+                geometry.get("board_points")
+                if isinstance(geometry, dict)
+                and geometry.get("available")
+                else None
+            ),
+            master_resolution=(
+                geometry.get("resolution")
+                if isinstance(geometry, dict)
+                and geometry.get("available")
+                else None
+            ),
         )
         photo = self._photo_from_image(preview, 326, 88)
         if photo is not None:
@@ -468,7 +544,7 @@ def _install_check_reference_preview() -> None:
         label = getattr(self, "reference_roi_status", None)
         if label is not None:
             label.configure(
-                text=f"MÁSCARAS DO PROJETO • {mask_count}",
+                text=f"MÁSCARAS DO CHECK • {mask_count}",
                 fg=F3_REFERENCE_ROI_COLOR if mask_count else "#94A3B8",
             )
         threshold = float(

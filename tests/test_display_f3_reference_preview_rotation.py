@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -72,6 +73,93 @@ class DisplayF3ReferencePreviewRotationTests(unittest.TestCase):
         self.assertEqual(2, mask_count)
         self.assertEqual((40, 60, 3), preview.shape)
         self.assertGreater(int(np.count_nonzero(preview)), 0)
+
+    def test_preview_do_check_usa_a_mesma_geometria_efetiva_do_editor(self):
+        project = {
+            "name": "DISPLAY TESTE",
+            "master_resolution": {"width": 120, "height": 80},
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 25,
+                    "cy": 30,
+                    "radius": 8,
+                }
+            ],
+        }
+        check = {
+            "id": "CHECK_001",
+            "name": "H1",
+            "board_points_reference": [
+                [50, 10],
+                [115, 10],
+                [115, 75],
+                [50, 75],
+            ],
+            "mask_overrides_reference": {
+                "MASK_001": {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 82,
+                    "cy": 48,
+                    "radius": 9,
+                }
+            },
+        }
+
+        class Repository:
+            def carregar_projeto(self, _name):
+                return deepcopy(project)
+
+            def carregar_check(self, _project_name, _check_id):
+                return deepcopy(check)
+
+        repository = Repository()
+        geometry = rotation.resolver_geometria_referencia_check_f3(
+            repository,
+            "DISPLAY TESTE",
+            "CHECK_001",
+        )
+        self.assertTrue(geometry["available"])
+        self.assertEqual(82, int(geometry["masks"][0]["cx"]))
+        self.assertEqual(48, int(geometry["masks"][0]["cy"]))
+
+        image = np.zeros((80, 120, 3), dtype=np.uint8)
+        captured = {}
+
+        def draw(image_value, board_points, masks, **_kwargs):
+            captured["board"] = deepcopy(board_points)
+            captured["masks"] = deepcopy(masks)
+            return image_value
+
+        stale_metadata = {
+            "width": 120,
+            "height": 80,
+            "_display_mask_regions": deepcopy(project["masks"]),
+        }
+        with patch(
+            "src.platform.display_f3_object_tracking.draw_reference_geometry",
+            side_effect=draw,
+        ):
+            rendered, mask_count = rotation.preparar_preview_referencia_com_mascaras_f3(
+                image_raw=image,
+                metadata=stale_metadata,
+                repository=repository,
+                project_name="DISPLAY TESTE",
+                rotacao=0,
+                target_width=120,
+                target_height=80,
+                mask_regions=geometry["masks"],
+                board_points=geometry["board_points"],
+                master_resolution=geometry["resolution"],
+            )
+
+        self.assertEqual((80, 120, 3), rendered.shape)
+        self.assertEqual(1, mask_count)
+        self.assertEqual(82, int(captured["masks"][0]["cx"]))
+        self.assertEqual(48, int(captured["masks"][0]["cy"]))
+        self.assertEqual(50, int(captured["board"][0][0]))
 
     def test_preview_nao_depende_das_mascaras_injetadas_no_metadata(self):
         repository = _Repository()
