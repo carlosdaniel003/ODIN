@@ -74,6 +74,20 @@ F3_PREVIEW_ZOOM_WIDTH_RATIO = 0.38
 F3_PREVIEW_ZOOM_MAX_WIDTH = 300
 F3_PREVIEW_ZOOM_PADDING_RATIO = 0.18
 
+# Espelho visual latest-frame-wins. Estes parâmetros NÃO classificam o produto;
+# apenas dizem quais ROIs do frame já reduzido parecem emitir luz para que câmera
+# e visor reajam juntos. O analyzer produtivo continua sendo a única autoridade
+# de ON/OFF/POUCA LUZ/OK/NG.
+F3_LIVE_VISUAL_CORE_SCALE = 0.66
+F3_LIVE_VISUAL_BASE_PERCENTILE = 25.0
+F3_LIVE_VISUAL_SCORE_MID_PERCENTILE = 50.0
+F3_LIVE_VISUAL_SCORE_HIGH_PERCENTILE = 85.0
+F3_LIVE_VISUAL_HIGH_WEIGHT = 0.28
+F3_LIVE_VISUAL_MIN_PEAK = 135.0
+F3_LIVE_VISUAL_MIN_DYNAMIC_RANGE = 22.0
+F3_LIVE_VISUAL_THRESHOLD_RANGE_FRACTION = 0.58
+F3_LIVE_VISUAL_MIN_THRESHOLD_MARGIN = 16.0
+
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
     DISPLAY_CHECK_STATE_OFF: (139, 116, 100),    # azul/cinza #64748B
@@ -721,6 +735,261 @@ def _mask_geometry(mask: dict, sx: float, sy: float):
     return ("polygon", polygon)
 
 
+def _live_visual_core_values(
+    value_channel,
+    mask: dict,
+    sx: float,
+    sy: float,
+):
+    """Amostra somente o núcleo da ROI no preview reduzido.
+
+    A operação é deliberadamente pequena: nenhum ORB, template, feature extractor
+    ou leitura de disco. Cada máscara cria apenas uma máscara local no seu bbox.
+    """
+    geometry = _mask_geometry(mask, sx, sy)
+    if geometry is None:
+        return None
+
+    frame_h, frame_w = value_channel.shape[:2]
+    local_mask = None
+    crop = None
+
+    if geometry[0] == "circle":
+        _kind, center, axes = geometry
+        cx, cy = int(center[0]), int(center[1])
+        rx = max(1, int(round(float(axes[0]) * F3_LIVE_VISUAL_CORE_SCALE)))
+        ry = max(1, int(round(float(axes[1]) * F3_LIVE_VISUAL_CORE_SCALE)))
+        x1 = max(0, cx - rx - 1)
+        y1 = max(0, cy - ry - 1)
+        x2 = min(frame_w, cx + rx + 2)
+        y2 = min(frame_h, cy + ry + 2)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        crop = value_channel[y1:y2, x1:x2]
+        local_mask = np.zeros(crop.shape[:2], dtype=np.uint8)
+        cv2.ellipse(
+            local_mask,
+            (cx - x1, cy - y1),
+            (rx, ry),
+            0,
+            0,
+            360,
+            255,
+            -1,
+            cv2.LINE_8,
+        )
+    else:
+        _kind, polygon = geometry
+        points = np.asarray(polygon, dtype=np.float32).reshape(-1, 2)
+        if len(points) < 3:
+            return None
+        center = np.mean(points, axis=0)
+        core = center + (points - center) * float(F3_LIVE_VISUAL_CORE_SCALE)
+        core = np.rint(core).astype(np.int32)
+        x1 = max(0, int(np.min(core[:, 0])) - 1)
+        y1 = max(0, int(np.min(core[:, 1])) - 1)
+        x2 = min(frame_w, int(np.max(core[:, 0])) + 2)
+        y2 = min(frame_h, int(np.max(core[:, 1])) + 2)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        crop = value_channel[y1:y2, x1:x2]
+        local_mask = np.zeros(crop.shape[:2], dtype=np.uint8)
+        shifted = core.copy()
+        shifted[:, 0] -= x1
+        shifted[:, 1] -= y1
+        cv2.fillPoly(local_mask, [shifted], 255, lineType=cv2.LINE_8)
+
+    values = crop[local_mask > 0]
+    if values.size < 6:
+        return None
+
+    p_mid = float(
+        np.percentile(values, F3_LIVE_VISUAL_SCORE_MID_PERCENTILE)
+    )
+    p_high = float(
+        np.percentile(values, F3_LIVE_VISUAL_SCORE_HIGH_PERCENTILE)
+    )
+    score = (
+        p_mid * (1.0 - F3_LIVE_VISUAL_HIGH_WEIGHT)
+        + p_high * F3_LIVE_VISUAL_HIGH_WEIGHT
+    )
+    return score, p_high, int(values.size)
+
+
+def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
+    """Detecta emissão apenas para apresentação no MESMO frame do preview.
+
+    O resultado nunca entra em energia, analyzer, OK/NG ou sequência. A decisão
+    produtiva continua desacoplada e pesada no executor canônico.
+    """
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return {"ready": False, "mask_ids": (), "reason": "frame_invalido"}
+    if not isinstance(context, dict):
+        return {"ready": False, "mask_ids": (), "reason": "contexto_ausente"}
+
+    resolution = context.get("resolution")
+    masks = tuple(context.get("masks") or ())
+    if (
+        not isinstance(resolution, (list, tuple))
+        or len(resolution) < 2
+        or not masks
+    ):
+        return {"ready": False, "mask_ids": (), "reason": "geometria_ausente"}
+
+    try:
+        value_channel = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[:, :, 2]
+    except Exception:
+        return {"ready": False, "mask_ids": (), "reason": "canal_v_indisponivel"}
+
+    source_width = max(1, int(resolution[0]))
+    source_height = max(1, int(resolution[1]))
+    frame_height, frame_width = frame.shape[:2]
+    sx = frame_width / float(source_width)
+    sy = frame_height / float(source_height)
+
+    rows = []
+    for mask in masks:
+        if not isinstance(mask, dict):
+            continue
+        mask_id = str(mask.get("id") or "")
+        if not mask_id:
+            continue
+        stats = _live_visual_core_values(
+            value_channel,
+            mask,
+            sx,
+            sy,
+        )
+        if stats is None:
+            continue
+        score, p_high, pixel_count = stats
+        rows.append(
+            {
+                "mask_id": mask_id,
+                "score": float(score),
+                "p_high": float(p_high),
+                "pixel_count": int(pixel_count),
+            }
+        )
+
+    if len(rows) < 3:
+        return {
+            "ready": False,
+            "mask_ids": (),
+            "reason": "amostras_insuficientes",
+            "sampled_mask_count": len(rows),
+        }
+
+    scores = np.asarray([row["score"] for row in rows], dtype=np.float32)
+    baseline = float(
+        np.percentile(scores, F3_LIVE_VISUAL_BASE_PERCENTILE)
+    )
+    peak = float(np.max(scores))
+    dynamic_range = max(0.0, peak - baseline)
+
+    luminous_ids = ()
+    threshold = baseline + max(
+        F3_LIVE_VISUAL_MIN_THRESHOLD_MARGIN,
+        dynamic_range * F3_LIVE_VISUAL_THRESHOLD_RANGE_FRACTION,
+    )
+    if (
+        peak >= F3_LIVE_VISUAL_MIN_PEAK
+        and dynamic_range >= F3_LIVE_VISUAL_MIN_DYNAMIC_RANGE
+    ):
+        minimum_high = max(
+            F3_LIVE_VISUAL_MIN_PEAK,
+            threshold + 4.0,
+        )
+        luminous_ids = tuple(
+            sorted(
+                row["mask_id"]
+                for row in rows
+                if row["score"] >= threshold
+                and row["p_high"] >= minimum_high
+            )
+        )
+
+    return {
+        "ready": True,
+        "mask_ids": luminous_ids,
+        "reason": "ok",
+        "sampled_mask_count": len(rows),
+        "baseline": round(baseline, 2),
+        "peak": round(peak, 2),
+        "dynamic_range": round(dynamic_range, 2),
+        "threshold": round(float(threshold), 2),
+    }
+
+
+def aplicar_emissao_visual_ao_vivo_f3(
+    window,
+    frame,
+    context: dict | None,
+    *,
+    frame_token=None,
+    geometry_token=None,
+) -> dict | None:
+    """Publica uma única amostra visual por frame para câmera + visor.
+
+    Repaints do mesmo frame reutilizam cache. Assim o sincronismo visual não cria
+    um segundo scheduler nem repete processamento quando a câmera não avançou.
+    """
+    if not isinstance(context, dict):
+        return context
+
+    result = dict(context)
+    cache_key = (
+        repr(frame_token),
+        str(result.get("project_name") or ""),
+        str(result.get("check_id") or ""),
+        repr(geometry_token),
+        tuple(getattr(frame, "shape", ()) or ()),
+    )
+    cached = getattr(window, "_display_f3_live_visual_sample_cache", None)
+    if (
+        isinstance(cached, dict)
+        and cached.get("key") == cache_key
+        and isinstance(cached.get("value"), dict)
+    ):
+        sample = dict(cached["value"])
+    else:
+        sample = detectar_emissao_visual_ao_vivo_f3(frame, result)
+        window._display_f3_live_visual_sample_cache = {
+            "key": cache_key,
+            "value": dict(sample),
+        }
+
+    ready = bool(sample.get("ready"))
+    mask_ids = tuple(
+        str(mask_id)
+        for mask_id in (sample.get("mask_ids") or ())
+        if str(mask_id)
+    )
+    result["live_visual_sample_ready"] = ready
+    result["live_visual_mask_ids"] = mask_ids
+    result["live_visual_frame_token"] = frame_token
+    result["live_visual_sample_source"] = "latest_preview_frame_core_v"
+    result["live_visual_sample_reason"] = str(sample.get("reason") or "")
+    result["live_visual_sample_threshold"] = sample.get("threshold")
+    result["live_visual_sample_baseline"] = sample.get("baseline")
+    result["live_visual_sample_peak"] = sample.get("peak")
+    result["live_visual_sampled_mask_count"] = int(
+        sample.get("sampled_mask_count", 0) or 0
+    )
+
+    # Quando a amostra do frame atual existe, ela substitui APENAS a emissão
+    # visual antiga do tracker. Classificações produtivas permanecem intactas.
+    if ready:
+        result["luminous_mask_ids"] = mask_ids
+        result["has_any_on"] = bool(mask_ids)
+
+    try:
+        window._display_f3_live_visual_sample = dict(sample)
+    except Exception:
+        pass
+    return result
+
+
 def _draw_mask(tint, mask: dict, sx: float, sy: float, color):
     geometry = _mask_geometry(mask, sx, sy)
     if geometry is None:
@@ -903,18 +1172,28 @@ def _render_classic_luminous_preview(
         and energy_state != "off"
     )
 
-    luminous_ids = set()
-    if not energy_gate_declared or semantic_power_ready:
+    live_visual_ready = bool(context.get("live_visual_sample_ready"))
+    if live_visual_ready:
+        # A câmera e o visor usam exatamente a MESMA amostra do frame visual
+        # latest-frame-wins. É apresentação somente; não concede autoridade.
         luminous_ids = {
             str(mask_id)
-            for mask_id in (context.get("luminous_mask_ids") or ())
+            for mask_id in (context.get("live_visual_mask_ids") or ())
             if str(mask_id)
         }
-        luminous_ids.update(
-            mask_id
-            for mask_id, state in classifications.items()
-            if state == DISPLAY_CHECK_STATE_ON
-        )
+    else:
+        luminous_ids = set()
+        if not energy_gate_declared or semantic_power_ready:
+            luminous_ids = {
+                str(mask_id)
+                for mask_id in (context.get("luminous_mask_ids") or ())
+                if str(mask_id)
+            }
+            luminous_ids.update(
+                mask_id
+                for mask_id, state in classifications.items()
+                if state == DISPLAY_CHECK_STATE_ON
+            )
 
     board_points = context.get("board_points") or ()
     if len(board_points) >= 3:

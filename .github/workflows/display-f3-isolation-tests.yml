@@ -149,6 +149,19 @@ jobs:
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_live_tracking_calls_luminous_refinement_after_structural_attempt \
             -v
 
+      - name: Run live visual sync and startup performance regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_latest_frame_detecta_emissao_sem_worker_semantico \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_latest_frame_apaga_visor_na_fase_escura \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_e_calculada_uma_vez_por_frame_e_reutilizada \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_usa_amostra_do_mesmo_frame_mesmo_antes_do_gate \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_camera_e_visor_consumem_a_mesma_amostra_do_latest_frame \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_reference_bank_materializa_akaze_somente_no_fallback \
+            tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_primeiro_lock_high_pode_ser_enfileirado_mesmo_com_executor_ocupado \
+            tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_primeiro_lock_em_voo_respeita_backpressure_normal \
+            -v
+
       - name: Run ROI geometry parity tests
         run: |
           python -m unittest \

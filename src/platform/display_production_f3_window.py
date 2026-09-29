@@ -593,6 +593,20 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                     for mask_id in (context.get("luminous_mask_ids") or ())
                     if str(mask_id)
                 },
+                "live_visual_sample_ready": bool(
+                    context.get("live_visual_sample_ready")
+                ),
+                "live_visual_mask_ids": {
+                    str(mask_id)
+                    for mask_id in (context.get("live_visual_mask_ids") or ())
+                    if str(mask_id)
+                },
+                "live_visual_frame_token": context.get(
+                    "live_visual_frame_token"
+                ),
+                "live_visual_sample_source": str(
+                    context.get("live_visual_sample_source") or ""
+                ),
                 "has_any_on": bool(context.get("has_any_on")),
                 "intermittent": bool(context.get("intermittent", False)),
                 "power_confirmed": bool(context.get("power_confirmed")),
@@ -702,20 +716,32 @@ class DisplayProductionF3Window(DesktopOperationWindow):
 
         for segment_name, mask_id in zip(segment_order, mask_ids):
             if live_luminous_only:
-                # Visor operacional: somente emissão identificada aparece verde.
-                # OFF/LOW/NG continuam pertencendo ao motor e ao debug, não ao
-                # desenho simplificado usado para localizar o display.
-                state = (
-                    "on"
-                    if (
-                        ready
-                        and (
-                            mask_id in luminous_mask_ids
-                            or classifications.get(mask_id) == "on"
-                        )
-                    )
-                    else "neutral"
+                # Visor operacional: quando existe amostra do frame visual atual,
+                # ela é a única fonte de animação. Assim o visor muda no MESMO
+                # repaint da câmera, sem esperar o worker semântico.
+                live_visual_ready = bool(
+                    context.get("live_visual_sample_ready")
                 )
+                live_visual_ids = {
+                    str(item)
+                    for item in (context.get("live_visual_mask_ids") or ())
+                    if str(item)
+                }
+                if live_visual_ready:
+                    state = "on" if mask_id in live_visual_ids else "neutral"
+                else:
+                    # Fallback durante aquisição inicial sem amostra visual.
+                    state = (
+                        "on"
+                        if (
+                            ready
+                            and (
+                                mask_id in luminous_mask_ids
+                                or classifications.get(mask_id) == "on"
+                            )
+                        )
+                        else "neutral"
+                    )
             else:
                 state = self._display_readout_semantic_state(
                     classifications.get(mask_id),

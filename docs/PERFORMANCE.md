@@ -203,6 +203,31 @@ O repaint produtivo do F3 usa 50 ms como cadência base, coerente com o perfil
 de câmera de aproximadamente 20 FPS; redesenhar o mesmo frame acima dessa taxa
 é trabalho redundante no Tk.
 
+### Sincronia visual latest-frame-wins
+
+Máscaras verdes e `VISOR DO DISPLAY` não esperam o worker semântico para
+**animação visual**. Com geometria rastreada disponível, o mesmo frame já reduzido
+para o preview recebe uma amostra leve do canal V nos núcleos das ROIs.
+
+Invariantes:
+
+~~~text
+1 frame visual reduzido
+→ 1 amostra luminosa leve
+→ mesmo conjunto de IDs para câmera + visor
+~~~
+
+- cache por frame/CHECK/geometria evita recalcular repaint repetido;
+- não há ORB/AKAZE/template/feature extractor nessa amostra;
+- não há I/O;
+- não cria scheduler, thread ou job;
+- a amostra é apresentação somente e nunca participa de OK/NG.
+
+A aquisição inicial também evita custo preventivo: AKAZE de referências é
+materializado somente no fallback de reacquisition. O primeiro tracking HIGH
+pode ser enfileirado antes de trabalho LOW, mantendo o executor único e o
+backpressure depois da submissão inicial.
+
 Após ciclos caros, o coordenador impõe idle progressivo ao mainloop antes de
 agendar o próximo tick. As métricas ficam disponíveis em
 `_display_f3_runtime_coordinator_stats`.

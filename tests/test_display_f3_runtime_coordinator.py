@@ -96,6 +96,7 @@ class _App:
         self._display_f3_object_tracking_enabled = False
         self._display_f3_tracking_config_open = False
         self._display_f3_tracking_result = object()
+        self._display_f3_tracking_future = None
         self._display_f3_tracking_analysis_pending = False
         self.analysis_due = True
         self.full_cycles = 0
@@ -264,6 +265,37 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
         self.assertEqual(
             1,
             coordinator.stats()["heavy_executor"]["active_jobs"],
+        )
+
+    def test_primeiro_lock_high_pode_ser_enfileirado_mesmo_com_executor_ocupado(self):
+        app, coordinator = self._install()
+        app._display_f3_object_tracking_enabled = True
+        app._display_f3_tracking_result = None
+        app._display_f3_tracking_future = None
+        app._display_f3_heavy_executor = _HeavyExecutor(active=1, pending=2)
+
+        app.root.run_next()
+
+        self.assertEqual(1, app.full_cycles)
+        self.assertEqual(
+            "tracking_initial_lock_priority",
+            coordinator.stats()["last_reason"],
+        )
+
+    def test_primeiro_lock_em_voo_respeita_backpressure_normal(self):
+        app, coordinator = self._install()
+        app._display_f3_object_tracking_enabled = True
+        app._display_f3_tracking_result = None
+        app._display_f3_tracking_future = object()
+        app._display_f3_heavy_executor = _HeavyExecutor(active=1)
+
+        app.root.run_next()
+
+        self.assertEqual(0, app.full_cycles)
+        self.assertEqual(1, app.renders)
+        self.assertEqual(
+            "heavy_executor_busy",
+            coordinator.stats()["last_reason"],
         )
 
     def test_tracking_pending_second_half_runs_even_without_new_frame(self):

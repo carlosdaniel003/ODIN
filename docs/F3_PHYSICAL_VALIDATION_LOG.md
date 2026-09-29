@@ -179,3 +179,69 @@ H1 conclui
 → USB conclui e avança para AUX
 ~~~
 
+---
+
+## 29/09/2026 — Sincronia visual câmera x máscaras x visor e demora no IDENTIFICANDO
+
+**Resultado físico antes da correção:** FAIL de experiência operacional.
+
+### Sintoma observado
+
+- os segmentos reais do display mudavam primeiro na câmera ao vivo;
+- as máscaras verdes sobre a câmera reagiam depois;
+- o `VISOR DO DISPLAY` também reagia depois;
+- no BLUE intermitente, a defasagem entre a fase física e as representações da
+  interface deixava a tela visualmente desconcertante;
+- ao abrir o F3, a aquisição inicial permanecia tempo demais em
+  `IDENTIFICANDO...`.
+
+### Causa identificada no código
+
+As duas representações visuais usavam resultados assíncronos do
+tracking/analyzer, enquanto a imagem da câmera já era latest-frame-wins. Portanto
+não existia garantia de que câmera, máscara verde e visor representassem o mesmo
+frame.
+
+Na inicialização, o banco de referências também calculava AKAZE
+preventivamente para todas as fotos, apesar de AKAZE ser fallback de
+reacquisition. Além disso, o coordinator podia deixar o primeiro tracking HIGH
+esperando um executor ocupado por trabalho já existente.
+
+### Correção D-029
+
+- uma amostra luminosa **somente visual** é calculada sobre o mesmo frame reduzido
+  que será desenhado na câmera;
+- a amostra é compartilhada entre overlay e visor no mesmo repaint;
+- repaints do mesmo frame reutilizam cache;
+- nenhum timer, thread ou worker novo foi criado;
+- a amostra não participa de OK/NG ou de qualquer autoridade produtiva;
+- AKAZE das referências passou a ser lazy e cacheado somente quando necessário;
+- o primeiro tracking HIGH recebe prioridade de enfileiramento para reduzir o
+  tempo de `IDENTIFICANDO...`.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+abrir F3
+→ aquisição inicial/LOCK ocorre mais cedo
+
+BLUE acende
+→ no mesmo repaint:
+   câmera física mostra ON
+   máscaras correspondentes ficam verdes
+   VISOR mostra os mesmos segmentos verdes
+
+BLUE apaga
+→ no mesmo repaint:
+   câmera física mostra OFF
+   máscaras verdes apagam
+   VISOR apaga os mesmos segmentos
+
+sem backlog visual
+sem queda perceptível de responsividade
+sem alterar a regra produtiva de OK/NG
+~~~

@@ -4274,37 +4274,18 @@ class F3DisplayObjectTracker:
                 descriptors = None
                 canonical_points = np.empty((0, 2), dtype=np.float32)
 
+        # AKAZE é fallback absoluto e é sensivelmente mais caro. Não pagamos
+        # esse custo para TODAS as fotos durante o primeiro "IDENTIFICANDO".
+        # Guardamos somente a imagem cinza+mask já preparadas e materializamos
+        # descritores AKAZE na primeira reacquisition que realmente precisar.
         akaze_descriptors = None
         akaze_canonical_points = np.empty((0, 2), dtype=np.float32)
-        try:
-            akaze = cv2.AKAZE_create(
-                threshold=F3_TRACKING_AKAZE_THRESHOLD,
-                nOctaves=4,
-                nOctaveLayers=4,
-            )
-            akaze_keypoints, akaze_detected = akaze.detectAndCompute(
-                gray,
-                tracking_mask,
-            )
-        except Exception:
-            akaze_keypoints, akaze_detected = [], None
-        if (
-            akaze_detected is not None
-            and len(akaze_keypoints) >= F3_TRACKING_AKAZE_MIN_MATCHES
-        ):
-            points = np.asarray(
-                [kp.pt for kp in akaze_keypoints],
-                dtype=np.float32,
-            ).reshape(-1, 1, 2)
-            try:
-                akaze_canonical_points = cv2.transform(
-                    points,
-                    reference_to_canonical,
-                ).reshape(-1, 2)
-                akaze_descriptors = akaze_detected
-            except Exception:
-                akaze_descriptors = None
-                akaze_canonical_points = np.empty((0, 2), dtype=np.float32)
+        akaze_lazy_gray = gray.copy()
+        akaze_lazy_tracking_mask = (
+            tracking_mask.copy()
+            if isinstance(tracking_mask, np.ndarray)
+            else None
+        )
 
         template_edges = None
         template_origin = None
@@ -4353,13 +4334,12 @@ class F3DisplayObjectTracker:
                         support.copy() if support_ok else None
                     )
 
-        # Uma referência pode ser útil mesmo com pouco ORB. O fallback por
-        # template de bordas resolve translação quando câmera/suporte são fixos,
-        # exatamente o cenário produtivo do F3.
+        # Uma referência pode ser útil mesmo com pouco ORB/template porque
+        # AKAZE será materializado somente se o caminho nominal falhar.
         if (
             descriptors is None
-            and akaze_descriptors is None
             and template_edges is None
+            and akaze_lazy_gray is None
         ):
             return
 
@@ -4368,6 +4348,9 @@ class F3DisplayObjectTracker:
             "canonical_points": canonical_points,
             "akaze_descriptors": akaze_descriptors,
             "akaze_canonical_points": akaze_canonical_points,
+            "akaze_ready": False,
+            "_akaze_lazy_gray": akaze_lazy_gray,
+            "_akaze_lazy_tracking_mask": akaze_lazy_tracking_mask,
             "angle_deg": float(angle),
             "source_type": str(source_type or "reference"),
             "reference_to_canonical": reference_to_canonical,
@@ -4375,6 +4358,71 @@ class F3DisplayObjectTracker:
             "template_origin": template_origin,
             "template_support_mask": template_support_mask,
         }
+
+    def _ensure_akaze_reference(self, key: str) -> bool:
+        """Materializa AKAZE de UMA referência somente no fallback real."""
+        ref = self.references.get(str(key or ""))
+        if not isinstance(ref, dict):
+            return False
+        if bool(ref.get("akaze_ready")):
+            return ref.get("akaze_descriptors") is not None
+
+        # Marca antes do compute: falha também é cacheada e não vira retry por
+        # frame durante uma cena difícil.
+        ref["akaze_ready"] = True
+        gray = ref.pop("_akaze_lazy_gray", None)
+        tracking_mask = ref.pop("_akaze_lazy_tracking_mask", None)
+        if not isinstance(gray, np.ndarray) or gray.size == 0:
+            return False
+
+        try:
+            akaze = cv2.AKAZE_create(
+                threshold=F3_TRACKING_AKAZE_THRESHOLD,
+                nOctaves=4,
+                nOctaveLayers=4,
+            )
+            keypoints, detected = akaze.detectAndCompute(
+                gray,
+                tracking_mask,
+            )
+        except Exception:
+            keypoints, detected = [], None
+
+        if (
+            detected is None
+            or len(keypoints) < F3_TRACKING_AKAZE_MIN_MATCHES
+        ):
+            ref["akaze_descriptors"] = None
+            ref["akaze_canonical_points"] = np.empty(
+                (0, 2),
+                dtype=np.float32,
+            )
+            return False
+
+        points = np.asarray(
+            [kp.pt for kp in keypoints],
+            dtype=np.float32,
+        ).reshape(-1, 1, 2)
+        try:
+            canonical = cv2.transform(
+                points,
+                np.asarray(
+                    ref.get("reference_to_canonical"),
+                    dtype=np.float32,
+                ).reshape(2, 3),
+            ).reshape(-1, 2)
+        except Exception:
+            ref["akaze_descriptors"] = None
+            ref["akaze_canonical_points"] = np.empty(
+                (0, 2),
+                dtype=np.float32,
+            )
+            return False
+
+        ref["akaze_descriptors"] = detected
+        ref["akaze_canonical_points"] = canonical
+        return True
+
 
     def _template_candidate(
         self,
@@ -5271,6 +5319,7 @@ class F3DisplayObjectTracker:
             akaze_desc is not None
             and len(akaze_kp) >= F3_TRACKING_AKAZE_MIN_MATCHES
         ):
+            self._ensure_akaze_reference(str(key))
             candidate = self._akaze_candidate(
                 akaze_kp,
                 akaze_desc,
@@ -5425,6 +5474,7 @@ class F3DisplayObjectTracker:
             )
             if akaze_available:
                 for key in tuple(self.references):
+                    self._ensure_akaze_reference(key)
                     candidate = self._akaze_candidate(
                         akaze_kp,
                         akaze_desc,
@@ -7236,6 +7286,7 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         _effective_phase_mask_ids_for_current_check,
                         _mask_snapshot_for_current_check,
                         _project_preview_context,
+                        aplicar_emissao_visual_ao_vivo_f3,
                         renderizar_preview_claro_display_f3,
                     )
                     from src.platform.display_visual_rotation import (
@@ -7255,6 +7306,23 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         int(visual_rotation or 0) % 360,
                     )
                     if isinstance(semantic_context, dict):
+                        token_fn = getattr(app, "_display_auto_frame_token", None)
+                        try:
+                            live_frame_token = (
+                                token_fn(source)
+                                if callable(token_fn)
+                                else ("object", id(source))
+                            )
+                        except Exception:
+                            live_frame_token = ("object", id(source))
+                        semantic_context = aplicar_emissao_visual_ao_vivo_f3(
+                            self_window,
+                            visual,
+                            semantic_context,
+                            frame_token=live_frame_token,
+                            geometry_token=id(geometry),
+                        )
+
                         classifications, failed_mask_ids = _mask_snapshot_for_current_check(
                             self_window,
                             project_name=str(semantic_context.get("project_name") or ""),

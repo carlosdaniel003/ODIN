@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
@@ -274,6 +276,132 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         )
 
         self.assertEqual(0, int(rendered.sum()))
+
+    @staticmethod
+    def _live_visual_test_context():
+        return {
+            "project_name": "P1",
+            "check_id": "CHECK_001",
+            "resolution": (160, 80),
+            "masks": (
+                {
+                    "id": "MASK_001",
+                    "type": "polygon",
+                    "points": [[8, 28], [32, 28], [32, 52], [8, 52]],
+                },
+                {
+                    "id": "MASK_002",
+                    "type": "polygon",
+                    "points": [[48, 28], [72, 28], [72, 52], [48, 52]],
+                },
+                {
+                    "id": "MASK_003",
+                    "type": "polygon",
+                    "points": [[88, 28], [112, 28], [112, 52], [88, 52]],
+                },
+                {
+                    "id": "MASK_004",
+                    "type": "polygon",
+                    "points": [[128, 28], [152, 28], [152, 52], [128, 52]],
+                },
+            ),
+            "live_luminous_only": True,
+        }
+
+    def test_amostra_visual_latest_frame_detecta_emissao_sem_worker_semantico(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        frame[30:51, 50:71] = 255
+        frame[30:51, 130:151] = 255
+
+        result = clarity.detectar_emissao_visual_ao_vivo_f3(
+            frame,
+            self._live_visual_test_context(),
+        )
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(
+            {"MASK_002", "MASK_004"},
+            set(result["mask_ids"]),
+        )
+        self.assertGreater(result["dynamic_range"], 100.0)
+
+    def test_amostra_visual_latest_frame_apaga_visor_na_fase_escura(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+
+        result = clarity.detectar_emissao_visual_ao_vivo_f3(
+            frame,
+            self._live_visual_test_context(),
+        )
+
+        self.assertTrue(result["ready"])
+        self.assertEqual((), result["mask_ids"])
+
+    def test_amostra_visual_e_calculada_uma_vez_por_frame_e_reutilizada(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        window = SimpleNamespace()
+        context = self._live_visual_test_context()
+        sample = {
+            "ready": True,
+            "mask_ids": ("MASK_002",),
+            "reason": "ok",
+            "sampled_mask_count": 4,
+            "baseline": 10.0,
+            "peak": 240.0,
+            "threshold": 150.0,
+        }
+
+        with patch.object(
+            clarity,
+            "detectar_emissao_visual_ao_vivo_f3",
+            return_value=sample,
+        ) as detect:
+            first = clarity.aplicar_emissao_visual_ao_vivo_f3(
+                window,
+                frame,
+                context,
+                frame_token=("camera", 10),
+                geometry_token=123,
+            )
+            second = clarity.aplicar_emissao_visual_ao_vivo_f3(
+                window,
+                frame,
+                context,
+                frame_token=("camera", 10),
+                geometry_token=123,
+            )
+
+        self.assertEqual(1, detect.call_count)
+        self.assertEqual(("MASK_002",), first["live_visual_mask_ids"])
+        self.assertEqual(
+            first["live_visual_mask_ids"],
+            second["live_visual_mask_ids"],
+        )
+        self.assertEqual(
+            "latest_preview_frame_core_v",
+            first["live_visual_sample_source"],
+        )
+
+    def test_preview_classico_usa_amostra_do_mesmo_frame_mesmo_antes_do_gate(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        context = self._live_visual_test_context()
+        context.update(
+            live_visual_sample_ready=True,
+            live_visual_mask_ids=("MASK_003",),
+            power_confirmed=False,
+            power_off_confirmed=False,
+            energy_state="unconfirmed",
+        )
+
+        rendered = clarity.renderizar_preview_claro_display_f3(
+            frame,
+            context,
+        )
+
+        lit = rendered[40, 100]
+        dark = rendered[40, 60]
+        self.assertGreater(int(lit[1]), int(lit[2]))
+        self.assertGreater(int(lit[1]), int(lit[0]))
+        self.assertLess(int(dark[0]) + int(dark[1]) + int(dark[2]), 20)
 
     def test_fallback_de_classificacao_aceita_somente_o_check_atual(self):
         right = clarity._classifications_from_analysis(

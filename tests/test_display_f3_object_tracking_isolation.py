@@ -274,6 +274,20 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("_display_f3_skip_auto_analysis_this_preview", source)
         self.assertIn("if heavy_due:", source)
 
+    def test_camera_e_visor_consumem_a_mesma_amostra_do_latest_frame(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        sample_pos = source.index("aplicar_emissao_visual_ao_vivo_f3(")
+        readout_pos = source.index("set_display_readout_context(")
+        renderer_pos = source.index("renderizar_preview_claro_display_f3(")
+
+        self.assertGreaterEqual(sample_pos, 0)
+        self.assertGreater(readout_pos, sample_pos)
+        self.assertGreater(renderer_pos, readout_pos)
+        self.assertIn("live_frame_token", source)
+        self.assertIn("geometry_token=id(geometry)", source)
+
     def test_live_preview_never_prefers_worker_raw_frame(self):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3
@@ -1111,39 +1125,30 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         board = [[65, 50], [255, 50], [255, 190], [65, 190]]
         return image, board
 
-    def test_reference_bank_adds_akaze_for_absolute_reacquisition(self):
-        with tempfile.TemporaryDirectory() as directory:
-            repository = SimpleNamespace(
-                config_file=Path(directory) / "odin_display_projects.json"
-            )
-            tracker = tracking.F3DisplayObjectTracker(repository)
-            tracker.width = 320
-            tracker.height = 240
-            reference, board = self._rich_tracking_reference()
-            mask = tracking.build_tracking_mask(320, 240, board, [])
-            refs = {}
-            tracker._add_reference(
-                refs,
-                key="ref",
-                image=reference,
-                tracking_mask=mask,
-                reference_to_canonical=np.asarray(
-                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                    dtype=np.float32,
-                ),
-                angle=0.0,
-                source_type="board_off",
-                board_points=board,
-            )
+    def test_reference_bank_materializa_akaze_somente_no_fallback(self):
+        add_source = inspect.getsource(
+            tracking.F3DisplayObjectTracker._add_reference
+        )
+        lazy_source = inspect.getsource(
+            tracking.F3DisplayObjectTracker._ensure_akaze_reference
+        )
+        align_source = inspect.getsource(
+            tracking.F3DisplayObjectTracker.align
+        )
+        direct_source = inspect.getsource(
+            tracking.F3DisplayObjectTracker.candidate_for_reference
+        )
 
-            self.assertIn("ref", refs)
-            self.assertIn("akaze_descriptors", refs["ref"])
-            self.assertIn("akaze_canonical_points", refs["ref"])
-            self.assertIsNotNone(refs["ref"]["akaze_descriptors"])
-            self.assertGreaterEqual(
-                len(refs["ref"]["akaze_canonical_points"]),
-                tracking.F3_TRACKING_AKAZE_MIN_MATCHES,
-            )
+        self.assertNotIn("cv2.AKAZE_create", add_source)
+        self.assertIn('"akaze_ready": False', add_source)
+        self.assertIn('"_akaze_lazy_gray"', add_source)
+        self.assertIn("cv2.AKAZE_create", lazy_source)
+        self.assertIn("ref.pop", lazy_source)
+        self.assertIn("_ensure_akaze_reference(key)", align_source)
+        self.assertIn(
+            "_ensure_akaze_reference(str(key))",
+            direct_source,
+        )
 
     def test_adaptive_template_reacquires_rotated_scaled_board(self):
         with tempfile.TemporaryDirectory() as directory:

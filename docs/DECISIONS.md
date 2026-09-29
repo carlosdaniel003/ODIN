@@ -990,6 +990,93 @@ O histórico físico detalhado desta ocorrência fica em
 `docs/F3_PHYSICAL_VALIDATION_LOG.md`.
 
 ---
+## D-029 — Espelho visual latest-frame-wins e aquisição inicial prioritária no F3
+
+**Status:** Accepted
+
+### Contexto
+
+No teste físico de 29/09/2026, a câmera mostrava o display real mudando antes
+das máscaras verdes e do `VISOR DO DISPLAY`. Isso era visualmente desconcertante,
+especialmente no BLUE intermitente: a imagem física já estava em outra fase,
+enquanto as duas representações da UI ainda refletiam o último resultado do
+worker de tracking/análise.
+
+O atraso era arquitetural. A câmera visível já seguia latest-frame-wins, porém a
+cor das máscaras e o visor lógico consumiam `luminous_mask_ids` e classificações
+produzidas por jobs HIGH assíncronos. Esses jobs precisam continuar assíncronos
+para decisão produtiva, mas não são a fonte adequada para uma animação que deve
+espelhar o frame que o operador está vendo.
+
+Também foi observado que a abertura do F3 podia permanecer tempo demais em
+`IDENTIFICANDO...`. O primeiro `configure()` do tracker calculava ORB e AKAZE
+para todas as referências antes de o fallback AKAZE ser realmente necessário,
+e o primeiro job HIGH de tracking podia ficar atrás de trabalho LOW já presente
+no executor.
+
+### Decisão
+
+#### Espelho visual
+
+- A câmera física continua sendo latest-frame-wins.
+- Depois que existe geometria rastreada válida, o **mesmo frame já reduzido para
+  o preview** recebe uma leitura luminosa leve sobre o núcleo das 28 ROIs.
+- Essa leitura usa somente o canal V e estatísticas locais simples; não executa
+  ORB, AKAZE, template matching, feature extractor ou acesso a disco.
+- O resultado é calculado no máximo uma vez por `frame_token + CHECK + geometria`
+  e é reutilizado em repaints repetidos.
+- A mesma coleção `live_visual_mask_ids` alimenta, no mesmo repaint:
+  - as máscaras verdes sobre a câmera;
+  - os segmentos verdes do `VISOR DO DISPLAY`.
+- Uma fase escura válida produz conjunto vazio e apaga as duas representações
+  juntas.
+- Essa leitura é **somente apresentação**. Ela não participa de energia,
+  presença, ON/OFF/POUCA LUZ produtivo, OK/NG, debounce ou avanço de CHECK.
+- A autoridade produtiva continua no tracking/analyzer/energy/state machine
+  canônicos. Não existe segundo scheduler nem segunda thread.
+
+#### Aquisição inicial
+
+- As features AKAZE das referências salvas deixam de ser calculadas
+  preventivamente para todas as imagens no primeiro `configure()`.
+- ORB/template continuam disponíveis imediatamente.
+- AKAZE de uma referência é materializado e cacheado somente quando o caminho de
+  reacquisition realmente precisa desse fallback.
+- Falha de materialização também é cacheada, evitando retry caro a cada frame.
+- O primeiro job HIGH de tracking pode ser enfileirado mesmo quando o executor
+  já possui trabalho de menor prioridade. Depois que esse future existe, o
+  backpressure normal volta a valer.
+- Nenhum worker adicional é criado e `F3HeavyVisionExecutor` continua com
+  concorrência máxima de um job.
+
+### Consequência
+
+Visualmente, a intenção passa a ser:
+
+~~~text
+frame N chega da câmera
+→ preview reduzido
+→ amostra luminosa leve nas ROIs
+→ câmera e VISOR recebem o mesmo estado visual do frame N
+~~~
+
+Enquanto isso, em paralelo e sem alterar a decisão:
+
+~~~text
+latest frame elegível
+→ tracking/analyzer HIGH
+→ energia + analyzer + state machine
+→ OK/NG / avanço de CHECK
+~~~
+
+Assim, responsividade visual e segurança da decisão deixam de disputar a mesma
+latência. A abertura também deixa de pagar antecipadamente pelo fallback AKAZE
+de todas as referências.
+
+A validação física desta mudança é registrada em
+`docs/F3_PHYSICAL_VALIDATION_LOG.md`.
+
+---
 ## Como adicionar uma decisão
 
 Use:

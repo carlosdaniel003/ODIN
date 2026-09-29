@@ -289,9 +289,6 @@ class F3RuntimeCoordinator:
         ):
             return "full_cycle", "tracking_analysis_pending"
 
-        if self._heavy_executor_busy():
-            return "render_only", "heavy_executor_busy"
-
         new_frame = frame_token != self._last_frame_token
         if not new_frame:
             self._repeated_frame_count += 1
@@ -299,8 +296,25 @@ class F3RuntimeCoordinator:
 
         if self._rearm_pending():
             return "full_cycle", "rearm_new_frame"
-        if self._tracking_needs_initial_lock():
-            return "full_cycle", "tracking_initial_lock"
+
+        # O primeiro lock é HIGH e não deve ficar atrás de thumbnail/debug LOW
+        # apenas porque o executor já possui trabalho. Um único full_cycle
+        # enfileira o tracking prioritário; depois, com o future existente, o
+        # backpressure normal volta a valer.
+        initial_lock_needed = self._tracking_needs_initial_lock()
+        tracking_future = getattr(
+            self.app,
+            "_display_f3_tracking_future",
+            None,
+        )
+        if initial_lock_needed and tracking_future is None:
+            return "full_cycle", "tracking_initial_lock_priority"
+
+        if self._heavy_executor_busy():
+            return "render_only", "heavy_executor_busy"
+
+        if initial_lock_needed:
+            return "render_only", "tracking_initial_lock_in_flight"
         if self._analysis_due():
             return "full_cycle", "analysis_due_new_frame"
         return "render_only", "analysis_not_due"
