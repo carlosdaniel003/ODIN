@@ -895,14 +895,45 @@ def _close_debug(window) -> None:
     window.close_f3_snapshot_debug()
 
 
+def _screen_capture_fit_limits(widget=None) -> tuple[int, int]:
+    """Limita o print à área realmente alocada para o preview.
+
+    Depois que o painel D-025 foi incluído, usar apenas a altura da tela podia
+    produzir uma PhotoImage maior que a linha disponível no grid. O Tk então
+    mantinha a imagem inteira, mas mostrava somente a região que cabia, dando a
+    impressão de print cortado.
+    """
+    fallback_width, fallback_height = _debug_preview_limits(widget)
+    if widget is None:
+        return fallback_width, fallback_height
+
+    try:
+        allocated_width = int(widget.winfo_width())
+        allocated_height = int(widget.winfo_height())
+    except Exception:
+        return fallback_width, fallback_height
+
+    # Dimensões 1x1 são comuns antes do primeiro layout do Tk e não representam
+    # área útil real. Nesse caso preservamos o fallback até o after configurado.
+    if allocated_width <= 120 or allocated_height <= 80:
+        return fallback_width, fallback_height
+
+    usable_width = max(120, allocated_width - 24)
+    usable_height = max(80, allocated_height - 20)
+    return (
+        min(fallback_width, usable_width),
+        min(fallback_height, usable_height),
+    )
+
+
 def _screen_capture_photo(window, widget=None):
-    """Converte somente o print já capturado para PhotoImage de apresentação."""
+    """Converte o print capturado e sempre o encaixa inteiro no preview."""
     image = getattr(window, "_display_f3_manual_screen_capture_image", None)
     if image is None:
         return None
     try:
         preview = image.copy()
-        max_width, max_height = _debug_preview_limits(widget)
+        max_width, max_height = _screen_capture_fit_limits(widget)
         preview.thumbnail((max_width, max_height))
         buffer = io.BytesIO()
         preview.save(buffer, format="PNG")
@@ -1250,7 +1281,7 @@ def _open_lightweight_snapshot_debug(window):
     window._display_f3_snapshot_debug_photo = None
 
     def render_captured_screen():
-        photo = _screen_capture_photo(window, top)
+        photo = _screen_capture_photo(window, preview_label)
         window._display_f3_snapshot_debug_photo = photo
         try:
             if photo is not None:

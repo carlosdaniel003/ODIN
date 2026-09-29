@@ -14,7 +14,7 @@ class DisplayF3SnapshotDebugLightweightUiTests(unittest.TestCase):
 
     def test_janela_debug_usa_print_e_visual_d025_ja_precomputado(self):
         source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
-        self.assertIn("_screen_capture_photo(window, top)", source)
+        self.assertIn("_screen_capture_photo(window, preview_label)", source)
         self.assertIn("PRINT DA TELA ANALISADA", source)
         self.assertIn("D-025 • FILTRO RETIFICADO", source)
         self.assertNotIn("_frame_photo(", source)
@@ -51,6 +51,26 @@ class DisplayF3SnapshotDebugLightweightUiTests(unittest.TestCase):
         self.assertIn('preview.save(buffer, format="PNG")', source)
         self.assertNotIn("cv2.", source)
         self.assertNotIn("camera_frame_atual", source)
+
+    def test_print_do_debug_respeita_area_real_do_preview(self):
+        class _PreviewWidget:
+            def winfo_screenheight(self):
+                return 768
+
+            def winfo_width(self):
+                return 1168
+
+            def winfo_height(self):
+                return 206
+
+        width, height = debug_ui._screen_capture_fit_limits(_PreviewWidget())
+        self.assertLessEqual(width, 1144)
+        self.assertLessEqual(height, 186)
+        self.assertGreater(width, 0)
+        self.assertGreater(height, 0)
+
+        source = inspect.getsource(debug_ui._screen_capture_photo)
+        self.assertIn("_screen_capture_fit_limits(widget)", source)
 
     def test_rodape_tem_copiar_debug_copiar_imagem_e_fechar(self):
         source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
