@@ -225,6 +225,11 @@ esperando um executor ocupado por trabalho já existente.
 
 Implementação principal: commit `ba627170e5da3629f27ec564ebd675547fdd035e`.
 
+Ajuste final de renderização: commit
+`979cb1fa0de5f78df9171ff0d2ae23ea6edbd5ef`, que evita reconstruir o conjunto
+de IDs luminosos dentro de cada um dos 28 segmentos do visor e reforça o teste
+de contrato do espelho visual.
+
 ### Validação automatizada desta correção
 
 - compilação dos módulos F3: PASS;
