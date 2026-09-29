@@ -160,6 +160,8 @@ jobs:
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_reference_bank_materializa_akaze_somente_no_fallback \
             tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_primeiro_lock_high_pode_ser_enfileirado_mesmo_com_executor_ocupado \
             tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_primeiro_lock_em_voo_respeita_backpressure_normal \
+            tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_primeiro_lock_concluido_e_drenado_antes_do_backpressure \
+            tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_semantic_concluido_e_drenado_mesmo_com_frame_repetido \
             -v
 
       - name: Run ROI geometry parity tests
