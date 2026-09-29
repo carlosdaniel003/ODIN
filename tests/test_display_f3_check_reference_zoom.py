@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import unittest
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
