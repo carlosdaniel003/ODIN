@@ -775,6 +775,9 @@ def summarize_h1_registration(result: dict | None) -> dict:
         "experimental": bool(data.get("experimental", True)),
         "production_authority": bool(data.get("production_authority", False)),
         "filter_candidate_count": int(data.get("filter_candidate_count", 0) or 0),
+        "filter_locator_source": str(
+            data.get("filter_locator_source") or ""
+        ),
         "rectified_size": list(data.get("rectified_size") or ()),
         "phase_shift": list(data.get("phase_shift") or ()),
         "phase_response": data.get("phase_response"),

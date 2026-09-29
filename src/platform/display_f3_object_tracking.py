@@ -1369,12 +1369,15 @@ def experiment_h1_filter_registration(
     canonical_resolution=None,
     reference_masks=None,
     expected_on_mask_ids=None,
+    current_filter_points=None,
+    current_filter_source: str = "",
 ) -> dict:
     """D-025: avalia homografia + registro H1 sem alterar o runtime produtivo.
 
-    O filtro continua sendo localizado pelo detector estrutural canônico. Cada
-    candidato é retificado e registrado contra a foto H1 inteira; o melhor
-    resultado é escolhido somente para telemetria do experimento.
+    Quando o F3 já possui LOCK estrutural, a geometria do filtro publicada pelo
+    proprietário canônico de tracking é reutilizada diretamente. O detector
+    escuro permanece apenas como fallback diagnóstico quando essa geometria não
+    foi fornecida.
     """
     if not _valid_frame(reference_frame) or not _valid_frame(current_frame):
         return {"available": False, "reason": "invalid_frame"}
@@ -1388,22 +1391,43 @@ def experiment_h1_filter_registration(
     if resolution is None:
         return {"available": False, "reason": "master_resolution_missing"}
 
-    candidates = _detect_dark_filter_candidates(
-        current_frame,
-        reference_filter_points,
-        resolution,
+    supplied_filter = _normalize_points(
+        current_filter_points,
+        minimum=4,
     )
+    if len(supplied_filter) >= 4:
+        locator_source = str(
+            current_filter_source or "tracking_structural_lock"
+        )
+        candidates = [
+            {
+                "points": supplied_filter,
+                "score": 1.0,
+                "source": locator_source,
+                "prelocked": True,
+            }
+        ]
+    else:
+        locator_source = "dark_filter_detector"
+        candidates = _detect_dark_filter_candidates(
+            current_frame,
+            reference_filter_points,
+            resolution,
+        )
+
     if not candidates:
         return {
             "available": False,
             "reason": "filter_not_found",
             "filter_candidate_count": 0,
+            "filter_locator_source": locator_source,
             "attempts": [],
         }
 
     attempts = []
     best = None
     best_score = float("-inf")
+    best_filter_source = ""
     for candidate in candidates:
         result = register_h1_with_filter_homography(
             reference_frame,
@@ -1461,12 +1485,16 @@ def experiment_h1_filter_registration(
         if bool(result.get("available")) and score > best_score:
             best = result
             best_score = score
+            best_filter_source = str(
+                candidate.get("source") or locator_source
+            )
 
     if best is None:
         return {
             "available": False,
             "reason": "h1_registration_not_converged",
             "filter_candidate_count": int(len(candidates)),
+            "filter_locator_source": locator_source,
             "attempts": attempts,
         }
 
@@ -1476,6 +1504,9 @@ def experiment_h1_filter_registration(
             "available": True,
             "reason": "h1_filter_registration_ready",
             "filter_candidate_count": int(len(candidates)),
+            "filter_locator_source": str(
+                best_filter_source or locator_source
+            ),
             "attempts": attempts,
             "experimental": True,
             "production_authority": False,

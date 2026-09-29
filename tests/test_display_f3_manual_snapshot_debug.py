@@ -163,6 +163,8 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("cv2.imread(image_path", source)
         self.assertIn("_check_reference_geometry", source)
         self.assertIn("experiment_h1_filter_registration", source)
+        self.assertIn("current_filter_points=structural_filter_points", source)
+        self.assertIn("current_filter_source=structural_source", source)
         self.assertIn("frame,", source)
         self.assertIn('"production_authority": False', source)
         self.assertNotIn("camera_frame_atual", source)
@@ -180,7 +182,10 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
                 "quality_ok": True,
                 "check_name": "H1",
                 "reference_image_path": "h1.jpg",
-                "filter_candidate_count": 2,
+                "filter_candidate_count": 1,
+                "filter_locator_source": "structural_only",
+                "tracking_geometry_locked": True,
+                "tracking_filter_point_count": 4,
                 "rectified_size": [320, 120],
                 "ecc_score": 0.97,
                 "rotation_deg": 1.2,
@@ -219,6 +224,9 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
             report,
         )
         self.assertIn("check=H1", report)
+        self.assertIn("filter_source=structural_only", report)
+        self.assertIn("tracking_lock=SIM", report)
+        self.assertIn("tracking_filter_points=4", report)
         self.assertIn("ecc=0.9700", report)
         self.assertIn("dice=0.4000->0.9200", report)
         self.assertIn("emission_in_masks=0.3500->0.8800", report)
@@ -464,6 +472,34 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn('name="technical-report-at-analyze"', source)
         self.assertNotIn("threading.Thread", source)
         self.assertNotIn("while True", source)
+
+    def test_tracking_geometry_snapshot_preserva_contorno_do_filtro_para_d025(self):
+        class _TrackingApp:
+            _display_f3_tracking_live_geometry = {
+                "locked": True,
+                "board_points": [
+                    [100.0, 200.0],
+                    [500.0, 205.0],
+                    [495.0, 320.0],
+                    [105.0, 315.0],
+                ],
+                "masks": [{"id": "MASK_001", "type": "polygon", "points": []}],
+                "resolution": (1920, 1080),
+                "geometry_space": "canonical",
+                "reference": "board_off",
+                "source_type": "feature_match",
+                "check_id": "CHECK_001",
+                "spatial_alignment_ready": False,
+                "spatial_alignment_source": "structural_only",
+            }
+
+        frozen = snapshot_module._tracking_geometry_snapshot(_TrackingApp())
+
+        self.assertTrue(frozen["locked"])
+        self.assertEqual(4, len(frozen["board_points"]))
+        self.assertEqual("structural_only", frozen["spatial_alignment_source"])
+        self.assertEqual("feature_match", frozen["source_type"])
+        self.assertEqual("CHECK_001", frozen["check_id"])
 
     def test_seed_do_analisar_e_minimo(self):
         source = inspect.getsource(

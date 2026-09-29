@@ -1152,14 +1152,28 @@ def _tracking_geometry_snapshot(app) -> dict | None:
         for mask in (geometry.get("masks") or ())
         if isinstance(mask, dict)
     ]
-    if not masks:
+    board_points = [
+        [float(point[0]), float(point[1])]
+        for point in (geometry.get("board_points") or ())
+        if isinstance(point, (list, tuple)) and len(point) >= 2
+    ]
+    if not masks and len(board_points) < 4:
         return None
     return {
         "locked": True,
+        "board_points": board_points,
         "masks": masks,
         "resolution": _safe_deepcopy(geometry.get("resolution")),
         "geometry_space": str(geometry.get("geometry_space") or ""),
         "reference": str(geometry.get("reference") or ""),
+        "source_type": str(geometry.get("source_type") or ""),
+        "check_id": str(geometry.get("check_id") or ""),
+        "spatial_alignment_ready": bool(
+            geometry.get("spatial_alignment_ready", False)
+        ),
+        "spatial_alignment_source": str(
+            geometry.get("spatial_alignment_source") or ""
+        ),
     }
 
 
@@ -1227,6 +1241,7 @@ def _run_d025_h1_registration_diagnostic(
     checks,
     frame,
     logical_context: dict | None,
+    tracking_geometry: dict | None = None,
 ) -> dict:
     """Roda D-025 apenas no worker do DEBUG, sobre o mesmo frame congelado."""
     context = logical_context if isinstance(logical_context, dict) else {}
@@ -1332,6 +1347,19 @@ def _run_d025_h1_registration_diagnostic(
         if str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
     }
 
+    frozen_tracking = (
+        tracking_geometry
+        if isinstance(tracking_geometry, dict)
+        and bool(tracking_geometry.get("locked"))
+        else {}
+    )
+    structural_filter_points = frozen_tracking.get("board_points") or []
+    structural_source = str(
+        frozen_tracking.get("spatial_alignment_source")
+        or frozen_tracking.get("source_type")
+        or "tracking_structural_lock"
+    )
+
     result = experiment_h1_filter_registration(
         reference,
         reference_board,
@@ -1339,6 +1367,8 @@ def _run_d025_h1_registration_diagnostic(
         canonical_resolution=project.get("master_resolution"),
         reference_masks=reference_masks,
         expected_on_mask_ids=expected_on_ids,
+        current_filter_points=structural_filter_points,
+        current_filter_source=structural_source,
     )
     summary = summarize_h1_registration(result)
     summary.update(
@@ -1349,6 +1379,22 @@ def _run_d025_h1_registration_diagnostic(
             "reference_filter_point_count": int(len(reference_board)),
             "reference_mask_count": int(len(reference_masks)),
             "expected_on_count": int(len(expected_on_ids)),
+            "tracking_geometry_locked": bool(frozen_tracking),
+            "tracking_filter_point_count": int(
+                len(structural_filter_points)
+            ),
+            "tracking_geometry_space": str(
+                frozen_tracking.get("geometry_space") or ""
+            ),
+            "tracking_geometry_reference": str(
+                frozen_tracking.get("reference") or ""
+            ),
+            "tracking_geometry_source_type": str(
+                frozen_tracking.get("source_type") or ""
+            ),
+            "tracking_spatial_alignment_source": str(
+                frozen_tracking.get("spatial_alignment_source") or ""
+            ),
             "experimental": True,
             "production_authority": False,
         }
@@ -1399,6 +1445,9 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         snapshot["camera_settings_at_frame"] = _safe_deepcopy(
             seed.get("camera_settings_at_frame") or {}
         )
+        snapshot["tracking_geometry"] = _safe_deepcopy(
+            seed.get("tracking_geometry") or {}
+        )
         snapshot["async_worker"] = True
     else:
         snapshot["rotation"] = _rotation(app)
@@ -1409,6 +1458,9 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
             snapshot["runtime_at_click"],
         )
         snapshot["camera_settings_at_frame"] = _camera_settings_at_frame(app)
+        snapshot["tracking_geometry"] = _safe_deepcopy(
+            _tracking_geometry_snapshot(app) or {}
+        )
         snapshot["async_worker"] = False
 
     repository = getattr(app, "display_project_repository", None)
@@ -1466,6 +1518,7 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
             checks,
             frame,
             snapshot.get("logical_context"),
+            snapshot.get("tracking_geometry"),
         )
     except Exception as exc:
         d025 = {
@@ -1841,6 +1894,9 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     f"check={d025.get('check_name') or d025.get('check_id') or '--'}",
                     f"reference={d025.get('reference_image_path', '--')}",
                     f"filter_candidates={d025.get('filter_candidate_count', '--')}",
+                    f"filter_source={d025.get('filter_locator_source') or '--'}",
+                    f"tracking_lock={_yes_no(d025.get('tracking_geometry_locked'))}",
+                    f"tracking_filter_points={d025.get('tracking_filter_point_count', '--')}",
                     f"rectified_size={d025.get('rectified_size', '--')}",
                     f"ecc={_fmt(d025.get('ecc_score'))}",
                     f"rotation_deg={_fmt(d025.get('rotation_deg'), 3)}",

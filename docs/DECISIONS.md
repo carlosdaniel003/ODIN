@@ -683,8 +683,12 @@ técnico:
 
 - quando o CHECK lógico congelado é H1, o diagnóstico carrega a foto H1 real
   salva em CONFIGURAR e a geometria do filtro/máscaras desenhada nessa foto;
-- o mesmo frame bruto congelado pelo clique em ANALISAR é passado ao detector
-  estrutural do filtro e ao pipeline D-025;
+- o mesmo frame bruto congelado pelo clique em ANALISAR é usado junto da
+  geometria do filtro já publicada pelo LOCK estrutural do tracking canônico;
+  essa geometria é capturada no mesmo seed do ANALISAR e entra diretamente na
+  homografia, sem redetectar o filtro quando quatro pontos válidos existem;
+- o detector escuro independente permanece somente como fallback diagnóstico
+  quando o snapshot não contém geometria estrutural utilizável;
 - o resultado gera um PNG diagnóstico precomputado com três painéis:
   REFERÊNCIA H1 | FILTRO RETIFICADO | H1 REGISTRADO, todos com as mesmas
   máscaras fixas do espaço retificado;

@@ -228,6 +228,36 @@ class DisplayF3H1RegistrationExperimentTests(unittest.TestCase):
             result["metrics_before"]["dice"],
         )
 
+    def test_object_tracking_experiment_reuses_supplied_structural_filter_lock(self):
+        reference, current, reference_quad, current_quad, masks = self._scene()
+
+        with patch.object(
+            tracking,
+            "_detect_dark_filter_candidates",
+            side_effect=AssertionError(
+                "detector escuro não deve rodar com LOCK estrutural"
+            ),
+        ):
+            result = tracking.experiment_h1_filter_registration(
+                reference,
+                reference_quad,
+                current,
+                canonical_resolution=(640, 480),
+                reference_masks=masks,
+                expected_on_mask_ids={mask["id"] for mask in masks},
+                current_filter_points=current_quad.tolist(),
+                current_filter_source="structural_only",
+            )
+
+        self.assertTrue(result["available"], result)
+        self.assertEqual("structural_only", result["filter_locator_source"])
+        self.assertEqual(1, result["filter_candidate_count"])
+        self.assertEqual(
+            "structural_only",
+            result["attempts"][0]["filter_source"],
+        )
+        self.assertGreater(result["ecc_score"], 0.90)
+
     def test_diagnostic_png_shows_reference_rectified_and_registered(self):
         reference, current, reference_quad, current_quad, masks = self._scene()
         result = h1reg.register_h1_with_filter_homography(
