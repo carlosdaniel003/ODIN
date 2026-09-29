@@ -151,6 +151,21 @@ outro projeto ou evidência luminosa antiga.
 
 **CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
 
+Implementação principal: commit `2fca6b695542b325eb67d6bfb3d7b6d10feefa31`.
+
+### Validação automatizada desta correção
+
+- compilação dos módulos F3: PASS;
+- regressões luminosas focadas: **30 testes PASS**;
+- novos testes D-028:
+  - `test_usb_power_gate_aceita_lock_luminoso_atual_do_mesmo_check`: PASS;
+  - `test_lock_luminoso_stale_ou_de_outro_check_nao_libera_gate`: PASS;
+- workflow `Display F3 fast H1 BLUE tests`: PASS;
+- workflow `Display F3 cycle rearm tests`: PASS;
+- a suíte ampla de object tracking continua com **8 failures + 1 error** nos
+  mesmos testes históricos já presentes antes desta alteração. A etapa focada
+  da D-028 passa antes desse bloco agregado.
+
 O reteste esperado é:
 
 ~~~text
