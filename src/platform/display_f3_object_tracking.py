@@ -36,6 +36,9 @@ from src.platform.display_check_presence_reference import (
 from src.platform.display_f3_heavy_executor import (
     F3HeavyWorkPriority,
 )
+from src.platform.display_f3_h1_registration import (
+    register_h1_with_filter_homography,
+)
 from src.platform.display_f3_mask_editor_reference import (
     DisplayMaskEditorReferenceStore,
 )
@@ -1356,6 +1359,129 @@ def _detect_dark_filter_candidates(
 
     candidates.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
     return candidates[:F3_TRACKING_FILTER_MAX_CANDIDATES]
+
+
+def experiment_h1_filter_registration(
+    reference_frame,
+    reference_filter_points,
+    current_frame,
+    *,
+    canonical_resolution=None,
+    reference_masks=None,
+    expected_on_mask_ids=None,
+) -> dict:
+    """D-025: avalia homografia + registro H1 sem alterar o runtime produtivo.
+
+    O filtro continua sendo localizado pelo detector estrutural canônico. Cada
+    candidato é retificado e registrado contra a foto H1 inteira; o melhor
+    resultado é escolhido somente para telemetria do experimento.
+    """
+    if not _valid_frame(reference_frame) or not _valid_frame(current_frame):
+        return {"available": False, "reason": "invalid_frame"}
+
+    if canonical_resolution is None:
+        canonical_resolution = (
+            int(reference_frame.shape[1]),
+            int(reference_frame.shape[0]),
+        )
+    resolution = normalizar_resolucao_display(canonical_resolution)
+    if resolution is None:
+        return {"available": False, "reason": "master_resolution_missing"}
+
+    candidates = _detect_dark_filter_candidates(
+        current_frame,
+        reference_filter_points,
+        resolution,
+    )
+    if not candidates:
+        return {
+            "available": False,
+            "reason": "filter_not_found",
+            "filter_candidate_count": 0,
+            "attempts": [],
+        }
+
+    attempts = []
+    best = None
+    best_score = float("-inf")
+    for candidate in candidates:
+        result = register_h1_with_filter_homography(
+            reference_frame,
+            reference_filter_points,
+            current_frame,
+            candidate.get("points") or [],
+            reference_masks=reference_masks,
+            expected_on_mask_ids=expected_on_mask_ids,
+        )
+        metrics_after = (
+            result.get("metrics_after")
+            if isinstance(result.get("metrics_after"), dict)
+            else {}
+        )
+        mask_after = (
+            result.get("mask_overlap_after")
+            if isinstance(result.get("mask_overlap_after"), dict)
+            else {}
+        )
+        score = (
+            float(result.get("ecc_score", 0.0) or 0.0) * 2.0
+            + float(metrics_after.get("dice", 0.0) or 0.0)
+            + float(metrics_after.get("correlation", 0.0) or 0.0)
+            + float(mask_after.get("emission_inside_fraction", 0.0) or 0.0)
+        )
+        attempts.append(
+            {
+                "filter_score": round(
+                    float(candidate.get("score", 0.0) or 0.0),
+                    6,
+                ),
+                "filter_source": str(
+                    candidate.get("source") or "dark_filter_detector"
+                ),
+                "available": bool(result.get("available")),
+                "reason": str(result.get("reason") or ""),
+                "quality_ok": bool(result.get("quality_ok")),
+                "ecc_score": result.get("ecc_score"),
+                "rotation_deg": result.get("rotation_deg"),
+                "center_shift_px": result.get("center_shift_px"),
+                "metrics_before": deepcopy(
+                    result.get("metrics_before") or {}
+                ),
+                "metrics_after": deepcopy(
+                    result.get("metrics_after") or {}
+                ),
+                "mask_overlap_before": deepcopy(
+                    result.get("mask_overlap_before") or {}
+                ),
+                "mask_overlap_after": deepcopy(
+                    result.get("mask_overlap_after") or {}
+                ),
+            }
+        )
+        if bool(result.get("available")) and score > best_score:
+            best = result
+            best_score = score
+
+    if best is None:
+        return {
+            "available": False,
+            "reason": "h1_registration_not_converged",
+            "filter_candidate_count": int(len(candidates)),
+            "attempts": attempts,
+        }
+
+    payload = dict(best)
+    payload.update(
+        {
+            "available": True,
+            "reason": "h1_filter_registration_ready",
+            "filter_candidate_count": int(len(candidates)),
+            "attempts": attempts,
+            "experimental": True,
+            "production_authority": False,
+        }
+    )
+    return payload
 
 
 def _detect_luminous_segment_centers(frame, filter_points) -> dict:

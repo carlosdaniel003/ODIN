@@ -57,6 +57,7 @@ jobs:
             src/platform/display_f3_exact_check_template.py \
             src/platform/display_f3_contour_check_identity.py \
             src/platform/display_f3_object_tracking.py \
+            src/platform/display_f3_h1_registration.py \
             src/platform/display_f3_tracking_orientation_ui.py \
             src/platform/display_f3_reference_geometry_editor.py \
             src/platform/display_f3_mask_editor_reference.py \
@@ -92,8 +93,15 @@ jobs:
             tests/test_display_f3_exact_check_template.py \
             tests/test_display_f3_contour_check_identity.py \
             tests/test_display_f3_object_tracking_isolation.py \
+            tests/test_display_f3_h1_registration.py \
             tests/test_display_f3_tracking_ui_contract.py \
             tests/test_display_f3_geometry_adjustments.py
+
+      - name: Run D-025 homography H1 experiment tests
+        run: |
+          python -m unittest \
+            tests.test_display_f3_h1_registration \
+            -v
 
       - name: Run luminous F3 tracking regressions
         run: |

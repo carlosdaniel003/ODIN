@@ -655,6 +655,25 @@ Regras da proposta:
   F3DisplayObjectTracker e ao F3HeavyVisionExecutor; esta proposta não cria
   novo scheduler, thread ou autoridade paralela.
 
+### Implementação experimental — Etapa 1
+
+A primeira etapa de D-025 foi implementada como compute isolado, sem participação
+no runtime produtivo:
+
+- `src/platform/display_f3_h1_registration.py` contém retificação por homografia,
+  mapa de emissão, correlação de fase, refinamento ECC euclidiano, métricas de
+  alinhamento e projeção experimental das máscaras fixas;
+- `display_f3_object_tracking.experiment_h1_filter_registration()` reutiliza o
+  detector estrutural de filtro já existente somente para produzir candidatos e
+  escolhe o melhor registro H1 para telemetria;
+- nenhuma chamada do scheduler, energia, analyzer, sequência ou UI produtiva usa
+  esse caminho nesta etapa;
+- testes sintéticos reproduzem explicitamente filtro movendo/perspectivando e o
+  H1 deslocando/rotacionando internamente de forma independente;
+- a próxima evidência necessária continua sendo o lote de imagens reais H1.
+
+D-025 permanece **Proposed** até a validação física. Esta implementação não
+autoriza substituir o alinhamento luminoso produtivo atual.
 ### Validação antes de integrar ao ciclo produtivo
 
 A primeira implementação deve ser um experimento isolado de geometria, sem
