@@ -168,8 +168,19 @@ F3_TRACKING_LUMINOUS_FINE_MIN_ANCHORS = 3
 F3_TRACKING_LUMINOUS_FINE_MIN_GAIN_PX = 0.45
 F3_TRACKING_LUMINOUS_FINE_ALREADY_ALIGNED_PX = 1.25
 F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_SPAN_FRACTION = 0.18
+# Rotação/escala fina só são confiáveis quando os anchors cobrem uma porção
+# significativa do display nos dois eixos. Um grupo concentrado em um dígito
+# pode corrigir translação, mas não recebe autoridade para entortar as 28 ROIs.
+F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_X_SPAN_FRACTION = 0.30
+F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_Y_SPAN_FRACTION = 0.18
 F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_FRACTION = 0.025
 F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_MAX_PX = 18
+# O padding acima é apenas região de aquisição. Depois do fit, a pose só é
+# publicada se a emissão realmente cair dentro do núcleo geométrico exato das
+# máscaras reprojetadas, sem dilatação.
+F3_TRACKING_LUMINOUS_FINE_MIN_CORE_HOT_PIXELS = 6
+F3_TRACKING_LUMINOUS_FINE_MIN_CORE_HOT_FRACTION = 0.08
+F3_TRACKING_LUMINOUS_FINE_MIN_CORE_MATCH_RATIO = 0.55
 # Reflexo/sujeira no filtro escuro não pode virar landmark geométrico. Em
 # 1920x1080 os segmentos reais observados ficam tipicamente abaixo de ~28px de
 # erro local antes do refinamento; acima disso a evidência já não pertence à
@@ -1895,6 +1906,185 @@ def _detect_expected_on_luminous_landmarks(
     }
 
 
+def _validate_luminous_pose_core_support(
+    frame,
+    expected_rows,
+    current_to_fit,
+    threshold_v,
+) -> dict:
+    """Valida a pose candidata contra a área exata das máscaras ON.
+
+    A busca local pode usar padding para encontrar um segmento deslocado em
+    relação à pose estrutural. Esse padding nunca vira prova de alinhamento:
+    depois do fit, a emissão precisa ocupar o núcleo da própria máscara
+    reprojetada. Isso rejeita luz de segmento vizinho e reflexo aceitos apenas
+    por proximidade.
+    """
+    if not _valid_frame(frame):
+        return {
+            "available": False,
+            "enforced": False,
+            "reason": "invalid_frame",
+            "geometry_count": 0,
+            "validated_count": 0,
+            "required_count": 0,
+            "validated_mask_ids": [],
+            "details": [],
+        }
+    try:
+        threshold = float(threshold_v)
+        current_to_fit_matrix = np.asarray(
+            current_to_fit,
+            dtype=np.float32,
+        ).reshape(2, 3)
+        fit_to_current = cv2.invertAffineTransform(current_to_fit_matrix)
+        value = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[:, :, 2]
+    except (TypeError, ValueError, cv2.error):
+        return {
+            "available": False,
+            "enforced": False,
+            "reason": "core_validation_prepare_failed",
+            "geometry_count": 0,
+            "validated_count": 0,
+            "required_count": 0,
+            "validated_mask_ids": [],
+            "details": [],
+        }
+    if not math.isfinite(threshold):
+        return {
+            "available": False,
+            "enforced": False,
+            "reason": "core_validation_threshold_invalid",
+            "geometry_count": 0,
+            "validated_count": 0,
+            "required_count": 0,
+            "validated_mask_ids": [],
+            "details": [],
+        }
+
+    frame_h, frame_w = value.shape[:2]
+    geometry_count = 0
+    validated_ids: list[str] = []
+    details: list[dict] = []
+
+    for row in expected_rows or ():
+        if not isinstance(row, dict) or not isinstance(row.get("mask"), dict):
+            continue
+        projected = transform_mask(row.get("mask"), fit_to_current)
+        if not isinstance(projected, dict):
+            continue
+        try:
+            bx1, by1, bx2, by2 = bbox_mascara_display(projected)
+            x1 = max(0, int(math.floor(float(bx1))) - 1)
+            y1 = max(0, int(math.floor(float(by1))) - 1)
+            x2 = min(frame_w, int(math.ceil(float(bx2))) + 2)
+            y2 = min(frame_h, int(math.ceil(float(by2))) + 2)
+        except (TypeError, ValueError):
+            continue
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        geometry_count += 1
+        crop_value = value[y1:y2, x1:x2]
+        hot_y, hot_x = np.nonzero(
+            crop_value.astype(np.float32) >= threshold
+        )
+        support_flags = _hot_pixels_inside_projected_mask(
+            hot_x,
+            hot_y,
+            projected_mask=projected,
+            crop_origin=(x1, y1),
+            crop_shape=crop_value.shape,
+            padding_px=0,
+        )
+        hot_core_count = (
+            int(np.count_nonzero(support_flags))
+            if support_flags is not None
+            else 0
+        )
+
+        kind = str(projected.get("type") or "").lower()
+        if kind == "circle":
+            try:
+                radius = max(1.0, float(projected.get("radius", 1.0)))
+                core_area = float(math.pi * radius * radius)
+            except (TypeError, ValueError):
+                core_area = 0.0
+        else:
+            try:
+                polygon = np.asarray(
+                    pontos_mascara_display(projected),
+                    dtype=np.float32,
+                ).reshape(-1, 2)
+                core_area = (
+                    float(abs(cv2.contourArea(polygon)))
+                    if len(polygon) >= 3
+                    else 0.0
+                )
+            except (TypeError, ValueError, cv2.error):
+                core_area = 0.0
+
+        hot_fraction = (
+            float(hot_core_count) / max(1.0, core_area)
+            if core_area > 0.0
+            else 0.0
+        )
+        accepted = bool(
+            hot_core_count >= F3_TRACKING_LUMINOUS_FINE_MIN_CORE_HOT_PIXELS
+            and hot_fraction
+            >= F3_TRACKING_LUMINOUS_FINE_MIN_CORE_HOT_FRACTION
+        )
+        mask_id = str(row.get("mask_id") or "")
+        if accepted and mask_id:
+            validated_ids.append(mask_id)
+        details.append(
+            {
+                "mask_id": mask_id,
+                "hot_core_count": int(hot_core_count),
+                "core_area_px": round(float(core_area), 3),
+                "hot_core_fraction": round(float(hot_fraction), 5),
+                "accepted": bool(accepted),
+            }
+        )
+
+    # Chamadores sintéticos/legados podem fornecer somente centros. No runtime
+    # produtivo _expected_on_rows() sempre inclui a geometria real da máscara.
+    # Sem geometria suficiente, este guard não inventa um veto novo.
+    if geometry_count < F3_TRACKING_LUMINOUS_MIN_COMPONENTS:
+        return {
+            "available": True,
+            "enforced": False,
+            "reason": "core_geometry_unavailable",
+            "geometry_count": int(geometry_count),
+            "validated_count": int(len(validated_ids)),
+            "required_count": 0,
+            "validated_mask_ids": validated_ids,
+            "details": details,
+        }
+
+    required = max(
+        F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
+        int(math.ceil(
+            geometry_count * F3_TRACKING_LUMINOUS_FINE_MIN_CORE_MATCH_RATIO
+        )),
+    )
+    available = len(validated_ids) >= required
+    return {
+        "available": bool(available),
+        "enforced": True,
+        "reason": (
+            "fine_core_support_confirmed"
+            if available
+            else "fine_core_support_insufficient"
+        ),
+        "geometry_count": int(geometry_count),
+        "validated_count": int(len(validated_ids)),
+        "required_count": int(required),
+        "validated_mask_ids": validated_ids,
+        "details": details,
+    }
+
+
 def _canonical_check_masks_for_luminous_tracking(
     runtime,
     project: dict,
@@ -2104,14 +2294,30 @@ def _fit_id_anchored_luminous_pose(
         1.0,
         float(np.linalg.norm(np.max(board, axis=0) - np.min(board, axis=0))),
     )
-    target_span = float(
-        np.linalg.norm(np.max(target, axis=0) - np.min(target, axis=0))
-    )
+    board_extent = np.max(board, axis=0) - np.min(board, axis=0)
+    target_extent = np.max(target, axis=0) - np.min(target, axis=0)
+    target_span = float(np.linalg.norm(target_extent))
     span_fraction = target_span / board_diagonal
+    x_span_fraction = float(target_extent[0]) / max(
+        1.0,
+        float(board_extent[0]),
+    )
+    y_span_fraction = float(target_extent[1]) / max(
+        1.0,
+        float(board_extent[1]),
+    )
+    similarity_spatially_supported = bool(
+        span_fraction
+        >= F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_SPAN_FRACTION
+        and x_span_fraction
+        >= F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_X_SPAN_FRACTION
+        and y_span_fraction
+        >= F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_Y_SPAN_FRACTION
+    )
 
     fit_mode = "translation"
     refined = np.asarray(coarse, dtype=np.float32).copy()
-    if span_fraction >= F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_SPAN_FRACTION:
+    if similarity_spatially_supported:
         similarity = _estimate_affine_partial(source, target)
         if similarity is not None:
             refined = np.asarray(similarity, dtype=np.float32).reshape(2, 3)
@@ -2206,6 +2412,11 @@ def _fit_id_anchored_luminous_pose(
                 "refined_median_error_px": round(refined_median, 3),
                 "gain_px": round(gain, 3),
                 "span_fraction": round(span_fraction, 5),
+                "x_span_fraction": round(x_span_fraction, 5),
+                "y_span_fraction": round(y_span_fraction, 5),
+                "similarity_spatially_supported": bool(
+                    similarity_spatially_supported
+                ),
                 "refinement_guard": deepcopy(guard),
             }
         )
@@ -2707,6 +2918,7 @@ def _find_luminous_segment_pose(
         )
 
         fit = None
+        global_fit = None
         fit_diagnostics: dict = {}
         fit_landmark_source = "global_connected_components"
         local_landmarks = {
@@ -2716,13 +2928,18 @@ def _find_luminous_segment_pose(
         }
 
         if bool(luminous.get("available")):
-            fit = _fit_luminous_pose(
+            global_fit = _fit_luminous_pose(
                 canonical_board,
                 expected_rows,
                 luminous.get("centers") or [],
                 coarse_matrices,
                 diagnostics=fit_diagnostics,
             )
+            # Sem lock estrutural, o grid global ainda pode reacquirir a pose.
+            # Com lock estrutural, ele é apenas diagnóstico: não conhece IDs e
+            # pode casar um segmento vizinho com a máscara errada.
+            if normalized_base_matrix is None:
+                fit = global_fit
         elif normalized_base_matrix is None:
             attempt["fit_diagnostics"] = {}
             attempt["fit"] = False
@@ -2746,6 +2963,9 @@ def _find_luminous_segment_pose(
                 luminous.get("threshold_v"),
             )
             attempt["global_fit_diagnostics"] = deepcopy(fit_diagnostics)
+            attempt["global_fit_candidate_available"] = bool(
+                global_fit is not None
+            )
             if bool(local_landmarks.get("available")):
                 fine_fit_diagnostics: dict = {}
                 fine_fit = _fit_id_anchored_luminous_pose(
@@ -2759,40 +2979,52 @@ def _find_luminous_segment_pose(
                     fine_fit_diagnostics
                 )
                 if fine_fit is not None:
+                    core_validation = _validate_luminous_pose_core_support(
+                        frame,
+                        expected_rows,
+                        fine_fit.get("matrix"),
+                        luminous.get("threshold_v"),
+                    )
+                    attempt["fine_core_validation"] = deepcopy(
+                        core_validation
+                    )
+                    if (
+                        bool(core_validation.get("enforced"))
+                        and not bool(core_validation.get("available"))
+                    ):
+                        fine_fit_diagnostics.update(
+                            {
+                                "failure_stage": (
+                                    "fine_core_support_insufficient"
+                                ),
+                                "core_validation": deepcopy(
+                                    core_validation
+                                ),
+                            }
+                        )
+                        fine_fit = None
+                    else:
+                        fine_fit["core_validated_mask_ids"] = list(
+                            core_validation.get("validated_mask_ids") or []
+                        )
+                        fine_fit["core_validated_count"] = int(
+                            core_validation.get("validated_count", 0) or 0
+                        )
+                        fine_fit["core_required_count"] = int(
+                            core_validation.get("required_count", 0) or 0
+                        )
+
+                if fine_fit is not None:
                     fit = fine_fit
                     fit_diagnostics = fine_fit_diagnostics
                     fit_landmark_source = "expected_on_id_anchored_fine"
-                elif fit is None:
-                    # Blooming severo pode impedir o ajuste fino por IDs. Nesse
-                    # caso preservamos o fallback histórico por centros, ainda
-                    # limitado ao lock estrutural e somente aos ON esperados.
-                    local_fit_diagnostics: dict = {}
-                    local_fit = _fit_luminous_pose(
-                        canonical_board,
-                        expected_rows,
-                        local_landmarks.get("centers") or [],
-                        [normalized_base_matrix],
-                        diagnostics=local_fit_diagnostics,
-                    )
-                    attempt["local_fit_diagnostics"] = deepcopy(
-                        local_fit_diagnostics
-                    )
-                    if local_fit is not None:
-                        fit = local_fit
-                        fit_diagnostics = local_fit_diagnostics
-                        fit_landmark_source = "expected_on_local_emission"
-                    elif int(
-                        local_fit_diagnostics.get(
-                            "best_final_match_count",
-                            0,
-                        ) or 0
-                    ) > int(
-                        fit_diagnostics.get(
-                            "best_final_match_count",
-                            0,
-                        ) or 0
-                    ):
-                        fit_diagnostics = local_fit_diagnostics
+                else:
+                    # Com lock estrutural, não publique fallback sem identidade.
+                    # Se os IDs locais não provarem a pose, preserve a geometria
+                    # estrutural e continue procurando no próximo frame.
+                    fit = None
+                    fit_diagnostics = fine_fit_diagnostics
+                    fit_landmark_source = "expected_on_id_anchored_fine"
 
         attempt["fit_landmark_source"] = fit_landmark_source
         attempt["local_luminous_landmark_count"] = int(

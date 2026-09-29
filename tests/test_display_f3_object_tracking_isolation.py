@@ -1665,6 +1665,223 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             set(diagnostics["rejected_mask_ids"]),
         )
 
+    def test_localized_luminous_anchors_only_translate_structural_pose(self):
+        board = [
+            [0.0, 0.0],
+            [1000.0, 0.0],
+            [1000.0, 500.0],
+            [0.0, 500.0],
+        ]
+        centers = [
+            [100.0, 100.0],
+            [150.0, 100.0],
+            [200.0, 140.0],
+            [250.0, 140.0],
+            [300.0, 180.0],
+        ]
+        rows = [
+            {
+                "mask_id": f"MASK_{index + 1:03d}",
+                "center": center,
+            }
+            for index, center in enumerate(centers)
+        ]
+        details = [
+            {
+                "mask_id": row["mask_id"],
+                "center": [row["center"][0] + 20.0, row["center"][1] - 12.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 24.0,
+            }
+            for row in rows
+        ]
+        diagnostics = {}
+        result = tracking._fit_id_anchored_luminous_pose(
+            board,
+            rows,
+            details,
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            diagnostics=diagnostics,
+        )
+
+        self.assertIsNotNone(result, diagnostics)
+        self.assertEqual("translation", result["fine_fit_mode"])
+        self.assertFalse(diagnostics["similarity_spatially_supported"])
+        self.assertLess(
+            diagnostics["x_span_fraction"],
+            tracking.F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_X_SPAN_FRACTION,
+        )
+        self.assertAlmostEqual(
+            0.0,
+            tracking.affine_rotation_deg(result["matrix"]),
+            places=3,
+        )
+
+    def test_exact_mask_core_rejects_light_only_inside_search_padding(self):
+        frame = np.full((140, 180, 3), 20, dtype=np.uint8)
+        rows = []
+        for index, x1 in enumerate((20, 70, 120), start=1):
+            mask = {
+                "id": f"MASK_{index:03d}",
+                "type": "polygon",
+                "points": [
+                    [x1, 40],
+                    [x1 + 30, 40],
+                    [x1 + 30, 50],
+                    [x1, 50],
+                ],
+            }
+            rows.append(
+                {
+                    "mask_id": mask["id"],
+                    "center": [x1 + 15.0, 45.0],
+                    "mask": mask,
+                }
+            )
+            # Cinco pixels de folga: entra numa vizinhança dilatada de 18 px,
+            # mas não toca o núcleo real da máscara.
+            cv2.rectangle(
+                frame,
+                (x1, 55),
+                (x1 + 30, 65),
+                (250, 250, 250),
+                -1,
+            )
+
+        validation = tracking._validate_luminous_pose_core_support(
+            frame,
+            rows,
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            120.0,
+        )
+
+        self.assertTrue(validation["enforced"])
+        self.assertFalse(validation["available"])
+        self.assertEqual(3, validation["geometry_count"])
+        self.assertEqual(0, validation["validated_count"])
+
+    def test_exact_mask_core_accepts_emission_after_correct_reprojection(self):
+        frame = np.full((140, 180, 3), 20, dtype=np.uint8)
+        rows = []
+        for index, x1 in enumerate((20, 70, 120), start=1):
+            mask = {
+                "id": f"MASK_{index:03d}",
+                "type": "polygon",
+                "points": [
+                    [x1, 40],
+                    [x1 + 30, 40],
+                    [x1 + 30, 50],
+                    [x1, 50],
+                ],
+            }
+            rows.append(
+                {
+                    "mask_id": mask["id"],
+                    "center": [x1 + 15.0, 45.0],
+                    "mask": mask,
+                }
+            )
+            cv2.rectangle(
+                frame,
+                (x1 + 2, 42),
+                (x1 + 28, 48),
+                (250, 250, 250),
+                -1,
+            )
+
+        validation = tracking._validate_luminous_pose_core_support(
+            frame,
+            rows,
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            120.0,
+        )
+
+        self.assertTrue(validation["enforced"])
+        self.assertTrue(validation["available"], validation)
+        self.assertEqual(3, validation["validated_count"])
+        self.assertEqual(
+            {"MASK_001", "MASK_002", "MASK_003"},
+            set(validation["validated_mask_ids"]),
+        )
+
+    def test_structural_lock_never_publishes_identityless_global_luminous_fit(self):
+        board = [
+            [20.0, 20.0],
+            [140.0, 20.0],
+            [140.0, 100.0],
+            [20.0, 100.0],
+        ]
+        rows = [
+            {"mask_id": "MASK_001", "center": [45.0, 45.0]},
+            {"mask_id": "MASK_002", "center": [80.0, 45.0]},
+            {"mask_id": "MASK_003", "center": [115.0, 45.0]},
+        ]
+        frame = np.full((120, 160, 3), 20, dtype=np.uint8)
+        identity = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+        bogus_global = {
+            "matrix": identity.copy(),
+            "matched_mask_ids": ["MASK_001", "MASK_002", "MASK_003"],
+            "missing_expected_on_mask_ids": [],
+            "matched_count": 3,
+            "expected_on_count": 3,
+            "match_ratio": 1.0,
+            "median_error_px": 1.0,
+            "score": 100.0,
+        }
+
+        with (
+            patch.object(
+                tracking,
+                "_detect_luminous_segment_centers",
+                return_value={
+                    "available": True,
+                    "reason": "luminous_segments_detected",
+                    "centers": [[45.0, 45.0], [80.0, 45.0], [115.0, 45.0]],
+                    "threshold_v": 120.0,
+                    "dynamic_range": 200.0,
+                },
+            ),
+            patch.object(
+                tracking,
+                "_fit_luminous_pose",
+                return_value=bogus_global,
+            ),
+            patch.object(
+                tracking,
+                "_detect_expected_on_luminous_landmarks",
+                return_value={
+                    "available": False,
+                    "reason": "expected_on_local_landmarks_insufficient",
+                    "centers": [],
+                    "details": [],
+                    "threshold_v": 120.0,
+                },
+            ),
+        ):
+            result = tracking._find_luminous_segment_pose(
+                frame,
+                board,
+                rows,
+                (160, 120),
+                base_matrix=identity,
+            )
+
+        self.assertFalse(result["available"], result)
+        self.assertEqual("luminous_grid_not_fitted", result["reason"])
+        self.assertTrue(result["attempts"][0]["global_fit_candidate_available"])
+
     def test_fine_fit_rejects_high_residual_even_when_it_improves_coarse(self):
         board = [
             [0.0, 0.0],

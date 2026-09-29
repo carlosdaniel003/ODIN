@@ -497,6 +497,17 @@ Decisão:
 - esse refinamento luminoso é limitado pela pose estrutural do contorno: ele pode
   corrigir deslocamento fino, mas não pode impor salto grande de rotação, escala
   ou centro que deixe o conjunto de máscaras visualmente torto;
+- quando já existe lock estrutural, componentes luminosos globais sem identidade
+  servem somente como telemetria/aquisição: a pose fina só pode ser publicada por
+  landmarks associados aos IDs das máscaras ON esperadas;
+- anchors concentrados em uma região podem corrigir **translação**, mas rotação e
+  escala finas exigem distribuição espacial suficiente nos eixos X e Y do
+  display; poucos segmentos de um mesmo dígito não podem girar as 28 máscaras;
+- o padding usado para procurar emissão perto de uma máscara não possui autoridade
+  de alinhamento. Antes de publicar a pose, o runtime reprojeta as máscaras ON e
+  exige emissão dentro do **núcleo geométrico exato**, sem dilatação, em quorum
+  suficiente; luz presente apenas na vizinhança é rejeitada como segmento
+  vizinho/reflexo;
 - a geometria ao vivo é sempre derivada das máscaras canônicas de **Placa +
   Máscaras**; geometria local de foto/CHECK não substitui o formato canônico;
 - após a transformação, o formato canônico é reconstruído explicitamente:
