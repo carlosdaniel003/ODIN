@@ -155,6 +155,75 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn('snapshot["overlay_context"]', source)
         self.assertIn('snapshot["camera_settings_at_frame"]', source)
 
+    def test_debug_d025_usa_foto_h1_real_e_frame_congelado_sem_autoridade_produtiva(self):
+        source = inspect.getsource(
+            snapshot_module._run_d025_h1_registration_diagnostic
+        )
+        self.assertIn("DisplayCheckPresenceReferenceStore(repository).get", source)
+        self.assertIn("cv2.imread(image_path", source)
+        self.assertIn("_check_reference_geometry", source)
+        self.assertIn("experiment_h1_filter_registration", source)
+        self.assertIn("frame,", source)
+        self.assertIn('"production_authority": False', source)
+        self.assertNotIn("camera_frame_atual", source)
+        self.assertNotIn("registrar_resultado_check_display_f3", source)
+
+    def test_relatorio_inclui_metricas_d025_sem_serializar_imagem(self):
+        snapshot = {
+            "source": snapshot_module.F3_MANUAL_SNAPSHOT_SOURCE,
+            "capture": {},
+            "frame": {},
+            "logical_context": {},
+            "project": {},
+            "d025_h1_registration": {
+                "available": True,
+                "quality_ok": True,
+                "check_name": "H1",
+                "reference_image_path": "h1.jpg",
+                "filter_candidate_count": 2,
+                "rectified_size": [320, 120],
+                "ecc_score": 0.97,
+                "rotation_deg": 1.2,
+                "center_shift_px": 8.5,
+                "reason": "h1_filter_registration_ready",
+                "metrics_before": {
+                    "dice": 0.40,
+                    "correlation": 0.50,
+                    "mean_error_px": 8.0,
+                    "p95_error_px": 14.0,
+                },
+                "metrics_after": {
+                    "dice": 0.92,
+                    "correlation": 0.95,
+                    "mean_error_px": 1.2,
+                    "p95_error_px": 2.4,
+                },
+                "mask_overlap_before": {
+                    "emission_inside_fraction": 0.35,
+                },
+                "mask_overlap_after": {
+                    "emission_inside_fraction": 0.88,
+                },
+            },
+            "reference_analysis": [],
+            "physical_analysis": {},
+            "check_configuration": [],
+            "mask_configuration": [],
+            "check_analyses": [],
+            "runtime_at_click": {},
+            "errors": [],
+        }
+        report = snapshot_module.montar_relatorio_snapshot_display_f3(snapshot)
+        self.assertIn(
+            "[D-025 / HOMOGRAFIA DO FILTRO + REGISTRO VISUAL H1]",
+            report,
+        )
+        self.assertIn("check=H1", report)
+        self.assertIn("ecc=0.9700", report)
+        self.assertIn("dice=0.4000->0.9200", report)
+        self.assertIn("emission_in_masks=0.3500->0.8800", report)
+        self.assertIn("NÃO participa de energia, OK/NG", report)
+
     def test_debug_captura_telemetria_do_refinamento_luminoso(self):
         source = inspect.getsource(snapshot_module._runtime_state_at_frame)
         self.assertIn('"luminous_tracking"', source)

@@ -12,14 +12,28 @@ class DisplayF3SnapshotDebugLightweightUiTests(unittest.TestCase):
         self.assertNotIn("text.insert(", source)
         self.assertIn("COPIAR DEBUG", source)
 
-    def test_janela_debug_usa_somente_o_print_capturado(self):
+    def test_janela_debug_usa_print_e_visual_d025_ja_precomputado(self):
         source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
         self.assertIn("_screen_capture_photo(window, top)", source)
         self.assertIn("PRINT DA TELA ANALISADA", source)
+        self.assertIn("D-025 • FILTRO RETIFICADO", source)
         self.assertNotIn("_frame_photo(", source)
         self.assertNotIn("_draw_debug_readout(", source)
         self.assertNotIn("renderizar_overlay_rois_display_f3", source)
         self.assertNotIn("camera_frame_atual", source)
+
+    def test_visual_d025_e_apenas_apresentacao_de_png_precomputado(self):
+        source = inspect.getsource(debug_ui._d025_registration_photo)
+        self.assertIn("d025_h1_registration_visual_png", source)
+        self.assertIn("Image.open", source)
+        self.assertNotIn("cv2.", source)
+        self.assertNotIn("camera_frame_atual", source)
+
+        refresh = inspect.getsource(
+            debug_ui._refresh_d025_registration_panel
+        )
+        self.assertNotIn("cv2.", refresh)
+        self.assertNotIn("camera_frame_atual", refresh)
 
     def test_debug_pode_abrir_enquanto_relatorio_esta_sendo_gerado(self):
         source = inspect.getsource(debug_ui._open_lightweight_snapshot_debug)
@@ -29,6 +43,7 @@ class DisplayF3SnapshotDebugLightweightUiTests(unittest.TestCase):
         self.assertIn("_display_f3_debug_analysis_running", refresh)
         self.assertIn("GERANDO RELATÓRIO TÉCNICO", refresh)
         self.assertIn("_display_f3_manual_snapshot_report", refresh)
+        self.assertIn("_refresh_d025_registration_panel(window)", refresh)
 
     def test_preview_e_derivada_exclusivamente_da_imagem_do_print(self):
         source = inspect.getsource(debug_ui._screen_capture_photo)

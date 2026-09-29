@@ -674,6 +674,30 @@ no runtime produtivo:
 
 D-025 permanece **Proposed** até a validação física. Esta implementação não
 autoriza substituir o alinhamento luminoso produtivo atual.
+
+### Implementação experimental — Etapa 2
+
+O caminho experimental foi conectado exclusivamente ao diagnóstico manual
+acionado por **ANALISAR**, reutilizando o worker LOW já existente do relatório
+técnico:
+
+- quando o CHECK lógico congelado é H1, o diagnóstico carrega a foto H1 real
+  salva em CONFIGURAR e a geometria do filtro/máscaras desenhada nessa foto;
+- o mesmo frame bruto congelado pelo clique em ANALISAR é passado ao detector
+  estrutural do filtro e ao pipeline D-025;
+- o resultado gera um PNG diagnóstico precomputado com três painéis:
+  REFERÊNCIA H1 | FILTRO RETIFICADO | H1 REGISTRADO, todos com as mesmas
+  máscaras fixas do espaço retificado;
+- DEBUG TÉCNICO apenas apresenta esse PNG e as métricas ECC/Dice/erro/overlap;
+  abrir a janela não acessa câmera, não executa OpenCV e não cria novo job;
+- BLUE/USB/AUX não executam este experimento nesta etapa;
+- o resultado permanece sem autoridade produtiva e não altera tracking ao vivo,
+  energia, analyzer, OK/NG, sequência ou rearme.
+
+Esta etapa permite coletar evidência física real pressionando ANALISAR enquanto
+H1 estiver visível. A substituição do alinhamento produtivo continua bloqueada
+até a comparação em múltiplas posições demonstrar repetibilidade.
+
 ### Validação antes de integrar ao ciclo produtivo
 
 A primeira implementação deve ser um experimento isolado de geometria, sem

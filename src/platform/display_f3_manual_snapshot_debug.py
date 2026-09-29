@@ -32,6 +32,17 @@ from src.platform.display_f3_same_mask_reference_fix import F3SameMaskReferenceA
 from src.platform.display_f3_analysis_service import (
     DisplayF3CurrentCheckAnalysisService,
 )
+from src.platform.display_check_presence_reference import (
+    DisplayCheckPresenceReferenceStore,
+)
+from src.platform.display_f3_h1_registration import (
+    encode_h1_registration_diagnostic_png,
+    summarize_h1_registration,
+)
+from src.platform.display_f3_object_tracking import (
+    _check_reference_geometry,
+    experiment_h1_filter_registration,
+)
 from src.platform.display_f3_heavy_executor import F3HeavyWorkPriority
 from src.platform.display_f3_exact_check_template import F3ExactCheckTemplateAnalyzer
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
@@ -1209,6 +1220,145 @@ def _take_async_snapshot_seed(app) -> dict | None:
     return seed if isinstance(seed, dict) else None
 
 
+def _run_d025_h1_registration_diagnostic(
+    repository,
+    project_name: str,
+    project: dict,
+    checks,
+    frame,
+    logical_context: dict | None,
+) -> dict:
+    """Roda D-025 apenas no worker do DEBUG, sobre o mesmo frame congelado."""
+    context = logical_context if isinstance(logical_context, dict) else {}
+    check_id = str(context.get("check_id") or "")
+    current_check = next(
+        (
+            item
+            for item in (checks or ())
+            if isinstance(item, dict)
+            and str(item.get("id") or "") == check_id
+        ),
+        None,
+    )
+    if not isinstance(current_check, dict):
+        return {
+            "summary": {
+                "available": False,
+                "reason": "logical_check_not_found",
+                "experimental": True,
+                "production_authority": False,
+            },
+            "visual_png": b"",
+        }
+
+    check_name = str(
+        current_check.get("name")
+        or context.get("check_name")
+        or current_check.get("id")
+        or ""
+    ).strip()
+    if check_name.upper() != "H1" and check_id.strip().upper() != "H1":
+        return {
+            "summary": {
+                "available": False,
+                "reason": "current_check_is_not_h1",
+                "check_id": check_id,
+                "check_name": check_name,
+                "experimental": True,
+                "production_authority": False,
+            },
+            "visual_png": b"",
+        }
+
+    metadata = DisplayCheckPresenceReferenceStore(repository).get(
+        project_name,
+        check_id,
+    )
+    image_path = str((metadata or {}).get("image_path") or "").strip()
+    if not image_path:
+        return {
+            "summary": {
+                "available": False,
+                "reason": "h1_reference_photo_missing",
+                "check_id": check_id,
+                "check_name": check_name,
+                "experimental": True,
+                "production_authority": False,
+            },
+            "visual_png": b"",
+        }
+
+    reference = cv2.imread(image_path, cv2.IMREAD_COLOR)
+    if reference is None or getattr(reference, "size", 0) == 0:
+        return {
+            "summary": {
+                "available": False,
+                "reason": "h1_reference_photo_unreadable",
+                "check_id": check_id,
+                "check_name": check_name,
+                "reference_image_path": image_path,
+                "experimental": True,
+                "production_authority": False,
+            },
+            "visual_png": b"",
+        }
+
+    reference_board, reference_masks = _check_reference_geometry(
+        project,
+        current_check,
+    )
+    if len(reference_board) < 4:
+        return {
+            "summary": {
+                "available": False,
+                "reason": "h1_reference_filter_geometry_missing",
+                "check_id": check_id,
+                "check_name": check_name,
+                "reference_image_path": image_path,
+                "experimental": True,
+                "production_authority": False,
+            },
+            "visual_png": b"",
+        }
+
+    states = (
+        current_check.get("mask_states")
+        if isinstance(current_check.get("mask_states"), dict)
+        else {}
+    )
+    expected_on_ids = {
+        str(mask_id)
+        for mask_id, state in states.items()
+        if str(state).strip().lower() == DISPLAY_CHECK_STATE_ON
+    }
+
+    result = experiment_h1_filter_registration(
+        reference,
+        reference_board,
+        frame,
+        canonical_resolution=project.get("master_resolution"),
+        reference_masks=reference_masks,
+        expected_on_mask_ids=expected_on_ids,
+    )
+    summary = summarize_h1_registration(result)
+    summary.update(
+        {
+            "check_id": check_id,
+            "check_name": check_name,
+            "reference_image_path": image_path,
+            "reference_filter_point_count": int(len(reference_board)),
+            "reference_mask_count": int(len(reference_masks)),
+            "expected_on_count": int(len(expected_on_ids)),
+            "experimental": True,
+            "production_authority": False,
+        }
+    )
+    return {
+        "summary": summary,
+        "visual_png": encode_h1_registration_diagnostic_png(result),
+    }
+
+
 def capturar_snapshot_debug_display_f3(app) -> dict:
     """Executa diagnóstico completo sem alterar a sequência produtiva."""
     seed = _take_async_snapshot_seed(app)
@@ -1307,6 +1457,33 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
         _check_configuration(check, masks) for check in checks
     ]
     snapshot["mask_configuration"] = _configured_masks(project, checks)
+
+    try:
+        d025 = _run_d025_h1_registration_diagnostic(
+            repository,
+            project_name,
+            project,
+            checks,
+            frame,
+            snapshot.get("logical_context"),
+        )
+    except Exception as exc:
+        d025 = {
+            "summary": {
+                "available": False,
+                "reason": f"d025_diagnostic_error:{type(exc).__name__}",
+                "error": str(exc),
+                "experimental": True,
+                "production_authority": False,
+            },
+            "visual_png": b"",
+        }
+    snapshot["d025_h1_registration"] = _safe_deepcopy(
+        d025.get("summary") or {}
+    )
+    snapshot["d025_h1_registration_visual_png"] = bytes(
+        d025.get("visual_png") or b""
+    )
 
     matcher = DisplayVisualReferenceMatcher(repository)
     references = _reference_rows(matcher, frame, project_name)
@@ -1647,6 +1824,48 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
 
     lines.append("[PROJETO DISPLAY]")
     lines.append(_json(snapshot.get("project")))
+    lines.append("")
+
+    d025 = snapshot.get("d025_h1_registration")
+    lines.append("[D-025 / HOMOGRAFIA DO FILTRO + REGISTRO VISUAL H1]")
+    if isinstance(d025, dict):
+        before = d025.get("metrics_before") or {}
+        after = d025.get("metrics_after") or {}
+        mask_before = d025.get("mask_overlap_before") or {}
+        mask_after = d025.get("mask_overlap_after") or {}
+        lines.append(
+            " | ".join(
+                (
+                    f"available={_yes_no(d025.get('available'))}",
+                    f"quality_ok={_yes_no(d025.get('quality_ok'))}",
+                    f"check={d025.get('check_name') or d025.get('check_id') or '--'}",
+                    f"reference={d025.get('reference_image_path', '--')}",
+                    f"filter_candidates={d025.get('filter_candidate_count', '--')}",
+                    f"rectified_size={d025.get('rectified_size', '--')}",
+                    f"ecc={_fmt(d025.get('ecc_score'))}",
+                    f"rotation_deg={_fmt(d025.get('rotation_deg'), 3)}",
+                    f"center_shift_px={_fmt(d025.get('center_shift_px'), 2)}",
+                    f"reason={d025.get('reason', '--')}",
+                )
+            )
+        )
+        lines.append(
+            "alignment="
+            + " | ".join(
+                (
+                    f"dice={_fmt(before.get('dice'))}->{_fmt(after.get('dice'))}",
+                    f"corr={_fmt(before.get('correlation'))}->{_fmt(after.get('correlation'))}",
+                    f"mean_error_px={_fmt(before.get('mean_error_px'), 2)}->{_fmt(after.get('mean_error_px'), 2)}",
+                    f"p95_error_px={_fmt(before.get('p95_error_px'), 2)}->{_fmt(after.get('p95_error_px'), 2)}",
+                    f"emission_in_masks={_fmt(mask_before.get('emission_inside_fraction'))}->{_fmt(mask_after.get('emission_inside_fraction'))}",
+                )
+            )
+        )
+        lines.append(
+            "authority=DIAGNÓSTICO EXPERIMENTAL; NÃO participa de energia, OK/NG ou avanço de CHECK"
+        )
+    else:
+        lines.append("indisponível neste snapshot")
     lines.append("")
 
     lines.append("[REFERÊNCIAS VISUAIS / PRESENÇA / SCORE - MESMO FRAME]")

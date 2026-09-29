@@ -103,6 +103,15 @@ jobs:
             tests.test_display_f3_h1_registration \
             -v
 
+      - name: Run D-025 diagnostic presentation regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_debug_d025_usa_foto_h1_real_e_frame_congelado_sem_autoridade_produtiva \
+            tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_relatorio_inclui_metricas_d025_sem_serializar_imagem \
+            tests.test_display_f3_snapshot_debug_lightweight_ui.DisplayF3SnapshotDebugLightweightUiTests.test_visual_d025_e_apenas_apresentacao_de_png_precomputado \
+            tests.test_display_f3_snapshot_debug_lightweight_ui.DisplayF3SnapshotDebugLightweightUiTests.test_janela_debug_usa_print_e_visual_d025_ja_precomputado \
+            -v
+
       - name: Run luminous F3 tracking regressions
         run: |
           python -m unittest \

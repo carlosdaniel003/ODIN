@@ -228,6 +228,32 @@ class DisplayF3H1RegistrationExperimentTests(unittest.TestCase):
             result["metrics_before"]["dice"],
         )
 
+    def test_diagnostic_png_shows_reference_rectified_and_registered(self):
+        reference, current, reference_quad, current_quad, masks = self._scene()
+        result = h1reg.register_h1_with_filter_homography(
+            reference,
+            reference_quad,
+            current,
+            current_quad,
+            reference_masks=masks,
+            expected_on_mask_ids={mask["id"] for mask in masks},
+        )
+
+        visual = h1reg.render_h1_registration_diagnostic(result)
+        encoded = h1reg.encode_h1_registration_diagnostic_png(result)
+        summary = h1reg.summarize_h1_registration(result)
+
+        self.assertIsNotNone(visual)
+        self.assertGreater(
+            visual.shape[1],
+            result["current_rectified"].shape[1] * 2,
+        )
+        self.assertGreater(len(encoded), 100)
+        self.assertTrue(summary["available"])
+        self.assertTrue(summary["quality_ok"])
+        self.assertNotIn("aligned_current", summary)
+        self.assertNotIn("reference_rectified", summary)
+
     def test_no_emission_does_not_claim_segment_lock(self):
         reference, _current, reference_quad, current_quad, _masks = self._scene()
         dark_current = np.full((480, 640, 3), 160, dtype=np.uint8)

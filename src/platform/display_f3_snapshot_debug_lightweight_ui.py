@@ -2,10 +2,11 @@ from __future__ import annotations
 
 """Tela leve do DEBUG TÉCNICO do Display F3.
 
-A janela não reconstrói o frame analisado. Ela apresenta exclusivamente o print
-dos pixels da tela PRODUÇÃO DISPLAY F3 capturado no clique em ANALISAR. O
-relatório técnico completo é gerado em segundo plano sobre o frame bruto
-congelado e fica disponível para COPIAR DEBUG.
+A janela não reconstrói o frame analisado. Ela apresenta o print dos pixels da
+tela PRODUÇÃO DISPLAY F3 capturado no clique em ANALISAR e, quando disponível,
+o painel D-025 já calculado pelo mesmo worker técnico sobre o frame congelado.
+O relatório completo é gerado em segundo plano e fica disponível para COPIAR
+DEBUG. Abrir a janela não executa visão computacional.
 
 A análise visual anexada ao relatório continua estritamente diagnóstica e nunca
 participa de OK/NG, avanço de CHECK, rearmamento ou decisão produtiva.
@@ -910,6 +911,88 @@ def _screen_capture_photo(window, widget=None):
         return None
 
 
+def _d025_registration_photo(window, widget=None):
+    """Converte somente o PNG D-025 precomputado pelo worker para PhotoImage."""
+    snapshot = getattr(window, "_display_f3_manual_snapshot", {}) or {}
+    payload = snapshot.get("d025_h1_registration_visual_png")
+    if not isinstance(payload, (bytes, bytearray)) or not payload:
+        return None
+    try:
+        from PIL import Image
+
+        preview = Image.open(io.BytesIO(bytes(payload))).convert("RGB")
+        max_width, _max_height = _debug_preview_limits(widget)
+        preview.thumbnail((max_width, 205))
+        buffer = io.BytesIO()
+        preview.save(buffer, format="PNG")
+        return tk.PhotoImage(
+            data=base64.b64encode(buffer.getvalue()).decode("ascii")
+        )
+    except Exception:
+        return None
+
+
+def _refresh_d025_registration_panel(window) -> None:
+    label = getattr(window, "_display_f3_snapshot_d025_label", None)
+    metrics_label = getattr(
+        window,
+        "_display_f3_snapshot_d025_metrics_label",
+        None,
+    )
+    if label is None:
+        return
+
+    snapshot = getattr(window, "_display_f3_manual_snapshot", {}) or {}
+    diagnostic = snapshot.get("d025_h1_registration")
+    diagnostic = diagnostic if isinstance(diagnostic, dict) else {}
+    running = bool(getattr(window, "_display_f3_debug_analysis_running", False))
+    photo = _d025_registration_photo(window, label)
+    window._display_f3_snapshot_d025_photo = photo
+
+    try:
+        if photo is not None:
+            label.configure(image=photo, text="")
+        else:
+            reason = str(diagnostic.get("reason") or "")
+            if running and not diagnostic:
+                text_value = "D-025 • GERANDO HOMOGRAFIA + REGISTRO H1..."
+            elif reason == "current_check_is_not_h1":
+                text_value = "D-025 • DIAGNÓSTICO GEOMÉTRICO EXECUTADO SOMENTE NO H1"
+            elif reason:
+                text_value = "D-025 • SEM VISUAL\n" + reason
+            else:
+                text_value = "D-025 • AGUARDANDO DIAGNÓSTICO H1"
+            label.configure(image="", text=text_value)
+    except Exception:
+        pass
+
+    if metrics_label is None:
+        return
+    try:
+        before = diagnostic.get("metrics_before") or {}
+        after = diagnostic.get("metrics_after") or {}
+        overlap = diagnostic.get("mask_overlap_after") or {}
+        if diagnostic:
+            error_after = _safe_float(after.get("mean_error_px"))
+            error_text = "--" if error_after is None else f"{error_after:.2f}px"
+            metrics_label.configure(
+                text=(
+                    "D-025 • "
+                    f"ECC {_pct(diagnostic.get('ecc_score'))} • "
+                    f"DICE {_pct(before.get('dice'))} → {_pct(after.get('dice'))} • "
+                    f"erro médio {error_text} • "
+                    f"emissão nas máscaras {_pct(overlap.get('emission_inside_fraction'))} • "
+                    "somente diagnóstico"
+                )
+            )
+        else:
+            metrics_label.configure(
+                text="D-025 • aguardando resultado do worker técnico"
+            )
+    except Exception:
+        pass
+
+
 def _screen_capture_png_bytes(window) -> bytes:
     image = getattr(window, "_display_f3_manual_screen_capture_image", None)
     if image is None:
@@ -1084,6 +1167,7 @@ def _refresh_lightweight_debug_state(window) -> None:
             )
         except Exception:
             pass
+    _refresh_d025_registration_panel(window)
 
 
 def _open_lightweight_snapshot_debug(window):
@@ -1154,6 +1238,7 @@ def _open_lightweight_snapshot_debug(window):
     body.grid(row=1, column=0, sticky="nsew", pady=(14, 10))
     body.grid_columnconfigure(0, weight=1)
     body.grid_rowconfigure(0, weight=1)
+    body.grid_rowconfigure(1, weight=0)
 
     preview_label = tk.Label(
         body, text="CARREGANDO PRINT CAPTURADO...",
@@ -1186,12 +1271,52 @@ def _open_lightweight_snapshot_debug(window):
     except Exception:
         render_captured_screen()
 
+    d025_shell = tk.Frame(
+        body,
+        bg=manual_module.DEBUG_PANEL,
+        highlightbackground=manual_module.DEBUG_BORDER,
+        highlightthickness=1,
+    )
+    d025_shell.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+    d025_shell.grid_columnconfigure(0, weight=1)
+    tk.Label(
+        d025_shell,
+        text="D-025 • FILTRO RETIFICADO → H1 REGISTRADO → MÁSCARAS FIXAS",
+        font=("Segoe UI", 9, "bold"),
+        bg=manual_module.DEBUG_PANEL,
+        fg=manual_module.DEBUG_TEXT,
+        anchor="w",
+    ).grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
+    d025_label = tk.Label(
+        d025_shell,
+        text="D-025 • AGUARDANDO DIAGNÓSTICO H1",
+        font=("Segoe UI", 9, "bold"),
+        bg="#020617",
+        fg=manual_module.DEBUG_MUTED,
+        anchor="center",
+        padx=8,
+        pady=8,
+    )
+    d025_label.grid(row=1, column=0, sticky="ew", padx=8)
+    window._display_f3_snapshot_d025_label = d025_label
+    window._display_f3_snapshot_d025_photo = None
+    d025_metrics = tk.Label(
+        d025_shell,
+        text="D-025 • aguardando resultado do worker técnico",
+        font=("Segoe UI", 8),
+        bg=manual_module.DEBUG_PANEL,
+        fg=manual_module.DEBUG_MUTED,
+        anchor="w",
+    )
+    d025_metrics.grid(row=2, column=0, sticky="ew", padx=10, pady=(4, 8))
+    window._display_f3_snapshot_d025_metrics_label = d025_metrics
+
     message = tk.Label(
         body, text=DEBUG_SUMMARY, font=("Segoe UI", 10),
         bg=manual_module.DEBUG_BG, fg=manual_module.DEBUG_MUTED,
         justify="left", anchor="nw", wraplength=1060,
     )
-    message.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+    message.grid(row=2, column=0, sticky="ew", pady=(12, 0))
     def fit_message(event):
         try:
             message.configure(wraplength=max(420, int(event.width) - 8))
@@ -1204,7 +1329,7 @@ def _open_lightweight_snapshot_debug(window):
         font=("Segoe UI", 9, "bold"), bg=manual_module.DEBUG_BG,
         fg=manual_module.DEBUG_MUTED, anchor="w",
     )
-    status.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+    status.grid(row=3, column=0, sticky="ew", pady=(10, 0))
     window._display_f3_snapshot_debug_status_label = status
 
     actions = tk.Frame(

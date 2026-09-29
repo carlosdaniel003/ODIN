@@ -730,6 +730,11 @@ def register_h1_with_filter_homography(
     result.update(
         {
             "source": "d025_homography_h1_registration_experiment",
+            "expected_on_mask_ids": sorted(
+                str(value)
+                for value in (expected_on_mask_ids or ())
+                if str(value)
+            ),
             "reference_rectified": reference_rectification["image"],
             "current_rectified": current_rectification["image"],
             "rectified_size": tuple(reference_rectification["size"]),
@@ -757,3 +762,196 @@ def register_h1_with_filter_homography(
         }
     )
     return result
+
+
+
+def summarize_h1_registration(result: dict | None) -> dict:
+    """Remove imagens/matrizes pesadas e mantém somente telemetria copiável."""
+    data = result if isinstance(result, dict) else {}
+    return {
+        "available": bool(data.get("available")),
+        "reason": str(data.get("reason") or ""),
+        "quality_ok": bool(data.get("quality_ok")),
+        "experimental": bool(data.get("experimental", True)),
+        "production_authority": bool(data.get("production_authority", False)),
+        "filter_candidate_count": int(data.get("filter_candidate_count", 0) or 0),
+        "rectified_size": list(data.get("rectified_size") or ()),
+        "phase_shift": list(data.get("phase_shift") or ()),
+        "phase_response": data.get("phase_response"),
+        "ecc_score": data.get("ecc_score"),
+        "rotation_deg": data.get("rotation_deg"),
+        "center_shift_px": data.get("center_shift_px"),
+        "center_shift_fraction": data.get("center_shift_fraction"),
+        "expected_on_mask_ids": list(data.get("expected_on_mask_ids") or ()),
+        "metrics_before": dict(data.get("metrics_before") or {}),
+        "metrics_after": dict(data.get("metrics_after") or {}),
+        "mask_overlap_before": dict(data.get("mask_overlap_before") or {}),
+        "mask_overlap_after": dict(data.get("mask_overlap_after") or {}),
+        "attempts": [
+            {
+                "filter_score": item.get("filter_score"),
+                "filter_source": item.get("filter_source"),
+                "available": bool(item.get("available")),
+                "reason": str(item.get("reason") or ""),
+                "quality_ok": bool(item.get("quality_ok")),
+                "ecc_score": item.get("ecc_score"),
+                "rotation_deg": item.get("rotation_deg"),
+                "center_shift_px": item.get("center_shift_px"),
+                "metrics_after": dict(item.get("metrics_after") or {}),
+                "mask_overlap_after": dict(
+                    item.get("mask_overlap_after") or {}
+                ),
+            }
+            for item in (data.get("attempts") or ())
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _draw_fixed_mask_overlay(
+    image,
+    masks,
+    *,
+    expected_on_mask_ids=None,
+):
+    if not _valid_image(image):
+        return None
+    output = image.copy()
+    expected = {
+        str(value)
+        for value in (expected_on_mask_ids or ())
+        if str(value)
+    }
+    for mask in masks or ():
+        if not isinstance(mask, dict):
+            continue
+        mask_id = str(mask.get("id") or "")
+        try:
+            polygon = np.rint(
+                np.asarray(mask.get("points"), dtype=np.float32)
+            ).astype(np.int32).reshape(-1, 2)
+        except (TypeError, ValueError):
+            continue
+        if len(polygon) < 3:
+            continue
+        color = (70, 220, 90) if mask_id in expected else (230, 190, 45)
+        cv2.polylines(
+            output,
+            [polygon],
+            True,
+            color,
+            2 if mask_id in expected else 1,
+            cv2.LINE_AA,
+        )
+    return output
+
+
+def _diagnostic_panel(image, title: str, masks, expected_on_ids) -> np.ndarray:
+    visual = _draw_fixed_mask_overlay(
+        image,
+        masks,
+        expected_on_mask_ids=expected_on_ids,
+    )
+    if visual is None:
+        visual = np.zeros((120, 320, 3), dtype=np.uint8)
+    panel = cv2.copyMakeBorder(
+        visual,
+        28,
+        0,
+        0,
+        0,
+        cv2.BORDER_CONSTANT,
+        value=(12, 20, 34),
+    )
+    cv2.putText(
+        panel,
+        str(title),
+        (9, 19),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.48,
+        (232, 238, 246),
+        1,
+        cv2.LINE_AA,
+    )
+    return panel
+
+
+def render_h1_registration_diagnostic(result: dict | None):
+    """Monta REFERÊNCIA | RETIFICADO | REGISTRADO com máscaras fixas."""
+    data = result if isinstance(result, dict) else {}
+    reference = data.get("reference_rectified")
+    current = data.get("current_rectified")
+    aligned = data.get("aligned_current")
+    if not all(_valid_image(image) for image in (reference, current, aligned)):
+        return None
+
+    masks = [
+        mask
+        for mask in (data.get("fixed_masks_rectified") or ())
+        if isinstance(mask, dict)
+    ]
+    expected = list(data.get("expected_on_mask_ids") or ())
+    panels = [
+        _diagnostic_panel(reference, "REFERENCIA H1", masks, expected),
+        _diagnostic_panel(current, "FILTRO RETIFICADO", masks, expected),
+        _diagnostic_panel(aligned, "H1 REGISTRADO", masks, expected),
+    ]
+    height = min(panel.shape[0] for panel in panels)
+    normalized = []
+    for panel in panels:
+        if panel.shape[0] != height:
+            width = max(
+                1,
+                int(round(panel.shape[1] * height / float(panel.shape[0]))),
+            )
+            panel = cv2.resize(
+                panel,
+                (width, height),
+                interpolation=cv2.INTER_AREA,
+            )
+        normalized.append(panel)
+
+    composite = np.hstack(normalized)
+    before = data.get("metrics_before") or {}
+    after = data.get("metrics_after") or {}
+    overlap_before = data.get("mask_overlap_before") or {}
+    overlap_after = data.get("mask_overlap_after") or {}
+    composite = cv2.copyMakeBorder(
+        composite,
+        0,
+        34,
+        0,
+        0,
+        cv2.BORDER_CONSTANT,
+        value=(7, 17, 31),
+    )
+    summary = (
+        f"ECC {float(data.get('ecc_score', 0.0) or 0.0):.3f} | "
+        f"DICE {float(before.get('dice', 0.0) or 0.0):.3f}"
+        f" -> {float(after.get('dice', 0.0) or 0.0):.3f} | "
+        f"erro medio {float(before.get('mean_error_px', 0.0) or 0.0):.2f}"
+        f" -> {float(after.get('mean_error_px', 0.0) or 0.0):.2f}px | "
+        f"emissao nas mascaras "
+        f"{float(overlap_before.get('emission_inside_fraction', 0.0) or 0.0):.2f}"
+        f" -> {float(overlap_after.get('emission_inside_fraction', 0.0) or 0.0):.2f}"
+    )
+    cv2.putText(
+        composite,
+        summary,
+        (9, composite.shape[0] - 11),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.43,
+        (202, 213, 226),
+        1,
+        cv2.LINE_AA,
+    )
+    return composite
+
+
+def encode_h1_registration_diagnostic_png(result: dict | None) -> bytes:
+    """PNG pronto no worker; a UI apenas apresenta os bytes precomputados."""
+    visual = render_h1_registration_diagnostic(result)
+    if not _valid_image(visual):
+        return b""
+    ok, buffer = cv2.imencode(".png", visual)
+    return bytes(buffer) if ok else b""
