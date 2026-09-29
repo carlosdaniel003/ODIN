@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import inspect
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -1652,6 +1653,15 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             {
                 "mask_id": f"MASK_{index + 1:03d}",
                 "center": center,
+                "mask": {
+                    "id": f"MASK_{index + 1:03d}",
+                    "type": "segment",
+                    "cx": float(center[0]),
+                    "cy": float(center[1]),
+                    "width": 24.0,
+                    "height": 8.0,
+                    "angle": 0.0,
+                },
             }
             for index, center in enumerate(expected_centers)
         ]

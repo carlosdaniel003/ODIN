@@ -166,6 +166,7 @@ F3_TRACKING_LUMINOUS_STRUCTURAL_MIN_MATCHES = 3
 F3_TRACKING_LUMINOUS_LOCAL_MASK_PADDING_FRACTION = 0.55
 F3_TRACKING_LUMINOUS_LOCAL_MASK_PADDING_MIN_PX = 6.0
 F3_TRACKING_LUMINOUS_LOCAL_MIN_SPAN_FRACTION = 0.06
+F3_TRACKING_LUMINOUS_LOCAL_RANSAC_PX = 6.0
 
 # O contorno/filtro é a autoridade da pose grossa. A luz pode corrigir o
 # alinhamento fino, mas nunca pode torcer o conjunto inteiro por um casamento
@@ -2072,11 +2073,67 @@ def _fit_direct_luminous_pose(
         _quad_from_points(canonical_board),
         dtype=np.float32,
     ).reshape(-1, 2)
-    target = np.asarray(target_points, dtype=np.float32).reshape(-1, 2)
+    source_all = np.asarray(source_points, dtype=np.float32).reshape(-1, 2)
+    target_all = np.asarray(target_points, dtype=np.float32).reshape(-1, 2)
     if len(board) != 4:
         if diagnostic is not None:
             diagnostic["failure_stage"] = "invalid_board_geometry"
         return None
+
+    # Reflexo pode cair dentro da vizinhança de uma máscara que deveria estar ON
+    # mas não acendeu. Como a identidade MASK_ID é conhecida, RANSAC aqui serve
+    # apenas para eliminar essas correspondências luminosas falsas antes do fit.
+    try:
+        matrix, inlier_mask = cv2.estimateAffinePartial2D(
+            source_all.reshape(-1, 1, 2),
+            target_all.reshape(-1, 1, 2),
+            method=cv2.RANSAC,
+            ransacReprojThreshold=F3_TRACKING_LUMINOUS_LOCAL_RANSAC_PX,
+            maxIters=2400,
+            confidence=0.995,
+            refineIters=20,
+        )
+    except Exception:
+        matrix, inlier_mask = None, None
+    if matrix is None:
+        if diagnostic is not None:
+            diagnostic["failure_stage"] = "refined_affine_rejected"
+        return None
+
+    if inlier_mask is None:
+        inliers = np.ones(len(source_all), dtype=bool)
+    else:
+        inliers = np.asarray(inlier_mask).reshape(-1).astype(bool)
+    inlier_count = int(np.count_nonzero(inliers))
+    if inlier_count < required:
+        if diagnostic is not None:
+            diagnostic.update(
+                {
+                    "failure_stage": "local_landmark_inliers_insufficient",
+                    "best_final_match_count": inlier_count,
+                    "ransac_inlier_count": inlier_count,
+                }
+            )
+        return None
+
+    source = source_all[inliers]
+    target = target_all[inliers]
+    matched_ids = [
+        mask_id
+        for mask_id, is_inlier in zip(matched_ids, inliers.tolist())
+        if bool(is_inlier)
+    ]
+
+    scale = affine_scale(matrix)
+    if not (
+        F3_TRACKING_REFERENCE_SCALE_MIN
+        <= scale
+        <= F3_TRACKING_REFERENCE_SCALE_MAX
+    ):
+        if diagnostic is not None:
+            diagnostic["failure_stage"] = "refined_affine_rejected"
+        return None
+
     board_diagonal = max(
         1.0,
         float(np.linalg.norm(np.max(board, axis=0) - np.min(board, axis=0))),
@@ -2095,16 +2152,12 @@ def _fit_direct_luminous_pose(
                     "failure_stage": "local_landmarks_spatial_span_insufficient",
                     "landmark_span_px": round(target_span, 3),
                     "minimum_landmark_span_px": round(minimum_span, 3),
+                    "ransac_inlier_count": inlier_count,
                 }
             )
         return None
 
-    matrix = _estimate_affine_partial(source_points, target_points)
-    if matrix is None:
-        if diagnostic is not None:
-            diagnostic["failure_stage"] = "refined_affine_rejected"
-        return None
-
+    matrix = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
     allowed, guard = _luminous_refinement_within_coarse_guard(
         matrix,
         coarse_matrix,
@@ -2120,9 +2173,8 @@ def _fit_direct_luminous_pose(
             )
         return None
 
-    source = np.asarray(source_points, dtype=np.float32).reshape(-1, 1, 2)
     projected = cv2.transform(
-        source,
+        source.reshape(-1, 1, 2),
         np.asarray(matrix, dtype=np.float32).reshape(2, 3),
     ).reshape(-1, 2)
     errors = np.linalg.norm(projected - target, axis=1)
@@ -2145,6 +2197,8 @@ def _fit_direct_luminous_pose(
             {
                 "failure_stage": "",
                 "best_final_match_count": int(len(matched_ids)),
+                "ransac_inlier_count": int(len(matched_ids)),
+                "ransac_candidate_count": int(len(source_all)),
                 "matched_mask_ids": list(matched_ids),
                 "median_error_px": round(float(median_error), 3),
                 "landmark_span_px": round(target_span, 3),
