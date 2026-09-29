@@ -110,6 +110,7 @@ jobs:
             tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_relatorio_inclui_metricas_d025_sem_serializar_imagem \
             tests.test_display_f3_snapshot_debug_lightweight_ui.DisplayF3SnapshotDebugLightweightUiTests.test_visual_d025_e_apenas_apresentacao_de_png_precomputado \
             tests.test_display_f3_snapshot_debug_lightweight_ui.DisplayF3SnapshotDebugLightweightUiTests.test_janela_debug_usa_print_e_visual_d025_ja_precomputado \
+            tests.test_display_f3_snapshot_debug_lightweight_ui.DisplayF3SnapshotDebugLightweightUiTests.test_print_do_debug_respeita_area_real_do_preview \
             -v
 
       - name: Run luminous F3 tracking regressions
