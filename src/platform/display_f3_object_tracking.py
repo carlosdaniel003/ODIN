@@ -2477,6 +2477,8 @@ def _fit_id_anchored_luminous_pose(
             {
                 "failure_stage": "",
                 "best_final_match_count": int(anchor_count),
+                "matched_mask_ids": list(matched_ids),
+                "rejected_mask_ids": list(dict.fromkeys(rejected_ids)),
                 "fit_mode": fit_mode,
                 "coarse_median_error_px": round(coarse_median, 3),
                 "refined_median_error_px": round(refined_median, 3),
