@@ -295,6 +295,25 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
                             "median_nearest_distance_px": 11.25,
                         },
                     },
+                    "attempts": [
+                        {
+                            "local_luminous_landmark_count": 3,
+                            "local_luminous_details": [
+                                {
+                                    "mask_id": "MASK_001",
+                                    "median_prediction_error_px": 4.0,
+                                },
+                                {
+                                    "mask_id": "MASK_008",
+                                    "median_prediction_error_px": 7.5,
+                                },
+                                {
+                                    "mask_id": "MASK_013",
+                                    "median_prediction_error_px": 12.0,
+                                },
+                            ],
+                        }
+                    ],
                     "luminous_emission_detected": True,
                     "alignment_required": True,
                     "alignment_ready": False,
@@ -330,6 +349,12 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("fit_debug=hypotheses=5", text)
         self.assertIn("best_final=3", text)
         self.assertIn("median_nearest_px=11.25", text)
+        self.assertIn("landmark_alignment=count=3", text)
+        self.assertIn("median_error_px=7.500", text)
+        self.assertIn("max_error_px=12.000", text)
+        self.assertIn("MASK_001:4.00px", text)
+        self.assertIn("MASK_008:7.50px", text)
+        self.assertIn("MASK_013:12.00px", text)
         self.assertIn(
             "DISPLAY COM EMISSÃO; AGUARDANDO GEOMETRIA FINA ANTES DE OK/NG",
             text,

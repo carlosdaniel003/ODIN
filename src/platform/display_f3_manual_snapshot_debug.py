@@ -1861,6 +1861,72 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     )
                 )
             )
+
+        # Diagnóstico sob demanda: expõe o erro fino por segmento sem alterar
+        # tracking, classificação ou state machine. Isso permite distinguir
+        # "contorno da placa correto, máscaras alguns pixels fora" de falha de
+        # identificação luminosa antes de qualquer novo ajuste no algoritmo.
+        attempts = [
+            item
+            for item in (luminous_tracking.get("attempts") or [])
+            if isinstance(item, dict)
+        ]
+        landmark_attempt = max(
+            attempts,
+            key=lambda item: int(
+                item.get("local_luminous_landmark_count", 0) or 0
+            ),
+            default=None,
+        )
+        if isinstance(landmark_attempt, dict):
+            details = [
+                item
+                for item in (
+                    landmark_attempt.get("local_luminous_details") or []
+                )
+                if isinstance(item, dict)
+            ]
+            errors = []
+            detail_parts = []
+            for item in details:
+                try:
+                    error = float(
+                        item.get("median_prediction_error_px")
+                    )
+                except (TypeError, ValueError):
+                    error = None
+                if error is not None:
+                    errors.append(error)
+                detail_parts.append(
+                    ":".join(
+                        (
+                            str(item.get("mask_id") or "--"),
+                            (
+                                f"{error:.2f}px"
+                                if error is not None
+                                else "--"
+                            ),
+                        )
+                    )
+                )
+            if errors:
+                lines.append(
+                    "landmark_alignment="
+                    + " | ".join(
+                        (
+                            f"count={len(errors)}",
+                            f"median_error_px={float(np.median(np.asarray(errors, dtype=np.float32))):.3f}",
+                            f"max_error_px={max(errors):.3f}",
+                            "por_mascara=" + ",".join(detail_parts),
+                        )
+                    )
+                )
+            elif details:
+                lines.append(
+                    "landmark_alignment=sem erro numérico disponível | "
+                    + "por_mascara="
+                    + ",".join(detail_parts)
+                )
         lines.append(
             "leitura="
             + (
