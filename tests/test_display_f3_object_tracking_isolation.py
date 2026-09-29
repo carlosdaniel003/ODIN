@@ -1730,6 +1730,73 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             places=3,
         )
 
+    def test_localized_translation_discards_inconsistent_anchor_vectors(self):
+        board = [
+            [0.0, 0.0],
+            [1000.0, 0.0],
+            [1000.0, 500.0],
+            [0.0, 500.0],
+        ]
+        centers = [
+            [100.0, 100.0],
+            [150.0, 100.0],
+            [200.0, 140.0],
+            [250.0, 140.0],
+            [300.0, 180.0],
+        ]
+        residuals = [
+            [2.584, -19.395],
+            [-15.333, -5.942],
+            [12.200, 16.936],
+            [5.077, -5.717],
+            [8.418, -7.137],
+        ]
+        rows = [
+            {
+                "mask_id": f"MASK_{index + 1:03d}",
+                "center": center,
+            }
+            for index, center in enumerate(centers)
+        ]
+        details = []
+        for row, residual in zip(rows, residuals):
+            details.append(
+                {
+                    "mask_id": row["mask_id"],
+                    "center": [
+                        row["center"][0] - residual[0],
+                        row["center"][1] - residual[1],
+                    ],
+                    "projected_mask_support": True,
+                    "median_prediction_error_px": min(
+                        29.0,
+                        float(np.linalg.norm(residual)),
+                    ),
+                }
+            )
+
+        diagnostics = {}
+        result = tracking._fit_id_anchored_luminous_pose(
+            board,
+            rows,
+            details,
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            diagnostics=diagnostics,
+        )
+
+        self.assertIsNotNone(result, diagnostics)
+        self.assertEqual("translation", result["fine_fit_mode"])
+        self.assertEqual(3, result["matched_count"])
+        self.assertEqual(3, diagnostics["translation_consensus_count"])
+        self.assertGreaterEqual(len(diagnostics["rejected_mask_ids"]), 2)
+        self.assertLess(
+            result["median_error_px"],
+            tracking.F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX,
+        )
+
     def test_exact_mask_core_rejects_light_only_inside_search_padding(self):
         frame = np.full((140, 180, 3), 20, dtype=np.uint8)
         rows = []

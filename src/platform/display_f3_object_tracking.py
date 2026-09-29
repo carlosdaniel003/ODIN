@@ -181,6 +181,11 @@ F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_MAX_PX = 18
 F3_TRACKING_LUMINOUS_FINE_MIN_CORE_HOT_PIXELS = 6
 F3_TRACKING_LUMINOUS_FINE_MIN_CORE_HOT_FRACTION = 0.08
 F3_TRACKING_LUMINOUS_FINE_MIN_CORE_MATCH_RATIO = 0.55
+# Quando os anchors não cobrem área suficiente para autorizar rotação/escala,
+# somente um consenso de vetores de deslocamento pode mover o grid por
+# translação. Isso elimina landmarks vizinhos que apontam em direções
+# incompatíveis com o restante do display.
+F3_TRACKING_LUMINOUS_FINE_TRANSLATION_CONSENSUS_PX = 15.0
 # Reflexo/sujeira no filtro escuro não pode virar landmark geométrico. Em
 # 1920x1080 os segmentos reais observados ficam tipicamente abaixo de ~28px de
 # erro local antes do refinamento; acima disso a evidência já não pertence à
@@ -2316,14 +2321,79 @@ def _fit_id_anchored_luminous_pose(
     )
 
     fit_mode = "translation"
+    translation_consensus_count = int(anchor_count)
     refined = np.asarray(coarse, dtype=np.float32).copy()
     if similarity_spatially_supported:
         similarity = _estimate_affine_partial(source, target)
         if similarity is not None:
             refined = np.asarray(similarity, dtype=np.float32).reshape(2, 3)
             fit_mode = "similarity"
+
     if fit_mode == "translation":
         residual = target - coarse_projected
+        consensus_gate = float(
+            F3_TRACKING_LUMINOUS_FINE_TRANSLATION_CONSENSUS_PX
+        )
+        best_indices: list[int] = []
+        best_spread = float("inf")
+        for anchor_residual in residual:
+            distances = np.linalg.norm(
+                residual - anchor_residual,
+                axis=1,
+            )
+            indices = np.flatnonzero(distances <= consensus_gate).tolist()
+            if not indices:
+                continue
+            local_spread = float(
+                np.median(distances[np.asarray(indices, dtype=np.int32)])
+            )
+            if (
+                len(indices) > len(best_indices)
+                or (
+                    len(indices) == len(best_indices)
+                    and local_spread < best_spread
+                )
+            ):
+                best_indices = [int(index) for index in indices]
+                best_spread = local_spread
+
+        if len(best_indices) < required:
+            if diag is not None:
+                diag.update(
+                    {
+                        "failure_stage": "translation_consensus_insufficient",
+                        "fit_mode": fit_mode,
+                        "translation_consensus_count": int(len(best_indices)),
+                        "translation_consensus_required": int(required),
+                        "translation_consensus_gate_px": consensus_gate,
+                        "coarse_median_error_px": round(coarse_median, 3),
+                        "span_fraction": round(span_fraction, 5),
+                        "x_span_fraction": round(x_span_fraction, 5),
+                        "y_span_fraction": round(y_span_fraction, 5),
+                        "similarity_spatially_supported": False,
+                    }
+                )
+            return None
+
+        if len(best_indices) < anchor_count:
+            kept = set(best_indices)
+            discarded_ids = [
+                matched_ids[index]
+                for index in range(anchor_count)
+                if index not in kept
+            ]
+            rejected_ids.extend(discarded_ids)
+            source = source[best_indices]
+            target = target[best_indices]
+            coarse_projected = coarse_projected[best_indices]
+            coarse_errors = coarse_errors[best_indices]
+            matched_ids = [matched_ids[index] for index in best_indices]
+            seen = set(matched_ids)
+            anchor_count = len(best_indices)
+            coarse_median = float(np.median(coarse_errors))
+            residual = target - coarse_projected
+
+        translation_consensus_count = int(anchor_count)
         correction = np.median(residual, axis=0)
         refined[0, 2] += float(correction[0])
         refined[1, 2] += float(correction[1])
@@ -2416,6 +2486,12 @@ def _fit_id_anchored_luminous_pose(
                 "y_span_fraction": round(y_span_fraction, 5),
                 "similarity_spatially_supported": bool(
                     similarity_spatially_supported
+                ),
+                "translation_consensus_count": int(
+                    translation_consensus_count
+                ),
+                "translation_consensus_gate_px": float(
+                    F3_TRACKING_LUMINOUS_FINE_TRANSLATION_CONSENSUS_PX
                 ),
                 "refinement_guard": deepcopy(guard),
             }

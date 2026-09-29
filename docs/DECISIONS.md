@@ -503,6 +503,9 @@ Decisão:
 - anchors concentrados em uma região podem corrigir **translação**, mas rotação e
   escala finas exigem distribuição espacial suficiente nos eixos X e Y do
   display; poucos segmentos de um mesmo dígito não podem girar as 28 máscaras;
+- quando o ajuste fica restrito a translação, os vetores de deslocamento dos
+  landmarks precisam formar um consenso espacial; anchors que pedem movimentos
+  incompatíveis são descartados antes de calcular a correção do grid;
 - o padding usado para procurar emissão perto de uma máscara não possui autoridade
   de alinhamento. Antes de publicar a pose, o runtime reprojeta as máscaras ON e
   exige emissão dentro do **núcleo geométrico exato**, sem dilatação, em quorum
