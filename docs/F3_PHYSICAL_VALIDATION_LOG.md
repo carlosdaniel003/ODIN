@@ -223,6 +223,28 @@ esperando um executor ocupado por trabalho já existente.
 
 **CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
 
+Implementação principal: commit `ba627170e5da3629f27ec564ebd675547fdd035e`.
+
+### Validação automatizada desta correção
+
+- compilação dos módulos F3: PASS;
+- regressões luminosas focadas anteriores: **30 testes PASS**;
+- novo bloco `live visual sync and startup performance regressions`:
+  **8/8 testes PASS**;
+- contratos validados:
+  - frame ON detecta somente as ROIs luminosas;
+  - frame totalmente escuro limpa imediatamente o espelho visual;
+  - repaint do mesmo frame reutiliza cache;
+  - câmera e visor consomem a mesma amostra latest-frame;
+  - AKAZE das referências é lazy;
+  - primeiro tracking HIGH pode entrar antes de trabalho de menor prioridade;
+  - backpressure volta a valer após o primeiro future;
+- `Display F3 fast H1 BLUE tests`: PASS;
+- `Display F3 cycle rearm tests`: PASS;
+- a suíte ampla de object tracking continua com **7 failures + 1 error** em
+  regressões históricas já existentes fora desta alteração. O antigo teste que
+  exigia AKAZE eager foi atualizado para o contrato lazy e agora passa.
+
 ### Reteste esperado
 
 ~~~text

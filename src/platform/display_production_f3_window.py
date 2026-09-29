@@ -713,20 +713,20 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             for mask_id in (context.get("luminous_mask_ids") or ())
             if str(mask_id)
         }
+        live_visual_ready = bool(
+            context.get("live_visual_sample_ready")
+        )
+        live_visual_ids = {
+            str(item)
+            for item in (context.get("live_visual_mask_ids") or ())
+            if str(item)
+        }
 
         for segment_name, mask_id in zip(segment_order, mask_ids):
             if live_luminous_only:
                 # Visor operacional: quando existe amostra do frame visual atual,
                 # ela é a única fonte de animação. Assim o visor muda no MESMO
                 # repaint da câmera, sem esperar o worker semântico.
-                live_visual_ready = bool(
-                    context.get("live_visual_sample_ready")
-                )
-                live_visual_ids = {
-                    str(item)
-                    for item in (context.get("live_visual_mask_ids") or ())
-                    if str(item)
-                }
                 if live_visual_ready:
                     state = "on" if mask_id in live_visual_ids else "neutral"
                 else:

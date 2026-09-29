@@ -139,8 +139,10 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             DisplayProductionF3Window._draw_fixed_semantic_digit
         )
         self.assertIn('context.get("live_luminous_only")', source)
+        self.assertIn('context.get("live_visual_sample_ready")', source)
+        self.assertIn('context.get("live_visual_mask_ids")', source)
         self.assertIn('context.get("luminous_mask_ids")', source)
-        self.assertIn('else "neutral"', source)
+        self.assertIn('state = "on" if mask_id in live_visual_ids else "neutral"', source)
         self.assertIn('classifications.get(mask_id) == "on"', source)
         self.assertIn("ready", source)
 
