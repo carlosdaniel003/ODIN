@@ -1886,11 +1886,16 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
         after = d025.get("metrics_after") or {}
         mask_before = d025.get("mask_overlap_before") or {}
         mask_after = d025.get("mask_overlap_after") or {}
+        candidate = d025.get("ecc_candidate_metrics") or {}
+        candidate_mask = d025.get("ecc_candidate_mask_overlap") or {}
         lines.append(
             " | ".join(
                 (
                     f"available={_yes_no(d025.get('available'))}",
                     f"quality_ok={_yes_no(d025.get('quality_ok'))}",
+                    f"refinement_applied={_yes_no(d025.get('refinement_applied'))}",
+                    f"alignment_source={d025.get('selected_alignment_source') or '--'}",
+                    f"refinement_reason={d025.get('refinement_reason') or '--'}",
                     f"check={d025.get('check_name') or d025.get('check_id') or '--'}",
                     f"reference={d025.get('reference_image_path', '--')}",
                     f"filter_candidates={d025.get('filter_candidate_count', '--')}",
@@ -1914,6 +1919,18 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     f"mean_error_px={_fmt(before.get('mean_error_px'), 2)}->{_fmt(after.get('mean_error_px'), 2)}",
                     f"p95_error_px={_fmt(before.get('p95_error_px'), 2)}->{_fmt(after.get('p95_error_px'), 2)}",
                     f"emission_in_masks={_fmt(mask_before.get('emission_inside_fraction'))}->{_fmt(mask_after.get('emission_inside_fraction'))}",
+                )
+            )
+        )
+        lines.append(
+            "ecc_candidate="
+            + " | ".join(
+                (
+                    f"dice={_fmt(candidate.get('dice'))}",
+                    f"corr={_fmt(candidate.get('correlation'))}",
+                    f"mean_error_px={_fmt(candidate.get('mean_error_px'), 2)}",
+                    f"p95_error_px={_fmt(candidate.get('p95_error_px'), 2)}",
+                    f"emission_in_masks={_fmt(candidate_mask.get('emission_inside_fraction'))}",
                 )
             )
         )

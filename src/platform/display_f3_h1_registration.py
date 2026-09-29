@@ -313,6 +313,110 @@ def emission_alignment_metrics(reference_map, observed_map) -> dict:
     }
 
 
+def _ecc_refinement_decision(
+    before: dict,
+    candidate: dict,
+    ecc_score: float,
+) -> tuple[bool, str]:
+    """Aceita ECC somente quando ele melhora sem piorar métricas-chave."""
+    if float(ecc_score) < F3_H1_REGISTRATION_ECC_QUALITY_SCORE:
+        return False, "ecc_score_below_quality_threshold"
+    if not bool(candidate.get("available")):
+        return False, "ecc_candidate_metrics_unavailable"
+    if not bool(before.get("available")):
+        return True, "ecc_candidate_metrics_available_without_base_metrics"
+
+    higher_is_better = ("dice", "correlation")
+    lower_is_better = ("mean_error_px", "p95_error_px")
+    worsened = []
+    improved = []
+
+    for key in higher_is_better:
+        base_value = float(before.get(key, 0.0) or 0.0)
+        candidate_value = float(candidate.get(key, 0.0) or 0.0)
+        if candidate_value < base_value:
+            worsened.append(key)
+        elif candidate_value > base_value:
+            improved.append(key)
+
+    for key in lower_is_better:
+        try:
+            base_value = float(before.get(key))
+            candidate_value = float(candidate.get(key))
+        except (TypeError, ValueError):
+            continue
+        if candidate_value > base_value:
+            worsened.append(key)
+        elif candidate_value < base_value:
+            improved.append(key)
+
+    if worsened:
+        return False, "ecc_candidate_worsened:" + ",".join(worsened)
+    if not improved:
+        return False, "ecc_candidate_no_measurable_gain"
+    return True, "ecc_candidate_improved_alignment"
+
+
+def _mask_overlap_refinement_decision(
+    before: dict,
+    candidate: dict,
+) -> tuple[bool, str]:
+    """Veta refinamento que afaste emissão das máscaras ON fixas."""
+    if not bool(before.get("available")) or not bool(candidate.get("available")):
+        return True, "mask_overlap_guard_unavailable"
+
+    higher_is_better = (
+        "emission_inside_fraction",
+        "mask_hot_fraction",
+    )
+    worsened = []
+    for key in higher_is_better:
+        base_value = float(before.get(key, 0.0) or 0.0)
+        candidate_value = float(candidate.get(key, 0.0) or 0.0)
+        if candidate_value < base_value:
+            worsened.append(key)
+
+    if worsened:
+        return False, "ecc_candidate_worsened_mask_overlap:" + ",".join(
+            worsened
+        )
+    return True, "mask_overlap_preserved"
+
+
+def _identity_affine() -> np.ndarray:
+    return np.asarray(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        dtype=np.float32,
+    )
+
+
+def _preserve_homography_base(
+    registration: dict,
+    current_rectified,
+    reason: str,
+) -> dict:
+    """Descarta apenas o ajuste ECC e mantém a homografia já retificada."""
+    result = dict(registration)
+    identity = _identity_affine()
+    result.update(
+        {
+            "quality_ok": False,
+            "refinement_applied": False,
+            "refinement_reason": str(reason),
+            "selected_alignment_source": "filter_homography_base",
+            "reference_to_current_affine": identity.copy(),
+            "current_to_reference_affine": identity.copy(),
+            "aligned_emission_map": np.asarray(
+                result["current_emission_map"],
+                dtype=np.float32,
+            ),
+            "aligned_current": current_rectified.copy(),
+            "metrics_after": dict(result.get("metrics_before") or {}),
+        }
+    )
+    return result
+
+
 def register_rectified_h1(
     reference_rectified,
     current_rectified,
@@ -450,7 +554,7 @@ def register_rectified_h1(
             "metrics_before": before,
         }
 
-    aligned_map = cv2.warpAffine(
+    candidate_map = cv2.warpAffine(
         current_map,
         warp_reference_to_current,
         (int(w), int(h)),
@@ -458,28 +562,52 @@ def register_rectified_h1(
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=0,
     )
-    aligned_image = cv2.warpAffine(
+    candidate_image = cv2.warpAffine(
         current_rectified,
         warp_reference_to_current,
         (int(w), int(h)),
         flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
         borderMode=cv2.BORDER_REPLICATE,
     )
-    after = emission_alignment_metrics(reference_map, aligned_map)
-    quality_ok = bool(
-        float(ecc_score) >= F3_H1_REGISTRATION_ECC_QUALITY_SCORE
-        and bool(after.get("available"))
-        and (
-            not bool(before.get("available"))
-            or float(after.get("dice", 0.0))
-            >= float(before.get("dice", 0.0))
-        )
+    candidate_metrics = emission_alignment_metrics(
+        reference_map,
+        candidate_map,
     )
+    refinement_applied, refinement_reason = _ecc_refinement_decision(
+        before,
+        candidate_metrics,
+        float(ecc_score),
+    )
+
+    if refinement_applied:
+        selected_reference_to_current = warp_reference_to_current
+        selected_current_to_reference = np.asarray(
+            warp_current_to_reference,
+            dtype=np.float32,
+        ).reshape(2, 3)
+        selected_map = candidate_map
+        selected_image = candidate_image
+        selected_metrics = candidate_metrics
+        selected_source = "ecc_refined"
+    else:
+        selected_reference_to_current = _identity_affine()
+        selected_current_to_reference = _identity_affine()
+        selected_map = current_map
+        selected_image = current_rectified.copy()
+        selected_metrics = before
+        selected_source = "filter_homography_base"
 
     return {
         "available": True,
-        "reason": "h1_registered",
-        "quality_ok": quality_ok,
+        "reason": (
+            "h1_registered"
+            if refinement_applied
+            else "h1_registration_base_preserved"
+        ),
+        "quality_ok": bool(refinement_applied),
+        "refinement_applied": bool(refinement_applied),
+        "refinement_reason": str(refinement_reason),
+        "selected_alignment_source": selected_source,
         "phase_shift": (
             round(float(phase_shift[0]), 4),
             round(float(phase_shift[1]), 4),
@@ -489,17 +617,31 @@ def register_rectified_h1(
         "rotation_deg": round(float(rotation_deg), 4),
         "center_shift_px": round(center_shift, 4),
         "center_shift_fraction": round(center_shift_fraction, 6),
-        "reference_to_current_affine": warp_reference_to_current,
+        "reference_to_current_affine": np.asarray(
+            selected_reference_to_current,
+            dtype=np.float32,
+        ).reshape(2, 3),
         "current_to_reference_affine": np.asarray(
+            selected_current_to_reference,
+            dtype=np.float32,
+        ).reshape(2, 3),
+        "ecc_candidate_reference_to_current_affine": np.asarray(
+            warp_reference_to_current,
+            dtype=np.float32,
+        ).reshape(2, 3),
+        "ecc_candidate_current_to_reference_affine": np.asarray(
             warp_current_to_reference,
             dtype=np.float32,
         ).reshape(2, 3),
         "reference_emission_map": reference_map,
         "current_emission_map": current_map,
-        "aligned_emission_map": aligned_map,
-        "aligned_current": aligned_image,
+        "aligned_emission_map": selected_map,
+        "aligned_current": selected_image,
+        "ecc_candidate_emission_map": candidate_map,
+        "ecc_candidate_aligned_current": candidate_image,
         "metrics_before": before,
-        "metrics_after": after,
+        "metrics_after": selected_metrics,
+        "ecc_candidate_metrics": candidate_metrics,
     }
 
 
@@ -695,9 +837,51 @@ def register_h1_with_filter_homography(
         result["current_rectification"] = current_rectification
         return result
 
+    fixed_masks = project_masks_to_rectified_space(
+        reference_masks or (),
+        reference_rectification["image_to_rectified"],
+    )
+    mask_overlap_before = {}
+    mask_overlap_candidate = {}
+    if fixed_masks:
+        mask_overlap_before = emission_overlap_with_masks(
+            registration["current_emission_map"],
+            fixed_masks,
+            mask_ids=expected_on_mask_ids,
+        )
+        mask_overlap_candidate = emission_overlap_with_masks(
+            registration.get(
+                "ecc_candidate_emission_map",
+                registration["aligned_emission_map"],
+            ),
+            fixed_masks,
+            mask_ids=expected_on_mask_ids,
+        )
+
+    selected_registration = dict(registration)
+    if bool(selected_registration.get("refinement_applied")) and fixed_masks:
+        overlap_ok, overlap_reason = _mask_overlap_refinement_decision(
+            mask_overlap_before,
+            mask_overlap_candidate,
+        )
+        if not overlap_ok:
+            selected_registration = _preserve_homography_base(
+                selected_registration,
+                current_rectification["image"],
+                overlap_reason,
+            )
+
+    mask_overlap_after = {}
+    if fixed_masks:
+        mask_overlap_after = emission_overlap_with_masks(
+            selected_registration["aligned_emission_map"],
+            fixed_masks,
+            mask_ids=expected_on_mask_ids,
+        )
+
     current_to_reference_affine = np.eye(3, dtype=np.float32)
     current_to_reference_affine[:2, :] = np.asarray(
-        registration["current_to_reference_affine"],
+        selected_registration["current_to_reference_affine"],
         dtype=np.float32,
     ).reshape(2, 3)
     current_frame_to_reference_rectified = (
@@ -708,25 +892,7 @@ def register_h1_with_filter_homography(
         ).reshape(3, 3)
     )
 
-    fixed_masks = project_masks_to_rectified_space(
-        reference_masks or (),
-        reference_rectification["image_to_rectified"],
-    )
-    mask_overlap_before = {}
-    mask_overlap_after = {}
-    if fixed_masks:
-        mask_overlap_before = emission_overlap_with_masks(
-            registration["current_emission_map"],
-            fixed_masks,
-            mask_ids=expected_on_mask_ids,
-        )
-        mask_overlap_after = emission_overlap_with_masks(
-            registration["aligned_emission_map"],
-            fixed_masks,
-            mask_ids=expected_on_mask_ids,
-        )
-
-    result = dict(registration)
+    result = dict(selected_registration)
     result.update(
         {
             "source": "d025_homography_h1_registration_experiment",
@@ -759,6 +925,7 @@ def register_h1_with_filter_homography(
             "fixed_masks_rectified": fixed_masks,
             "mask_overlap_before": mask_overlap_before,
             "mask_overlap_after": mask_overlap_after,
+            "ecc_candidate_mask_overlap": mask_overlap_candidate,
         }
     )
     return result
@@ -772,6 +939,11 @@ def summarize_h1_registration(result: dict | None) -> dict:
         "available": bool(data.get("available")),
         "reason": str(data.get("reason") or ""),
         "quality_ok": bool(data.get("quality_ok")),
+        "refinement_applied": bool(data.get("refinement_applied")),
+        "refinement_reason": str(data.get("refinement_reason") or ""),
+        "selected_alignment_source": str(
+            data.get("selected_alignment_source") or ""
+        ),
         "experimental": bool(data.get("experimental", True)),
         "production_authority": bool(data.get("production_authority", False)),
         "filter_candidate_count": int(data.get("filter_candidate_count", 0) or 0),
@@ -788,8 +960,14 @@ def summarize_h1_registration(result: dict | None) -> dict:
         "expected_on_mask_ids": list(data.get("expected_on_mask_ids") or ()),
         "metrics_before": dict(data.get("metrics_before") or {}),
         "metrics_after": dict(data.get("metrics_after") or {}),
+        "ecc_candidate_metrics": dict(
+            data.get("ecc_candidate_metrics") or {}
+        ),
         "mask_overlap_before": dict(data.get("mask_overlap_before") or {}),
         "mask_overlap_after": dict(data.get("mask_overlap_after") or {}),
+        "ecc_candidate_mask_overlap": dict(
+            data.get("ecc_candidate_mask_overlap") or {}
+        ),
         "attempts": [
             {
                 "filter_score": item.get("filter_score"),
@@ -894,10 +1072,16 @@ def render_h1_registration_diagnostic(result: dict | None):
         if isinstance(mask, dict)
     ]
     expected = list(data.get("expected_on_mask_ids") or ())
+    refinement_applied = bool(data.get("refinement_applied"))
+    selected_title = (
+        "H1 REGISTRADO - ECC ACEITO"
+        if refinement_applied
+        else "BASE PRESERVADA - ECC REJEITADO"
+    )
     panels = [
         _diagnostic_panel(reference, "REFERENCIA H1", masks, expected),
         _diagnostic_panel(current, "FILTRO RETIFICADO", masks, expected),
-        _diagnostic_panel(aligned, "H1 REGISTRADO", masks, expected),
+        _diagnostic_panel(aligned, selected_title, masks, expected),
     ]
     height = min(panel.shape[0] for panel in panels)
     normalized = []
@@ -928,15 +1112,26 @@ def render_h1_registration_diagnostic(result: dict | None):
         cv2.BORDER_CONSTANT,
         value=(7, 17, 31),
     )
+    candidate = data.get("ecc_candidate_metrics") or {}
+    candidate_overlap = data.get("ecc_candidate_mask_overlap") or {}
+    if refinement_applied:
+        decision_text = "ECC ACEITO"
+    else:
+        decision_text = "ECC REJEITADO / BASE PRESERVADA"
     summary = (
-        f"ECC {float(data.get('ecc_score', 0.0) or 0.0):.3f} | "
-        f"DICE {float(before.get('dice', 0.0) or 0.0):.3f}"
-        f" -> {float(after.get('dice', 0.0) or 0.0):.3f} | "
-        f"erro medio {float(before.get('mean_error_px', 0.0) or 0.0):.2f}"
-        f" -> {float(after.get('mean_error_px', 0.0) or 0.0):.2f}px | "
-        f"emissao nas mascaras "
+        f"{decision_text} | ECC {float(data.get('ecc_score', 0.0) or 0.0):.3f} | "
+        f"DICE base {float(before.get('dice', 0.0) or 0.0):.3f}"
+        f" / cand {float(candidate.get('dice', 0.0) or 0.0):.3f}"
+        f" / sel {float(after.get('dice', 0.0) or 0.0):.3f} | "
+        f"erro base {float(before.get('mean_error_px', 0.0) or 0.0):.2f}"
+        f" / cand {float(candidate.get('mean_error_px', 0.0) or 0.0):.2f}"
+        f" / sel {float(after.get('mean_error_px', 0.0) or 0.0):.2f}px | "
+        f"mascaras base "
         f"{float(overlap_before.get('emission_inside_fraction', 0.0) or 0.0):.2f}"
-        f" -> {float(overlap_after.get('emission_inside_fraction', 0.0) or 0.0):.2f}"
+        f" / cand "
+        f"{float(candidate_overlap.get('emission_inside_fraction', 0.0) or 0.0):.2f}"
+        f" / sel "
+        f"{float(overlap_after.get('emission_inside_fraction', 0.0) or 0.0):.2f}"
     )
     cv2.putText(
         composite,

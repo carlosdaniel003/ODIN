@@ -702,6 +702,24 @@ Esta etapa permite coletar evidência física real pressionando ANALISAR enquant
 H1 estiver visível. A substituição do alinhamento produtivo continua bloqueada
 até a comparação em múltiplas posições demonstrar repetibilidade.
 
+#### Guarda conservadora do refinamento ECC
+
+O teste físico com iluminação ambiente reduzida demonstrou que a homografia
+base/LOCK estrutural pode já estar geometricamente melhor que o candidato ECC.
+Por isso, nesta etapa diagnóstica:
+
+- o resultado ECC é tratado como **candidato**, nunca como substituição
+  automática da homografia base;
+- Dice e correlação não podem diminuir;
+- erro médio e erro P95 não podem aumentar;
+- quando máscaras ON fixas estiverem disponíveis, a sobreposição da emissão com
+  essas máscaras também não pode piorar;
+- qualquer regressão preserva a geometria da homografia base, com
+  `refinement_applied=False` e motivo explícito no DEBUG;
+- as métricas do candidato rejeitado continuam registradas para diagnóstico;
+- esta guarda continua sem autoridade produtiva e não altera energia, OK/NG,
+  avanço de CHECK ou rearme.
+
 ### Validação antes de integrar ao ciclo produtivo
 
 A primeira implementação deve ser um experimento isolado de geometria, sem

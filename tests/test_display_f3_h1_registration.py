@@ -130,6 +130,8 @@ class DisplayF3H1RegistrationExperimentTests(unittest.TestCase):
 
         self.assertTrue(result["available"], result)
         self.assertTrue(result["quality_ok"], result)
+        self.assertTrue(result["refinement_applied"], result)
+        self.assertEqual("ecc_refined", result["selected_alignment_source"])
         self.assertGreater(result["ecc_score"], 0.90)
         self.assertLess(abs(abs(result["rotation_deg"]) - 2.2), 1.0)
 
@@ -149,6 +151,69 @@ class DisplayF3H1RegistrationExperimentTests(unittest.TestCase):
             mask_after["emission_inside_fraction"],
             mask_before["emission_inside_fraction"] + 0.15,
         )
+
+    def test_ecc_candidate_that_worsens_alignment_preserves_homography_base(self):
+        reference = self._h1_roi()
+        current = reference.copy()
+        bad_warp = np.asarray(
+            [[1.0, 0.0, 30.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+
+        with patch.object(
+            cv2,
+            "findTransformECC",
+            return_value=(0.99, bad_warp),
+        ):
+            result = h1reg.register_rectified_h1(reference, current)
+
+        self.assertTrue(result["available"], result)
+        self.assertFalse(result["quality_ok"], result)
+        self.assertFalse(result["refinement_applied"], result)
+        self.assertEqual(
+            "filter_homography_base",
+            result["selected_alignment_source"],
+        )
+        self.assertIn(
+            "ecc_candidate_worsened",
+            result["refinement_reason"],
+        )
+        self.assertEqual(result["metrics_before"], result["metrics_after"])
+        self.assertLess(
+            result["ecc_candidate_metrics"]["dice"],
+            result["metrics_before"]["dice"],
+        )
+        np.testing.assert_allclose(
+            result["current_to_reference_affine"],
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+        )
+        np.testing.assert_array_equal(
+            result["aligned_current"],
+            current,
+        )
+
+    def test_mask_overlap_guard_rejects_candidate_that_moves_light_outside_masks(self):
+        before = {
+            "available": True,
+            "emission_inside_fraction": 0.62,
+            "mask_hot_fraction": 0.41,
+        }
+        candidate = {
+            "available": True,
+            "emission_inside_fraction": 0.31,
+            "mask_hot_fraction": 0.22,
+        }
+
+        accepted, reason = h1reg._mask_overlap_refinement_decision(
+            before,
+            candidate,
+        )
+
+        self.assertFalse(accepted)
+        self.assertIn("worsened_mask_overlap", reason)
 
     def test_filter_homography_removes_external_perspective_before_h1_fit(self):
         reference, current, reference_quad, current_quad, _masks = self._scene()
@@ -281,6 +346,10 @@ class DisplayF3H1RegistrationExperimentTests(unittest.TestCase):
         self.assertGreater(len(encoded), 100)
         self.assertTrue(summary["available"])
         self.assertTrue(summary["quality_ok"])
+        self.assertTrue(summary["refinement_applied"])
+        self.assertEqual("ecc_refined", summary["selected_alignment_source"])
+        self.assertIn("ecc_candidate_metrics", summary)
+        self.assertIn("ecc_candidate_mask_overlap", summary)
         self.assertNotIn("aligned_current", summary)
         self.assertNotIn("reference_rectified", summary)
 

@@ -179,7 +179,10 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
             "project": {},
             "d025_h1_registration": {
                 "available": True,
-                "quality_ok": True,
+                "quality_ok": False,
+                "refinement_applied": False,
+                "refinement_reason": "ecc_candidate_worsened:dice,correlation",
+                "selected_alignment_source": "filter_homography_base",
                 "check_name": "H1",
                 "reference_image_path": "h1.jpg",
                 "filter_candidate_count": 1,
@@ -198,16 +201,25 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
                     "p95_error_px": 14.0,
                 },
                 "metrics_after": {
-                    "dice": 0.92,
-                    "correlation": 0.95,
-                    "mean_error_px": 1.2,
-                    "p95_error_px": 2.4,
+                    "dice": 0.40,
+                    "correlation": 0.50,
+                    "mean_error_px": 8.0,
+                    "p95_error_px": 14.0,
+                },
+                "ecc_candidate_metrics": {
+                    "dice": 0.22,
+                    "correlation": 0.31,
+                    "mean_error_px": 17.0,
+                    "p95_error_px": 31.0,
                 },
                 "mask_overlap_before": {
                     "emission_inside_fraction": 0.35,
                 },
                 "mask_overlap_after": {
-                    "emission_inside_fraction": 0.88,
+                    "emission_inside_fraction": 0.35,
+                },
+                "ecc_candidate_mask_overlap": {
+                    "emission_inside_fraction": 0.18,
                 },
             },
             "reference_analysis": [],
@@ -228,8 +240,12 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("tracking_lock=SIM", report)
         self.assertIn("tracking_filter_points=4", report)
         self.assertIn("ecc=0.9700", report)
-        self.assertIn("dice=0.4000->0.9200", report)
-        self.assertIn("emission_in_masks=0.3500->0.8800", report)
+        self.assertIn("refinement_applied=NÃO", report)
+        self.assertIn("alignment_source=filter_homography_base", report)
+        self.assertIn("dice=0.4000->0.4000", report)
+        self.assertIn("emission_in_masks=0.3500->0.3500", report)
+        self.assertIn("ecc_candidate=dice=0.2200", report)
+        self.assertIn("emission_in_masks=0.1800", report)
         self.assertIn("NÃO participa de energia, OK/NG", report)
 
     def test_debug_captura_telemetria_do_refinamento_luminoso(self):
