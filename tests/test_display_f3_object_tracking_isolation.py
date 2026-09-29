@@ -1599,6 +1599,132 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             observed,
         )
 
+    def test_fine_fit_ignores_unsupported_or_distant_landmarks(self):
+        board = [
+            [0.0, 0.0],
+            [1000.0, 0.0],
+            [1000.0, 1000.0],
+            [0.0, 1000.0],
+        ]
+        rows = [
+            {"mask_id": "MASK_001", "center": [100.0, 100.0]},
+            {"mask_id": "MASK_002", "center": [200.0, 100.0]},
+            {"mask_id": "MASK_003", "center": [100.0, 200.0]},
+            {"mask_id": "MASK_004", "center": [200.0, 200.0]},
+            {"mask_id": "MASK_005", "center": [300.0, 200.0]},
+        ]
+        details = [
+            {
+                "mask_id": "MASK_001",
+                "center": [108.0, 95.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 9.0,
+            },
+            {
+                "mask_id": "MASK_002",
+                "center": [208.0, 95.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 10.0,
+            },
+            {
+                "mask_id": "MASK_003",
+                "center": [108.0, 195.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 11.0,
+            },
+            {
+                "mask_id": "MASK_004",
+                "center": [350.0, 350.0],
+                "projected_mask_support": False,
+                "median_prediction_error_px": 90.0,
+            },
+            {
+                "mask_id": "MASK_005",
+                "center": [380.0, 260.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 70.0,
+            },
+        ]
+        diagnostics = {}
+        result = tracking._fit_id_anchored_luminous_pose(
+            board,
+            rows,
+            details,
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            diagnostics=diagnostics,
+        )
+
+        self.assertIsNotNone(result, diagnostics)
+        self.assertEqual(3, result["matched_count"])
+        self.assertEqual(
+            {"MASK_004", "MASK_005"},
+            set(diagnostics["rejected_mask_ids"]),
+        )
+
+    def test_fine_fit_rejects_high_residual_even_when_it_improves_coarse(self):
+        board = [
+            [0.0, 0.0],
+            [1000.0, 0.0],
+            [1000.0, 1000.0],
+            [0.0, 1000.0],
+        ]
+        rows = [
+            {"mask_id": "MASK_001", "center": [100.0, 100.0]},
+            {"mask_id": "MASK_002", "center": [200.0, 100.0]},
+            {"mask_id": "MASK_003", "center": [100.0, 200.0]},
+            {"mask_id": "MASK_004", "center": [200.0, 200.0]},
+        ]
+        details = [
+            {
+                "mask_id": "MASK_001",
+                "center": [120.0, 100.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 20.0,
+            },
+            {
+                "mask_id": "MASK_002",
+                "center": [180.0, 100.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 20.0,
+            },
+            {
+                "mask_id": "MASK_003",
+                "center": [100.0, 230.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 30.0,
+            },
+            {
+                "mask_id": "MASK_004",
+                "center": [200.0, 170.0],
+                "projected_mask_support": True,
+                "median_prediction_error_px": 30.0,
+            },
+        ]
+        diagnostics = {}
+        result = tracking._fit_id_anchored_luminous_pose(
+            board,
+            rows,
+            details,
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+            diagnostics=diagnostics,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(
+            "fine_residual_too_high",
+            diagnostics["failure_stage"],
+        )
+        self.assertGreater(
+            diagnostics["refined_median_error_px"],
+            tracking.F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX,
+        )
+
     def test_three_id_anchored_segments_refine_coarse_pose(self):
         board = [
             [50.0, 50.0],
@@ -2084,6 +2210,70 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertEqual(
             "filter_found_without_luminous_segments",
             result["reason"],
+        )
+
+    def test_luminous_rescue_is_vetoed_when_power_is_explicitly_off(self):
+        frame = np.full((120, 160, 3), 20, dtype=np.uint8)
+        check = {
+            "id": "CHECK_001",
+            "name": "H1",
+            "mask_states": {
+                "MASK_001": "on",
+                "MASK_002": "on",
+                "MASK_003": "on",
+            },
+        }
+        project = {
+            "name": "DISPLAY",
+            "master_resolution": {"width": 160, "height": 120},
+            "masks": [],
+        }
+        repository = SimpleNamespace(
+            obter_projeto_ativo=lambda: "DISPLAY",
+            carregar_projeto=lambda _name: project,
+            carregar_check=lambda _name, _check_id: check,
+        )
+        app = SimpleNamespace(
+            display_project_repository=repository,
+            display_check_runtime=SimpleNamespace(
+                snapshot=lambda: {"current_check": check}
+            ),
+            camera_ultimo_frame_id=22,
+            _display_f3_power_authority_status={
+                "board_present": True,
+                "decision_allowed": False,
+                "energy": {
+                    "project_name": "DISPLAY",
+                    "check_id": "CHECK_001",
+                    "energy_state": "off",
+                    "powered_confirmed": False,
+                    "off_confirmed": True,
+                },
+            },
+        )
+        runtime = SimpleNamespace()
+
+        with patch.object(
+            tracking,
+            "_find_luminous_segment_pose",
+        ) as finder:
+            result = tracking._rescue_luminous_segment_tracking_lock(
+                app,
+                frame,
+                runtime,
+                base_result=None,
+                frame_token=("camera", 22),
+            )
+
+        self.assertIsNone(result)
+        finder.assert_not_called()
+        telemetry = app._display_f3_luminous_tracking_debug
+        self.assertTrue(telemetry["power_vetoed"])
+        self.assertFalse(telemetry["luminous_emission_detected"])
+        self.assertFalse(telemetry["alignment_ready"])
+        self.assertEqual(
+            "power_off_confirmed_blocks_luminous_tracking",
+            telemetry["reason"],
         )
 
     def test_luminous_rescue_permanece_no_espaco_canonico(self):

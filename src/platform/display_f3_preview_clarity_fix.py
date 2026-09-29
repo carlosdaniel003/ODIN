@@ -888,16 +888,33 @@ def _render_classic_luminous_preview(
             or {}
         ).items()
     }
-    luminous_ids = {
-        str(mask_id)
-        for mask_id in (context.get("luminous_mask_ids") or ())
-        if str(mask_id)
-    }
-    luminous_ids.update(
-        mask_id
-        for mask_id, state in classifications.items()
-        if state == DISPLAY_CHECK_STATE_ON
+    energy_gate_declared = any(
+        key in context
+        for key in (
+            "power_confirmed",
+            "power_off_confirmed",
+            "energy_state",
+        )
     )
+    energy_state = str(context.get("energy_state") or "").strip().lower()
+    semantic_power_ready = bool(
+        context.get("power_confirmed")
+        and not bool(context.get("power_off_confirmed"))
+        and energy_state != "off"
+    )
+
+    luminous_ids = set()
+    if not energy_gate_declared or semantic_power_ready:
+        luminous_ids = {
+            str(mask_id)
+            for mask_id in (context.get("luminous_mask_ids") or ())
+            if str(mask_id)
+        }
+        luminous_ids.update(
+            mask_id
+            for mask_id, state in classifications.items()
+            if state == DISPLAY_CHECK_STATE_ON
+        )
 
     board_points = context.get("board_points") or ()
     if len(board_points) >= 3:

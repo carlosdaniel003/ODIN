@@ -708,8 +708,11 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 state = (
                     "on"
                     if (
-                        mask_id in luminous_mask_ids
-                        or classifications.get(mask_id) == "on"
+                        ready
+                        and (
+                            mask_id in luminous_mask_ids
+                            or classifications.get(mask_id) == "on"
+                        )
                     )
                     else "neutral"
                 )

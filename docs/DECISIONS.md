@@ -366,6 +366,14 @@ Decisão:
 - quando blooming/morfologia unem segmentos distintos em um único contorno, os
   pixels luminosos do filtro continuam podendo ser particionados localmente entre
   os centros ON esperados; OFF nunca é procurado para obter pose;
+- quando a geometria da máscara projetada está disponível, um landmark local só
+  participa do fit se a emissão realmente intersectar essa máscara e se o erro
+  prévio permanecer dentro do limite de vizinhança; melhorar numericamente uma
+  pose ruim não basta — erro residual alto veta a publicação do refinamento;
+- OFF explicitamente confirmado pela autoridade física do mesmo
+  projeto/CHECK veta o refinamento luminoso naquele instante; o tracking
+  estrutural continua ativo e estado de energia INDETERMINADO não recebe esse
+  veto, preservando a descoberta da transição para ligado;
 - após o encaixe, as 28 ROIs são reprojetadas para o frame RAW e o analyzer
   canônico continua sendo a única autoridade para ON/OFF/POUCA LUZ e OK/NG;
 - quando não há emissão, este refinamento luminoso simplesmente não executa
@@ -428,8 +436,13 @@ Decisão:
 - um lock estrutural obtido por AUX, USB, BOARD_OFF ou outra referência pode
   fornecer somente a pista grosseira do filtro; ele não fixa a identidade
   espacial das máscaras de H1;
-- três ou mais componentes luminosos válidos dentro do filtro localizado podem
-  confirmar **energia física**, mesmo antes do encaixe fino;
+- três ou mais componentes luminosos **validados contra a vizinhança das
+  máscaras esperadas**, sem excesso incompatível de reflexos/componentes no
+  filtro localizado, podem confirmar **energia física**, mesmo antes do encaixe
+  fino; contagem bruta de hot spots não é prova suficiente;
+- quando OFF já foi explicitamente confirmado pela autoridade de energia, essa
+  mesma captura não pode ser promovida a ligada nem publicar pose luminosa por
+  reflexos;
 - energia confirmada sem alinhamento espacial resulta em
   `LIGADA • ALINHANDO <CHECK>`, com `allow_auto=false` e sem autoridade de
   OK/NG/avanço;
@@ -483,8 +496,10 @@ Decisão:
   segmento continua segmento, círculo continua círculo e polígono preserva sua
   topologia;
 - no preview produtivo com tracking, a apresentação é propositalmente simples:
-  máscaras neutras e verde somente nos segmentos onde existe emissão identificada;
-  o visor 88:88 acende somente esses segmentos. Vermelho/amarelo continuam
+  máscaras neutras e verde somente nos segmentos onde existe emissão identificada
+  **e energia física confirmada**; com energia OFF/não confirmada, preview e visor
+  88:88 permanecem neutros mesmo que exista classificação bruta ou telemetria
+  luminosa residual. Vermelho/amarelo continuam
   disponíveis para decisão/diagnóstico, mas não deformam nem poluem a localização;
 - após o encaixe, F3CheckAnalyzerAuthority continua responsável por classificar
   ON/OFF/POUCA LUZ e decidir conformidade; detectar luz para tracking não equivale

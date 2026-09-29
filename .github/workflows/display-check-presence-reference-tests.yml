@@ -64,6 +64,8 @@ jobs:
             tests/test_display_f3_check_transition_guard.py \
             tests/test_display_f3_physical_state_fix.py \
             tests/test_display_f3_live_runtime_fix.py \
+            tests/test_display_f3_preview_clarity_fix.py \
+            tests/test_display_f3_live_roi_overlay.py \
             tests/test_display_f3_mask_status.py
 
       - name: Validate CHECK reference geometry parity
@@ -147,6 +149,8 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_f3_live_runtime_fix \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_luminoso_nao_pinta_verde_com_display_off \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_visor_luminoso_so_mostra_segmentos_identificados_com_luz \
             -v
 
       - name: Run F3 mask diagnostic status tests

@@ -146,6 +146,40 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
 
         self.assertEqual(0, int(rendered.sum()))
 
+    def test_preview_classico_luminoso_nao_pinta_verde_com_display_off(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        context = {
+            "resolution": (100, 100),
+            "masks": (
+                {
+                    "id": "MASK_001",
+                    "type": "segment",
+                    "cx": 50,
+                    "cy": 50,
+                    "width": 30,
+                    "height": 12,
+                    "angle": 0.0,
+                },
+            ),
+            "classifications": {"MASK_001": "on"},
+            "live_luminous_only": True,
+            "luminous_mask_ids": ("MASK_001",),
+            "power_confirmed": False,
+            "power_off_confirmed": True,
+            "energy_state": "off",
+        }
+
+        rendered = clarity.renderizar_preview_claro_display_f3(
+            frame,
+            context,
+        )
+
+        center = rendered[50, 50]
+        self.assertLess(
+            int(center[0]) + int(center[1]) + int(center[2]),
+            20,
+        )
+
     def test_guia_de_tracking_sem_energia_e_cinza_neutra(self):
         b, g, r = clarity.F3_PREVIEW_TRACKING_GUIDE_BGR
         self.assertLess(abs(int(b) - int(g)), 30)

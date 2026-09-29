@@ -142,6 +142,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertIn('context.get("luminous_mask_ids")', source)
         self.assertIn('else "neutral"', source)
         self.assertIn('classifications.get(mask_id) == "on"', source)
+        self.assertIn("ready", source)
 
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(

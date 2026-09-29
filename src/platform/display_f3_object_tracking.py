@@ -170,6 +170,19 @@ F3_TRACKING_LUMINOUS_FINE_ALREADY_ALIGNED_PX = 1.25
 F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_SPAN_FRACTION = 0.18
 F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_FRACTION = 0.025
 F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_MAX_PX = 18
+# Reflexo/sujeira no filtro escuro não pode virar landmark geométrico. Em
+# 1920x1080 os segmentos reais observados ficam tipicamente abaixo de ~28px de
+# erro local antes do refinamento; acima disso a evidência já não pertence à
+# máscara projetada com confiança suficiente.
+F3_TRACKING_LUMINOUS_FINE_MAX_ANCHOR_ERROR_PX = 30.0
+# Mesmo quando um ajuste melhora a pose grosseira, erro residual alto ainda
+# significa que o modelo 88:88 não encaixou de verdade. Não publique geometria
+# "menos ruim" como se fosse alinhamento válido.
+F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX = 12.0
+# Muitos componentes brilhantes em relação aos ON esperados caracterizam cena
+# contaminada por reflexos/sujeira. Isso pode continuar no DEBUG, mas não prova
+# emissão física por si só.
+F3_TRACKING_LUMINOUS_MAX_COMPONENT_RATIO_FOR_ENERGY = 3.0
 
 # O contorno/filtro é a autoridade da pose grossa. A luz pode corrigir o
 # alinhamento fino, mas nunca pode torcer o conjunto inteiro por um casamento
@@ -1817,6 +1830,27 @@ def _detect_expected_on_luminous_landmarks(
         if len(selected_indices) < F3_TRACKING_LUMINOUS_LOCAL_MIN_HOT_PIXELS:
             continue
 
+        # Se existe geometria real da máscara projetada, o landmark precisa
+        # nascer dentro dela (com o padding controlado acima). O antigo fallback
+        # Voronoi aceitava reflexos distantes e foi a origem de máscaras tortas
+        # sobre display desligado.
+        projected_mask_available = isinstance(
+            projected_masks[expected_index],
+            dict,
+        )
+        if projected_mask_available and not support_used:
+            continue
+
+        median_prediction_error = float(
+            np.median(nearest_distance[selected_indices])
+        )
+        if (
+            not math.isfinite(median_prediction_error)
+            or median_prediction_error
+            > F3_TRACKING_LUMINOUS_FINE_MAX_ANCHOR_ERROR_PX
+        ):
+            continue
+
         cluster = hot_points[selected_indices]
         # A mediana é deliberadamente usada em vez do centroide do blob:
         # reflexos/blooming nas bordas deslocam menos a posição robusta.
@@ -1838,7 +1872,7 @@ def _detect_expected_on_luminous_landmarks(
                 ],
                 "hot_pixel_count": int(len(selected_indices)),
                 "median_prediction_error_px": round(
-                    float(np.median(nearest_distance[selected_indices])),
+                    median_prediction_error,
                     3,
                 ),
                 "projected_mask_support": bool(support_used),
@@ -1969,6 +2003,7 @@ def _fit_id_anchored_luminous_pose(
     source_points = []
     target_points = []
     matched_ids = []
+    rejected_ids = []
     seen: set[str] = set()
     for detail in landmark_details or ():
         if not isinstance(detail, dict):
@@ -1984,6 +2019,26 @@ def _fit_id_anchored_luminous_pose(
             or len(center) < 2
         ):
             continue
+
+        # Segunda defesa: callers sintéticos/legados podem não declarar esses
+        # campos, mas quando o detector real os declara uma evidência explicitamente
+        # fora da máscara ou distante demais nunca entra no fit.
+        if detail.get("projected_mask_support") is False:
+            rejected_ids.append(mask_id)
+            continue
+        if detail.get("median_prediction_error_px") is not None:
+            try:
+                anchor_error = float(detail.get("median_prediction_error_px"))
+            except (TypeError, ValueError):
+                anchor_error = float("inf")
+            if (
+                not math.isfinite(anchor_error)
+                or anchor_error
+                > F3_TRACKING_LUMINOUS_FINE_MAX_ANCHOR_ERROR_PX
+            ):
+                rejected_ids.append(mask_id)
+                continue
+
         try:
             source_points.append([float(center[0]), float(center[1])])
             target = row.get("center") or ()
@@ -2005,6 +2060,7 @@ def _fit_id_anchored_luminous_pose(
                 "best_final_match_count": 0,
                 "failure_stage": "not_started",
                 "matched_mask_ids": list(matched_ids),
+                "rejected_mask_ids": list(rejected_ids),
             }
         )
     if anchor_count < required:
@@ -2093,6 +2149,24 @@ def _fit_id_anchored_luminous_pose(
         return None
     refined_errors = np.linalg.norm(refined_projected - target, axis=1)
     refined_median = float(np.median(refined_errors))
+    if (
+        not math.isfinite(refined_median)
+        or refined_median > F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX
+    ):
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "fine_residual_too_high",
+                    "fit_mode": fit_mode,
+                    "coarse_median_error_px": round(coarse_median, 3),
+                    "refined_median_error_px": round(refined_median, 3),
+                    "maximum_allowed_median_error_px": float(
+                        F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX
+                    ),
+                }
+            )
+        return None
+
     gain = coarse_median - refined_median
     minimum_gain = max(
         F3_TRACKING_LUMINOUS_FINE_MIN_GAIN_PX,
@@ -2883,6 +2957,41 @@ def _find_luminous_segment_pose(
     return result
 
 
+def _luminous_tracking_power_veto(
+    app,
+    *,
+    project_name: str,
+    check_id: str,
+) -> tuple[bool, str]:
+    """OFF explícito da autoridade física veta refinamento por falsa emissão.
+
+    Estado UNCONFIRMED não veta: D-022 permite que emissão real ajude a provar
+    energia antes do encaixe fino. Somente OFF confirmado do mesmo contexto
+    impede que reflexo/sujeira publique uma nova pose luminosa.
+    """
+    status = getattr(app, "_display_f3_power_authority_status", None)
+    energy = status.get("energy") if isinstance(status, dict) else None
+    if not isinstance(energy, dict):
+        return False, ""
+
+    energy_project = str(energy.get("project_name") or "")
+    energy_check = str(energy.get("check_id") or "")
+    if energy_project and energy_project != str(project_name or ""):
+        return False, ""
+    if energy_check and energy_check != str(check_id or ""):
+        return False, ""
+
+    explicit_off = bool(
+        energy.get("off_confirmed") is True
+        and energy.get("powered_confirmed") is not True
+        and str(energy.get("energy_state") or "").strip().lower()
+        in {"", "off"}
+    )
+    if explicit_off:
+        return True, "power_off_confirmed_blocks_luminous_tracking"
+    return False, ""
+
+
 def _rescue_luminous_segment_tracking_lock(
     app,
     frame,
@@ -2920,6 +3029,41 @@ def _rescue_luminous_segment_tracking_lock(
         check = current
     if not isinstance(check, dict):
         check = current
+
+    power_vetoed, power_veto_reason = _luminous_tracking_power_veto(
+        app,
+        project_name=str(project_name or ""),
+        check_id=check_id,
+    )
+    if power_vetoed:
+        app._display_f3_luminous_tracking_debug = {
+            "available": False,
+            "source": "f3_luminous_segment_tracking",
+            "project_name": str(project_name or ""),
+            "check_id": check_id,
+            "check_name": str(check.get("name") or check_id),
+            "frame_id": (
+                int(frame_token[1])
+                if isinstance(frame_token, tuple)
+                and len(frame_token) >= 2
+                and frame_token[0] == "camera"
+                else getattr(app, "camera_ultimo_frame_id", None)
+            ),
+            "frame_token": deepcopy(frame_token),
+            "base_locked": bool(
+                base_result is not None
+                and getattr(base_result, "locked", False)
+            ),
+            "luminous_emission_detected": False,
+            "alignment_required": True,
+            "alignment_ready": False,
+            "matched_mask_ids": [],
+            "matched_count": 0,
+            "validated_luminous_anchor_count": 0,
+            "reason": power_veto_reason,
+            "power_vetoed": True,
+        }
+        return None
 
     fit_board = (
         getattr(runtime, "canonical_board", None)
@@ -2962,16 +3106,6 @@ def _rescue_luminous_segment_tracking_lock(
         item for item in (pose.get("attempts") or ())
         if isinstance(item, dict)
     ]
-    luminous_emission_detected = bool(
-        pose.get("available")
-        or any(
-            str(item.get("luminous_reason") or "")
-            == "luminous_segments_detected"
-            and int(item.get("luminous_component_count", 0) or 0)
-            >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
-            for item in attempts
-        )
-    )
     alignment_required = bool(
         len(expected_rows) >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
     )
@@ -3008,6 +3142,46 @@ def _rescue_luminous_segment_tracking_lock(
             default=0,
         )
     )
+    validated_luminous_anchor_count = max(
+        (
+            len(
+                [
+                    detail
+                    for detail in (item.get("local_luminous_details") or ())
+                    if isinstance(detail, dict)
+                    and detail.get("projected_mask_support") is not False
+                    and (
+                        detail.get("median_prediction_error_px") is None
+                        or float(detail.get("median_prediction_error_px"))
+                        <= F3_TRACKING_LUMINOUS_FINE_MAX_ANCHOR_ERROR_PX
+                    )
+                ]
+            )
+            for item in attempts
+        ),
+        default=0,
+    )
+    maximum_components_for_energy = max(
+        F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
+        int(
+            math.ceil(
+                max(1, len(expected_rows))
+                * F3_TRACKING_LUMINOUS_MAX_COMPONENT_RATIO_FOR_ENERGY
+            )
+        ),
+    )
+    luminous_scene_noisy = bool(
+        luminous_component_count > maximum_components_for_energy
+    )
+    luminous_emission_detected = bool(
+        alignment_ready
+        or (
+            base_matrix is not None
+            and validated_luminous_anchor_count
+            >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+            and not luminous_scene_noisy
+        )
+    )
 
     telemetry = {
         key: (
@@ -3040,6 +3214,13 @@ def _rescue_luminous_segment_tracking_lock(
             "fit_composed_to_canonical": bool(fit_space != "canonical"),
             "expected_on_count": int(len(expected_rows)),
             "luminous_component_count": luminous_component_count,
+            "validated_luminous_anchor_count": int(
+                validated_luminous_anchor_count
+            ),
+            "maximum_components_for_energy": int(
+                maximum_components_for_energy
+            ),
+            "luminous_scene_noisy": bool(luminous_scene_noisy),
             "local_luminous_landmark_count": int(
                 pose.get("local_luminous_landmark_count", 0) or 0
             ),
