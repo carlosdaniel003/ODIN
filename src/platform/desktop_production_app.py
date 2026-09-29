@@ -77,6 +77,9 @@ from src.platform.display_f3_reference_authority_fix import (
 from src.platform.display_f3_same_mask_reference_fix import (
     instalar_referencias_por_mesma_mascara_display_f3,
 )
+from src.platform.display_f3_segregate_action import (
+    instalar_acao_segregar_placa_display_f3,
+)
 from src.platform.display_f3_status_layout_fix import (
     instalar_layout_status_f3_estavel,
 )
@@ -266,6 +269,7 @@ class DesktopProductionApp(
         instalar_autoridade_referencias_display_f3()
         instalar_ponte_autoridade_referencias_display_f3()
         instalar_referencias_por_mesma_mascara_display_f3()
+        instalar_acao_segregar_placa_display_f3()
         instalar_politica_fisica_e_aprendizado_display_f3()
         instalar_gabarito_exato_checks_display_f3()
         instalar_gate_rapido_check_esperado_display_f3()

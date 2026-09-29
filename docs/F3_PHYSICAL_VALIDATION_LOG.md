@@ -476,3 +476,112 @@ terminar placa A
 Além do tempo percebido, observar no DEBUG se o frame do tracking acompanha o
 frame atual logo após a entrada da nova placa.
 
+---
+
+## 29/09/2026 — Reteste D-030 / nova placa em outra posição
+
+**Resultado físico:** PASS.
+
+### Cenário
+
+Após concluir a placa anterior, ela foi retirada e uma nova placa entrou em outra
+posição física. Também foi retestado o tempo de aquisição após a separação entre
+pose efêmera e banco de referências da sessão.
+
+### Resultado observado
+
+- a placa seguinte foi procurada novamente;
+- a pose da placa anterior não foi herdada;
+- a nova posição foi adquirida corretamente;
+- o fluxo voltou a funcionar após a otimização de IDENTIFICANDO....
+
+### Estado
+
+**PASS.**
+
+---
+
+## 29/09/2026 — SEGREGAR PLACA sem ação em transição de rearme
+
+**Resultado físico antes da correção:** FAIL.
+
+### Sintoma observado
+
+O botão **SEGREGAR PLACA** podia não produzir ação.
+
+### Causa identificada no código
+
+A ação manual era bloqueada não apenas enquanto a placa anterior ainda aguardava
+EMPTY, mas também durante waiting_new_board_after_empty. Nesse segundo estado,
+a autoridade canônica de presença já podia ter confirmado fisicamente a nova
+placa enquanto o debounce de rearme ainda não havia limpado a flag. O clique
+virava um retorno silencioso.
+
+Também foi confirmado que a extensão de nomenclatura SEGREGAR existia, mas não
+era instalada explicitamente pela composição desktop canônica.
+
+### Alteração aplicada
+
+- waiting_empty continua bloqueando SEGREGAR para impedir dupla contagem;
+- durante waiting_new_board, SEGREGAR é liberado somente quando
+  board_presence_evidence confirma placa presente e não EMPTY;
+- a composição desktop passa a instalar explicitamente a apresentação
+  **SEGREGAR PLACA** antes de construir a janela F3;
+- nenhuma regra ou contador do F2 é alterado.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+---
+
+## 29/09/2026 — Segmento 24 fisicamente danificado foi aprovado
+
+**Resultado físico antes da correção:** FAIL crítico de decisão.
+
+### Cenário
+
+O CHECK esperava o segmento 24 ACESO. O segmento estava fisicamente danificado e
+não acendeu durante o teste. Mesmo assim, depois de algum tempo o CHECK foi
+aprovado.
+
+### Causa identificada no código
+
+A conformidade estrita já existia e bloqueava OK quando qualquer máscara ativa
+divergia. Entretanto, a composição final de tracking substituía o analyzer da
+sessão por F3TrackedRawCheckAnalyzer, que internamente reconstruía
+F3SameMaskReferenceAnalyzer simples.
+
+Assim, a camada geométrica final podia rebaixar a autoridade semântica que deveria
+continuar estrita. O mesmo wrapper permanecia publicado mesmo quando tracking
+estava desligado.
+
+### Correção D-031
+
+- o analyzer final de tracking passa a usar F3StrictMaskConformityAnalyzer;
+- a conformidade estrita agora aceita as ROIs móveis do tracking;
+- tracking ligado e desligado passam pela mesma regra de conformidade;
+- uma única máscara divergente impede OK;
+- regressão explícita usa MASK_024 esperado ON, classificado OFF, com outro
+  segmento ON: a política precisa retornar NG para MASK_024.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+CHECK posterior energizado
+→ demais segmentos esperados ON acendem
+→ MASK_024 deveria estar ON, mas permanece fisicamente apagada
+→ análise mantém MASK_024 como divergente
+→ CHECK nunca recebe OK
+→ após debounce normal de NG
+→ placa é reprovada por MASK_024
+→ frame/evidência NG permanece congelado até retirada
+~~~
+
+Repetir o mesmo teste com tracking habilitado e desabilitado para confirmar que a
+autoridade semântica não muda com o modo de tracking.
+

@@ -222,6 +222,10 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
         project_name: str,
         check_id: str,
         visual_rotation: int = 0,
+        *,
+        mask_geometry_override=None,
+        mask_geometry_resolution=None,
+        mask_geometry_source: str = "",
     ) -> dict:
         previous = self._strict_current_check_id
         self._strict_current_check_id = _normalized_check_id(check_id)
@@ -231,6 +235,9 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
                 project_name=project_name,
                 check_id=check_id,
                 visual_rotation=visual_rotation,
+                mask_geometry_override=mask_geometry_override,
+                mask_geometry_resolution=mask_geometry_resolution,
+                mask_geometry_source=mask_geometry_source,
             )
         finally:
             self._strict_current_check_id = previous

@@ -5,6 +5,7 @@ import unittest
 
 import src.platform.display_f3_segregate_action as segregate_module
 from src.platform.display_production_f3_window import DisplayProductionF3Window
+from src.platform.desktop_production_app import DesktopProductionApp
 
 
 class DisplayF3SegregateActionTests(unittest.TestCase):
@@ -26,6 +27,14 @@ class DisplayF3SegregateActionTests(unittest.TestCase):
         self.assertIn("SEGREGATE_FOOTER_TEXT", init_source)
         self.assertIn("SEGREGATE_RESULT_TEXT", result_source)
         self.assertIn("discarded", result_source)
+
+    def test_desktop_instala_segregar_antes_de_construir_janela_f3(self):
+        source = inspect.getsource(DesktopProductionApp.__init__)
+        self.assertIn("instalar_acao_segregar_placa_display_f3()", source)
+        self.assertLess(
+            source.index("instalar_acao_segregar_placa_display_f3()"),
+            source.index("super().__init__(root)"),
+        )
 
     def test_extensao_de_segregacao_nao_importa_f2(self):
         source = inspect.getsource(segregate_module)

@@ -543,16 +543,49 @@ class DisplayProductionF3Mixin:
         """Atalho semântico: conclui com sucesso o CHECK atualmente aguardado."""
         return self.registrar_resultado_check_display_f3(True)
 
+    def _display_f3_manual_segregation_can_release_new_board_wait(self) -> bool:
+        """Libera SEGREGAR quando a presença canônica já vê a nova placa.
+
+        Depois de EMPTY, o debounce de rearme pode ainda estar aguardando nova
+        placa por poucos frames. A ação explícita do operador não deve virar
+        no-op se a autoridade canônica já confirmou placa presente.
+        waiting_empty nunca é contornado, evitando dupla contabilização.
+        """
+        if not bool(
+            getattr(self, "_display_f3_waiting_new_board_after_empty", False)
+        ):
+            return True
+
+        state = getattr(self, "_display_f3_operational_state", None)
+        presence = (
+            state.get("board_presence_evidence")
+            if isinstance(state, dict)
+            else None
+        )
+        if not (
+            isinstance(presence, dict)
+            and presence.get("board_present") is True
+            and presence.get("presence_confirmed") is True
+            and presence.get("empty_confirmed") is not True
+        ):
+            return False
+
+        self._display_f3_waiting_new_board_after_empty = False
+        self._display_f3_new_board_frames = 0
+        self._display_f3_rearm_empty_frames = 0
+        return True
+
     def descartar_placa_display_f3(self) -> dict | None:
-        """Tecla/botão 1: soma TOTAL+NG e reinicia no primeiro CHECK."""
+        """SEGREGAR [1]: soma TOTAL+NG e reinicia no primeiro CHECK."""
         if not self.display_f3_ativo:
             return None
         if (
             bool(getattr(self, "_display_f3_ng_evidence_frozen", False))
             or bool(getattr(self, "_display_f3_waiting_empty_rearm", False))
-            or bool(getattr(self, "_display_f3_waiting_new_board_after_empty", False))
         ):
-            # O ciclo já terminou. Impede TOTAL/NG duplicado pela tecla 1.
+            # O ciclo anterior já terminou; nunca permita dupla contabilização.
+            return None
+        if not self._display_f3_manual_segregation_can_release_new_board_wait():
             return None
         snapshot_atual = self.display_check_runtime.snapshot()
         if not snapshot_atual.get("checks"):

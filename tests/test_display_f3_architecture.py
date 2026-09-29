@@ -398,6 +398,70 @@ class DisplayF3ArchitectureTests(unittest.TestCase):
         self.assertEqual(1, app.display_check_runtime.total)
         self.assertEqual(1, app.display_check_runtime.ng)
 
+    def test_segregar_placa_ativa_contabiliza_ng_sem_tocar_no_f2(self):
+        app = _FakeApp()
+        app.display_f3_ativo = True
+        app.display_check_runtime.configurar_checks(
+            [{"id": "CHECK_H1", "name": "H1"}]
+        )
+        antes_f2 = self._snapshot_f2(app)
+
+        event = app.descartar_placa_display_f3()
+
+        self.assertIsInstance(event, dict)
+        self.assertEqual("plate_discarded", event["event"])
+        self.assertEqual(1, app.display_check_runtime.total)
+        self.assertEqual(1, app.display_check_runtime.ng)
+        self.assertEqual(antes_f2, self._snapshot_f2(app))
+        self.assertTrue(app.display_f3_window.result_calls)
+        self.assertTrue(app.display_f3_window.result_calls[-1][1])
+
+    def test_segregar_nova_placa_presente_nao_fica_preso_em_waiting_new_board(self):
+        app = _FakeApp()
+        app.display_f3_ativo = True
+        app.display_check_runtime.configurar_checks(
+            [{"id": "CHECK_H1", "name": "H1"}]
+        )
+        app._display_f3_waiting_empty_rearm = False
+        app._display_f3_waiting_new_board_after_empty = True
+        app._display_f3_new_board_frames = 1
+        app._display_f3_rearm_empty_frames = 0
+        app._display_f3_operational_state = {
+            "kind": "powered",
+            "board_presence_evidence": {
+                "board_present": True,
+                "presence_confirmed": True,
+                "empty_confirmed": False,
+            },
+        }
+
+        event = app.descartar_placa_display_f3()
+
+        self.assertEqual("plate_discarded", event["event"])
+        self.assertFalse(app._display_f3_waiting_new_board_after_empty)
+        self.assertEqual(1, app.display_check_runtime.ng)
+
+    def test_segregar_continua_bloqueado_antes_de_confirmar_nova_placa(self):
+        app = _FakeApp()
+        app.display_f3_ativo = True
+        app.display_check_runtime.configurar_checks(
+            [{"id": "CHECK_H1", "name": "H1"}]
+        )
+        app._display_f3_waiting_empty_rearm = False
+        app._display_f3_waiting_new_board_after_empty = True
+        app._display_f3_operational_state = {
+            "kind": "empty",
+            "board_presence_evidence": {
+                "board_present": False,
+                "presence_confirmed": True,
+                "empty_confirmed": True,
+            },
+        }
+
+        self.assertIsNone(app.descartar_placa_display_f3())
+        self.assertEqual(0, app.display_check_runtime.total)
+        self.assertEqual(0, app.display_check_runtime.ng)
+
     def test_evidencia_ng_so_volta_ao_vivo_quando_rearme_a_libera(self):
         app = _FakeApp()
         app.display_f3_ativo = True

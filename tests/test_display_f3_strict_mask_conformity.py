@@ -33,6 +33,46 @@ def _source(check_id: str, mask_id: str, state: str):
 
 
 class DisplayF3StrictMaskConformityTests(TestCase):
+    def test_strict_analyzer_preserva_geometria_movel_do_tracking(self):
+        analyzer = F3StrictMaskConformityAnalyzer.__new__(
+            F3StrictMaskConformityAnalyzer
+        )
+        analyzer._strict_current_check_id = ""
+        base_analysis = {
+            "ready": True,
+            "approved": True,
+            "mask_results": [],
+        }
+        geometry = [
+            {
+                "id": "MASK_024",
+                "type": "circle",
+                "cx": 20,
+                "cy": 20,
+                "radius": 5,
+            }
+        ]
+
+        with patch.object(
+            F3SameMaskReferenceAnalyzer,
+            "analyze",
+            return_value=base_analysis,
+        ) as base:
+            analyzer.analyze(
+                frame=object(),
+                project_name="CM-550-L",
+                check_id="CHECK_004",
+                visual_rotation=180,
+                mask_geometry_override=geometry,
+                mask_geometry_resolution=(1920, 1080),
+                mask_geometry_source="tracking_live",
+            )
+
+        kwargs = base.call_args.kwargs
+        self.assertIs(geometry, kwargs["mask_geometry_override"])
+        self.assertEqual((1920, 1080), kwargs["mask_geometry_resolution"])
+        self.assertEqual("tracking_live", kwargs["mask_geometry_source"])
+
     def test_remove_foto_do_proprio_check_dos_pools_local_e_global(self):
         learning = {
             "by_mask": {
@@ -209,7 +249,7 @@ class DisplayF3StrictMaskConformityTests(TestCase):
         self.assertFalse(decision["confirmed_ng"])
 
     def test_instalacao_estrita_e_a_ultima_autoridade_de_analisador(self):
-        source = Path("src/platform/raspberry_pi3_production_app.py").read_text(
+        source = Path("src/platform/desktop_production_app.py").read_text(
             encoding="utf-8"
         )
         exact_call = source.index("instalar_gabarito_exato_checks_display_f3()")

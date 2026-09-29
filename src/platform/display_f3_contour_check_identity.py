@@ -28,8 +28,8 @@ from src.platform.display_f3_object_tracking import (
     get_tracking_runtime,
     tracking_enabled,
 )
-from src.platform.display_f3_same_mask_reference_fix import (
-    F3SameMaskReferenceAnalyzer,
+from src.platform.display_f3_strict_mask_conformity import (
+    F3StrictMaskConformityAnalyzer,
 )
 
 
@@ -842,7 +842,9 @@ class F3TrackedRawCheckAnalyzer:
     def __init__(self, repository, app) -> None:
         self.repository = repository
         self.app = app
-        self.semantic = F3SameMaskReferenceAnalyzer(repository)
+        # Tracking fornece geometria; nunca pode rebaixar a autoridade semântica.
+        # A mesma conformidade estrita vale com tracking ligado ou desligado.
+        self.semantic = F3StrictMaskConformityAnalyzer(repository)
 
     def invalidate_learning_cache(self) -> None:
         try:

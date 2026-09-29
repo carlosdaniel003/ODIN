@@ -7,9 +7,91 @@ from unittest.mock import patch
 import numpy as np
 
 import src.platform.display_f3_contour_check_identity as identity
+from src.platform.display_auto_check_policy import (
+    DISPLAY_AUTO_DECISION_NG,
+    decidir_analise_display_f3,
+)
+from src.platform.display_f3_same_mask_reference_fix import (
+    F3SameMaskReferenceAnalyzer,
+)
+from src.platform.display_f3_strict_mask_conformity import (
+    F3StrictMaskConformityAnalyzer,
+)
 
 
 class DisplayF3ContourCheckIdentityTests(unittest.TestCase):
+    def test_analisador_final_mantem_conformidade_estrita_sem_tracking(self):
+        analyzer = identity.F3TrackedRawCheckAnalyzer(
+            repository=object(),
+            app=SimpleNamespace(
+                _display_f3_tracking_live_geometry=None,
+                _display_f3_tracking_raw_authority_frame=None,
+            ),
+        )
+        self.assertIsInstance(
+            analyzer.semantic,
+            F3StrictMaskConformityAnalyzer,
+        )
+
+    def test_segmento_24_esperado_on_e_nunca_aceso_nao_pode_aprovar(self):
+        analyzer = identity.F3TrackedRawCheckAnalyzer(
+            repository=object(),
+            app=SimpleNamespace(
+                _display_f3_tracking_live_geometry=None,
+                _display_f3_tracking_raw_authority_frame=None,
+            ),
+        )
+        base_analysis = {
+            "ready": True,
+            "approved": True,
+            "reason": "antigo_ok",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_008",
+                    "expected": "on",
+                    "expected_label": "ACESO",
+                    "classified": "on",
+                    "classified_label": "ACESO",
+                    "matched": True,
+                    "confidence": 0.99,
+                },
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "expected_label": "ACESO",
+                    "classified": "off",
+                    "classified_label": "APAGADO",
+                    "matched": False,
+                    "confidence": 0.99,
+                },
+            ],
+            "active_mask_count": 2,
+            "matched_mask_count": 1,
+        }
+
+        with patch.object(
+            F3SameMaskReferenceAnalyzer,
+            "analyze",
+            return_value=base_analysis,
+        ):
+            result = analyzer.analyze(
+                np.zeros((40, 60, 3), dtype=np.uint8),
+                "DISPLAY A",
+                "CHECK_004",
+                0,
+            )
+
+        self.assertFalse(result["approved"])
+        self.assertEqual(["MASK_024"], result["failed_mask_ids"])
+        self.assertEqual(["MASK_024"], result["missing_on_mask_ids"])
+        decision = decidir_analise_display_f3(
+            result,
+            reference_gate=False,
+        )
+        self.assertEqual(DISPLAY_AUTO_DECISION_NG, decision["decision"])
+        self.assertTrue(decision["confirmed_ng"])
+        self.assertEqual("MASK_024", decision["failed_mask_id"])
+
     def test_identidade_escolhe_check_com_melhor_contorno_e_margem(self):
         result = identity.selecionar_identidade_check_f3(
             [

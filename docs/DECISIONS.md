@@ -1140,6 +1140,66 @@ A segurança permanece conservadora: referência cacheada é somente calibraçã
 OK/NG, energia, presença e sequência continuam nas autoridades canônicas.
 
 ---
+
+## D-031 — Tracking F3 não pode rebaixar a conformidade estrita das máscaras
+
+**Status:** Accepted
+
+### Contexto
+
+No teste físico de 29/09/2026, uma placa com o segmento 24 fisicamente
+danificado permaneceu sem emissão nesse segmento, embora o CHECK o esperasse
+ACESO. Mesmo assim, depois de algum tempo o CHECK foi aprovado.
+
+A árvore já possuía F3StrictMaskConformityAnalyzer, cuja regra é que uma única
+máscara configurada divergente impede aprovação. Porém a composição final de
+tracking instalava F3TrackedRawCheckAnalyzer e, internamente, reconstruía um
+F3SameMaskReferenceAnalyzer simples. Isso rebaixava a autoridade semântica
+depois que a camada estrita já havia sido instalada.
+
+O desvio existia tanto com tracking ativo quanto no fallback sem tracking,
+porque o wrapper final continuava sendo o analyzer publicado para a sessão.
+
+### Decisão
+
+- F3TrackedRawCheckAnalyzer continua proprietário da adaptação geométrica RAW
+  + ROIs móveis, mas sua autoridade semântica interna passa a ser
+  F3StrictMaskConformityAnalyzer;
+- a conformidade estrita aceita explicitamente mask_geometry_override,
+  resolução e fonte geométrica, preservando a leitura sobre ROIs rastreadas;
+- tracking fornece geometria e evidência luminosa positiva; não substitui a regra
+  de que todas as máscaras ativas do CHECK precisam permanecer conformes;
+- um segmento esperado ACESO que seja classificado APAGADO, enquanto o display
+  possui evidência de energia/segmentos ON, continua para a política de NG e não
+  pode ser convertido em OK pela composição final;
+- com tracking desligado, o caminho legado/alinhado usa a mesma autoridade
+  semântica estrita;
+- H1 mantém a política já aceita de referencial: divergência no primeiro CHECK
+  não cria NG automático antes de H1 ser confirmado. Esta decisão corrige o
+  falso OK; não remove esse gate de entrada.
+
+### Consequência
+
+A composição passa a obedecer:
+
+~~~text
+tracking ON
+frame RAW + geometria móvel
+→ conformidade estrita
+→ política SEARCHING / OK / NG
+
+tracking OFF
+frame do pipeline normal
+→ mesma conformidade estrita
+→ mesma política SEARCHING / OK / NG
+~~~
+
+Uma máscara ausente não pode ser escondida pela troca de analyzer feita pelo
+tracking. Em particular, se MASK_024 deveria estar ON e permanece OFF em um
+CHECK posterior com display energizado, a decisão esperada é NG após o debounce
+normal.
+
+---
 ## Como adicionar uma decisão
 
 Use:

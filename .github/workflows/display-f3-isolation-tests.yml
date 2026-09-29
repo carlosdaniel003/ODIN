@@ -56,6 +56,8 @@ jobs:
             src/platform/display_f3_physical_learning_policy.py \
             src/platform/display_f3_exact_check_template.py \
             src/platform/display_f3_contour_check_identity.py \
+            src/platform/display_f3_strict_mask_conformity.py \
+            src/platform/display_f3_segregate_action.py \
             src/platform/display_f3_object_tracking.py \
             src/platform/display_f3_h1_registration.py \
             src/platform/display_f3_tracking_orientation_ui.py \
@@ -178,6 +180,20 @@ jobs:
             tests.test_roi_geometry_f2_f3_consistency \
             tests.test_freeform_segment_roi \
             tests.test_freeform_project_roundtrip \
+            -v
+
+      - name: Run strict mask and segregation regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_strict_mask_conformity.DisplayF3StrictMaskConformityTests.test_strict_analyzer_preserva_geometria_movel_do_tracking \
+            tests.test_display_f3_strict_mask_conformity.DisplayF3StrictMaskConformityTests.test_uma_unica_mascara_divergente_impede_aprovacao \
+            tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_analisador_final_mantem_conformidade_estrita_sem_tracking \
+            tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_segmento_24_esperado_on_e_nunca_aceso_nao_pode_aprovar \
+            tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_emissao_no_nucleo_exato_promove_on_sem_aprovar_mascara_off_errada \
+            tests.test_display_f3_architecture.DisplayF3ArchitectureTests.test_segregar_placa_ativa_contabiliza_ng_sem_tocar_no_f2 \
+            tests.test_display_f3_architecture.DisplayF3ArchitectureTests.test_segregar_nova_placa_presente_nao_fica_preso_em_waiting_new_board \
+            tests.test_display_f3_architecture.DisplayF3ArchitectureTests.test_segregar_continua_bloqueado_antes_de_confirmar_nova_placa \
+            tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_desktop_instala_segregar_antes_de_construir_janela_f3 \
             -v
 
       - name: Run F3 object tracking tests
