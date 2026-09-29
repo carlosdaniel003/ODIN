@@ -1896,6 +1896,7 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     f"refinement_applied={_yes_no(d025.get('refinement_applied'))}",
                     f"alignment_source={d025.get('selected_alignment_source') or '--'}",
                     f"refinement_reason={d025.get('refinement_reason') or '--'}",
+                    f"registration_reason={d025.get('registration_reason') or '--'}",
                     f"check={d025.get('check_name') or d025.get('check_id') or '--'}",
                     f"reference={d025.get('reference_image_path', '--')}",
                     f"filter_candidates={d025.get('filter_candidate_count', '--')}",

@@ -390,6 +390,59 @@ def _identity_affine() -> np.ndarray:
     )
 
 
+def _base_registration_result(
+    reference_map,
+    current_map,
+    current_rectified,
+    metrics_before: dict,
+    *,
+    reason: str,
+    refinement_reason: str,
+    phase_shift=(0.0, 0.0),
+    phase_response: float = 0.0,
+    ecc_score=None,
+    rotation_deg=None,
+    center_shift_px=None,
+    center_shift_fraction=None,
+    error: str = "",
+) -> dict:
+    """Mantém a homografia retificada quando o refinamento ECC não é utilizável."""
+    identity = _identity_affine()
+    result = {
+        "available": True,
+        "reason": str(reason),
+        "quality_ok": False,
+        "refinement_applied": False,
+        "refinement_reason": str(refinement_reason),
+        "selected_alignment_source": "filter_homography_base",
+        "phase_shift": (
+            round(float(phase_shift[0]), 4),
+            round(float(phase_shift[1]), 4),
+        ),
+        "phase_response": round(float(phase_response), 6),
+        "reference_to_current_affine": identity.copy(),
+        "current_to_reference_affine": identity.copy(),
+        "reference_emission_map": np.asarray(reference_map, dtype=np.float32),
+        "current_emission_map": np.asarray(current_map, dtype=np.float32),
+        "aligned_emission_map": np.asarray(current_map, dtype=np.float32),
+        "aligned_current": current_rectified.copy(),
+        "metrics_before": dict(metrics_before or {}),
+        "metrics_after": dict(metrics_before or {}),
+        "ecc_candidate_metrics": {},
+    }
+    if ecc_score is not None:
+        result["ecc_score"] = round(float(ecc_score), 6)
+    if rotation_deg is not None:
+        result["rotation_deg"] = round(float(rotation_deg), 4)
+    if center_shift_px is not None:
+        result["center_shift_px"] = round(float(center_shift_px), 4)
+    if center_shift_fraction is not None:
+        result["center_shift_fraction"] = round(float(center_shift_fraction), 6)
+    if error:
+        result["error"] = str(error)
+    return result
+
+
 def _preserve_homography_base(
     registration: dict,
     current_rectified,
@@ -496,17 +549,17 @@ def register_rectified_h1(
             5,
         )
     except cv2.error as exc:
-        return {
-            "available": False,
-            "reason": "ecc_failed",
-            "phase_shift": (
-                round(float(phase_shift[0]), 4),
-                round(float(phase_shift[1]), 4),
-            ),
-            "phase_response": round(float(phase_response), 6),
-            "error": type(exc).__name__,
-            "metrics_before": before,
-        }
+        return _base_registration_result(
+            reference_map,
+            current_map,
+            current_rectified,
+            before,
+            reason="ecc_failed_base_preserved",
+            refinement_reason="ecc_failed_base_preserved",
+            phase_shift=phase_shift,
+            phase_response=phase_response,
+            error=type(exc).__name__,
+        )
 
     warp_reference_to_current = np.asarray(
         warp_reference_to_current,
@@ -539,20 +592,20 @@ def register_rectified_h1(
         <= F3_H1_REGISTRATION_MAX_CENTER_SHIFT_FRACTION
     )
     if not guard_ok:
-        return {
-            "available": False,
-            "reason": "registration_outside_guard",
-            "phase_shift": (
-                round(float(phase_shift[0]), 4),
-                round(float(phase_shift[1]), 4),
-            ),
-            "phase_response": round(float(phase_response), 6),
-            "ecc_score": round(float(ecc_score), 6),
-            "rotation_deg": round(float(rotation_deg), 4),
-            "center_shift_px": round(center_shift, 4),
-            "center_shift_fraction": round(center_shift_fraction, 6),
-            "metrics_before": before,
-        }
+        return _base_registration_result(
+            reference_map,
+            current_map,
+            current_rectified,
+            before,
+            reason="registration_outside_guard_base_preserved",
+            refinement_reason="registration_outside_guard_base_preserved",
+            phase_shift=phase_shift,
+            phase_response=phase_response,
+            ecc_score=ecc_score,
+            rotation_deg=rotation_deg,
+            center_shift_px=center_shift,
+            center_shift_fraction=center_shift_fraction,
+        )
 
     candidate_map = cv2.warpAffine(
         current_map,
@@ -938,6 +991,11 @@ def summarize_h1_registration(result: dict | None) -> dict:
     return {
         "available": bool(data.get("available")),
         "reason": str(data.get("reason") or ""),
+        "registration_reason": str(
+            data.get("registration_reason")
+            or data.get("reason")
+            or ""
+        ),
         "quality_ok": bool(data.get("quality_ok")),
         "refinement_applied": bool(data.get("refinement_applied")),
         "refinement_reason": str(data.get("refinement_reason") or ""),
@@ -975,6 +1033,11 @@ def summarize_h1_registration(result: dict | None) -> dict:
                 "available": bool(item.get("available")),
                 "reason": str(item.get("reason") or ""),
                 "quality_ok": bool(item.get("quality_ok")),
+                "refinement_applied": bool(item.get("refinement_applied")),
+                "refinement_reason": str(item.get("refinement_reason") or ""),
+                "selected_alignment_source": str(
+                    item.get("selected_alignment_source") or ""
+                ),
                 "ecc_score": item.get("ecc_score"),
                 "rotation_deg": item.get("rotation_deg"),
                 "center_shift_px": item.get("center_shift_px"),

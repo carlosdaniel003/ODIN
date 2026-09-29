@@ -716,6 +716,11 @@ Por isso, nesta etapa diagnóstica:
   essas máscaras também não pode piorar;
 - qualquer regressão preserva a geometria da homografia base, com
   `refinement_applied=False` e motivo explícito no DEBUG;
+- falha de convergência do ECC ou candidato fora dos limites de rotação/deslocamento
+  também preservam a homografia base válida; o ECC é opcional e nunca pode
+  transformar uma retificação válida em `SEM VISUAL`;
+- o DEBUG separa o motivo do wrapper experimental do motivo interno do registro
+  por meio de `registration_reason` / `refinement_reason`;
 - as métricas do candidato rejeitado continuam registradas para diagnóstico;
 - esta guarda continua sem autoridade produtiva e não altera energia, OK/NG,
   avanço de CHECK ou rearme.

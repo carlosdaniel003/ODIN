@@ -1465,6 +1465,15 @@ def experiment_h1_filter_registration(
                 "available": bool(result.get("available")),
                 "reason": str(result.get("reason") or ""),
                 "quality_ok": bool(result.get("quality_ok")),
+                "refinement_applied": bool(
+                    result.get("refinement_applied")
+                ),
+                "refinement_reason": str(
+                    result.get("refinement_reason") or ""
+                ),
+                "selected_alignment_source": str(
+                    result.get("selected_alignment_source") or ""
+                ),
                 "ecc_score": result.get("ecc_score"),
                 "rotation_deg": result.get("rotation_deg"),
                 "center_shift_px": result.get("center_shift_px"),
@@ -1490,19 +1499,30 @@ def experiment_h1_filter_registration(
             )
 
     if best is None:
+        registration_reason = next(
+            (
+                str(item.get("reason") or "")
+                for item in attempts
+                if str(item.get("reason") or "")
+            ),
+            "h1_registration_not_converged",
+        )
         return {
             "available": False,
             "reason": "h1_registration_not_converged",
+            "registration_reason": registration_reason,
             "filter_candidate_count": int(len(candidates)),
             "filter_locator_source": locator_source,
             "attempts": attempts,
         }
 
+    registration_reason = str(best.get("reason") or "")
     payload = dict(best)
     payload.update(
         {
             "available": True,
             "reason": "h1_filter_registration_ready",
+            "registration_reason": registration_reason,
             "filter_candidate_count": int(len(candidates)),
             "filter_locator_source": str(
                 best_filter_source or locator_source

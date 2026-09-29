@@ -182,6 +182,7 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
                 "quality_ok": False,
                 "refinement_applied": False,
                 "refinement_reason": "ecc_candidate_worsened:dice,correlation",
+                "registration_reason": "h1_registration_base_preserved",
                 "selected_alignment_source": "filter_homography_base",
                 "check_name": "H1",
                 "reference_image_path": "h1.jpg",
@@ -242,6 +243,10 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn("ecc=0.9700", report)
         self.assertIn("refinement_applied=NÃO", report)
         self.assertIn("alignment_source=filter_homography_base", report)
+        self.assertIn(
+            "registration_reason=h1_registration_base_preserved",
+            report,
+        )
         self.assertIn("dice=0.4000->0.4000", report)
         self.assertIn("emission_in_masks=0.3500->0.3500", report)
         self.assertIn("ecc_candidate=dice=0.2200", report)

@@ -152,6 +152,72 @@ class DisplayF3H1RegistrationExperimentTests(unittest.TestCase):
             mask_before["emission_inside_fraction"] + 0.15,
         )
 
+    def test_ecc_failure_preserves_valid_homography_base(self):
+        reference = self._h1_roi()
+        current = reference.copy()
+
+        with patch.object(
+            cv2,
+            "findTransformECC",
+            side_effect=cv2.error("forced_ecc_failure"),
+        ):
+            result = h1reg.register_rectified_h1(reference, current)
+
+        self.assertTrue(result["available"], result)
+        self.assertFalse(result["quality_ok"], result)
+        self.assertFalse(result["refinement_applied"], result)
+        self.assertEqual(
+            "filter_homography_base",
+            result["selected_alignment_source"],
+        )
+        self.assertEqual(
+            "ecc_failed_base_preserved",
+            result["refinement_reason"],
+        )
+        self.assertEqual(
+            "ecc_failed_base_preserved",
+            result["reason"],
+        )
+        self.assertEqual(result["metrics_before"], result["metrics_after"])
+        np.testing.assert_allclose(
+            result["current_to_reference_affine"],
+            np.asarray(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                dtype=np.float32,
+            ),
+        )
+        np.testing.assert_array_equal(result["aligned_current"], current)
+
+    def test_ecc_outside_guard_preserves_valid_homography_base(self):
+        reference = self._h1_roi()
+        current = reference.copy()
+        outside_guard = np.asarray(
+            [[1.0, 0.0, 500.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+
+        with patch.object(
+            cv2,
+            "findTransformECC",
+            return_value=(0.99, outside_guard),
+        ):
+            result = h1reg.register_rectified_h1(reference, current)
+
+        self.assertTrue(result["available"], result)
+        self.assertFalse(result["quality_ok"], result)
+        self.assertFalse(result["refinement_applied"], result)
+        self.assertEqual(
+            "filter_homography_base",
+            result["selected_alignment_source"],
+        )
+        self.assertEqual(
+            "registration_outside_guard_base_preserved",
+            result["refinement_reason"],
+        )
+        self.assertEqual(result["metrics_before"], result["metrics_after"])
+        self.assertGreater(result["center_shift_px"], 100.0)
+        np.testing.assert_array_equal(result["aligned_current"], current)
+
     def test_ecc_candidate_that_worsens_alignment_preserves_homography_base(self):
         reference = self._h1_roi()
         current = reference.copy()
@@ -291,6 +357,42 @@ class DisplayF3H1RegistrationExperimentTests(unittest.TestCase):
         self.assertGreater(
             result["metrics_after"]["dice"],
             result["metrics_before"]["dice"],
+        )
+
+    def test_full_homography_experiment_keeps_visual_when_ecc_fails(self):
+        reference, current, reference_quad, current_quad, masks = self._scene()
+
+        with patch.object(
+            cv2,
+            "findTransformECC",
+            side_effect=cv2.error("forced_ecc_failure"),
+        ):
+            result = h1reg.register_h1_with_filter_homography(
+                reference,
+                reference_quad,
+                current,
+                current_quad,
+                reference_masks=masks,
+                expected_on_mask_ids={mask["id"] for mask in masks},
+            )
+
+        self.assertTrue(result["available"], result)
+        self.assertFalse(result["refinement_applied"], result)
+        self.assertEqual(
+            "filter_homography_base",
+            result["selected_alignment_source"],
+        )
+        self.assertEqual(
+            "ecc_failed_base_preserved",
+            result["refinement_reason"],
+        )
+        self.assertTrue(result["rectified_size"])
+        self.assertEqual(
+            result["metrics_before"],
+            result["metrics_after"],
+        )
+        self.assertIsNotNone(
+            h1reg.render_h1_registration_diagnostic(result)
         )
 
     def test_object_tracking_experiment_reuses_supplied_structural_filter_lock(self):
