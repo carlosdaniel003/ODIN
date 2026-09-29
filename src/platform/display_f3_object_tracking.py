@@ -160,13 +160,6 @@ F3_TRACKING_LUMINOUS_MAX_COMPONENT_AREA_FRACTION = 0.055
 # esperados para recuperar landmarks sem reduzir o quorum espacial do CHECK.
 F3_TRACKING_LUMINOUS_LOCAL_GATE_FRACTION = 0.09
 F3_TRACKING_LUMINOUS_LOCAL_MIN_HOT_PIXELS = 6
-# Com o filtro/placa já localizado, três segmentos luminosos identificáveis
-# bastam para corrigir a pose fina. Isso é geometria, não aprovação do CHECK.
-F3_TRACKING_LUMINOUS_STRUCTURAL_MIN_MATCHES = 3
-F3_TRACKING_LUMINOUS_LOCAL_MASK_PADDING_FRACTION = 0.55
-F3_TRACKING_LUMINOUS_LOCAL_MASK_PADDING_MIN_PX = 6.0
-F3_TRACKING_LUMINOUS_LOCAL_MIN_SPAN_FRACTION = 0.06
-F3_TRACKING_LUMINOUS_LOCAL_RANSAC_PX = 6.0
 
 # O contorno/filtro é a autoridade da pose grossa. A luz pode corrigir o
 # alinhamento fino, mas nunca pode torcer o conjunto inteiro por um casamento
@@ -669,27 +662,6 @@ def transform_mask(mask: dict, matrix) -> dict | None:
             "cx": float(point[0]),
             "cy": float(point[1]),
             "radius": max(1.0, float(source.get("radius", 1)) * affine_scale(affine)),
-        }
-
-    if kind == "segment":
-        point = affine @ np.asarray(
-            [float(source.get("cx", 0)), float(source.get("cy", 0)), 1.0],
-            dtype=np.float32,
-        )
-        scale = affine_scale(affine)
-        angle = (
-            float(source.get("angle", 0.0) or 0.0)
-            + affine_rotation_deg(affine)
-            + 180.0
-        ) % 360.0 - 180.0
-        return {
-            "id": mask_id,
-            "type": "segment",
-            "cx": float(point[0]),
-            "cy": float(point[1]),
-            "width": max(1.0, float(source.get("width", 1)) * scale),
-            "height": max(1.0, float(source.get("height", 1)) * scale),
-            "angle": float(angle),
         }
 
     points = pontos_mascara_display(source)
@@ -1567,23 +1539,6 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
     }
 
 
-def _robust_luminous_cluster_center(cluster) -> list[float] | None:
-    """Centro robusto de uma emissão, resistente a blooming/reflexo assimétrico."""
-    try:
-        points = np.asarray(cluster, dtype=np.float32).reshape(-1, 2)
-    except Exception:
-        return None
-    if len(points) < 1 or not np.all(np.isfinite(points)):
-        return None
-
-    median = np.median(points, axis=0)
-    low = np.percentile(points, 12.0, axis=0)
-    high = np.percentile(points, 88.0, axis=0)
-    envelope_center = (low + high) / 2.0
-    center = (median * 0.65) + (envelope_center * 0.35)
-    return [float(center[0]), float(center[1])]
-
-
 def _detect_expected_on_luminous_landmarks(
     frame,
     filter_points,
@@ -1631,14 +1586,6 @@ def _detect_expected_on_luminous_landmarks(
             expected,
             fit_to_current,
         ).reshape(-1, 2)
-        projected_masks = [
-            (
-                transform_mask(row.get("mask"), fit_to_current)
-                if isinstance(row.get("mask"), dict)
-                else None
-            )
-            for row in expected_rows
-        ]
     except (TypeError, ValueError, cv2.error):
         return {
             "available": False,
@@ -1748,49 +1695,17 @@ def _detect_expected_on_luminous_landmarks(
             (nearest_expected == int(expected_index))
             & (nearest_distance <= float(assignment_gate))
         )
-
-        search_bbox = None
-        projected_mask = (
-            projected_masks[expected_index]
-            if expected_index < len(projected_masks)
-            else None
-        )
-        if isinstance(projected_mask, dict):
-            try:
-                mx1, my1, mx2, my2 = bbox_mascara_display(projected_mask)
-                mask_w = max(1.0, float(mx2) - float(mx1))
-                mask_h = max(1.0, float(my2) - float(my1))
-                padding = max(
-                    F3_TRACKING_LUMINOUS_LOCAL_MASK_PADDING_MIN_PX,
-                    min(
-                        24.0,
-                        max(mask_w, mask_h)
-                        * F3_TRACKING_LUMINOUS_LOCAL_MASK_PADDING_FRACTION,
-                    ),
-                )
-                search_bbox = (
-                    float(mx1) - padding,
-                    float(my1) - padding,
-                    float(mx2) + padding,
-                    float(my2) + padding,
-                )
-                selected &= (
-                    (hot_points[:, 0] >= search_bbox[0])
-                    & (hot_points[:, 0] <= search_bbox[2])
-                    & (hot_points[:, 1] >= search_bbox[1])
-                    & (hot_points[:, 1] <= search_bbox[3])
-                )
-            except Exception:
-                search_bbox = None
-
         selected_indices = np.flatnonzero(selected)
         if len(selected_indices) < F3_TRACKING_LUMINOUS_LOCAL_MIN_HOT_PIXELS:
             continue
 
         cluster = hot_points[selected_indices]
-        center = _robust_luminous_cluster_center(cluster)
-        if center is None:
-            continue
+        # A mediana é deliberadamente usada em vez do centroide do blob:
+        # reflexos/blooming nas bordas deslocam menos a posição robusta.
+        center = [
+            float(np.median(cluster[:, 0])),
+            float(np.median(cluster[:, 1])),
+        ]
         centers.append(center)
         details.append(
             {
@@ -1803,23 +1718,9 @@ def _detect_expected_on_luminous_landmarks(
                     round(float(predicted[expected_index][0]), 3),
                     round(float(predicted[expected_index][1]), 3),
                 ],
-                "search_bbox": (
-                    [round(float(value), 3) for value in search_bbox]
-                    if search_bbox is not None
-                    else None
-                ),
                 "hot_pixel_count": int(len(selected_indices)),
                 "median_prediction_error_px": round(
                     float(np.median(nearest_distance[selected_indices])),
-                    3,
-                ),
-                "center_correction_px": round(
-                    float(
-                        np.linalg.norm(
-                            np.asarray(center, dtype=np.float32)
-                            - predicted[expected_index]
-                        )
-                    ),
                     3,
                 ),
             }
@@ -1861,98 +1762,6 @@ def _canonical_check_masks_for_luminous_tracking(
     ]
 
 
-def _luminous_fit_context(
-    runtime,
-    project: dict,
-    check: dict,
-) -> dict:
-    """Usa pose local do CHECK para achar luz e volta ao modelo canônico."""
-    canonical_board = (
-        getattr(runtime, "canonical_board", None)
-        or canonical_board_points(project, runtime.store)
-    )
-    canonical_masks = _canonical_check_masks_for_luminous_tracking(
-        runtime,
-        project,
-        check,
-    )
-    fallback = {
-        "space": "canonical",
-        "board": deepcopy(canonical_board),
-        "masks": deepcopy(canonical_masks),
-        "fit_to_canonical": None,
-        "canonical_to_fit": None,
-    }
-
-    check_id = str(check.get("id") or "")
-    overrides = (
-        check.get("mask_overrides_reference", {})
-        if isinstance(check.get("mask_overrides_reference"), dict)
-        else {}
-    )
-    explicit_board = _normalize_points(
-        check.get("board_points_reference"),
-        minimum=3,
-    )
-    if not check_id or not bool(explicit_board or overrides):
-        return fallback
-
-    reference = (
-        runtime.references.get(f"check:{check_id}")
-        if isinstance(getattr(runtime, "references", None), dict)
-        else None
-    )
-    fit_to_canonical = (
-        reference.get("reference_to_canonical")
-        if isinstance(reference, dict)
-        else None
-    )
-    if fit_to_canonical is None:
-        return fallback
-
-    try:
-        fit_to_canonical = np.asarray(
-            fit_to_canonical,
-            dtype=np.float32,
-        ).reshape(2, 3)
-        canonical_to_fit = cv2.invertAffineTransform(fit_to_canonical)
-    except Exception:
-        return fallback
-
-    board = (
-        deepcopy(explicit_board)
-        if explicit_board
-        else transform_points(canonical_board, canonical_to_fit)
-    )
-    if len(board) < 3:
-        return fallback
-
-    local_masks = []
-    for base in canonical_masks:
-        if not isinstance(base, dict):
-            continue
-        mask_id = str(base.get("id") or "")
-        override = overrides.get(mask_id)
-        if isinstance(override, dict):
-            local = sincronizar_formato_mascara_display(base, override)
-        else:
-            local = transform_mask(base, canonical_to_fit)
-        if isinstance(local, dict):
-            local["id"] = mask_id
-            local_masks.append(local)
-
-    if len(local_masks) < F3_TRACKING_LUMINOUS_STRUCTURAL_MIN_MATCHES:
-        return fallback
-
-    return {
-        "space": f"check:{check_id}",
-        "board": board,
-        "masks": local_masks,
-        "fit_to_canonical": fit_to_canonical,
-        "canonical_to_fit": canonical_to_fit,
-    }
-
-
 def _expected_on_rows(masks, states) -> list[dict]:
     state_map = states if isinstance(states, dict) else {}
     rows: list[dict] = []
@@ -1969,7 +1778,6 @@ def _expected_on_rows(masks, states) -> list[dict]:
             {
                 "mask_id": mask_id,
                 "center": [float(center[0]), float(center[1])],
-                "mask": deepcopy(mask),
             }
         )
     return rows
@@ -2007,251 +1815,21 @@ def _greedy_point_matches(
     return matched
 
 
-def _fit_direct_luminous_pose(
-    canonical_board,
-    expected_rows,
-    local_landmarks: dict,
-    coarse_matrix,
-    diagnostics: dict | None = None,
-) -> dict | None:
-    """Refina a pose mantendo a identidade MASK_ID de cada emissão local."""
-    diagnostic = diagnostics if isinstance(diagnostics, dict) else None
-    details = [
-        item for item in (local_landmarks.get("details") or [])
-        if isinstance(item, dict)
-    ]
-    expected_by_id = {
-        str(row.get("mask_id") or ""): row
-        for row in expected_rows
-        if isinstance(row, dict) and str(row.get("mask_id") or "")
-    }
-
-    source_points = []
-    target_points = []
-    matched_ids = []
-    for item in details:
-        mask_id = str(item.get("mask_id") or "")
-        row = expected_by_id.get(mask_id)
-        center = item.get("center")
-        if (
-            row is None
-            or not isinstance(center, (list, tuple))
-            or len(center) < 2
-        ):
-            continue
-        try:
-            source_points.append([float(center[0]), float(center[1])])
-            target_points.append(
-                [float(row["center"][0]), float(row["center"][1])]
-            )
-            matched_ids.append(mask_id)
-        except (TypeError, ValueError, KeyError, IndexError):
-            continue
-
-    required = F3_TRACKING_LUMINOUS_STRUCTURAL_MIN_MATCHES
-    if diagnostic is not None:
-        diagnostic.clear()
-        diagnostic.update(
-            {
-                "expected_on_count": int(len(expected_rows)),
-                "observed_component_count": int(len(source_points)),
-                "required_match_count": int(required),
-                "hypothesis_count": 1,
-                "best_coarse_match_count": int(len(source_points)),
-                "best_final_match_count": 0,
-                "failure_stage": "not_started",
-                "fit_mode": "mask_id_local_landmarks",
-            }
-        )
-
-    if len(source_points) < required:
-        if diagnostic is not None:
-            diagnostic["failure_stage"] = "local_landmarks_insufficient"
-        return None
-
-    board = np.asarray(
-        _quad_from_points(canonical_board),
-        dtype=np.float32,
-    ).reshape(-1, 2)
-    source_all = np.asarray(source_points, dtype=np.float32).reshape(-1, 2)
-    target_all = np.asarray(target_points, dtype=np.float32).reshape(-1, 2)
-    if len(board) != 4:
-        if diagnostic is not None:
-            diagnostic["failure_stage"] = "invalid_board_geometry"
-        return None
-
-    # Reflexo pode cair dentro da vizinhança de uma máscara que deveria estar ON
-    # mas não acendeu. Como a identidade MASK_ID é conhecida, RANSAC aqui serve
-    # apenas para eliminar essas correspondências luminosas falsas antes do fit.
-    try:
-        matrix, inlier_mask = cv2.estimateAffinePartial2D(
-            source_all.reshape(-1, 1, 2),
-            target_all.reshape(-1, 1, 2),
-            method=cv2.RANSAC,
-            ransacReprojThreshold=F3_TRACKING_LUMINOUS_LOCAL_RANSAC_PX,
-            maxIters=2400,
-            confidence=0.995,
-            refineIters=20,
-        )
-    except Exception:
-        matrix, inlier_mask = None, None
-    if matrix is None:
-        if diagnostic is not None:
-            diagnostic["failure_stage"] = "refined_affine_rejected"
-        return None
-
-    if inlier_mask is None:
-        inliers = np.ones(len(source_all), dtype=bool)
-    else:
-        inliers = np.asarray(inlier_mask).reshape(-1).astype(bool)
-    inlier_count = int(np.count_nonzero(inliers))
-    if inlier_count < required:
-        if diagnostic is not None:
-            diagnostic.update(
-                {
-                    "failure_stage": "local_landmark_inliers_insufficient",
-                    "best_final_match_count": inlier_count,
-                    "ransac_inlier_count": inlier_count,
-                }
-            )
-        return None
-
-    source = source_all[inliers]
-    target = target_all[inliers]
-    matched_ids = [
-        mask_id
-        for mask_id, is_inlier in zip(matched_ids, inliers.tolist())
-        if bool(is_inlier)
-    ]
-
-    scale = affine_scale(matrix)
-    if not (
-        F3_TRACKING_REFERENCE_SCALE_MIN
-        <= scale
-        <= F3_TRACKING_REFERENCE_SCALE_MAX
-    ):
-        if diagnostic is not None:
-            diagnostic["failure_stage"] = "refined_affine_rejected"
-        return None
-
-    board_diagonal = max(
-        1.0,
-        float(np.linalg.norm(np.max(board, axis=0) - np.min(board, axis=0))),
-    )
-    target_span = float(
-        np.linalg.norm(np.max(target, axis=0) - np.min(target, axis=0))
-    )
-    minimum_span = max(
-        8.0,
-        board_diagonal * F3_TRACKING_LUMINOUS_LOCAL_MIN_SPAN_FRACTION,
-    )
-    if target_span < minimum_span:
-        if diagnostic is not None:
-            diagnostic.update(
-                {
-                    "failure_stage": "local_landmarks_spatial_span_insufficient",
-                    "landmark_span_px": round(target_span, 3),
-                    "minimum_landmark_span_px": round(minimum_span, 3),
-                    "ransac_inlier_count": inlier_count,
-                }
-            )
-        return None
-
-    matrix = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
-    allowed, guard = _luminous_refinement_within_coarse_guard(
-        matrix,
-        coarse_matrix,
-        canonical_board,
-    )
-    if not allowed:
-        if diagnostic is not None:
-            diagnostic.update(
-                {
-                    "failure_stage": "refined_pose_outside_filter_guard",
-                    "refinement_guard": deepcopy(guard),
-                }
-            )
-        return None
-
-    projected = cv2.transform(
-        source.reshape(-1, 1, 2),
-        np.asarray(matrix, dtype=np.float32).reshape(2, 3),
-    ).reshape(-1, 2)
-    errors = np.linalg.norm(projected - target, axis=1)
-    median_error = float(np.median(errors)) if len(errors) else float("inf")
-    matched_set = set(matched_ids)
-    missing_ids = [
-        str(row.get("mask_id") or "")
-        for row in expected_rows
-        if str(row.get("mask_id") or "") not in matched_set
-    ]
-    match_ratio = len(matched_ids) / max(1, len(expected_rows))
-    score = (
-        float(len(matched_ids)) * 4.0
-        + float(match_ratio) * 10.0
-        - median_error / 4.0
-    )
-
-    if diagnostic is not None:
-        diagnostic.update(
-            {
-                "failure_stage": "",
-                "best_final_match_count": int(len(matched_ids)),
-                "ransac_inlier_count": int(len(matched_ids)),
-                "ransac_candidate_count": int(len(source_all)),
-                "matched_mask_ids": list(matched_ids),
-                "median_error_px": round(float(median_error), 3),
-                "landmark_span_px": round(target_span, 3),
-                "minimum_landmark_span_px": round(minimum_span, 3),
-                "refinement_guard": deepcopy(guard),
-            }
-        )
-
-    return {
-        "matrix": np.asarray(matrix, dtype=np.float32).reshape(2, 3),
-        "matched_mask_ids": list(matched_ids),
-        "missing_expected_on_mask_ids": missing_ids,
-        "matched_count": int(len(matched_ids)),
-        "expected_on_count": int(len(expected_rows)),
-        "match_ratio": float(match_ratio),
-        "median_error_px": float(median_error),
-        "coarse_gate_px": float(
-            local_landmarks.get("assignment_gate_px", 0.0) or 0.0
-        ),
-        "final_gate_px": float(
-            local_landmarks.get("assignment_gate_px", 0.0) or 0.0
-        ),
-        "score": float(score),
-        "required_match_count": int(required),
-    }
-
-
 def _fit_luminous_pose(
     canonical_board,
     expected_rows,
     luminous_centers,
     coarse_matrices,
     diagnostics: dict | None = None,
-    required_match_count: int | None = None,
 ) -> dict | None:
     expected_count = int(len(expected_rows))
     observed_count = int(len(luminous_centers))
-    default_required = max(
+    required = max(
         F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
         int(math.ceil(
             expected_count * F3_TRACKING_LUMINOUS_MIN_MATCH_RATIO
         )),
     )
-    if required_match_count is None:
-        required = default_required
-    else:
-        required = min(
-            expected_count,
-            max(
-                F3_TRACKING_LUMINOUS_MIN_COMPONENTS,
-                int(required_match_count),
-            ),
-        )
 
     diagnostic = diagnostics if isinstance(diagnostics, dict) else None
     if diagnostic is not None:
@@ -2726,12 +2304,27 @@ def _find_luminous_segment_pose(
             "reason": "structural_base_matrix_missing",
             "centers": [],
         }
-        local_fit_diagnostics: dict = {}
 
-        if (
-            normalized_base_matrix is not None
-            and luminous.get("threshold_v") is not None
-        ):
+        if bool(luminous.get("available")):
+            fit = _fit_luminous_pose(
+                canonical_board,
+                expected_rows,
+                luminous.get("centers") or [],
+                coarse_matrices,
+                diagnostics=fit_diagnostics,
+            )
+        elif normalized_base_matrix is None:
+            attempt["fit_diagnostics"] = {}
+            attempt["fit"] = False
+            attempts.append(attempt)
+            continue
+
+        # Um display real pode apresentar blooming: dois ou mais segmentos
+        # separados viram um único contorno externo. Quando já há lock estrutural
+        # atual, repartimos SOMENTE os pixels luminosos entre os ON esperados e
+        # tentamos o mesmo fit/quorum novamente. Nenhuma regra de decisão é
+        # relaxada e segmentos OFF continuam fora da busca.
+        if fit is None and normalized_base_matrix is not None:
             local_landmarks = _detect_expected_on_luminous_landmarks(
                 frame,
                 filter_points,
@@ -2740,43 +2333,36 @@ def _find_luminous_segment_pose(
                 luminous.get("threshold_v"),
             )
             if bool(local_landmarks.get("available")):
-                fit = _fit_direct_luminous_pose(
+                local_fit_diagnostics: dict = {}
+                local_fit = _fit_luminous_pose(
                     canonical_board,
                     expected_rows,
-                    local_landmarks,
-                    normalized_base_matrix,
+                    local_landmarks.get("centers") or [],
+                    [normalized_base_matrix],
                     diagnostics=local_fit_diagnostics,
                 )
-                if fit is not None:
+                attempt["global_fit_diagnostics"] = deepcopy(
+                    fit_diagnostics
+                )
+                attempt["local_fit_diagnostics"] = deepcopy(
+                    local_fit_diagnostics
+                )
+                if local_fit is not None:
+                    fit = local_fit
                     fit_diagnostics = local_fit_diagnostics
                     fit_landmark_source = "expected_on_local_emission"
-
-        global_fit_diagnostics: dict = {}
-        if fit is None and bool(luminous.get("available")):
-            fit = _fit_luminous_pose(
-                canonical_board,
-                expected_rows,
-                luminous.get("centers") or [],
-                coarse_matrices,
-                diagnostics=global_fit_diagnostics,
-            )
-            if fit is not None:
-                fit_diagnostics = global_fit_diagnostics
-                fit_landmark_source = "global_connected_components"
-            elif not fit_diagnostics:
-                fit_diagnostics = global_fit_diagnostics
-        elif fit is None and normalized_base_matrix is None:
-            attempt["fit_diagnostics"] = {}
-            attempt["fit"] = False
-            attempts.append(attempt)
-            continue
-
-        attempt["global_fit_diagnostics"] = deepcopy(
-            global_fit_diagnostics
-        )
-        attempt["local_fit_diagnostics"] = deepcopy(
-            local_fit_diagnostics
-        )
+                elif int(
+                    local_fit_diagnostics.get(
+                        "best_final_match_count",
+                        0,
+                    ) or 0
+                ) > int(
+                    fit_diagnostics.get(
+                        "best_final_match_count",
+                        0,
+                    ) or 0
+                ):
+                    fit_diagnostics = local_fit_diagnostics
 
         attempt["fit_landmark_source"] = fit_landmark_source
         attempt["local_luminous_landmark_count"] = int(
@@ -2969,45 +2555,35 @@ def _rescue_luminous_segment_tracking_lock(
     if not isinstance(check, dict):
         check = current
 
-    fit_context = _luminous_fit_context(
+    fit_board = (
+        getattr(runtime, "canonical_board", None)
+        or canonical_board_points(project, runtime.store)
+    )
+    fit_masks = _canonical_check_masks_for_luminous_tracking(
         runtime,
         project,
         check,
     )
-    fit_board = fit_context.get("board") or []
-    fit_masks = fit_context.get("masks") or []
-    fit_space = str(fit_context.get("space") or "canonical")
-    fit_to_canonical = fit_context.get("fit_to_canonical")
-    canonical_to_fit = fit_context.get("canonical_to_fit")
+    fit_space = "canonical"
 
     expected_rows = _expected_on_rows(
         fit_masks,
         check.get("mask_states", {}),
     )
 
-    base_matrix_canonical = None
+    base_matrix = None
     if (
         base_result is not None
         and bool(getattr(base_result, "locked", False))
         and getattr(base_result, "current_to_canonical", None) is not None
     ):
         try:
-            base_matrix_canonical = np.asarray(
+            base_matrix = np.asarray(
                 base_result.current_to_canonical,
                 dtype=np.float32,
             ).reshape(2, 3)
         except Exception:
-            base_matrix_canonical = None
-
-    base_matrix = base_matrix_canonical
-    if (
-        base_matrix_canonical is not None
-        and canonical_to_fit is not None
-    ):
-        base_matrix = compose_affine(
-            canonical_to_fit,
-            base_matrix_canonical,
-        )
+            base_matrix = None
 
     pose = _find_luminous_segment_pose(
         frame,
@@ -3023,14 +2599,10 @@ def _rescue_luminous_segment_tracking_lock(
     luminous_emission_detected = bool(
         pose.get("available")
         or any(
-            (
-                str(item.get("luminous_reason") or "")
-                == "luminous_segments_detected"
-                and int(item.get("luminous_component_count", 0) or 0)
-                >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
-            )
-            or int(item.get("local_luminous_landmark_count", 0) or 0)
-            >= F3_TRACKING_LUMINOUS_STRUCTURAL_MIN_MATCHES
+            str(item.get("luminous_reason") or "")
+            == "luminous_segments_detected"
+            and int(item.get("luminous_component_count", 0) or 0)
+            >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
             for item in attempts
         )
     )
@@ -3099,17 +2671,7 @@ def _rescue_luminous_segment_tracking_lock(
                 and getattr(base_result, "locked", False)
             ),
             "fit_space": fit_space,
-            "fit_composed_to_canonical": bool(
-                fit_to_canonical is not None
-            ),
-            "fine_tracking_mode": (
-                "plate_contour_plus_luminous_segments"
-                if base_matrix is not None
-                else "luminous_reacquisition"
-            ),
-            "structural_luminous_min_matches": int(
-                F3_TRACKING_LUMINOUS_STRUCTURAL_MIN_MATCHES
-            ),
+            "fit_composed_to_canonical": bool(fit_space != "canonical"),
             "expected_on_count": int(len(expected_rows)),
             "luminous_component_count": luminous_component_count,
             "local_luminous_landmark_count": int(
@@ -3151,14 +2713,6 @@ def _rescue_luminous_segment_tracking_lock(
         return None
 
     matrix = np.asarray(fit_matrix, dtype=np.float32).reshape(2, 3)
-    if fit_to_canonical is not None:
-        composed = compose_affine(
-            fit_to_canonical,
-            matrix,
-        )
-        if composed is None:
-            return None
-        matrix = np.asarray(composed, dtype=np.float32).reshape(2, 3)
     if not np.all(np.isfinite(matrix)):
         return None
 

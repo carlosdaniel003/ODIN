@@ -351,17 +351,6 @@ Decisão:
   produtiva obrigatória;
 - quando existe emissão, o tracking usa somente os segmentos **ACESOS** do CHECK
   lógico atual como landmarks para refinar ou recuperar a pose;
-- com o contorno/filtro já localizado, o alinhamento fino é **segment-centric**:
-  cada emissão é procurada prioritariamente dentro da vizinhança da própria
-  máscara esperada, preservando a identidade MASK_ID em vez de depender apenas
-  do centro de blobs globais;
-- com lock estrutural atual, **3 segmentos luminosos espacialmente válidos** são
-  suficientes para estimar a pose fina do padrão 88:88; isso só autoriza
-  geometria, nunca aprova o CHECK nem reduz a exigência de conformidade das
-  28 máscaras;
-- quando o CHECK possui geometria local salva na própria foto de referência, essa
-  pose local é preferida para localizar os landmarks e depois composta de volta
-  ao modelo canônico; formato e topologia das máscaras continuam canônicos;
 - o filtro limita a região de busca; os segmentos luminosos determinam o
   alinhamento fino do display dentro dessa região;
 - segmentos apagados não são procurados para obter pose;
@@ -436,10 +425,6 @@ Decisão:
   espacial das máscaras de H1;
 - três ou mais componentes luminosos válidos dentro do filtro localizado podem
   confirmar **energia física**, mesmo antes do encaixe fino;
-- quando esses três componentes também podem ser associados por MASK_ID às
-  posições esperadas a partir do lock estrutural, eles podem confirmar a
-  **geometria fina**; classificação e OK/NG continuam exclusivamente na
-  autoridade canônica F3CheckAnalyzerAuthority;
 - energia confirmada sem alinhamento espacial resulta em
   `LIGADA • ALINHANDO <CHECK>`, com `allow_auto=false` e sem autoridade de
   OK/NG/avanço;
