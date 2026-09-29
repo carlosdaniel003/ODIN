@@ -22,7 +22,8 @@ Qualquer agente de IA que trabalhe neste repositório deve começar por `AGENTS.
 - `docs/PERFORMANCE.md` — invariantes de runtime e responsividade;
 - `docs/AI_WORKFLOW.md` — processo de trabalho por etapas;
 - `docs/DECISIONS.md` — decisões arquiteturais aceitas;
-- `docs/F3_MIGRATION.md` — ordem de modernização do F3.
+- `docs/F3_MIGRATION.md` — ordem de modernização do F3;
+- `docs/F3_PHYSICAL_VALIDATION_LOG.md` — histórico cronológico de testes físicos, falhas, correções e retestes do Display F3.
 
 **Plataformas alvo: Windows e Linux desktop.** A composição canônica usa
 classes `Desktop*`. Os shims/classes Raspberry e a infraestrutura GPIO foram

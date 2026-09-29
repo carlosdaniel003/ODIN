@@ -209,6 +209,149 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         )
         self.assertIn("ALINHANDO H1", result["text"])
 
+    def test_usb_power_gate_aceita_lock_luminoso_atual_do_mesmo_check(self):
+        app = _App()
+        owner = authorities.F3PowerAuthority(app)
+        energy = {
+            "powered_confirmed": True,
+            "off_confirmed": False,
+            "energy_state": "powered",
+            "spatial_alignment_required": True,
+            "spatial_alignment_ready": False,
+            "spatial_alignment_source": "structural_only",
+            "frame_token": ("camera", 949),
+        }
+        tracking = {
+            "locked": True,
+            "evidence_current": True,
+            "reference": "luminous:CHECK_004",
+            "reason": "locked_luminous_segments_refined",
+            "source_type": "luminous_segment_grid",
+            "frame_id": 942,
+            "verified_age_ms": 320.0,
+            "luminous_validated_mask_ids": [
+                "MASK_008",
+                "MASK_009",
+                "MASK_010",
+            ],
+        }
+
+        result = owner.apply(
+            {"kind": "unknown"},
+            {
+                "board_present": True,
+                "presence_confirmed": True,
+                "empty_confirmed": False,
+            },
+            energy,
+            project_name="CM_500_L",
+            context={"check_id": "CHECK_004", "check_name": "USB"},
+            tracking=tracking,
+        )
+
+        self.assertTrue(result["allow_auto"])
+        self.assertTrue(
+            result[authorities.contract_module.F3_DECISION_ALLOWED_KEY]
+        )
+        self.assertFalse(result["power_gate_blocked"])
+        self.assertEqual(
+            "presenca_estavel_e_energia_confirmada",
+            result["power_gate_reason"],
+        )
+        self.assertTrue(
+            result["power_evidence"][
+                "spatial_alignment_reconciled_from_tracking"
+            ]
+        )
+        self.assertEqual(
+            "runtime_current_luminous_tracking",
+            result["power_evidence"]["spatial_alignment_source"],
+        )
+        self.assertEqual(
+            942,
+            result["power_evidence"]["spatial_alignment_tracking_frame_id"],
+        )
+
+    def test_lock_luminoso_stale_ou_de_outro_check_nao_libera_gate(self):
+        app = _App()
+        owner = authorities.F3PowerAuthority(app)
+        energy = {
+            "powered_confirmed": True,
+            "off_confirmed": False,
+            "energy_state": "powered",
+            "spatial_alignment_required": True,
+            "spatial_alignment_ready": False,
+            "frame_token": ("camera", 949),
+        }
+        base_tracking = {
+            "locked": True,
+            "evidence_current": True,
+            "source_type": "luminous_segment_grid",
+            "frame_id": 942,
+            "verified_age_ms": 320.0,
+            "luminous_validated_mask_ids": ["MASK_008"],
+        }
+
+        wrong_check = owner.apply(
+            {"kind": "unknown"},
+            {
+                "board_present": True,
+                "presence_confirmed": True,
+                "empty_confirmed": False,
+            },
+            energy,
+            project_name="CM_500_L",
+            context={"check_id": "CHECK_004", "check_name": "USB"},
+            tracking={
+                **base_tracking,
+                "reference": "luminous:CHECK_002",
+            },
+        )
+        self.assertFalse(wrong_check["allow_auto"])
+
+        stale = owner.apply(
+            {"kind": "unknown"},
+            {
+                "board_present": True,
+                "presence_confirmed": True,
+                "empty_confirmed": False,
+            },
+            energy,
+            project_name="CM_500_L",
+            context={"check_id": "CHECK_004", "check_name": "USB"},
+            tracking={
+                **base_tracking,
+                "reference": "luminous:CHECK_004",
+                "verified_age_ms": (
+                    authorities.F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS
+                    + 1.0
+                ),
+            },
+        )
+        self.assertFalse(stale["allow_auto"])
+
+        far_frame = owner.apply(
+            {"kind": "unknown"},
+            {
+                "board_present": True,
+                "presence_confirmed": True,
+                "empty_confirmed": False,
+            },
+            energy,
+            project_name="CM_500_L",
+            context={"check_id": "CHECK_004", "check_name": "USB"},
+            tracking={
+                **base_tracking,
+                "reference": "luminous:CHECK_004",
+                "frame_id": (
+                    949
+                    - authorities.F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP
+                    - 1
+                ),
+            },
+        )
+        self.assertFalse(far_frame["allow_auto"])
+
     def test_cycle_reset_clears_tracking_orientation_for_next_board(self):
         owner = authorities.F3RuntimeAuthorities.__new__(
             authorities.F3RuntimeAuthorities
@@ -355,6 +498,11 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(1, classify.call_count)
         self.assertEqual(1, owner.power.evaluate.call_count)
+        self.assertIn("tracking", owner.power.apply.call_args.kwargs)
+        self.assertEqual(
+            tracking_owner.presence_evidence.return_value,
+            owner.power.apply.call_args.kwargs["tracking"],
+        )
         self.assertEqual(1, owner.build_count)
         self.assertEqual(1, owner.cache_hits)
         self.assertEqual(

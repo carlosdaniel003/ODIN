@@ -917,6 +917,79 @@ O BLUE pode ter a fase acesa capturada e analisada mesmo que, quando o worker te
 Esta decisão complementa D-024 e D-026.
 
 ---
+## D-028 — Gate espacial aceita lock luminoso atual do mesmo CHECK entre frames assíncronos
+
+**Status:** Accepted
+
+### Contexto
+
+No teste físico de USB de 29/09/2026, o display estava correto e a análise
+semântica chegou a `approved=true` com 28/28 máscaras conformes. A energia física
+também estava confirmada. Mesmo assim, o CHECK não avançou.
+
+O DEBUG mostrou duas visões temporalmente próximas do mesmo estado:
+
+- o tracker no frame 942 possuía `luminous:CHECK_004`,
+  `source_type=luminous_segment_grid`, `evidence_current=true`, 15/15 IDs ON
+  validados e `alignment_ready=true`;
+- a autoridade de energia, em um frame live posterior, possuía
+  `powered_confirmed=true`, porém ainda carregava
+  `spatial_alignment_ready=false` / `structural_only`.
+
+O resultado 28/28 correto ficou `blocked_by_power_gate=true`. A falha era de
+coerência temporal entre proprietários assíncronos, não de energia, classificação
+ou geometria luminosa.
+
+### Decisão
+
+- `F3PowerAuthority` continua sendo o proprietário do gate de energia.
+- O proprietário canônico de tracking passa sua evidência explicitamente ao
+  `F3PowerAuthority`.
+- Quando a energia do frame live estiver realmente confirmada, a autoridade pode
+  reconciliar `spatial_alignment_ready` a partir do lock luminoso atual do
+  tracker, desde que:
+  - `locked=true`;
+  - `evidence_current=true`;
+  - `source_type=luminous_segment_grid`;
+  - a referência seja exatamente `luminous:<CHECK atual>`;
+  - existam IDs luminosos validados;
+  - a idade do lock esteja dentro de
+    `F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS`;
+  - a diferença de frame esteja dentro de
+    `F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP`.
+- O tracking não substitui a prova de energia: sem
+  `powered_confirmed=true`, essa reconciliação não libera decisão.
+- Lock estrutural, lock mantido/stale, outro CHECK e evidência fora da janela de
+  frescor continuam bloqueados.
+- A regra estrita de mesmo snapshot dentro da autoridade bruta de energia não é
+  relaxada. A reconciliação acontece na composição canônica das autoridades,
+  onde tracking e energia já são proprietários distintos.
+- O CHECK ainda precisa passar pelo analyzer canônico. A reconciliação apenas
+  remove o falso bloqueio espacial; não transforma tracking em autoridade de
+  OK/NG.
+
+### Consequência
+
+Um CHECK contínuo como USB pode ser aprovado quando:
+
+~~~text
+tracking recente prova a geometria luminosa do USB
++
+frame live prova que o display continua energizado
++
+analyzer prova 28/28 conforme
+=
+USB possui autoridade produtiva para avançar
+~~~
+
+A defasagem normal de poucos frames causada pelo executor pesado deixa de
+bloquear um CHECK correto, sem aceitar geometria antiga ou pertencente a outro
+CHECK.
+
+O histórico físico detalhado desta ocorrência fica em
+`docs/F3_PHYSICAL_VALIDATION_LOG.md`.
+
+---
 ## Como adicionar uma decisão
 
 Use:

@@ -129,6 +129,8 @@ jobs:
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_intermittent_semantic_snapshot_survives_next_off_phase_within_hold \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_intermittent_snapshot_does_not_relax_steady_or_long_stale_frame \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_intermittent_tracking_snapshot_can_launch_semantic_after_live_frame_advanced \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_usb_power_gate_aceita_lock_luminoso_atual_do_mesmo_check \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_lock_luminoso_stale_ou_de_outro_check_nao_libera_gate \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_analisador_rastreado_aceita_snapshot_explicito_sem_estado_mutavel_do_app \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_emissao_no_nucleo_exato_promove_on_sem_aprovar_mascara_off_errada \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_evidencia_luminosa_nao_promove_on_sem_lock_do_mesmo_check \

@@ -14,7 +14,8 @@ Antes de analisar, planejar ou alterar código:
 6. Leia `docs/AI_WORKFLOW.md`.
 7. Leia `docs/DECISIONS.md`.
 8. Leia documentação específica do subsistema afetado, quando existir.
-9. Inspecione a branch e o código atuais. Não assuma que o estado lembrado de uma conversa anterior ainda é o estado do repositório.
+9. Para qualquer trabalho no Display F3, leia também `docs/F3_PHYSICAL_VALIDATION_LOG.md`.
+10. Inspecione a branch e o código atuais. Não assuma que o estado lembrado de uma conversa anterior ainda é o estado do repositório.
 
 Esses documentos são instruções obrigatórias do projeto.
 
@@ -86,6 +87,25 @@ Quando existir um plano em fases:
 Se o usuário pedir apenas análise, visualização, diagnóstico ou planejamento:
 
 **não altere nenhum arquivo.**
+
+### Registro obrigatório de validação física do F3
+
+Sempre que o usuário relatar um teste físico do Display F3, registre o resultado em
+`docs/F3_PHYSICAL_VALIDATION_LOG.md`, inclusive quando o resultado for negativo.
+
+O registro deve preservar:
+
+- data;
+- cenário/CHECK;
+- PASS, FAIL ou PENDENTE DE RETESTE;
+- sintoma observado;
+- evidência objetiva disponível no DEBUG;
+- causa identificada, quando houver;
+- alteração aplicada;
+- próximo reteste esperado.
+
+Não apague falhas antigas depois que uma correção funcionar. O histórico deve
+mostrar a sequência real de tentativa, evidência, correção e validação.
 
 ## 6. Princípios arquiteturais obrigatórios
 

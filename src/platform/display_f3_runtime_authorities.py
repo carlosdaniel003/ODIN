@@ -21,6 +21,8 @@ import src.platform.display_f3_runtime_contract_fix as contract_module
 import src.platform.display_f3_check_transition_guard as transition_module
 from src.platform.display_f3_contour_check_identity import F3TrackedRawCheckAnalyzer
 from src.platform.display_f3_object_tracking import (
+    F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP,
+    F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS,
     get_tracking_runtime,
     reset_tracking_runtime,
 )
@@ -32,6 +34,74 @@ F3_TRACKING_PRESENCE_SOURCE = "f3_tracking_current_lock_presence"
 
 def _valid_frame(frame) -> bool:
     return frame is not None and getattr(frame, "size", 0) > 0
+
+
+def _camera_frame_id_from_token(token):
+    if (
+        isinstance(token, (list, tuple))
+        and len(token) >= 2
+        and token[0] == "camera"
+    ):
+        try:
+            return int(token[1])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _current_luminous_alignment_for_check(
+    tracking: dict | None,
+    energy: dict | None,
+    check_id: str,
+) -> bool:
+    """Reconcilia a latência normal entre tracking HIGH e energia do frame live.
+
+    A geometria luminosa continua pertencendo ao tracker. A autoridade de energia
+    pode apenas consumir esse lock quando ele é atual, pertence ao mesmo CHECK e
+    ainda está dentro dos mesmos limites de frescor usados pelo pipeline pesado.
+    """
+    data = tracking if isinstance(tracking, dict) else {}
+    evidence = energy if isinstance(energy, dict) else {}
+    expected_reference = f"luminous:{str(check_id or '')}"
+
+    if not (
+        bool(data.get("locked"))
+        and bool(data.get("evidence_current"))
+        and str(data.get("source_type") or "") == "luminous_segment_grid"
+        and str(data.get("reference") or "") == expected_reference
+        and bool(data.get("luminous_validated_mask_ids"))
+    ):
+        return False
+
+    try:
+        age_ms = float(data.get("verified_age_ms", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return False
+    if (
+        age_ms < 0.0
+        or age_ms > float(F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS)
+    ):
+        return False
+
+    tracking_frame_id = data.get("frame_id")
+    try:
+        tracking_frame_id = (
+            int(tracking_frame_id)
+            if tracking_frame_id is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        return False
+    energy_frame_id = _camera_frame_id_from_token(evidence.get("frame_token"))
+    if (
+        tracking_frame_id is not None
+        and energy_frame_id is not None
+        and abs(energy_frame_id - tracking_frame_id)
+        > int(F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP)
+    ):
+        return False
+
+    return True
 
 
 class F3TrackingAuthority:
@@ -52,6 +122,14 @@ class F3TrackingAuthority:
             if self.runtime is not None
             else None
         )
+        last_verified_s = float(
+            getattr(self.runtime, "last_verified_s", 0.0) or 0.0
+        ) if self.runtime is not None else 0.0
+        verified_age_ms = (
+            max(0.0, (time.monotonic() - last_verified_s) * 1000.0)
+            if last_verified_s > 0.0
+            else float("inf")
+        )
         return {
             "available": result is not None,
             "source": F3_TRACKING_PRESENCE_SOURCE,
@@ -61,6 +139,19 @@ class F3TrackingAuthority:
             ),
             "reference": str(getattr(result, "reference", "") or ""),
             "reason": str(getattr(result, "reason", "") or ""),
+            "source_type": str(getattr(result, "source_type", "") or ""),
+            "frame_id": (
+                getattr(self.runtime, "last_frame_id", None)
+                if self.runtime is not None
+                else None
+            ),
+            "verified_age_ms": round(float(verified_age_ms), 2),
+            "luminous_validated_mask_ids": list(
+                getattr(result, "luminous_validated_mask_ids", ()) or ()
+            ),
+            "luminous_alignment_mode": str(
+                getattr(result, "luminous_alignment_mode", "") or ""
+            ),
         }
 
     def stats(self) -> dict:
@@ -177,6 +268,7 @@ class F3PowerAuthority:
         *,
         project_name: str,
         context: dict | None,
+        tracking: dict | None = None,
     ) -> dict:
         output = deepcopy(state)
         output["board_presence_evidence"] = deepcopy(presence)
@@ -220,6 +312,40 @@ class F3PowerAuthority:
             intermittent = bool((context or {}).get("intermittent", False))
             signature = (str(project_name or ""), check_id)
             now = time.monotonic()
+
+            # O worker de tracking e a leitura física de energia terminam em
+            # instantes diferentes. Se a energia do frame live está confirmada,
+            # aceite o lock luminoso ATUAL do proprietário canônico do tracking
+            # para o mesmo CHECK em vez de bloquear um 28/28 correto só porque
+            # a geometria publicada no frame de energia ainda era estrutural.
+            if (
+                evidence.get("powered_confirmed")
+                and evidence.get("spatial_alignment_required") is True
+                and evidence.get("spatial_alignment_ready") is not True
+                and _current_luminous_alignment_for_check(
+                    tracking,
+                    evidence,
+                    check_id,
+                )
+            ):
+                tracking_data = tracking if isinstance(tracking, dict) else {}
+                evidence.update(
+                    spatial_alignment_ready=True,
+                    spatial_alignment_source="runtime_current_luminous_tracking",
+                    spatial_alignment_reconciled_from_tracking=True,
+                    spatial_alignment_tracking_reference=str(
+                        tracking_data.get("reference") or ""
+                    ),
+                    spatial_alignment_tracking_frame_id=(
+                        tracking_data.get("frame_id")
+                    ),
+                    spatial_alignment_tracking_age_ms=(
+                        tracking_data.get("verified_age_ms")
+                    ),
+                    spatial_alignment_luminous_mask_ids=list(
+                        tracking_data.get("luminous_validated_mask_ids") or ()
+                    ),
+                )
 
             spatial_ready = evidence.get("spatial_alignment_ready") is not False
             if evidence.get("powered_confirmed"):
@@ -576,6 +702,7 @@ class F3RuntimeAuthorities:
             energy,
             project_name=project_name,
             context=context,
+            tracking=tracking_evidence,
         )
         state = live_runtime_module.aplicar_gate_rearme_ciclo_f3(
             self.app,
