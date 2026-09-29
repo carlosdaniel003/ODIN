@@ -1906,6 +1906,125 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             set(validation["validated_mask_ids"]),
         )
 
+    def test_base_pose_with_light_inside_exact_on_masks_becomes_luminous_lock_without_motion(self):
+        frame = np.full((140, 180, 3), 20, dtype=np.uint8)
+        board = [
+            [10.0, 20.0],
+            [170.0, 20.0],
+            [170.0, 120.0],
+            [10.0, 120.0],
+        ]
+        rows = []
+        details = []
+        for index, x1 in enumerate((20, 70, 120), start=1):
+            mask_id = f"MASK_{index:03d}"
+            mask = {
+                "id": mask_id,
+                "type": "polygon",
+                "points": [
+                    [x1, 40],
+                    [x1 + 30, 40],
+                    [x1 + 30, 52],
+                    [x1, 52],
+                ],
+            }
+            rows.append(
+                {
+                    "mask_id": mask_id,
+                    "center": [x1 + 15.0, 46.0],
+                    "mask": mask,
+                }
+            )
+            details.append(
+                {
+                    "mask_id": mask_id,
+                    "center": [x1 + 17.0, 46.0],
+                    "predicted_center": [x1 + 15.0, 46.0],
+                    "projected_mask_support": True,
+                    "median_prediction_error_px": 2.0,
+                }
+            )
+            cv2.rectangle(
+                frame,
+                (x1 + 3, 42),
+                (x1 + 27, 50),
+                (250, 250, 250),
+                -1,
+            )
+
+        identity = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+
+        def reject_unnecessary_refinement(
+            _board,
+            _rows,
+            _details,
+            _matrix,
+            diagnostics=None,
+        ):
+            if isinstance(diagnostics, dict):
+                diagnostics.update(
+                    {
+                        "failure_stage": "fine_gain_insufficient",
+                        "best_coarse_match_count": 3,
+                        "best_final_match_count": 0,
+                        "required_match_count": 3,
+                    }
+                )
+            return None
+
+        with (
+            patch.object(
+                tracking,
+                "_detect_luminous_segment_centers",
+                return_value={
+                    "available": False,
+                    "reason": "luminous_components_insufficient",
+                    "centers": [],
+                    "threshold_v": 120.0,
+                    "dynamic_range": 200.0,
+                },
+            ),
+            patch.object(
+                tracking,
+                "_detect_expected_on_luminous_landmarks",
+                return_value={
+                    "available": True,
+                    "reason": "expected_on_local_luminous_landmarks",
+                    "centers": [item["center"] for item in details],
+                    "details": details,
+                    "threshold_v": 120.0,
+                },
+            ),
+            patch.object(
+                tracking,
+                "_fit_id_anchored_luminous_pose",
+                side_effect=reject_unnecessary_refinement,
+            ),
+        ):
+            result = tracking._find_luminous_segment_pose(
+                frame,
+                board,
+                rows,
+                (180, 140),
+                base_matrix=identity,
+            )
+
+        self.assertTrue(result["available"], result)
+        self.assertEqual(
+            "expected_on_core_validated_base",
+            result["fit_landmark_source"],
+        )
+        self.assertEqual("base_core_verified", result["fine_fit_mode"])
+        self.assertEqual(3, result["matched_count"])
+        self.assertEqual(
+            {"MASK_001", "MASK_002", "MASK_003"},
+            set(result["core_validated_mask_ids"]),
+        )
+        np.testing.assert_allclose(result["matrix"], identity)
+
     def test_structural_lock_never_publishes_identityless_global_luminous_fit(self):
         board = [
             [20.0, 20.0],
