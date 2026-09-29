@@ -119,6 +119,14 @@ def _energy_authority_frame(app, frame):
     return frame, "pipeline_frame"
 
 
+def _logical_frame_token(app, frame):
+    """Token lógico compartilhável com o job de tracking da mesma captura."""
+    try:
+        return deepcopy(app._display_auto_frame_token(frame))
+    except Exception:
+        return ("object", id(frame))
+
+
 def _frame_token(app, frame):
     """Identifica a imagem real, não apenas o contador lógico da câmera.
 
@@ -818,6 +826,10 @@ def avaliar_evidencia_energia_unificada_display_f3(
         }
 
     check_id = str(context.get("check_id") or "")
+    authority_logical_frame_token = _logical_frame_token(
+        app,
+        authority_frame,
+    )
     geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
     geometry_token = (
         id(geometry),
@@ -908,6 +920,25 @@ def avaliar_evidencia_energia_unificada_display_f3(
         fallback["fallback_reason"] = str((evidence or {}).get("reason") or "")
         evidence = fallback
 
+    if isinstance(geometry, dict) and bool(geometry.get("locked")):
+        geometry_check_id = str(geometry.get("check_id") or "")
+        same_geometry_context = bool(
+            not geometry_check_id or geometry_check_id == check_id
+        )
+        if (
+            same_geometry_context
+            and geometry.get("alignment_required") is True
+        ):
+            evidence["spatial_alignment_required"] = True
+            evidence["spatial_alignment_ready"] = bool(
+                geometry.get("spatial_alignment_ready") is True
+            )
+            evidence["spatial_alignment_source"] = str(
+                geometry.get("spatial_alignment_source")
+                or geometry.get("source_type")
+                or "structural_only"
+            )
+
     luminous_hint = _luminous_tracking_energy_hint(
         app,
         project_name,
@@ -916,9 +947,14 @@ def avaliar_evidencia_energia_unificada_display_f3(
     if bool(luminous_hint.get("available")):
         evidence["luminous_tracking_evidence"] = deepcopy(luminous_hint)
         if bool(luminous_hint.get("alignment_required")):
+            evidence["spatial_alignment_required"] = True
             evidence["spatial_alignment_ready"] = bool(
                 luminous_hint.get("alignment_ready")
             )
+            if bool(luminous_hint.get("alignment_ready")):
+                evidence["spatial_alignment_source"] = (
+                    "luminous_segment_grid"
+                )
         if bool(luminous_hint.get("emission_detected")):
             evidence["mask_vote_energy_state_before_luminous_hint"] = str(
                 evidence.get("energy_state") or ""
@@ -935,7 +971,10 @@ def avaliar_evidencia_energia_unificada_display_f3(
                 }
             )
 
+    evidence.setdefault("spatial_alignment_required", False)
     evidence.setdefault("spatial_alignment_ready", True)
+    evidence.setdefault("spatial_alignment_source", "not_required")
+    evidence["frame_token"] = deepcopy(authority_logical_frame_token)
     evidence["project_name"] = str(project_name or "")
     evidence["check_id"] = check_id
     evidence["same_mask_comparison"] = True

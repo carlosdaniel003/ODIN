@@ -2962,12 +2962,15 @@ def _luminous_tracking_power_veto(
     *,
     project_name: str,
     check_id: str,
+    frame_token=None,
 ) -> tuple[bool, str]:
-    """OFF explícito da autoridade física veta refinamento por falsa emissão.
+    """OFF só veta o refinamento quando pertence à mesma captura e pose válida.
 
-    Estado UNCONFIRMED não veta: D-022 permite que emissão real ajude a provar
-    energia antes do encaixe fino. Somente OFF confirmado do mesmo contexto
-    impede que reflexo/sujeira publique uma nova pose luminosa.
+    A autoridade de energia é publicada depois do tracking. Portanto um OFF de
+    frame anterior nunca pode bloquear a descoberta de uma transição física
+    para ligado. Da mesma forma, OFF calculado sobre ROIs ainda sustentadas
+    apenas pelo lock estrutural não pode vetar o mecanismo que corrige essas
+    próprias ROIs. Isso preserva D-022 sem reabrir autoridade para reflexos.
     """
     status = getattr(app, "_display_f3_power_authority_status", None)
     energy = status.get("energy") if isinstance(status, dict) else None
@@ -2981,13 +2984,22 @@ def _luminous_tracking_power_veto(
     if energy_check and energy_check != str(check_id or ""):
         return False, ""
 
+    energy_frame_token = energy.get("frame_token")
+    same_frame = bool(
+        frame_token is not None
+        and energy_frame_token is not None
+        and energy_frame_token == frame_token
+    )
+    spatially_authoritative = bool(
+        energy.get("spatial_alignment_ready") is True
+    )
     explicit_off = bool(
         energy.get("off_confirmed") is True
         and energy.get("powered_confirmed") is not True
         and str(energy.get("energy_state") or "").strip().lower()
         in {"", "off"}
     )
-    if explicit_off:
+    if explicit_off and same_frame and spatially_authoritative:
         return True, "power_off_confirmed_blocks_luminous_tracking"
     return False, ""
 
@@ -3034,6 +3046,7 @@ def _rescue_luminous_segment_tracking_lock(
         app,
         project_name=str(project_name or ""),
         check_id=check_id,
+        frame_token=frame_token,
     )
     if power_vetoed:
         app._display_f3_luminous_tracking_debug = {
@@ -5451,6 +5464,68 @@ def _update_tracking_live_geometry(
         return
 
     geometry_space = "canonical"
+
+    current = _current_check(app)
+    current_check_id = (
+        str(current.get("id") or "")
+        if isinstance(current, dict)
+        else ""
+    )
+    current_mask_states = (
+        current.get("mask_states", {})
+        if isinstance(current, dict)
+        and isinstance(current.get("mask_states"), dict)
+        else {}
+    )
+    if not current_mask_states and current_check_id:
+        for configured_check in project.get("checks", []) or []:
+            if (
+                isinstance(configured_check, dict)
+                and str(configured_check.get("id") or "")
+                == current_check_id
+            ):
+                states = configured_check.get("mask_states")
+                if isinstance(states, dict):
+                    current_mask_states = states
+                break
+    if not current_mask_states and current_check_id:
+        try:
+            configured_check = repository.carregar_check(
+                project_name,
+                current_check_id,
+            )
+        except Exception:
+            configured_check = None
+        states = (
+            configured_check.get("mask_states")
+            if isinstance(configured_check, dict)
+            else None
+        )
+        if isinstance(states, dict):
+            current_mask_states = states
+
+    expected_on_count = sum(
+        1
+        for state in current_mask_states.values()
+        if str(state or "").strip().lower() == "on"
+    )
+    alignment_required = bool(
+        expected_on_count >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
+    )
+    spatial_alignment_ready = bool(
+        not alignment_required
+        or str(result.source_type or "") == "luminous_segment_grid"
+    )
+    spatial_alignment_source = (
+        "luminous_segment_grid"
+        if spatial_alignment_ready and alignment_required
+        else (
+            "structural_only"
+            if alignment_required
+            else "not_required"
+        )
+    )
+
     board_current = transform_points(source_board, source_to_current)
     masks_current = []
     for mask in source_masks:
@@ -5469,6 +5544,11 @@ def _update_tracking_live_geometry(
         "reference": str(result.reference or ""),
         "source_type": str(result.source_type or ""),
         "geometry_space": geometry_space,
+        "check_id": current_check_id,
+        "expected_on_count": int(expected_on_count),
+        "alignment_required": bool(alignment_required),
+        "spatial_alignment_ready": bool(spatial_alignment_ready),
+        "spatial_alignment_source": spatial_alignment_source,
         "resolution": (int(w), int(h)),
         "board_points": board_current,
         "masks": masks_current,
@@ -6465,7 +6545,25 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 {},
             )
             if locked:
-                if bool(status.get("evidence_current", False)):
+                alignment_required = bool(
+                    isinstance(geometry, dict)
+                    and geometry.get("alignment_required") is True
+                )
+                alignment_ready = bool(
+                    isinstance(geometry, dict)
+                    and geometry.get("spatial_alignment_ready") is True
+                )
+                if (
+                    bool(status.get("evidence_current", False))
+                    and alignment_required
+                    and not alignment_ready
+                ):
+                    legend = (
+                        "LOCK ESTRUTURAL • ALINHANDO SEGMENTOS • "
+                        "MÁSCARA CLÁSSICA"
+                    )
+                    color = "#FDE68A"
+                elif bool(status.get("evidence_current", False)):
                     legend = (
                         "LOCK ESTÁVEL • MÁSCARA CLÁSSICA • "
                         "VERDE = LUZ IDENTIFICADA"

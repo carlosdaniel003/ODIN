@@ -440,9 +440,16 @@ Decisão:
   máscaras esperadas**, sem excesso incompatível de reflexos/componentes no
   filtro localizado, podem confirmar **energia física**, mesmo antes do encaixe
   fino; contagem bruta de hot spots não é prova suficiente;
-- quando OFF já foi explicitamente confirmado pela autoridade de energia, essa
-  mesma captura não pode ser promovida a ligada nem publicar pose luminosa por
-  reflexos;
+- OFF só veta o refinamento luminoso quando a evidência pertence à **mesma
+  captura** e foi calculada sobre geometria com autoridade espacial já
+  confirmada; OFF herdado de frame anterior nunca bloqueia a descoberta de uma
+  transição física para ligado;
+- OFF calculado com ROIs sustentadas apenas pelo lock estrutural é diagnóstico de
+  energia, mas não pode vetar o refinamento que precisa corrigir essas próprias
+  ROIs; isso evita o ciclo máscara desalinhada -> lê OFF -> bloqueia alinhamento;
+- quando OFF da mesma captura e com geometria espacialmente autoritativa já foi
+  explicitamente confirmado, essa captura não pode ser promovida a ligada nem
+  publicar pose luminosa por reflexos;
 - energia confirmada sem alinhamento espacial resulta em
   `LIGADA • ALINHANDO <CHECK>`, com `allow_auto=false` e sem autoridade de
   OK/NG/avanço;

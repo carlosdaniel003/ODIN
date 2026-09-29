@@ -15,6 +15,7 @@ import numpy as np
 import src.platform.display_f3_object_tracking as tracking
 import src.platform.display_f3_tracking_orientation_ui as tracking_ui
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
+import src.platform.display_f3_power_authority_v2 as power_v2
 import src.platform.display_auto_check_runtime as auto_runtime
 import src.platform.display_auto_check_policy as auto_policy
 
@@ -2245,9 +2246,11 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 "energy": {
                     "project_name": "DISPLAY",
                     "check_id": "CHECK_001",
+                    "frame_token": ("camera", 22),
                     "energy_state": "off",
                     "powered_confirmed": False,
                     "off_confirmed": True,
+                    "spatial_alignment_ready": True,
                 },
             },
         )
@@ -2275,6 +2278,73 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             "power_off_confirmed_blocks_luminous_tracking",
             telemetry["reason"],
         )
+
+    def test_luminous_power_veto_ignores_off_from_unaligned_geometry(self):
+        app = SimpleNamespace(
+            _display_f3_power_authority_status={
+                "energy": {
+                    "project_name": "DISPLAY",
+                    "check_id": "CHECK_001",
+                    "frame_token": ("camera", 22),
+                    "energy_state": "off",
+                    "powered_confirmed": False,
+                    "off_confirmed": True,
+                    "spatial_alignment_ready": False,
+                }
+            }
+        )
+
+        vetoed, reason = tracking._luminous_tracking_power_veto(
+            app,
+            project_name="DISPLAY",
+            check_id="CHECK_001",
+            frame_token=("camera", 22),
+        )
+
+        self.assertFalse(vetoed)
+        self.assertEqual("", reason)
+
+    def test_luminous_power_veto_ignores_off_from_previous_frame(self):
+        app = SimpleNamespace(
+            _display_f3_power_authority_status={
+                "energy": {
+                    "project_name": "DISPLAY",
+                    "check_id": "CHECK_001",
+                    "frame_token": ("camera", 21),
+                    "energy_state": "off",
+                    "powered_confirmed": False,
+                    "off_confirmed": True,
+                    "spatial_alignment_ready": True,
+                }
+            }
+        )
+
+        vetoed, reason = tracking._luminous_tracking_power_veto(
+            app,
+            project_name="DISPLAY",
+            check_id="CHECK_001",
+            frame_token=("camera", 22),
+        )
+
+        self.assertFalse(vetoed)
+        self.assertEqual("", reason)
+
+    def test_live_geometry_marks_structural_lock_as_not_fine_aligned(self):
+        source = inspect.getsource(tracking._update_tracking_live_geometry)
+        self.assertIn('"alignment_required"', source)
+        self.assertIn('"spatial_alignment_ready"', source)
+        self.assertIn('"spatial_alignment_source"', source)
+        self.assertIn('"luminous_segment_grid"', source)
+        self.assertIn('"structural_only"', source)
+
+    def test_power_evidence_carries_frame_and_spatial_alignment_provenance(self):
+        source = inspect.getsource(
+            power_v2.avaliar_evidencia_energia_unificada_display_f3
+        )
+        self.assertIn('"frame_token"', source)
+        self.assertIn('"spatial_alignment_required"', source)
+        self.assertIn('"spatial_alignment_ready"', source)
+        self.assertIn('"spatial_alignment_source"', source)
 
     def test_luminous_rescue_permanece_no_espaco_canonico(self):
         frame = np.full((480, 640, 3), 20, dtype=np.uint8)
