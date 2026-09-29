@@ -304,6 +304,73 @@ python main.py
   -> DesktopProductionApp
 ~~~
 
+
+## Experimento controlado de geometria F3 — homografia + registro H1
+
+Esta seção registra uma investigação posterior às etapas estruturais já
+consolidadas. **Não altera o status das Etapas 1–7 e não autoriza integração
+produtiva automática.**
+
+Motivação física observada:
+
+- câmera e base são fixas;
+- a placa e o filtro preto podem ocupar posições diferentes entre ciclos;
+- os segmentos sempre ficam dentro do filtro;
+- o conjunto luminoso pode deslocar dentro do filtro, portanto a pose do filtro
+  não é suficiente para posicionar finamente as máscaras;
+- depois de adquirir H1, a placa permanece fisicamente parada durante os demais
+  CHECKS daquele ciclo.
+
+Escopo da etapa experimental:
+
+~~~text
+somente alinhamento geométrico
+    ↓
+nenhuma mudança em energia
+nenhuma mudança em OK/NG
+nenhuma mudança em avanço de CHECK
+nenhuma mudança em rearme
+~~~
+
+Sequência do protótipo:
+
+~~~text
+1. coletar 20–30 frames H1 reais em posições/ângulos permitidos
+2. localizar o filtro preto
+3. estimar homografia dos quatro cantos
+4. retificar o filtro para ROI canônica
+5. gerar representação visual útil para registro (ex.: emissão/contraste)
+6. registrar o H1 inteiro contra a referência ensinada
+7. normalizar a imagem para o espaço das máscaras fixas
+8. aplicar as 28 máscaras canônicas
+9. medir erro, overlap e taxa de lock
+10. revisar resultados antes de qualquer integração produtiva
+~~~
+
+Hipóteses a testar:
+
+- homografia resolve translação/rotação/escala/perspectiva externa do filtro;
+- registro de imagem do H1 completo é mais estável que poucos landmarks de
+  segmentos individuais;
+- correlação de fase pode fornecer deslocamento inicial e ECC pode fornecer
+  refinamento;
+- depois da homografia, translação + pequena rotação devem ser suficientes na
+  maioria dos casos;
+- um lock H1 validado pode ser congelado e reutilizado em BLUE/USB/AUX.
+
+Critério de saída:
+
+~~~text
+SE alinhamento repetível for comprovado
+   → promover D-025 para Accepted
+   → integrar no F3TrackingAuthority
+   → substituir o alinhamento fino anterior de forma consolidada
+
+SE não for comprovado
+   → não empilhar outro patch
+   → preservar dados/telemetria do experimento
+   → revisar a hipótese geométrica antes de nova implementação
+~~~
 ## Critérios globais
 
 Ao final da modernização:

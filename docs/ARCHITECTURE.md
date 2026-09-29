@@ -217,6 +217,67 @@ auditados e possuem consumidores produtivos. Módulos órfãos comprovadamente
 substituídos foram removidos na Etapa 7. Nenhum novo patch paralelo deve ser
 criado quando existir um proprietário canônico.
 
+
+### Direção experimental — filtro como localizador e H1 como referência geométrica fina
+
+> Estado: **proposta de experimento**, ainda não descreve o runtime produtivo
+> atual. A decisão correspondente está em D-025.
+
+O problema geométrico do Display F3 possui duas referências físicas diferentes:
+
+1. o **filtro preto**, que acompanha aproximadamente a placa e delimita a região
+   onde os segmentos sempre aparecem;
+2. o **grid luminoso dos segmentos**, que pode se deslocar dentro do próprio
+   filtro e por isso não deve herdar automaticamente a pose fina do contorno.
+
+A direção experimental separa essas responsabilidades:
+
+~~~text
+Frame RAW
+   ↓
+Tracking estrutural do filtro
+   ↓
+Homografia H_filter
+   ↓
+Filtro retificado em ROI canônica
+   ↓
+Registro visual do H1 completo
+   ↓
+Ajuste interno T_segments
+   ↓
+Imagem normalizada para a geometria de referência
+   ↓
+Máscaras canônicas fixas
+~~~
+
+Contratos propostos:
+
+- F3TrackingAuthority permanece o único proprietário de tracking;
+- localizar o filtro produz LOCK_FILTRO, suficiente para presença/região, mas
+  insuficiente para analisar máscaras;
+- o primeiro CHECK/H1 é usado para obter LOCK_SEGMENTOS por registro da imagem
+  inteira do padrão luminoso contra a referência ensinada;
+- o alinhamento deve normalizar a imagem para o espaço canônico das máscaras,
+  em vez de recalcular 28 geometrias independentes no frame RAW;
+- o registro fino deve começar com transformação conservadora após a homografia:
+  translação e pequena rotação; escala só entra se experimentos reais provarem
+  necessidade;
+- reconhecimento visual de H1/BLUE/USB/AUX na ROI retificada é permitido como
+  evidência/telemetria de identidade, mas não cria uma segunda autoridade de
+  OK/NG;
+- após LOCK_SEGMENTOS no H1, a transformação do ciclo é congelada para os
+  CHECKS seguintes, pois a placa não deve mover fisicamente durante
+  H1 -> BLUE -> USB -> AUX;
+- movimento significativo depois do lock invalida a geometria; não deve disparar
+  adaptação silenciosa contínua;
+- retirada/rearme da placa encerra o lock geométrico do ciclo;
+- qualquer implementação pesada continua no executor HIGH existente, sem novo
+  scheduler, fila ou thread.
+
+A validação inicial deve ocorrer fora da lógica produtiva de energia/OK/NG:
+um lote de imagens reais de H1 em posições diferentes deve provar que a
+retificação + registro coloca consistentemente as máscaras fixas sobre os
+segmentos antes de o mecanismo substituir o alinhamento luminoso atual.
 ### Coordenador canônico do runtime F3
 
 O scheduling periódico do F3 possui um proprietário explícito:

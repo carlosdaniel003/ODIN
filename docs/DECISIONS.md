@@ -567,6 +567,148 @@ segunda confirmação de identidade que contradiga a própria leitura 28/28.
 
 ---
 
+
+## D-025 — Experimento de alinhamento F3 por homografia do filtro + registro visual do H1
+
+**Status:** Proposed
+
+### Contexto
+
+O cenário físico do F3 é controlado:
+
+- a câmera é fixa;
+- a base/suporte é fixa;
+- a placa pode entrar em posições diferentes no campo da câmera;
+- o filtro preto do display se move com a placa e sempre contém os segmentos;
+- o conjunto luminoso pode se deslocar dentro do próprio filtro, portanto o
+  filtro não é uma referência fina suficiente para posicionar as 28 máscaras;
+- depois que a placa entra no ciclo e H1 é exibido, a placa não se move
+  fisicamente durante a sequência H1 -> BLUE -> USB -> AUX;
+- máscaras fixas funcionaram de forma consistente quando a geometria da imagem
+  coincidia com a referência; as tentativas recentes de fazer as máscaras
+  perseguirem landmarks luminosos individualmente não atingiram consistência
+  suficiente no equipamento real.
+
+A estratégia deve explorar essas restrições físicas em vez de tratar o problema
+como tracking genérico de 28 objetos independentes.
+
+### Proposta
+
+Separar localização grosseira e alinhamento fino em dois estágios distintos.
+
+~~~text
+FRAME RAW
+   ↓
+LOCALIZAR FILTRO PRETO
+   ↓
+H_filter = homografia do filtro
+   ↓
+FILTRO RETIFICADO / ROI CANÔNICA
+   ↓
+REGISTRO VISUAL DO H1 INTEIRO
+   ↓
+T_segments = pequeno ajuste interno dos segmentos
+   ↓
+IMAGEM CANÔNICA DOS SEGMENTOS
+   ↓
+28 MÁSCARAS FIXAS
+~~~
+
+Regras da proposta:
+
+- o contorno do filtro preto é **localizador grosseiro**, não autoridade final
+  da posição dos segmentos;
+- os quatro cantos do filtro localizado devem permitir retificação por
+  homografia para uma ROI canônica de tamanho conhecido;
+- a fotografia H1 ensinada em CONFIGURAR, já associada ao contorno e às máscaras,
+  torna-se a principal referência geométrica para o alinhamento fino do primeiro
+  CHECK;
+- após retificar o filtro, o runtime deve comparar a região inteira do H1 com a
+  referência H1, preferencialmente em representação reduzida a emissão/contraste
+  útil, em vez de estimar a pose pelas correspondências individuais de poucas
+  máscaras;
+- o alinhamento fino deve experimentar registro de imagem do H1 completo,
+  priorizando tecnologias OpenCV como correlação de fase para deslocamento
+  grosseiro e ECC para refinamento;
+- após a homografia, o ajuste interno deve começar conservador: translação X/Y e
+  pequena rotação. Escala livre só deve ser considerada se medições reais
+  demonstrarem necessidade;
+- o objetivo é transformar **a imagem móvel para o espaço das máscaras fixas**,
+  e não continuar transformando as 28 máscaras para perseguir o frame bruto;
+- as máscaras permanecem na geometria canônica ensinada. Classificação
+  ON/OFF/POUCA LUZ continua pertencendo ao analyzer canônico e não ao tracking;
+- o reconhecimento visual do CHECK pode comparar o crop retificado com as
+  referências H1/BLUE/USB/AUX para telemetria, mas em produção o CHECK esperado
+  deve ser a comparação principal; os demais scores são diagnóstico;
+- a autoridade espacial passa conceitualmente por três estados:
+  SEM_LOCK -> LOCK_FILTRO -> LOCK_SEGMENTOS;
+- somente LOCK_SEGMENTOS autoriza as 28 máscaras a participarem da análise
+  produtiva;
+- quando H1 obtiver LOCK_SEGMENTOS, a transformação geométrica do ciclo deve
+  ser congelada e reutilizada em BLUE, USB e AUX;
+- durante o mesmo ciclo, o runtime não deve recalcular continuamente pose por
+  CHECK. Pequena vibração pode ser tolerada; deslocamento significativo deve
+  invalidar a geometria e bloquear a análise em vez de adaptar silenciosamente;
+- retirada da placa ou rearme físico descarta a transformação congelada e obriga
+  nova aquisição H1 para a próxima placa;
+- todo compute pesado continua pertencendo ao F3TrackingAuthority /
+  F3DisplayObjectTracker e ao F3HeavyVisionExecutor; esta proposta não cria
+  novo scheduler, thread ou autoridade paralela.
+
+### Validação antes de integrar ao ciclo produtivo
+
+A primeira implementação deve ser um experimento isolado de geometria, sem
+alterar energia, OK/NG, avanço de CHECK ou regras produtivas.
+
+Usar um conjunto de aproximadamente 20 a 30 imagens reais de H1 com variações de:
+
+- posição horizontal;
+- posição vertical;
+- pequena rotação;
+- pequenas diferenças de perspectiva/enquadramento permitidas pela montagem.
+
+Para cada imagem:
+
+~~~text
+detectar filtro
+→ homografia
+→ crop retificado
+→ mapa de emissão / imagem de registro
+→ registrar H1 contra a referência
+→ aplicar as 28 máscaras fixas
+→ medir alinhamento
+~~~
+
+Critérios devem incluir métricas objetivas, não somente inspeção visual:
+
+- erro médio e máximo de alinhamento;
+- sobreposição entre emissão real e máscaras ON;
+- score/convergência do registro;
+- taxa de sucesso do lock;
+- estabilidade entre imagens diferentes da mesma montagem.
+
+Somente depois de o experimento demonstrar consistência a nova geometria deve ser
+conectada novamente a energia, analyzer, sequência e UI produtiva.
+
+### Relação com decisões anteriores
+
+Enquanto esta decisão estiver como **Proposed**, D-020, D-022 e D-023 continuam
+descrevendo o comportamento aceito atual.
+
+Se o experimento for validado e esta decisão for promovida a **Accepted**, ela
+substituirá especificamente a parte dessas decisões que usa landmarks luminosos
+individuais como mecanismo principal de alinhamento fino. As regras de
+proprietário único, isolamento de energia/analyzer e ausência de banco angular
+continuam válidas.
+
+### Consequência esperada
+
+O filtro responde apenas **onde está a região do display**. O H1 inteiro responde
+**onde está o grid real dos segmentos dentro dessa região**. Depois da aquisição
+H1, a inspeção recupera a estabilidade das máscaras fixas em um espaço canônico
+e evita recalcular a pose durante os demais CHECKS do mesmo ciclo.
+
+---
 ## Como adicionar uma decisão
 
 Use:
