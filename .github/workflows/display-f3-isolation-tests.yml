@@ -108,6 +108,8 @@ jobs:
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_tracking_worker_preserva_token_do_snapshot_mesmo_se_camera_avanca \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_semantic_worker_preserva_raw_e_geometria_do_mesmo_tracking_snapshot \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_analisador_rastreado_aceita_snapshot_explicito_sem_estado_mutavel_do_app \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_three_id_anchored_segments_refine_coarse_pose \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_structural_lock_accepts_three_segment_fine_alignment \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_segments_refine_pose_inside_moving_filter \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_grid_survives_missing_expected_on_and_extra_light \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_blooming_recovers_expected_on_landmarks_with_structural_lock \

@@ -356,11 +356,16 @@ Decisão:
 - segmentos apagados não são procurados para obter pose;
 - um ON esperado ausente ou uma emissão extra não invalida automaticamente o
   tracking se os demais landmarks sustentarem a geometria;
-- quando blooming/morfologia unem segmentos distintos em um único contorno e já
-  existe lock estrutural atual, os pixels luminosos do filtro podem ser
-  particionados localmente entre os centros ON esperados para recuperar
-  landmarks independentes; esse fallback não procura OFF, não reduz o quorum de
-  encaixe e não cria autoridade de decisão;
+- quando já existe lock estrutural atual, o tracking executa um segundo estágio
+  fino por segmento: os pixels luminosos são associados localmente aos IDs ON do
+  modelo 88:88 e **3 landmarks identificados** já podem corrigir translação e,
+  quando estiverem suficientemente espalhados, pequena rotação/escala;
+- esse mínimo de 3 vale somente para geometria. Ele não reduz nenhum requisito de
+  classificação, OK/NG ou CHECK; sem lock estrutural a reaquisição global mantém
+  o quorum luminoso mais conservador;
+- quando blooming/morfologia unem segmentos distintos em um único contorno, os
+  pixels luminosos do filtro continuam podendo ser particionados localmente entre
+  os centros ON esperados; OFF nunca é procurado para obter pose;
 - após o encaixe, as 28 ROIs são reprojetadas para o frame RAW e o analyzer
   canônico continua sendo a única autoridade para ON/OFF/POUCA LUZ e OK/NG;
 - quando não há emissão, este refinamento luminoso simplesmente não executa

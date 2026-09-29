@@ -161,6 +161,16 @@ F3_TRACKING_LUMINOUS_MAX_COMPONENT_AREA_FRACTION = 0.055
 F3_TRACKING_LUMINOUS_LOCAL_GATE_FRACTION = 0.09
 F3_TRACKING_LUMINOUS_LOCAL_MIN_HOT_PIXELS = 6
 
+# Segundo estágio do tracking híbrido: com lock estrutural, três segmentos ON
+# identificados pelo próprio ID já bastam para corrigir o encaixe fino. Isso não
+# reduz quorum de OK/NG; altera somente a geometria das 28 ROIs.
+F3_TRACKING_LUMINOUS_FINE_MIN_ANCHORS = 3
+F3_TRACKING_LUMINOUS_FINE_MIN_GAIN_PX = 0.45
+F3_TRACKING_LUMINOUS_FINE_ALREADY_ALIGNED_PX = 1.25
+F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_SPAN_FRACTION = 0.18
+F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_FRACTION = 0.025
+F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_MAX_PX = 18
+
 # O contorno/filtro é a autoridade da pose grossa. A luz pode corrigir o
 # alinhamento fino, mas nunca pode torcer o conjunto inteiro por um casamento
 # errado entre poucos segmentos.
@@ -1539,6 +1549,81 @@ def _detect_luminous_segment_centers(frame, filter_points) -> dict:
     }
 
 
+def _hot_pixels_inside_projected_mask(
+    hot_x,
+    hot_y,
+    *,
+    projected_mask,
+    crop_origin,
+    crop_shape,
+    padding_px: int,
+):
+    """Retorna quais pixels quentes pertencem à vizinhança da máscara prevista."""
+    if not isinstance(projected_mask, dict):
+        return None
+    try:
+        crop_h, crop_w = int(crop_shape[0]), int(crop_shape[1])
+        x1, y1 = int(crop_origin[0]), int(crop_origin[1])
+    except Exception:
+        return None
+    if crop_h <= 0 or crop_w <= 0:
+        return None
+
+    support = np.zeros((crop_h, crop_w), dtype=np.uint8)
+    kind = str(projected_mask.get("type") or "").lower()
+    try:
+        if kind == "circle":
+            cx = int(round(float(projected_mask.get("cx", 0)) - x1))
+            cy = int(round(float(projected_mask.get("cy", 0)) - y1))
+            radius = max(1, int(round(float(projected_mask.get("radius", 1)))))
+            cv2.circle(
+                support,
+                (cx, cy),
+                radius,
+                255,
+                -1,
+                lineType=cv2.LINE_AA,
+            )
+        else:
+            points = pontos_mascara_display(projected_mask)
+            if len(points) < 3:
+                return None
+            polygon = np.rint(
+                np.asarray(
+                    [
+                        [float(px) - x1, float(py) - y1]
+                        for px, py in points
+                    ],
+                    dtype=np.float32,
+                )
+            ).astype(np.int32)
+            cv2.fillPoly(
+                support,
+                [polygon],
+                255,
+                lineType=cv2.LINE_AA,
+            )
+    except Exception:
+        return None
+
+    padding = max(0, int(padding_px))
+    if padding > 0:
+        kernel_size = padding * 2 + 1
+        support = cv2.dilate(
+            support,
+            np.ones((kernel_size, kernel_size), dtype=np.uint8),
+            iterations=1,
+        )
+
+    try:
+        return support[
+            np.asarray(hot_y, dtype=np.int32),
+            np.asarray(hot_x, dtype=np.int32),
+        ] > 0
+    except Exception:
+        return None
+
+
 def _detect_expected_on_luminous_landmarks(
     frame,
     filter_points,
@@ -1586,6 +1671,12 @@ def _detect_expected_on_luminous_landmarks(
             expected,
             fit_to_current,
         ).reshape(-1, 2)
+        projected_masks = [
+            transform_mask(row.get("mask"), fit_to_current)
+            if isinstance(row.get("mask"), dict)
+            else None
+            for row in expected_rows
+        ]
     except (TypeError, ValueError, cv2.error):
         return {
             "available": False,
@@ -1687,6 +1778,16 @@ def _detect_expected_on_luminous_landmarks(
         10.0,
         filter_diagonal * F3_TRACKING_LUMINOUS_LOCAL_GATE_FRACTION,
     )
+    support_padding = min(
+        F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_MAX_PX,
+        max(
+            4,
+            int(round(
+                filter_diagonal
+                * F3_TRACKING_LUMINOUS_FINE_SUPPORT_PADDING_FRACTION
+            )),
+        ),
+    )
 
     centers: list[list[float]] = []
     details: list[dict] = []
@@ -1695,6 +1796,23 @@ def _detect_expected_on_luminous_landmarks(
             (nearest_expected == int(expected_index))
             & (nearest_distance <= float(assignment_gate))
         )
+        support_used = False
+        support_flags = _hot_pixels_inside_projected_mask(
+            hot_x,
+            hot_y,
+            projected_mask=projected_masks[expected_index],
+            crop_origin=(x1, y1),
+            crop_shape=crop.shape[:2],
+            padding_px=support_padding,
+        )
+        if support_flags is not None:
+            shape_selected = selected & support_flags
+            if int(np.count_nonzero(shape_selected)) >= (
+                F3_TRACKING_LUMINOUS_LOCAL_MIN_HOT_PIXELS
+            ):
+                selected = shape_selected
+                support_used = True
+
         selected_indices = np.flatnonzero(selected)
         if len(selected_indices) < F3_TRACKING_LUMINOUS_LOCAL_MIN_HOT_PIXELS:
             continue
@@ -1723,6 +1841,8 @@ def _detect_expected_on_luminous_landmarks(
                     float(np.median(nearest_distance[selected_indices])),
                     3,
                 ),
+                "projected_mask_support": bool(support_used),
+                "support_padding_px": int(support_padding),
             }
         )
 
@@ -1771,13 +1891,15 @@ def _expected_on_rows(masks, states) -> list[dict]:
         mask_id = str(mask.get("id") or "")
         if state_map.get(mask_id) != DISPLAY_CHECK_STATE_ON:
             continue
-        center = _mask_center(mask)
+        normalized_mask = converter_mascara_legada_para_editor(mask)
+        center = _mask_center(normalized_mask)
         if center is None:
             continue
         rows.append(
             {
                 "mask_id": mask_id,
                 "center": [float(center[0]), float(center[1])],
+                "mask": deepcopy(normalized_mask),
             }
         )
     return rows
@@ -1813,6 +1935,220 @@ def _greedy_point_matches(
         used_observed.add(observed_index)
         matched.append((expected_index, observed_index, distance))
     return matched
+
+
+def _fit_id_anchored_luminous_pose(
+    canonical_board,
+    expected_rows,
+    landmark_details,
+    coarse_matrix,
+    diagnostics: dict | None = None,
+) -> dict | None:
+    """Refina a pose grossa usando IDs conhecidos dos segmentos luminosos.
+
+    Com três landmarks já associados ao modelo 88:88, não precisamos exigir que
+    metade dos ON do CHECK esteja visível para ajustar geometria. A decisão
+    semântica continua fora daqui.
+    """
+    diag = diagnostics if isinstance(diagnostics, dict) else None
+    if diag is not None:
+        diag.clear()
+
+    try:
+        coarse = np.asarray(coarse_matrix, dtype=np.float32).reshape(2, 3)
+    except Exception:
+        if diag is not None:
+            diag.update({"failure_stage": "coarse_matrix_invalid"})
+        return None
+
+    by_id = {
+        str(row.get("mask_id") or ""): row
+        for row in (expected_rows or ())
+        if isinstance(row, dict) and str(row.get("mask_id") or "")
+    }
+    source_points = []
+    target_points = []
+    matched_ids = []
+    seen: set[str] = set()
+    for detail in landmark_details or ():
+        if not isinstance(detail, dict):
+            continue
+        mask_id = str(detail.get("mask_id") or "")
+        row = by_id.get(mask_id)
+        center = detail.get("center")
+        if (
+            not mask_id
+            or mask_id in seen
+            or row is None
+            or not isinstance(center, (list, tuple))
+            or len(center) < 2
+        ):
+            continue
+        try:
+            source_points.append([float(center[0]), float(center[1])])
+            target = row.get("center") or ()
+            target_points.append([float(target[0]), float(target[1])])
+        except (TypeError, ValueError, IndexError):
+            continue
+        seen.add(mask_id)
+        matched_ids.append(mask_id)
+
+    anchor_count = len(source_points)
+    required = int(F3_TRACKING_LUMINOUS_FINE_MIN_ANCHORS)
+    if diag is not None:
+        diag.update(
+            {
+                "expected_on_count": int(len(by_id)),
+                "observed_component_count": int(anchor_count),
+                "required_match_count": required,
+                "best_coarse_match_count": int(anchor_count),
+                "best_final_match_count": 0,
+                "failure_stage": "not_started",
+                "matched_mask_ids": list(matched_ids),
+            }
+        )
+    if anchor_count < required:
+        if diag is not None:
+            diag["failure_stage"] = "id_anchors_insufficient"
+        return None
+
+    source = np.asarray(source_points, dtype=np.float32).reshape(-1, 2)
+    target = np.asarray(target_points, dtype=np.float32).reshape(-1, 2)
+    try:
+        coarse_projected = cv2.transform(
+            source.reshape(-1, 1, 2),
+            coarse,
+        ).reshape(-1, 2)
+    except Exception:
+        if diag is not None:
+            diag["failure_stage"] = "coarse_projection_failed"
+        return None
+
+    coarse_errors = np.linalg.norm(coarse_projected - target, axis=1)
+    coarse_median = float(np.median(coarse_errors))
+    if coarse_median <= F3_TRACKING_LUMINOUS_FINE_ALREADY_ALIGNED_PX:
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "coarse_already_precise",
+                    "coarse_median_error_px": round(coarse_median, 3),
+                }
+            )
+        return None
+
+    board = np.asarray(
+        _quad_from_points(canonical_board),
+        dtype=np.float32,
+    ).reshape(-1, 2)
+    if len(board) != 4:
+        if diag is not None:
+            diag["failure_stage"] = "invalid_board_geometry"
+        return None
+    board_diagonal = max(
+        1.0,
+        float(np.linalg.norm(np.max(board, axis=0) - np.min(board, axis=0))),
+    )
+    target_span = float(
+        np.linalg.norm(np.max(target, axis=0) - np.min(target, axis=0))
+    )
+    span_fraction = target_span / board_diagonal
+
+    fit_mode = "translation"
+    refined = np.asarray(coarse, dtype=np.float32).copy()
+    if span_fraction >= F3_TRACKING_LUMINOUS_FINE_SIMILARITY_MIN_SPAN_FRACTION:
+        similarity = _estimate_affine_partial(source, target)
+        if similarity is not None:
+            refined = np.asarray(similarity, dtype=np.float32).reshape(2, 3)
+            fit_mode = "similarity"
+    if fit_mode == "translation":
+        residual = target - coarse_projected
+        correction = np.median(residual, axis=0)
+        refined[0, 2] += float(correction[0])
+        refined[1, 2] += float(correction[1])
+
+    allowed, guard = _luminous_refinement_within_coarse_guard(
+        refined,
+        coarse,
+        canonical_board,
+    )
+    if not allowed:
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "fine_pose_outside_structural_guard",
+                    "refinement_guard": deepcopy(guard),
+                    "fit_mode": fit_mode,
+                }
+            )
+        return None
+
+    try:
+        refined_projected = cv2.transform(
+            source.reshape(-1, 1, 2),
+            refined,
+        ).reshape(-1, 2)
+    except Exception:
+        if diag is not None:
+            diag["failure_stage"] = "refined_projection_failed"
+        return None
+    refined_errors = np.linalg.norm(refined_projected - target, axis=1)
+    refined_median = float(np.median(refined_errors))
+    gain = coarse_median - refined_median
+    minimum_gain = max(
+        F3_TRACKING_LUMINOUS_FINE_MIN_GAIN_PX,
+        coarse_median * 0.08,
+    )
+    if gain < minimum_gain:
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "fine_gain_insufficient",
+                    "fit_mode": fit_mode,
+                    "coarse_median_error_px": round(coarse_median, 3),
+                    "refined_median_error_px": round(refined_median, 3),
+                    "gain_px": round(gain, 3),
+                }
+            )
+        return None
+
+    missing_ids = [
+        mask_id
+        for mask_id in by_id
+        if mask_id not in seen
+    ]
+    match_ratio = anchor_count / max(1, len(by_id))
+    score = (
+        anchor_count * 4.0
+        + min(20.0, max(0.0, gain))
+        - refined_median * 0.15
+    )
+    if diag is not None:
+        diag.update(
+            {
+                "failure_stage": "",
+                "best_final_match_count": int(anchor_count),
+                "fit_mode": fit_mode,
+                "coarse_median_error_px": round(coarse_median, 3),
+                "refined_median_error_px": round(refined_median, 3),
+                "gain_px": round(gain, 3),
+                "span_fraction": round(span_fraction, 5),
+                "refinement_guard": deepcopy(guard),
+            }
+        )
+
+    return {
+        "matrix": np.asarray(refined, dtype=np.float32).reshape(2, 3),
+        "matched_mask_ids": list(matched_ids),
+        "missing_expected_on_mask_ids": missing_ids,
+        "matched_count": int(anchor_count),
+        "expected_on_count": int(len(by_id)),
+        "match_ratio": float(match_ratio),
+        "median_error_px": float(refined_median),
+        "coarse_median_error_px": float(coarse_median),
+        "fine_alignment_gain_px": float(gain),
+        "fine_fit_mode": fit_mode,
+        "score": float(score),
+    }
 
 
 def _fit_luminous_pose(
@@ -2319,12 +2655,15 @@ def _find_luminous_segment_pose(
             attempts.append(attempt)
             continue
 
-        # Um display real pode apresentar blooming: dois ou mais segmentos
-        # separados viram um único contorno externo. Quando já há lock estrutural
-        # atual, repartimos SOMENTE os pixels luminosos entre os ON esperados e
-        # tentamos o mesmo fit/quorum novamente. Nenhuma regra de decisão é
-        # relaxada e segmentos OFF continuam fora da busca.
-        if fit is None and normalized_base_matrix is not None:
+        # Com lock estrutural, o segundo estágio rastreia os segmentos luminosos
+        # individualmente. A associação local preserva o ID do 88:88 e permite
+        # que três landmarks confirmados corrijam a pose fina de TODAS as 28 ROIs.
+        # Isso roda mesmo quando o fit global já encontrou uma pose, porque o
+        # objetivo aqui é remover o erro residual do contorno.
+        if (
+            normalized_base_matrix is not None
+            and luminous.get("threshold_v") is not None
+        ):
             local_landmarks = _detect_expected_on_luminous_landmarks(
                 frame,
                 filter_points,
@@ -2332,37 +2671,54 @@ def _find_luminous_segment_pose(
                 normalized_base_matrix,
                 luminous.get("threshold_v"),
             )
+            attempt["global_fit_diagnostics"] = deepcopy(fit_diagnostics)
             if bool(local_landmarks.get("available")):
-                local_fit_diagnostics: dict = {}
-                local_fit = _fit_luminous_pose(
+                fine_fit_diagnostics: dict = {}
+                fine_fit = _fit_id_anchored_luminous_pose(
                     canonical_board,
                     expected_rows,
-                    local_landmarks.get("centers") or [],
-                    [normalized_base_matrix],
-                    diagnostics=local_fit_diagnostics,
+                    local_landmarks.get("details") or [],
+                    normalized_base_matrix,
+                    diagnostics=fine_fit_diagnostics,
                 )
-                attempt["global_fit_diagnostics"] = deepcopy(
-                    fit_diagnostics
+                attempt["fine_fit_diagnostics"] = deepcopy(
+                    fine_fit_diagnostics
                 )
-                attempt["local_fit_diagnostics"] = deepcopy(
-                    local_fit_diagnostics
-                )
-                if local_fit is not None:
-                    fit = local_fit
-                    fit_diagnostics = local_fit_diagnostics
-                    fit_landmark_source = "expected_on_local_emission"
-                elif int(
-                    local_fit_diagnostics.get(
-                        "best_final_match_count",
-                        0,
-                    ) or 0
-                ) > int(
-                    fit_diagnostics.get(
-                        "best_final_match_count",
-                        0,
-                    ) or 0
-                ):
-                    fit_diagnostics = local_fit_diagnostics
+                if fine_fit is not None:
+                    fit = fine_fit
+                    fit_diagnostics = fine_fit_diagnostics
+                    fit_landmark_source = "expected_on_id_anchored_fine"
+                elif fit is None:
+                    # Blooming severo pode impedir o ajuste fino por IDs. Nesse
+                    # caso preservamos o fallback histórico por centros, ainda
+                    # limitado ao lock estrutural e somente aos ON esperados.
+                    local_fit_diagnostics: dict = {}
+                    local_fit = _fit_luminous_pose(
+                        canonical_board,
+                        expected_rows,
+                        local_landmarks.get("centers") or [],
+                        [normalized_base_matrix],
+                        diagnostics=local_fit_diagnostics,
+                    )
+                    attempt["local_fit_diagnostics"] = deepcopy(
+                        local_fit_diagnostics
+                    )
+                    if local_fit is not None:
+                        fit = local_fit
+                        fit_diagnostics = local_fit_diagnostics
+                        fit_landmark_source = "expected_on_local_emission"
+                    elif int(
+                        local_fit_diagnostics.get(
+                            "best_final_match_count",
+                            0,
+                        ) or 0
+                    ) > int(
+                        fit_diagnostics.get(
+                            "best_final_match_count",
+                            0,
+                        ) or 0
+                    ):
+                        fit_diagnostics = local_fit_diagnostics
 
         attempt["fit_landmark_source"] = fit_landmark_source
         attempt["local_luminous_landmark_count"] = int(
@@ -2375,6 +2731,14 @@ def _find_luminous_segment_pose(
             local_landmarks.get("details") or []
         )
         attempt["fit_diagnostics"] = deepcopy(fit_diagnostics)
+        attempt["fine_fit_mode"] = str(
+            (fit or {}).get("fine_fit_mode") or ""
+        )
+        attempt["fine_alignment_gain_px"] = (
+            round(float((fit or {}).get("fine_alignment_gain_px")), 3)
+            if (fit or {}).get("fine_alignment_gain_px") is not None
+            else None
+        )
         attempt["coarse_matched_count"] = int(
             fit_diagnostics.get("best_coarse_match_count", 0) or 0
         )
@@ -2430,6 +2794,8 @@ def _find_luminous_segment_pose(
                 len(local_landmarks.get("centers") or [])
             ),
             "fit_landmark_source": fit_landmark_source,
+            "fine_fit_mode": str(fit.get("fine_fit_mode") or ""),
+            "fine_alignment_gain_px": fit.get("fine_alignment_gain_px"),
             "threshold_v": luminous.get("threshold_v"),
             "dynamic_range": luminous.get("dynamic_range"),
             "fit_diagnostics": deepcopy(fit_diagnostics),

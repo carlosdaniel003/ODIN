@@ -1599,6 +1599,160 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             observed,
         )
 
+    def test_three_id_anchored_segments_refine_coarse_pose(self):
+        board = [
+            [50.0, 50.0],
+            [250.0, 50.0],
+            [250.0, 250.0],
+            [50.0, 250.0],
+        ]
+        centers = [
+            [90.0, 90.0],
+            [180.0, 90.0],
+            [90.0, 180.0],
+            [180.0, 180.0],
+            [135.0, 135.0],
+            [210.0, 135.0],
+            [135.0, 210.0],
+        ]
+        rows = [
+            {
+                "mask_id": f"MASK_{index + 1:03d}",
+                "center": center,
+            }
+            for index, center in enumerate(centers)
+        ]
+        # A placa/contorno localizou a região, porém o display real está 7px
+        # para a direita e 5px para cima em relação à pose grosseira.
+        details = [
+            {
+                "mask_id": rows[index]["mask_id"],
+                "center": [
+                    rows[index]["center"][0] + 7.0,
+                    rows[index]["center"][1] - 5.0,
+                ],
+            }
+            for index in (0, 1, 2)
+        ]
+        coarse = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+        diagnostics = {}
+
+        result = tracking._fit_id_anchored_luminous_pose(
+            board,
+            rows,
+            details,
+            coarse,
+            diagnostics=diagnostics,
+        )
+
+        self.assertIsNotNone(result, diagnostics)
+        self.assertEqual(3, result["matched_count"])
+        self.assertGreater(result["fine_alignment_gain_px"], 5.0)
+        self.assertEqual("", diagnostics["failure_stage"])
+
+        observed = np.asarray(
+            [item["center"] for item in details],
+            dtype=np.float32,
+        )
+        recovered = cv2.transform(
+            observed.reshape(-1, 1, 2),
+            np.asarray(result["matrix"], dtype=np.float32),
+        ).reshape(-1, 2)
+        target = np.asarray(
+            [rows[index]["center"] for index in (0, 1, 2)],
+            dtype=np.float32,
+        )
+        self.assertLess(
+            float(np.median(np.linalg.norm(recovered - target, axis=1))),
+            1.0,
+        )
+
+    def test_structural_lock_accepts_three_segment_fine_alignment(self):
+        board = [
+            [50.0, 50.0],
+            [250.0, 50.0],
+            [250.0, 250.0],
+            [50.0, 250.0],
+        ]
+        centers = [
+            [90.0, 90.0],
+            [180.0, 90.0],
+            [90.0, 180.0],
+            [180.0, 180.0],
+            [135.0, 135.0],
+            [210.0, 135.0],
+            [135.0, 210.0],
+        ]
+        rows = [
+            {
+                "mask_id": f"MASK_{index + 1:03d}",
+                "center": center,
+            }
+            for index, center in enumerate(centers)
+        ]
+        frame = np.full((300, 300, 3), 20, dtype=np.uint8)
+        observed = [
+            [centers[index][0] + 6.0, centers[index][1] + 4.0]
+            for index in (0, 1, 2)
+        ]
+        local_details = [
+            {
+                "mask_id": rows[index]["mask_id"],
+                "center": observed[position],
+            }
+            for position, index in enumerate((0, 1, 2))
+        ]
+        identity = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+
+        with (
+            patch.object(
+                tracking,
+                "_detect_luminous_segment_centers",
+                return_value={
+                    "available": True,
+                    "reason": "luminous_segments_detected",
+                    "centers": observed,
+                    "threshold_v": 120.0,
+                    "dynamic_range": 180.0,
+                },
+            ),
+            patch.object(
+                tracking,
+                "_detect_expected_on_luminous_landmarks",
+                return_value={
+                    "available": True,
+                    "reason": "expected_on_local_luminous_landmarks",
+                    "centers": observed,
+                    "details": local_details,
+                    "threshold_v": 120.0,
+                },
+            ),
+        ):
+            result = tracking._find_luminous_segment_pose(
+                frame,
+                board,
+                rows,
+                (300, 300),
+                base_matrix=identity,
+            )
+
+        self.assertTrue(result["available"], result)
+        self.assertEqual(3, result["matched_count"])
+        self.assertEqual(
+            "expected_on_id_anchored_fine",
+            result["fit_landmark_source"],
+        )
+        self.assertGreater(
+            float(result.get("fine_alignment_gain_px", 0.0)),
+            3.0,
+        )
+
     def test_luminous_segments_refine_pose_inside_moving_filter(self):
         (
             frame,
@@ -1755,9 +1909,12 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             4,
         )
         self.assertGreaterEqual(result["matched_count"], 4)
-        self.assertEqual(
-            "expected_on_local_emission",
+        self.assertIn(
             result["fit_landmark_source"],
+            {
+                "expected_on_id_anchored_fine",
+                "expected_on_local_emission",
+            },
         )
         self.assertEqual("", result["fit_diagnostics"]["failure_stage"])
 
