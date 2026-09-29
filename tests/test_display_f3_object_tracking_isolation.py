@@ -320,6 +320,130 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             )
         )
 
+    def test_intermittent_semantic_snapshot_survives_next_off_phase_within_hold(self):
+        payload = {
+            "age_ms": 2100.0,
+            "frame_token": ("camera", 100),
+            "context": {
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_002",
+            },
+            "analysis": {
+                "ready": True,
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_002",
+                "tracking_snapshot_explicit": True,
+                "positive_on_matched_count": 1,
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_001",
+                        "expected": "on",
+                        "classified": "on",
+                        "matched": True,
+                    }
+                ],
+            },
+        }
+        context = {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "intermittent": True,
+        }
+
+        self.assertFalse(
+            tracking._tracking_result_operationally_fresh(
+                payload,
+                ("camera", 145),
+            )
+        )
+        self.assertTrue(
+            tracking._intermittent_snapshot_acceptable(
+                payload,
+                context,
+                ("camera", 145),
+            )
+        )
+
+    def test_intermittent_snapshot_does_not_relax_steady_or_long_stale_frame(self):
+        payload = {
+            "age_ms": 2100.0,
+            "frame_token": ("camera", 100),
+            "context": {
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_002",
+            },
+            "analysis": {
+                "ready": True,
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_002",
+                "tracking_snapshot_explicit": True,
+                "luminous_core_confirmed_mask_ids": ["MASK_001"],
+            },
+        }
+        steady = {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_002",
+            "intermittent": False,
+        }
+        intermittent = {
+            **steady,
+            "intermittent": True,
+        }
+
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                payload,
+                steady,
+                ("camera", 145),
+            )
+        )
+
+        payload["age_ms"] = 4000.0
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                payload,
+                intermittent,
+                ("camera", 145),
+            )
+        )
+
+    def test_intermittent_tracking_snapshot_can_launch_semantic_after_live_frame_advanced(self):
+        result = tracking.F3TrackingResult(
+            locked=True,
+            frame=np.zeros((10, 10, 3), dtype=np.uint8),
+            reference="luminous:CHECK_002",
+            source_type="luminous_segment_grid",
+            evidence_current=True,
+            luminous_validated_mask_ids=("MASK_001",),
+        )
+        payload = {
+            "age_ms": 1900.0,
+            "frame_token": ("camera", 200),
+            "result": result,
+            "geometry": {
+                "locked": True,
+                "check_id": "CHECK_002",
+                "source_type": "luminous_segment_grid",
+                "luminous_evidence_current": True,
+                "luminous_core_validated_mask_ids": ["MASK_001"],
+            },
+        }
+        context = {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "intermittent": True,
+        }
+
+        self.assertTrue(
+            tracking._intermittent_snapshot_acceptable(
+                payload,
+                context,
+                ("camera", 240),
+            )
+        )
+
     def test_cached_lock_never_promotes_held_pose_to_current_evidence(self):
         source = inspect.getsource(tracking.F3DisplayObjectTracker.align)
         self.assertIn(

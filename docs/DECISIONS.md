@@ -889,6 +889,33 @@ registrar H1 OK e liberar a transição para o próximo CHECK.
 Esta decisão complementa D-022, D-023 e D-024. D-025 permanece experimental e
 não se torna autoridade produtiva por causa desta mudança.
 
+
+---
+## D-027 — Snapshot ON de CHECK intermitente
+
+**Status:** Accepted
+
+### Contexto
+
+No teste físico de BLUE, o tracking encontrou os 18 segmentos ON no frame 1215, mas o runtime já estava observando uma fase OFF quando o resultado assíncrono ficou disponível. O analyzer do snapshot rastreado confirmou os 18 IDs luminosos, porém o resultado permaneceu bloqueado pelo gate de energia.
+
+### Decisão
+
+- A câmera visível continua latest-frame-wins.
+- Em CHECK com `intermittent=true`, um snapshot coerente de frame, geometria e CHECK com evidência positiva pode continuar elegível por até 2,5 s.
+- A exceção vale somente para o mesmo projeto e CHECK.
+- O snapshot precisa ter evidência positiva: geometria `luminous_segment_grid` com IDs validados ou análise explícita com pelo menos um ON positivo.
+- A mesma regra vale na passagem tracking para analyzer e na entrega posterior do resultado semântico.
+- Um único ON apenas preserva o frame candidato; não aprova o CHECK. As regras temporais atuais continuam exigindo a fase ON válida, conformidade do CHECK e tratamento de defeito persistente.
+- CHECK contínuo, outro CHECK/projeto, snapshot sem emissão positiva ou com mais de 2,5 s continuam sujeitos à regra normal de frescor.
+- O snapshot preservado nunca substitui `camera_frame_atual`.
+
+### Consequência
+
+O BLUE pode ter a fase acesa capturada e analisada mesmo que, quando o worker termine, a câmera já esteja mostrando a fase apagada. Segmentos de frames diferentes continuam não sendo somados para fabricar conformidade.
+
+Esta decisão complementa D-024 e D-026.
+
 ---
 ## Como adicionar uma decisão
 

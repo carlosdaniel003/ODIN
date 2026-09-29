@@ -136,6 +136,12 @@ F3_SEMANTIC_EXECUTOR_KEY = "semantic-latest"
 # substituir a câmera atual nem alimentar decisão produtiva muito atrasada.
 F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS = 1200.0
 F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP = 24
+# CHECK intermitente é um evento temporal: o frame ON precisa continuar válido
+# enquanto o worker termina, mesmo que a câmera já esteja mostrando a fase OFF
+# seguinte. O valor acompanha o hold de energia intermitente do runtime (2,5 s)
+# e continua muito abaixo de uma mudança operacional longa/indefinida.
+F3_TRACKING_INTERMITTENT_SNAPSHOT_MAX_AGE_MS = 2500.0
+F3_TRACKING_INTERMITTENT_SNAPSHOT_MAX_FRAME_GAP = 80
 
 F3_TRACKING_MASK_BGR = (21, 204, 250)
 F3_TRACKING_BOARD_BGR = (248, 189, 56)
@@ -6675,6 +6681,132 @@ def _tracking_result_operationally_fresh(
     return True
 
 
+def _analysis_has_positive_on_evidence(analysis: dict | None) -> bool:
+    """Indica que o snapshot contém emissão positiva do CHECK atual."""
+    if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
+        return False
+    try:
+        if int(analysis.get("positive_on_matched_count", 0) or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    if analysis.get("luminous_core_confirmed_mask_ids"):
+        return True
+    for item in analysis.get("mask_results") or ():
+        if not isinstance(item, dict):
+            continue
+        if (
+            str(item.get("expected") or "").strip().lower() == "on"
+            and str(item.get("classified") or "").strip().lower() == "on"
+            and item.get("matched") is not False
+        ):
+            return True
+    return False
+
+
+def _intermittent_snapshot_acceptable(
+    payload: dict | None,
+    current_context: dict | None,
+    current_token,
+) -> bool:
+    """Aceita por pouco tempo o frame ON congelado de um CHECK intermitente.
+
+    O frame da câmera continua latest-frame-wins. Esta exceção vale somente para
+    o snapshot de análise/tracking: quando o BLUE pisca, o worker pode terminar
+    depois que a câmera já entrou na fase OFF. Se o snapshot pertence ao mesmo
+    CHECK e contém emissão positiva coerente, ele continua analisável durante a
+    janela temporal do pisca.
+    """
+    if not isinstance(payload, dict) or not isinstance(current_context, dict):
+        return False
+    if not bool(current_context.get("intermittent", False)):
+        return False
+
+    try:
+        age_ms = float(
+            payload.get(
+                "age_ms",
+                payload.get("elapsed_ms", 0.0),
+            )
+            or 0.0
+        )
+    except (TypeError, ValueError):
+        return False
+    if not (
+        0.0
+        <= age_ms
+        <= F3_TRACKING_INTERMITTENT_SNAPSHOT_MAX_AGE_MS
+    ):
+        return False
+
+    payload_token = payload.get("frame_token")
+    if (
+        isinstance(payload_token, tuple)
+        and isinstance(current_token, tuple)
+        and len(payload_token) >= 2
+        and len(current_token) >= 2
+        and payload_token[0] == "camera"
+        and current_token[0] == "camera"
+    ):
+        try:
+            gap = abs(int(current_token[1]) - int(payload_token[1]))
+        except (TypeError, ValueError):
+            return False
+        if gap > F3_TRACKING_INTERMITTENT_SNAPSHOT_MAX_FRAME_GAP:
+            return False
+
+    project_name = str(current_context.get("project_name") or "")
+    check_id = str(current_context.get("check_id") or "")
+
+    payload_context = payload.get("context")
+    if isinstance(payload_context, dict):
+        if (
+            str(payload_context.get("project_name") or "") != project_name
+            or str(payload_context.get("check_id") or "") != check_id
+        ):
+            return False
+
+    analysis = payload.get("analysis")
+    if isinstance(analysis, dict):
+        if (
+            str(analysis.get("project_name") or project_name) != project_name
+            or str(analysis.get("check_id") or check_id) != check_id
+        ):
+            return False
+        if not bool(analysis.get("tracking_snapshot_explicit")):
+            return False
+        return _analysis_has_positive_on_evidence(analysis)
+
+    geometry = payload.get("geometry")
+    if isinstance(geometry, dict):
+        geometry_check_id = str(geometry.get("check_id") or "")
+        if geometry_check_id and geometry_check_id != check_id:
+            return False
+        if (
+            bool(geometry.get("locked"))
+            and str(geometry.get("source_type") or "")
+            == "luminous_segment_grid"
+            and bool(geometry.get("luminous_evidence_current"))
+            and bool(geometry.get("luminous_core_validated_mask_ids"))
+        ):
+            return True
+
+    result = payload.get("result")
+    if result is not None:
+        if (
+            bool(getattr(result, "locked", False))
+            and bool(getattr(result, "evidence_current", False))
+            and str(getattr(result, "source_type", "") or "")
+            == "luminous_segment_grid"
+            and bool(
+                getattr(result, "luminous_validated_mask_ids", ()) or ()
+            )
+        ):
+            return True
+
+    return False
+
+
 def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
     """Autoridade final na instância real de DesktopProductionApp.
 
@@ -6785,15 +6917,37 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     and str(current_context.get("check_id") or "")
                     == str(payload_context.get("check_id") or "")
                 )
+                normal_fresh = _tracking_result_operationally_fresh(
+                    payload,
+                    current_token,
+                )
+                intermittent_snapshot = _intermittent_snapshot_acceptable(
+                    payload,
+                    current_context,
+                    current_token,
+                )
                 if (
                     same_context
-                    and _tracking_result_operationally_fresh(
-                        payload,
-                        current_token,
-                    )
+                    and (normal_fresh or intermittent_snapshot)
                     and isinstance(payload.get("analysis"), dict)
                     and _valid_frame(payload.get("analysis_frame"))
                 ):
+                    if intermittent_snapshot and not normal_fresh:
+                        analysis = deepcopy(payload.get("analysis") or {})
+                        analysis.update(
+                            intermittent_snapshot_capture=True,
+                            intermittent_snapshot_frame_token=deepcopy(
+                                payload.get("frame_token")
+                            ),
+                            intermittent_snapshot_age_ms=float(
+                                payload.get("age_ms", 0.0) or 0.0
+                            ),
+                            intermittent_snapshot_policy=(
+                                "positive_on_frozen_snapshot"
+                            ),
+                        )
+                        payload = dict(payload)
+                        payload["analysis"] = analysis
                     ready_semantic = payload
 
         if isinstance(ready_semantic, dict):
@@ -6934,8 +7088,27 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         payload,
                         current_token,
                     )
+                    current_context = None
+                    context_fn = getattr(
+                        self,
+                        "_display_auto_current_context",
+                        None,
+                    )
+                    if callable(context_fn):
+                        try:
+                            current_context = context_fn()
+                        except Exception:
+                            current_context = None
+                    intermittent_snapshot = _intermittent_snapshot_acceptable(
+                        payload,
+                        current_context,
+                        current_token,
+                    )
 
-                    if operational_fresh and _valid_frame(analysis_frame):
+                    if (
+                        (operational_fresh or intermittent_snapshot)
+                        and _valid_frame(analysis_frame)
+                    ):
                         self._display_f3_tracking_analysis_frame = None
                         self._display_f3_tracking_pending_raw_frame = None
                         self._display_f3_tracking_analysis_pending = False

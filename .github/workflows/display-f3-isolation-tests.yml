@@ -126,6 +126,9 @@ jobs:
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_visor_luminoso_so_mostra_segmentos_identificados_com_luz \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_tracking_worker_preserva_token_do_snapshot_mesmo_se_camera_avanca \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_semantic_worker_preserva_raw_e_geometria_do_mesmo_tracking_snapshot \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_intermittent_semantic_snapshot_survives_next_off_phase_within_hold \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_intermittent_snapshot_does_not_relax_steady_or_long_stale_frame \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_intermittent_tracking_snapshot_can_launch_semantic_after_live_frame_advanced \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_analisador_rastreado_aceita_snapshot_explicito_sem_estado_mutavel_do_app \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_emissao_no_nucleo_exato_promove_on_sem_aprovar_mascara_off_errada \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_evidencia_luminosa_nao_promove_on_sem_lock_do_mesmo_check \
