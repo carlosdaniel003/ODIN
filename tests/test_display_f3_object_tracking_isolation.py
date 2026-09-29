@@ -1353,21 +1353,139 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertNotIn("_analysis_transform_for_current_check", source)
         self.assertNotIn("_analysis_alignment_for_current_check", source)
 
-    def test_luminous_tracking_uses_canonical_mask_geometry(self):
-        source = inspect.getsource(
-            tracking._canonical_check_masks_for_luminous_tracking
+    def test_luminous_tracking_uses_check_local_pose_but_keeps_canonical_model(self):
+        project = {
+            "name": "DISPLAY",
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "segment",
+                    "cx": 100.0,
+                    "cy": 80.0,
+                    "width": 24.0,
+                    "height": 8.0,
+                    "angle": 0.0,
+                },
+                {
+                    "id": "MASK_002",
+                    "type": "segment",
+                    "cx": 160.0,
+                    "cy": 120.0,
+                    "width": 24.0,
+                    "height": 8.0,
+                    "angle": 0.0,
+                },
+                {
+                    "id": "MASK_003",
+                    "type": "segment",
+                    "cx": 220.0,
+                    "cy": 80.0,
+                    "width": 24.0,
+                    "height": 8.0,
+                    "angle": 0.0,
+                },
+            ],
+        }
+        check = {
+            "id": "CHECK_001",
+            "board_points_reference": [
+                [30.0, 40.0],
+                [290.0, 40.0],
+                [290.0, 170.0],
+                [30.0, 170.0],
+            ],
+            "mask_overrides_reference": {
+                "MASK_001": {
+                    "id": "MASK_001",
+                    "type": "segment",
+                    "cx": 112.0,
+                    "cy": 88.0,
+                    "width": 24.0,
+                    "height": 8.0,
+                    "angle": 2.0,
+                },
+                "MASK_002": {
+                    "id": "MASK_002",
+                    "type": "segment",
+                    "cx": 172.0,
+                    "cy": 128.0,
+                    "width": 24.0,
+                    "height": 8.0,
+                    "angle": 2.0,
+                },
+                "MASK_003": {
+                    "id": "MASK_003",
+                    "type": "segment",
+                    "cx": 232.0,
+                    "cy": 88.0,
+                    "width": 24.0,
+                    "height": 8.0,
+                    "angle": 2.0,
+                },
+            },
+        }
+        reference_to_canonical = np.asarray(
+            [[1.0, 0.0, -12.0], [0.0, 1.0, -8.0]],
+            dtype=np.float32,
         )
-        self.assertIn("canonical_masks", source)
-        self.assertIn('project.get("masks"', source)
-        self.assertNotIn("mask_overrides_reference", source)
-        self.assertNotIn("reference_to_canonical", source)
+        runtime = SimpleNamespace(
+            canonical_board=[
+                [18.0, 32.0],
+                [278.0, 32.0],
+                [278.0, 162.0],
+                [18.0, 162.0],
+            ],
+            canonical_masks=deepcopy(project["masks"]),
+            references={
+                "check:CHECK_001": {
+                    "reference_to_canonical": reference_to_canonical,
+                }
+            },
+            store=object(),
+        )
 
-        rescue = inspect.getsource(
-            tracking._rescue_luminous_segment_tracking_lock
+        context = tracking._luminous_fit_context(
+            runtime,
+            project,
+            check,
         )
-        self.assertIn('fit_space = "canonical"', rescue)
-        self.assertNotIn("canonical_to_fit", rescue)
-        self.assertNotIn("fit_to_canonical", rescue)
+
+        self.assertEqual("check:CHECK_001", context["space"])
+        self.assertIsNotNone(context["fit_to_canonical"])
+        self.assertEqual(112, int(context["masks"][0]["cx"]))
+        self.assertEqual(88, int(context["masks"][0]["cy"]))
+        live_source = inspect.getsource(tracking._update_tracking_live_geometry)
+        self.assertIn("project.get("masks"", live_source)
+        self.assertNotIn("_check_reference_geometry", live_source)
+
+    def test_transform_mask_preserves_segment_format_angle_and_scale(self):
+        mask = {
+            "id": "MASK_001",
+            "type": "segment",
+            "cx": 100.0,
+            "cy": 80.0,
+            "width": 30.0,
+            "height": 8.0,
+            "angle": 12.0,
+        }
+        matrix = cv2.getRotationMatrix2D(
+            (160.0, 120.0),
+            7.0,
+            1.05,
+        ).astype(np.float32)
+        matrix[0, 2] += 11.0
+        matrix[1, 2] -= 5.0
+
+        transformed = tracking.transform_mask(mask, matrix)
+
+        self.assertEqual("segment", transformed["type"])
+        self.assertAlmostEqual(31.5, float(transformed["width"]), places=2)
+        self.assertAlmostEqual(8.4, float(transformed["height"]), places=2)
+        self.assertAlmostEqual(
+            12.0 + tracking.affine_rotation_deg(matrix),
+            float(transformed["angle"]),
+            places=3,
+        )
 
     def test_rotation_anchor_rejects_90_degree_pose_flip(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1509,7 +1627,11 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
 
 
     @staticmethod
-    def _luminous_tracking_scene(*, missing_index: int | None = None):
+    def _luminous_tracking_scene(
+        *,
+        missing_index: int | None = None,
+        visible_indices: set[int] | None = None,
+    ):
         width, height = 640, 480
         canonical_board = [
             [120.0, 150.0],
@@ -1564,8 +1686,15 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             canonical,
             display_to_current,
         ).reshape(-1, 2)
+        allowed = (
+            None
+            if visible_indices is None
+            else {int(value) for value in visible_indices}
+        )
         for index, point in enumerate(observed):
             if missing_index is not None and index == int(missing_index):
+                continue
+            if allowed is not None and index not in allowed:
                 continue
             cx, cy = int(round(float(point[0]))), int(round(float(point[1])))
             cv2.rectangle(
@@ -1646,6 +1775,55 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertLess(
             float(np.median(error)),
             float(np.median(coarse_error)),
+        )
+
+    def test_structural_lock_plus_three_luminous_segments_refines_all_masks(self):
+        (
+            frame,
+            canonical_board,
+            rows,
+            filter_to_current,
+            _display_to_current,
+            observed,
+        ) = self._luminous_tracking_scene(
+            visible_indices={0, 2, 5},
+        )
+
+        coarse_current_to_canonical = cv2.invertAffineTransform(
+            filter_to_current
+        )
+        result = tracking._find_luminous_segment_pose(
+            frame,
+            canonical_board,
+            rows,
+            (640, 480),
+            base_matrix=coarse_current_to_canonical,
+        )
+
+        self.assertTrue(result["available"], result)
+        self.assertEqual(3, result["required_match_count"])
+        self.assertGreaterEqual(result["matched_count"], 3)
+        self.assertEqual(
+            "expected_on_local_emission",
+            result["fit_landmark_source"],
+        )
+
+        estimated = np.asarray(
+            result["matrix"],
+            dtype=np.float32,
+        ).reshape(2, 3)
+        visible = observed[[0, 2, 5]]
+        recovered = cv2.transform(
+            visible.reshape(-1, 1, 2),
+            estimated,
+        ).reshape(-1, 2)
+        expected = np.asarray(
+            [rows[index]["center"] for index in (0, 2, 5)],
+            dtype=np.float32,
+        )
+        self.assertLess(
+            float(np.median(np.linalg.norm(recovered - expected, axis=1))),
+            6.0,
         )
 
     def test_luminous_grid_survives_missing_expected_on_and_extra_light(self):

@@ -100,7 +100,8 @@ jobs:
           python -m unittest \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_rescue_permanece_no_espaco_canonico \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_refinement_guard_rejects_large_twist \
-            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_tracking_uses_canonical_mask_geometry \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_tracking_uses_check_local_pose_but_keeps_canonical_model \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_transform_mask_preserves_segment_format_angle_and_scale \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_live_geometry_uses_canonical_shape_without_check_local_warp \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_tracking_preview_uses_classic_luminous_mask_presentation \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_preview_operacional_classico_so_pinta_luz_em_verde \
@@ -109,6 +110,7 @@ jobs:
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_semantic_worker_preserva_raw_e_geometria_do_mesmo_tracking_snapshot \
             tests.test_display_f3_contour_check_identity.DisplayF3ContourCheckIdentityTests.test_analisador_rastreado_aceita_snapshot_explicito_sem_estado_mutavel_do_app \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_segments_refine_pose_inside_moving_filter \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_structural_lock_plus_three_luminous_segments_refines_all_masks \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_grid_survives_missing_expected_on_and_extra_light \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_blooming_recovers_expected_on_landmarks_with_structural_lock \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_luminous_fit_diagnostics_explain_coarse_failure \
