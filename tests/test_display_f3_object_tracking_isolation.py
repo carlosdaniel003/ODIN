@@ -1455,7 +1455,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertEqual(112, int(context["masks"][0]["cx"]))
         self.assertEqual(88, int(context["masks"][0]["cy"]))
         live_source = inspect.getsource(tracking._update_tracking_live_geometry)
-        self.assertIn("project.get("masks"", live_source)
+        self.assertIn('project.get("masks"', live_source)
         self.assertNotIn("_check_reference_geometry", live_source)
 
     def test_transform_mask_preserves_segment_format_angle_and_scale(self):
