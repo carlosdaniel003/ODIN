@@ -4040,20 +4040,31 @@ class F3DisplayObjectTracker:
         self.reset()
 
     def reset(self) -> None:
+        """Invalida configuração + banco de referências + pose corrente."""
         self.project = ""
         self.signature = None
         self.width = 0
         self.height = 0
         self.references: dict[str, dict] = {}
+        self.reference_specs: dict[str, dict] = {}
+        self.reference_materialization_failures: set[str] = set()
         self.ready = False
         self.reason = "not_configured"
+        self.canonical_board: list[list[float]] = []
+        self.canonical_masks: list[dict] = []
+        self.reset_pose()
+
+    def reset_pose(self) -> None:
+        """Descarta somente a pose da placa; preserva calibração já preparada.
+
+        Rearme físico entre duas placas precisa procurar a nova posição do zero,
+        mas não precisa reler as mesmas fotos nem recalcular o banco estrutural.
+        """
         self.last_matrix: np.ndarray | None = None
         self.last_compute_s = 0.0
         self.last_result: F3TrackingResult | None = None
         self.last_frame_id = None
         self._last_reference = ""
-        self.canonical_board: list[list[float]] = []
-        self.canonical_masks: list[dict] = []
         self.last_gray = None
         self.last_verified_s = 0.0
         self.last_verified_rotation_deg: float | None = None
@@ -4203,8 +4214,18 @@ class F3DisplayObjectTracker:
         except OSError:
             return str(path), 0, 0
 
-    def _signature(self, project: dict, board) -> tuple:
-        reference_specs = self._calibrated_reference_specs(project)
+    def _signature(
+        self,
+        project: dict,
+        board,
+        *,
+        reference_specs: list[dict] | None = None,
+    ) -> tuple:
+        reference_specs = (
+            self._calibrated_reference_specs(project)
+            if reference_specs is None
+            else reference_specs
+        )
         reference_files = tuple(
             (
                 str(spec.get("key") or ""),
@@ -4227,6 +4248,71 @@ class F3DisplayObjectTracker:
             repr(project.get("masks", [])),
             reference_files,
         )
+
+    def _available_reference_keys(self) -> tuple[str, ...]:
+        keys = list(self.reference_specs)
+        for key in self.references:
+            if key not in self.reference_specs:
+                keys.append(key)
+        return tuple(str(key) for key in keys if str(key))
+
+    def has_reference(self, key: str) -> bool:
+        name = str(key or "")
+        return bool(
+            name
+            and (
+                name in self.references
+                or (
+                    name in self.reference_specs
+                    and name not in self.reference_materialization_failures
+                )
+            )
+        )
+
+    def _ensure_reference(self, key: str) -> bool:
+        """Materializa uma referência estrutural somente quando ela é usada."""
+        name = str(key or "")
+        if not name:
+            return False
+        if name in self.references:
+            return True
+        if name in self.reference_materialization_failures:
+            return False
+
+        spec = self.reference_specs.get(name)
+        if not isinstance(spec, dict):
+            return False
+
+        path = str(spec.get("path") or "")
+        image = cv2.imread(path, cv2.IMREAD_COLOR)
+        if not _valid_frame(image) or image.shape[:2] != (self.height, self.width):
+            self.reference_materialization_failures.add(name)
+            return False
+
+        tracking_mask = build_tracking_mask(
+            self.width,
+            self.height,
+            spec.get("board", []),
+            spec.get("masks", []),
+        )
+        if tracking_mask is None:
+            self.reference_materialization_failures.add(name)
+            return False
+
+        self._add_reference(
+            self.references,
+            key=name,
+            image=image,
+            tracking_mask=tracking_mask,
+            reference_to_canonical=spec.get("reference_to_canonical"),
+            angle=float(spec.get("angle", 0.0) or 0.0),
+            source_type=str(spec.get("source_type") or "reference"),
+            board_points=spec.get("board", []),
+        )
+        if name not in self.references:
+            self.reference_materialization_failures.add(name)
+            return False
+        return True
 
     def _add_reference(
         self,
@@ -4361,6 +4447,8 @@ class F3DisplayObjectTracker:
 
     def _ensure_akaze_reference(self, key: str) -> bool:
         """Materializa AKAZE de UMA referência somente no fallback real."""
+        if not self._ensure_reference(str(key or "")):
+            return False
         ref = self.references.get(str(key or ""))
         if not isinstance(ref, dict):
             return False
@@ -5053,7 +5141,12 @@ class F3DisplayObjectTracker:
             self.reset()
             self.reason = "display_shape_missing"
             return False
-        signature = self._signature(project, board)
+        reference_specs = self._calibrated_reference_specs(project)
+        signature = self._signature(
+            project,
+            board,
+            reference_specs=reference_specs,
+        )
         if signature == self.signature:
             return self.ready
 
@@ -5069,40 +5162,18 @@ class F3DisplayObjectTracker:
             if isinstance(mask, dict)
         ]
 
-        refs: dict[str, dict] = {}
-
-        # Banco multivista real: foto canônica de Máscaras, placa desligada e
-        # todos os CHECKS. Cada uma usa SEU contorno e SUAS máscaras desenhadas,
-        # portanto a posição física da placa na foto não precisa coincidir.
-        for spec in self._calibrated_reference_specs(project):
-            path = str(spec.get("path") or "")
-            image = cv2.imread(path, cv2.IMREAD_COLOR)
-            if not _valid_frame(image) or image.shape[:2] != (height, width):
-                continue
-            tracking_mask = build_tracking_mask(
-                width,
-                height,
-                spec.get("board", []),
-                spec.get("masks", []),
-            )
-            if tracking_mask is None:
-                continue
-            self._add_reference(
-                refs,
-                key=str(spec.get("key") or ""),
-                image=image,
-                tracking_mask=tracking_mask,
-                reference_to_canonical=spec.get("reference_to_canonical"),
-                angle=float(spec.get("angle", 0.0) or 0.0),
-                source_type=str(spec.get("source_type") or "reference"),
-                board_points=spec.get("board", []),
-            )
-
-        if not refs:
+        # Configuração agora indexa o banco multivista sem decodificar todas as
+        # imagens Full HD nem calcular ORB de todas elas. A referência necessária
+        # é materializada no primeiro uso e então permanece em cache na sessão.
+        self.reference_specs = {
+            str(spec.get("key") or ""): deepcopy(spec)
+            for spec in reference_specs
+            if isinstance(spec, dict) and str(spec.get("key") or "")
+        }
+        if not self.reference_specs:
             self.reason = "reference_features_insufficient"
             return False
 
-        self.references = refs
         self.ready = True
         self.reason = "ready"
         return True
@@ -5262,8 +5333,10 @@ class F3DisplayObjectTracker:
             not _valid_frame(frame)
             or not self.ready
             or frame.shape[:2] != (self.height, self.width)
-            or str(key or "") not in self.references
+            or not self.has_reference(str(key or ""))
         ):
+            return None
+        if not self._ensure_reference(str(key or "")):
             return None
 
         gray = self._gray(frame)
@@ -5357,7 +5430,13 @@ class F3DisplayObjectTracker:
         candidate["current_masked_for_segments"] = False
         return candidate
 
-    def align(self, frame, frame_id=None) -> F3TrackingResult:
+    def align(
+        self,
+        frame,
+        frame_id=None,
+        *,
+        preferred_reference_keys=None,
+    ) -> F3TrackingResult:
         if not _valid_frame(frame):
             return F3TrackingResult(False, frame, reason="invalid_frame")
         if not self.ready:
@@ -5424,6 +5503,21 @@ class F3DisplayObjectTracker:
             self.last_frame_id = frame_id
             return result
 
+        all_reference_keys = list(self._available_reference_keys())
+        preferred_keys = []
+        for key in preferred_reference_keys or ():
+            name = str(key or "")
+            if name and name in all_reference_keys and name not in preferred_keys:
+                preferred_keys.append(name)
+        remaining_keys = [
+            key for key in all_reference_keys if key not in preferred_keys
+        ]
+        reference_groups = (
+            [preferred_keys, remaining_keys]
+            if preferred_keys
+            else [all_reference_keys]
+        )
+
         orb = cv2.ORB_create(
             nfeatures=F3_TRACKING_ORB_FEATURES,
             scaleFactor=1.2,
@@ -5439,14 +5533,23 @@ class F3DisplayObjectTracker:
 
         candidates = []
         if orb_available:
-            for key in tuple(self.references):
-                candidate = self._candidate(current_kp, current_desc, key)
-                if candidate is not None:
-                    candidates.append(candidate)
-            candidates = self._filter_abrupt_rotation_candidates(
-                candidates,
-                source="orb",
-            )
+            for group in reference_groups:
+                if not group:
+                    continue
+                group_candidates = []
+                for key in group:
+                    if not self._ensure_reference(key):
+                        continue
+                    candidate = self._candidate(current_kp, current_desc, key)
+                    if candidate is not None:
+                        group_candidates.append(candidate)
+                group_candidates = self._filter_abrupt_rotation_candidates(
+                    group_candidates,
+                    source="orb",
+                )
+                if group_candidates:
+                    candidates = group_candidates
+                    break
 
         # Quando nenhuma referência absoluta vence, tente continuidade óptica
         # entre o último frame confirmado e o atual, restrita ao contorno da placa.
@@ -5473,19 +5576,27 @@ class F3DisplayObjectTracker:
                 and len(akaze_kp) >= F3_TRACKING_AKAZE_MIN_MATCHES
             )
             if akaze_available:
-                for key in tuple(self.references):
-                    self._ensure_akaze_reference(key)
-                    candidate = self._akaze_candidate(
-                        akaze_kp,
-                        akaze_desc,
-                        key,
+                for group in reference_groups:
+                    if not group:
+                        continue
+                    group_candidates = []
+                    for key in group:
+                        if not self._ensure_akaze_reference(key):
+                            continue
+                        candidate = self._akaze_candidate(
+                            akaze_kp,
+                            akaze_desc,
+                            key,
+                        )
+                        if candidate is not None:
+                            group_candidates.append(candidate)
+                    group_candidates = self._filter_abrupt_rotation_candidates(
+                        group_candidates,
+                        source="akaze",
                     )
-                    if candidate is not None:
-                        candidates.append(candidate)
-                candidates = self._filter_abrupt_rotation_candidates(
-                    candidates,
-                    source="akaze",
-                )
+                    if group_candidates:
+                        candidates = group_candidates
+                        break
 
         # Câmera e suporte são fixos: se o PCB tiver poucos corners ORB, use as
         # bordas do contorno desenhado como fallback de translação. O contorno
@@ -5496,14 +5607,23 @@ class F3DisplayObjectTracker:
                 current_edges = cv2.Canny(gray, 45, 135)
             except Exception:
                 current_edges = None
-            for key in tuple(self.references):
-                candidate = self._template_candidate(current_edges, key)
-                if candidate is not None:
-                    candidates.append(candidate)
-            candidates = self._filter_abrupt_rotation_candidates(
-                candidates,
-                source="edge_template",
-            )
+            for group in reference_groups:
+                if not group:
+                    continue
+                group_candidates = []
+                for key in group:
+                    if not self._ensure_reference(key):
+                        continue
+                    candidate = self._template_candidate(current_edges, key)
+                    if candidate is not None:
+                        group_candidates.append(candidate)
+                group_candidates = self._filter_abrupt_rotation_candidates(
+                    group_candidates,
+                    source="edge_template",
+                )
+                if group_candidates:
+                    candidates = group_candidates
+                    break
 
         if not candidates:
             self.consecutive_misses += 1
@@ -5664,10 +5784,12 @@ def set_tracking_enabled(app, enabled: bool) -> bool:
     return True
 
 
-def reset_tracking_runtime(app) -> None:
-    runtime = get_tracking_runtime(app)
-    if runtime is not None:
-        runtime.reset()
+def _clear_tracking_runtime_transients(
+    app,
+    *,
+    reason: str,
+    resync_enabled: bool,
+) -> None:
     executor = getattr(app, "_display_f3_heavy_executor", None)
     if executor is not None:
         try:
@@ -5684,17 +5806,44 @@ def reset_tracking_runtime(app) -> None:
     app._display_f3_tracking_raw_preview_frame = None
     app._display_f3_tracking_result = None
     app._display_f3_tracking_live_geometry = None
-    # O F3 usa pipeline cooperativo em dois ciclos do Tk: rastreamento primeiro,
-    # classificação depois. Nunca deixe um frame pendente sobreviver a reset,
-    # troca de projeto, fechamento do F3 ou perda de rastreamento.
     app._display_f3_tracking_analysis_frame = None
     app._display_f3_tracking_analysis_pending = False
     app._display_f3_tracking_pending_raw_frame = None
+
+    enabled = bool(
+        tracking_enabled(app)
+        if resync_enabled
+        else getattr(app, "_display_f3_object_tracking_enabled", False)
+    )
     app._display_f3_object_tracking_last_status = {
-        "enabled": tracking_enabled(app),
+        "enabled": enabled,
         "locked": False,
-        "reason": "reset",
+        "reason": str(reason or "reset"),
     }
+
+
+def reset_tracking_runtime(app) -> None:
+    """Reset completo usado quando configuração/projeto pode ter mudado."""
+    runtime = get_tracking_runtime(app)
+    if runtime is not None:
+        runtime.reset()
+    _clear_tracking_runtime_transients(
+        app,
+        reason="reset",
+        resync_enabled=True,
+    )
+
+
+def reset_tracking_cycle(app) -> None:
+    """Nova placa: perde toda pose, mas preserva referências da mesma sessão."""
+    runtime = get_tracking_runtime(app)
+    if runtime is not None:
+        runtime.reset_pose()
+    _clear_tracking_runtime_transients(
+        app,
+        reason="cycle_pose_reset",
+        resync_enabled=False,
+    )
 
 
 def _rescue_current_check_tracking_lock(
@@ -5734,7 +5883,7 @@ def _rescue_current_check_tracking_lock(
     unique_specs: list[tuple[str, float]] = []
     seen = set()
     for key, threshold in specs:
-        if key in seen or key not in runtime.references:
+        if key in seen or not runtime.has_reference(key):
             continue
         seen.add(key)
         unique_specs.append((key, threshold))
@@ -5975,9 +6124,21 @@ def align_frame_for_f3(app, frame, *, frame_token=None):
             return frame, result
         result = luminous
     else:
+        current = _current_check(app)
+        current_check_id = (
+            str(current.get("id") or "")
+            if isinstance(current, dict)
+            else ""
+        )
+        preferred_reference_keys = []
+        if current_check_id:
+            preferred_reference_keys.append(f"check:{current_check_id}")
+        preferred_reference_keys.append("board_off")
+
         result = runtime.align(
             frame,
             frame_id=analysis_frame_id,
+            preferred_reference_keys=preferred_reference_keys,
         )
         if not bool(result.locked):
             rescued = _rescue_current_check_tracking_lock(
@@ -6051,7 +6212,10 @@ def _analysis_transform_for_current_check(
         return result.current_to_canonical, "canonical"
 
     check_id = str(current.get("id") or "")
-    reference = runtime.references.get(f"check:{check_id}")
+    reference_key = f"check:{check_id}"
+    reference = runtime.references.get(reference_key)
+    if not isinstance(reference, dict):
+        reference = runtime.reference_specs.get(reference_key)
     mapping = (
         reference.get("reference_to_canonical")
         if isinstance(reference, dict)

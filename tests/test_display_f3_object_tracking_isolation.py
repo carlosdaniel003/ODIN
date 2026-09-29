@@ -1125,6 +1125,235 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         board = [[65, 50], [255, 50], [255, 190], [65, 190]]
         return image, board
 
+    def test_configure_indexa_referencias_sem_decodificar_banco_inteiro(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json",
+                obter_projeto_ativo=lambda: "P1",
+                carregar_projeto=lambda _name: {
+                    "name": "P1",
+                    "master_resolution": {"width": 320, "height": 240},
+                    "masks": [],
+                },
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            board = [[50, 40], [270, 40], [270, 200], [50, 200]]
+            specs = [
+                {
+                    "key": "check:CHECK_001",
+                    "path": str(Path(directory) / "h1.jpg"),
+                    "board": board,
+                    "masks": [],
+                    "reference_to_canonical": np.asarray(
+                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                        dtype=np.float32,
+                    ),
+                    "angle": 0.0,
+                    "source_type": "check",
+                },
+                {
+                    "key": "board_off",
+                    "path": str(Path(directory) / "off.jpg"),
+                    "board": board,
+                    "masks": [],
+                    "reference_to_canonical": np.asarray(
+                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                        dtype=np.float32,
+                    ),
+                    "angle": 0.0,
+                    "source_type": "board_off",
+                },
+            ]
+            with (
+                patch.object(
+                    tracking,
+                    "canonical_board_points",
+                    return_value=board,
+                ),
+                patch.object(
+                    tracker,
+                    "_calibrated_reference_specs",
+                    return_value=specs,
+                ),
+                patch.object(tracking.cv2, "imread") as imread,
+            ):
+                self.assertTrue(tracker.configure("P1"))
+
+            imread.assert_not_called()
+            self.assertEqual({}, tracker.references)
+            self.assertEqual(
+                {"check:CHECK_001", "board_off"},
+                set(tracker.reference_specs),
+            )
+
+    def test_referencia_lazy_materializa_uma_vez_e_fica_em_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            tracker.width = 320
+            tracker.height = 240
+            tracker.ready = True
+            board = [[50, 40], [270, 40], [270, 200], [50, 200]]
+            tracker.reference_specs = {
+                "check:CHECK_001": {
+                    "key": "check:CHECK_001",
+                    "path": str(Path(directory) / "h1.jpg"),
+                    "board": board,
+                    "masks": [],
+                    "reference_to_canonical": np.asarray(
+                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                        dtype=np.float32,
+                    ),
+                    "angle": 0.0,
+                    "source_type": "check",
+                }
+            }
+            image = np.zeros((240, 320, 3), dtype=np.uint8)
+
+            def add_reference(refs, **kwargs):
+                refs[kwargs["key"]] = {
+                    "reference_to_canonical": kwargs["reference_to_canonical"],
+                }
+
+            with (
+                patch.object(tracking.cv2, "imread", return_value=image) as imread,
+                patch.object(
+                    tracking,
+                    "build_tracking_mask",
+                    return_value=np.full((240, 320), 255, dtype=np.uint8),
+                ),
+                patch.object(
+                    tracker,
+                    "_add_reference",
+                    side_effect=add_reference,
+                ) as add,
+            ):
+                self.assertTrue(tracker._ensure_reference("check:CHECK_001"))
+                self.assertTrue(tracker._ensure_reference("check:CHECK_001"))
+
+            self.assertEqual(1, imread.call_count)
+            self.assertEqual(1, add.call_count)
+
+    def test_reset_de_ciclo_apaga_pose_mas_preserva_banco_calibrado(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            tracker.project = "P1"
+            tracker.signature = ("P1",)
+            tracker.width = 320
+            tracker.height = 240
+            tracker.ready = True
+            tracker.reference_specs = {
+                "check:CHECK_001": {"key": "check:CHECK_001"}
+            }
+            tracker.references = {
+                "check:CHECK_001": {"descriptors": object()}
+            }
+            tracker.last_matrix = np.asarray(
+                [[1.0, 0.0, 12.0], [0.0, 1.0, -8.0]],
+                dtype=np.float32,
+            )
+            tracker.last_result = tracking.F3TrackingResult(
+                True,
+                np.zeros((240, 320, 3), dtype=np.uint8),
+                reference="check:CHECK_001",
+            )
+            tracker.last_verified_rotation_deg = 7.5
+            tracker.last_frame_id = 99
+
+            tracker.reset_pose()
+
+            self.assertTrue(tracker.ready)
+            self.assertEqual("P1", tracker.project)
+            self.assertIn("check:CHECK_001", tracker.references)
+            self.assertIn("check:CHECK_001", tracker.reference_specs)
+            self.assertIsNone(tracker.last_matrix)
+            self.assertIsNone(tracker.last_result)
+            self.assertIsNone(tracker.last_verified_rotation_deg)
+            self.assertIsNone(tracker.last_frame_id)
+
+    def test_align_prioriza_referencias_do_check_sem_materializar_restante(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = SimpleNamespace(
+                config_file=Path(directory) / "odin_display_projects.json"
+            )
+            tracker = tracking.F3DisplayObjectTracker(repository)
+            tracker.width = 320
+            tracker.height = 240
+            tracker.ready = True
+            tracker.reference_specs = {
+                "check:CHECK_001": {"key": "check:CHECK_001"},
+                "board_off": {"key": "board_off"},
+                "check:CHECK_002": {"key": "check:CHECK_002"},
+            }
+            frame = np.zeros((240, 320, 3), dtype=np.uint8)
+            fake_kp = [SimpleNamespace(pt=(10.0 + i, 20.0)) for i in range(20)]
+            fake_desc = np.zeros((20, 32), dtype=np.uint8)
+
+            class _Orb:
+                def detectAndCompute(self, _gray, _mask):
+                    return fake_kp, fake_desc
+
+            def ensure(key):
+                tracker.references.setdefault(str(key), {})
+                return True
+
+            preferred_candidate = {
+                "reference": "check:CHECK_001",
+                "matrix": np.asarray(
+                    [[1.0, 0.0, 5.0], [0.0, 1.0, 3.0]],
+                    dtype=np.float32,
+                ),
+                "matches": 20,
+                "inliers": 18,
+                "ratio": 0.9,
+                "rotation_deg": 0.0,
+                "scale": 1.0,
+                "score": 28.8,
+                "source_type": "check",
+            }
+
+            with (
+                patch.object(tracker, "_gray", return_value=np.zeros((240, 320), dtype=np.uint8)),
+                patch.object(tracking.cv2, "ORB_create", return_value=_Orb()),
+                patch.object(tracker, "_ensure_reference", side_effect=ensure) as materialize,
+                patch.object(
+                    tracker,
+                    "_candidate",
+                    side_effect=lambda _kp, _desc, key: (
+                        preferred_candidate if key == "check:CHECK_001" else None
+                    ),
+                ),
+                patch.object(
+                    tracker,
+                    "_filter_abrupt_rotation_candidates",
+                    side_effect=lambda candidates, **_kwargs: candidates,
+                ),
+                patch.object(
+                    tracking.cv2,
+                    "warpAffine",
+                    side_effect=lambda src, *_args, **_kwargs: src.copy(),
+                ),
+            ):
+                result = tracker.align(
+                    frame,
+                    frame_id=1,
+                    preferred_reference_keys=(
+                        "check:CHECK_001",
+                        "board_off",
+                    ),
+                )
+
+            self.assertTrue(result.locked)
+            materialized = [call.args[0] for call in materialize.call_args_list]
+            self.assertIn("check:CHECK_001", materialized)
+            self.assertIn("board_off", materialized)
+            self.assertNotIn("check:CHECK_002", materialized)
+
     def test_reference_bank_materializa_akaze_somente_no_fallback(self):
         add_source = inspect.getsource(
             tracking.F3DisplayObjectTracker._add_reference
@@ -1485,10 +1714,16 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
 
     def test_tracking_reset_cancels_pending_executor_work(self):
-        source = inspect.getsource(tracking.reset_tracking_runtime)
+        source = inspect.getsource(tracking._clear_tracking_runtime_transients)
         self.assertIn("cancel_owner(F3_TRACKING_EXECUTOR_OWNER)", source)
         self.assertIn("_display_f3_tracking_job_generation", source)
         self.assertIn("_display_f3_tracking_future = None", source)
+
+    def test_cycle_reset_usa_reset_pose_sem_descartar_referencias(self):
+        source = inspect.getsource(tracking.reset_tracking_cycle)
+        self.assertIn("runtime.reset_pose()", source)
+        self.assertNotIn("runtime.reset()", source)
+        self.assertIn('reason="cycle_pose_reset"', source)
 
     def test_live_geometry_uses_canonical_shape_without_check_local_warp(self):
         source = inspect.getsource(tracking._update_tracking_live_geometry)

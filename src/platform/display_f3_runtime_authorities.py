@@ -24,7 +24,7 @@ from src.platform.display_f3_object_tracking import (
     F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP,
     F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS,
     get_tracking_runtime,
-    reset_tracking_runtime,
+    reset_tracking_cycle,
 )
 
 
@@ -530,7 +530,7 @@ class F3RuntimeAuthorities:
         # de presença/energia, descarte a pose e o anchor angular para que a
         # próxima placa possa ser adquirida novamente sem herdar geometria.
         try:
-            reset_tracking_runtime(self.app)
+            reset_tracking_cycle(self.app)
         except Exception:
             self.tracking.reset()
         self.presence.reset()

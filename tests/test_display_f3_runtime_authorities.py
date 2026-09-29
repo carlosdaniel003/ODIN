@@ -369,7 +369,7 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
 
         with patch.object(
             authorities,
-            "reset_tracking_runtime",
+            "reset_tracking_cycle",
         ) as reset_tracking:
             owner.reset_cycle_state()
 

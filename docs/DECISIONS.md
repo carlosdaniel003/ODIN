@@ -1077,6 +1077,69 @@ A validação física desta mudança é registrada em
 `docs/F3_PHYSICAL_VALIDATION_LOG.md`.
 
 ---
+
+## D-030 — Rearme invalida pose e preserva banco de referências F3
+
+**Status:** Accepted
+
+### Contexto
+
+Após validar a correção que destravou o `IDENTIFICANDO...`, o teste físico
+confirmou que a câmera e o pipeline voltaram a avançar. Permaneceram dois custos
+desnecessários no início de cada aquisição:
+
+- `configure()` decodificava todas as fotografias estruturais Full HD e
+  calculava ORB para todo o banco antes de saber qual referência seria necessária;
+- o rearme após EMPTY chamava reset completo do tracker, apagando também esse
+  banco já preparado, embora projeto, resolução e referências não tivessem mudado.
+
+Além disso, a próxima placa pode entrar em outra posição. Portanto a geometria da
+placa anterior nunca pode atravessar o rearme.
+
+### Decisão
+
+- configuração/calibração e pose efêmera do ciclo passam a ter lifecycles
+  distintos;
+- `reset_tracking_runtime()` continua sendo reset completo para mudança de
+  configuração, projeto ou edição de referências;
+- o rearme físico entre placas usa `reset_tracking_cycle()`, que:
+  - cancela jobs pendentes e invalida geração;
+  - limpa Future/resultado/geometria live;
+  - limpa matriz, orientação, frame anterior e evidência do lock;
+  - preserva o banco de referências já calibrado da mesma sessão;
+- a próxima placa, mesmo entrando em outra posição, precisa obter um novo lock do
+  zero; preservar referências não significa preservar pose;
+- `configure()` indexa metadados das referências, mas imagem/ORB/template são
+  materializados sob demanda e cacheados no primeiro uso;
+- durante aquisição sem pose válida, o CHECK lógico atual e `board_off` têm
+  prioridade sobre as demais vistas; o restante do banco continua disponível
+  como fallback;
+- AKAZE permanece fallback lazy;
+- nenhum novo scheduler, thread, worker ou fila é criado.
+
+### Consequência
+
+O primeiro `IDENTIFICANDO...` deixa de pagar antecipadamente pelo banco inteiro
+e, após a retirada da placa, o próximo ciclo reutiliza a calibração em memória
+sem reutilizar a posição anterior.
+
+O fluxo esperado é:
+
+~~~text
+resultado terminal
+→ retirar placa
+→ EMPTY confirmado
+→ descartar pose/matriz/anchor da placa anterior
+→ preservar banco de referências da sessão
+→ nova placa entra em qualquer posição permitida
+→ aquisição prioriza CHECK atual + board_off
+→ novo LOCK
+~~~
+
+A segurança permanece conservadora: referência cacheada é somente calibração;
+OK/NG, energia, presença e sequência continuam nas autoridades canônicas.
+
+---
 ## Como adicionar uma decisão
 
 Use:

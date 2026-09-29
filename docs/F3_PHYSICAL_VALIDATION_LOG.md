@@ -376,3 +376,103 @@ com LOCK válido:
 -> sem alterar OK/NG, energia ou sequência
 ~~~
 
+---
+
+## 29/09/2026 — Reteste do deadlock de publicação D-029
+
+**Resultado físico:** PASS.
+
+### Cenário
+
+Foi repetida a abertura do Display F3 após a correção que passou a drenar
+`Future` de tracking/semântica concluído antes do backpressure do coordinator.
+
+### Resultado observado
+
+O runtime deixou de permanecer indefinidamente em `IDENTIFICANDO...`.
+O fluxo voltou a avançar normalmente.
+
+### Estado
+
+**PASS.**
+
+A falha anterior permanece registrada acima como histórico; este reteste confirma
+a correção do deadlock de publicação.
+
+---
+
+## 29/09/2026 — Troca de placa em nova posição e latência de aquisição
+
+**Resultado físico antes desta alteração:** FAIL de desempenho / requisito de
+reaquisição confirmado.
+
+### Cenário
+
+Depois de a placa terminar a inspeção e receber o resultado, ela é retirada do
+suporte. A placa seguinte pode entrar em outra posição física.
+
+O comportamento requerido é:
+
+~~~text
+placa A termina
+→ placa A sai
+→ suporte vazio confirmado
+→ placa B entra em outra posição
+→ ODIN procura novamente a placa
+→ nenhuma pose da placa A é reutilizada
+~~~
+
+Também foi observado que o início de uma aquisição ainda permanece tempo demais
+em `IDENTIFICANDO...`.
+
+### Causa identificada no código
+
+O rearme canônico já invalidava tracking, porém usava o mesmo reset completo
+destinado a mudanças de configuração. Isso apagava simultaneamente:
+
+- pose/matriz da placa anterior, o que é correto;
+- banco de referências estruturais já preparado, o que é desnecessário.
+
+Na aquisição seguinte, `configure()` precisava novamente decodificar todas as
+fotografias estruturais e calcular ORB do banco inteiro.
+
+No primeiro ciclo da sessão ocorria custo semelhante: o banco inteiro era
+materializado antes de o tracker saber se H1 atual ou `board_off` já eram
+suficientes para localizar a placa.
+
+### Alteração aplicada
+
+- foi separado reset completo de reset de ciclo;
+- EMPTY agora invalida a pose corrente sem descartar a calibração/referências da
+  sessão;
+- a nova placa continua obrigatoriamente sem `last_matrix`, sem anchor angular,
+  sem `last_result` e sem geometria live da placa anterior;
+- referências passaram a ser materializadas sob demanda;
+- aquisição inicial prioriza a referência do CHECK atual e `board_off`;
+- as demais vistas continuam disponíveis como fallback;
+- nenhum scheduler, thread ou worker adicional foi criado.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+abrir F3
+→ IDENTIFICANDO reduzido
+→ novo LOCK
+
+terminar placa A
+→ retirar placa A
+→ confirmar EMPTY
+→ inserir placa B deslocada/rotacionada dentro da faixa permitida
+→ pose antiga não aparece
+→ ODIN procura novamente
+→ obtém novo LOCK na posição da placa B
+→ H1 segue normalmente
+~~~
+
+Além do tempo percebido, observar no DEBUG se o frame do tracking acompanha o
+frame atual logo após a entrada da nova placa.
+
