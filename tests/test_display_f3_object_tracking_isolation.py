@@ -731,7 +731,8 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             DisplayProductionF3Window,
         )
         self.assertEqual("#22C55E", DisplayProductionF3Window.DISPLAY_READOUT_ACTIVE)
-        self.assertEqual("#1E293B", DisplayProductionF3Window.DISPLAY_READOUT_OFF)
+        self.assertEqual("#14532D", DisplayProductionF3Window.DISPLAY_READOUT_OFF)
+        self.assertEqual("#166534", DisplayProductionF3Window.DISPLAY_READOUT_OFF_OUTLINE)
         self.assertEqual("#64748B", DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE)
         self.assertEqual("#EF4444", DisplayProductionF3Window.DISPLAY_READOUT_NG)
 
