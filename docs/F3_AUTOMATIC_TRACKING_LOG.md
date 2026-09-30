@@ -1486,3 +1486,59 @@ Reteste obrigatório:
 - SEGREGAR por botão, 1 e NumPad 1 contabiliza uma única vez;
 - retirar e recolocar a placa faz a sequência visual
   TERMINAL -> EMPTY -> NOVA PLACA -> H1.
+
+---
+
+## 30/09/2026 — D-040: vermelho terminal de SEGREGAR é apresentação, não tracking
+
+Modo:
+- tracking OFF como foco atual;
+- regra vale igualmente com tracking ON.
+
+Cenário:
+- CHECK: qualquer;
+- placa/posição: placa ainda presente após SEGREGAR;
+- condição de iluminação: indiferente;
+- comportamento esperado: resultado permanece vermelho até EMPTY.
+
+Sintoma/evidência:
+- D-039 já preservava o latch terminal e bloqueava H1;
+- cards/status/bordas ainda não comunicavam integralmente a segregação em
+  vermelho;
+- isso podia fazer botão/tecla parecerem sem efeito ou rápidos demais.
+
+Hipótese:
+- problema de apresentação do latch existente, não de captura de tecla, tracking,
+  energia ou analyzer.
+
+Tentativa:
+- manter D-039 como autoridade de lifecycle;
+- adicionar somente o tipo terminal `segregated` à janela;
+- derivar dele cards/bordas/status vermelhos;
+- limpar esse estado nos mesmos pontos de EMPTY/nova placa já existentes.
+
+Resultado:
+- PENDENTE DE RETESTE FÍSICO
+
+Commit(s):
+- commits da correção D-040.
+
+Decisão/ligação:
+- D-039 e D-040.
+
+Lição:
+- feedback terminal deve ser derivado do rearme físico já existente;
+- vermelho de resultado não deve contaminar a classificação óptica das ROIs.
+
+Não repetir:
+- não adicionar outro binding para tecla 1;
+- não criar timer para prolongar o vermelho;
+- não alterar thresholds/tracking para um problema de feedback;
+- não pintar todas as máscaras como NG só porque a placa foi segregada.
+
+Próximo reteste:
+- SEGREGAR por clique, 1 e NumPad 1;
+- manter placa no suporte por vários segundos e confirmar vermelho persistente;
+- retirar a placa e confirmar transição para espera por nova placa;
+- confirmar que ON/OFF físico das máscaras continua correto durante o terminal.
+
