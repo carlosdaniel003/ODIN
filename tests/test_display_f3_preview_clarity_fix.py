@@ -871,7 +871,11 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         fixed_source = source[fixed_pos:]
 
         self.assertIn(
-            "for mask in mascaras_geometria_check_display(project, check)",
+            "effective_masks = mascaras_geometria_runtime_fixa_display(project)",
+            fixed_source,
+        )
+        self.assertNotIn(
+            "mascaras_geometria_check_display(project, check)",
             fixed_source,
         )
         self.assertIn('"tracking_active": False', fixed_source)
