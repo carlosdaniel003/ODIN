@@ -40,6 +40,9 @@ F3_FIRST_CHECK_FULL_MASK_AUTHORITY_SOURCE = (
 F3_CURRENT_CHECK_FULL_MASK_TRANSITION_SOURCE = (
     "f3_current_check_full_mask_transition"
 )
+F3_CURRENT_CHECK_MASK_SIGNATURE_TRANSITION_SOURCE = (
+    "f3_current_check_mask_transition_signature"
+)
 
 
 def _context(app) -> dict | None:
@@ -198,6 +201,148 @@ def _diferenca_semantica_checks_consecutivos(
         "different_mask_ids": tuple(different_ids),
         "different_mask_count": len(different_ids),
     }
+
+
+def _assinatura_transicao_semantica_por_energia_f3(
+    app,
+    *,
+    repository,
+    project_name: str,
+    previous_check_id: str,
+    current_check_id: str,
+) -> dict:
+    """Usa somente máscaras que MUDARAM para provar chegada ao CHECK destino.
+
+    Esta evidência não decide conformidade nem NG. Ela responde apenas se o
+    padrão físico já se parece majoritariamente com o destino, permitindo que o
+    analyzer do CHECK atual julgue defeitos reais depois da chegada.
+    """
+    delta = _diferenca_semantica_checks_consecutivos(
+        repository,
+        project_name,
+        previous_check_id,
+        current_check_id,
+    )
+    result = {
+        "available": False,
+        "confirmed": False,
+        "source": F3_CURRENT_CHECK_MASK_SIGNATURE_TRANSITION_SOURCE,
+        "reason": str(delta.get("reason") or "transicao_semantica_indisponivel"),
+        "different_mask_ids": tuple(delta.get("different_mask_ids") or ()),
+        "different_mask_count": int(delta.get("different_mask_count", 0) or 0),
+    }
+    if not bool(delta.get("available") and delta.get("different")):
+        return result
+
+    power_status = getattr(app, "_display_f3_power_authority_status", None)
+    energy = (
+        power_status.get("energy")
+        if isinstance(power_status, dict)
+        and isinstance(power_status.get("energy"), dict)
+        else None
+    )
+    if not isinstance(energy, dict):
+        result["reason"] = "energia_produtiva_da_transicao_indisponivel"
+        return result
+    if not (
+        bool(energy.get("available"))
+        and bool(energy.get("powered_confirmed"))
+        and not bool(energy.get("off_confirmed"))
+    ):
+        result["reason"] = "energia_nao_confirma_display_ligado"
+        return result
+    if (
+        str(energy.get("project_name") or "") != str(project_name or "")
+        or str(energy.get("check_id") or "") != str(current_check_id or "")
+    ):
+        result["reason"] = "energia_pertence_a_outro_contexto"
+        return result
+
+    previous = _carregar_check_por_id(
+        repository,
+        project_name,
+        previous_check_id,
+    )
+    current = _carregar_check_por_id(
+        repository,
+        project_name,
+        current_check_id,
+    )
+    if not isinstance(previous, dict) or not isinstance(current, dict):
+        result["reason"] = "configuracao_checks_transicao_indisponivel"
+        return result
+
+    previous_states = (
+        previous.get("mask_states", {})
+        if isinstance(previous.get("mask_states"), dict)
+        else {}
+    )
+    current_states = (
+        current.get("mask_states", {})
+        if isinstance(current.get("mask_states"), dict)
+        else {}
+    )
+
+    observed = {}
+    for item in energy.get("details") or ():
+        if not isinstance(item, dict):
+            continue
+        mask_id = str(item.get("mask_id") or "")
+        winner = str(item.get("winner") or "").strip().lower()
+        classified = str(item.get("classified") or "").strip().lower()
+        if not mask_id:
+            continue
+        if winner == "powered" and classified in {"on", "low_light"}:
+            observed[mask_id] = "on"
+        elif winner == "off" and classified == "off":
+            observed[mask_id] = "off"
+
+    current_ids = []
+    previous_ids = []
+    uncertain_ids = []
+    for mask_id in result["different_mask_ids"]:
+        value = observed.get(mask_id)
+        expected_current = str(current_states.get(mask_id) or "").strip().lower()
+        expected_previous = str(previous_states.get(mask_id) or "").strip().lower()
+        if value == expected_current:
+            current_ids.append(mask_id)
+        elif value == expected_previous:
+            previous_ids.append(mask_id)
+        else:
+            uncertain_ids.append(mask_id)
+
+    total_changed = int(result["different_mask_count"])
+    required_current_votes = (total_changed // 2) + 1 if total_changed > 0 else 0
+    current_votes = len(current_ids)
+    previous_votes = len(previous_ids)
+    confirmed = bool(
+        required_current_votes > 0
+        and current_votes >= required_current_votes
+        and current_votes > previous_votes
+    )
+
+    result.update(
+        available=bool(observed),
+        confirmed=confirmed,
+        required_current_votes=int(required_current_votes),
+        current_pattern_votes=int(current_votes),
+        previous_pattern_votes=int(previous_votes),
+        uncertain_votes=len(uncertain_ids),
+        current_pattern_mask_ids=tuple(current_ids),
+        previous_pattern_mask_ids=tuple(previous_ids),
+        uncertain_mask_ids=tuple(uncertain_ids),
+        # Uma máscara que ainda conserva o estado anterior depois de a assinatura
+        # majoritária já ter mudado para o destino é candidata natural a defeito.
+        # O analyzer continua sendo a autoridade que efetivamente declara NG.
+        transition_defect_candidate_mask_ids=tuple(previous_ids),
+        energy_frame_token=deepcopy(energy.get("frame_token")),
+        reason=(
+            "assinatura_mascaras_confirma_chegada_check_atual"
+            if confirmed
+            else "assinatura_mascaras_ainda_nao_prefere_check_atual"
+        ),
+    )
+    return result
 
 
 def avaliar_entrada_fisica_check_f3(
@@ -361,6 +506,42 @@ def avaliar_entrada_fisica_check_f3(
                 "current_index": index,
                 "semantic_transition": deepcopy(semantic_delta),
                 **conformity,
+            }
+
+    # D-044: um CHECK defeituoso nunca alcança 100%, mas ainda precisamos provar
+    # que a função física saiu do CHECK anterior ANTES de permitir o NG. A
+    # assinatura abaixo usa somente as máscaras cujo ON/OFF mudou entre os dois
+    # CHECKS e a leitura física genérica da autoridade de energia. Maioria
+    # estrita no padrão do destino confirma chegada sem transformar divergência
+    # em OK nem depender da foto inteira.
+    current_analysis_matches = bool(
+        isinstance(current_analysis, dict)
+        and bool(current_analysis.get("ready"))
+        and str(current_analysis.get("project_name") or "").strip()
+        == str((ctx or {}).get("project_name") or "").strip()
+        and str(current_analysis.get("check_id") or "").strip() == current_id
+    )
+    if current_analysis_matches:
+        project_name = str((ctx or {}).get("project_name") or "").strip()
+        semantic_signature = _assinatura_transicao_semantica_por_energia_f3(
+            app,
+            repository=getattr(app, "display_project_repository", None),
+            project_name=project_name,
+            previous_check_id=previous_id,
+            current_check_id=current_id,
+        )
+        if bool(semantic_signature.get("confirmed")):
+            return {
+                "source": F3_CURRENT_CHECK_MASK_SIGNATURE_TRANSITION_SOURCE,
+                "available": True,
+                "confirmed": True,
+                "reason": "assinatura_mascaras_confirma_chegada_check_atual",
+                "previous_check_id": previous_id,
+                "previous_check_name": previous_name,
+                "current_check_id": current_id,
+                "current_check_name": current_name,
+                "current_index": index,
+                "semantic_transition": deepcopy(semantic_signature),
             }
 
     # A identidade por contorno compara TODOS os CHECKS no mesmo espaço
