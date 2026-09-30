@@ -1251,3 +1251,101 @@ e capturar o DEBUG no mesmo instante. O diagnóstico precisa responder, no míni
 
 **FAIL REGISTRADO — CONTRATO D-041 DOCUMENTADO — CAUSA DE RUNTIME PENDENTE DE EVIDÊNCIA.**
 
+---
+
+## 30/09/2026 — H1 28/28 ficou bloqueado por presença global ambígua
+
+**Resultado físico antes da correção:** FAIL recorrente.
+
+### Cenário
+
+- Rastreamento Automático: DESATIVADO;
+- CHECK lógico: H1;
+- os sete segmentos que H1 espera ON estavam fisicamente acesos e verdes na
+  câmera/visor;
+- estados OFF restantes também foram reconhecidos pela análise semântica.
+
+### Evidência objetiva do DEBUG
+
+No mesmo snapshot:
+
+- gate produtivo: **BLOQUEADO**;
+- motivo: `placa_nao_confirmada_no_suporte`;
+- autoridade de presença: `board_present=false` e energia operacional `null`;
+- análise estrita H1 já estava `ready=true`, `approved=true` e
+  `check_conforme_mascaras_configuradas`;
+- `failed_mask_ids=[]`;
+- H1 tinha 7 ON + 21 OFF e o analyzer publicou 7 ON + 21 OFF;
+- a evidência diagnóstica das máscaras do próprio H1 mostrou 7/7 votos de
+  energia e zero votos OFF;
+- as referências globais de cena ficaram todas abaixo do threshold absoluto,
+  apesar de a placa e o padrão H1 estarem visíveis.
+
+### Causa confirmada
+
+O runtime canônico continha um deadlock de dependência:
+
+```text
+F3PresenceAuthority não confirma placa pela foto global
+→ F3RuntimeAuthorities não chama F3PowerAuthority.evaluate()
+→ energia das máscaras não existe no snapshot operacional
+→ gate mantém decisão bloqueada
+→ analyzer 28/28 fica apenas diagnóstico
+```
+
+Portanto o defeito não estava no H1 nem na classificação dos segmentos. O
+sistema já sabia exatamente quais máscaras estavam ON/OFF, mas a informação era
+impedida de chegar à autoridade de presença.
+
+### Correção D-042
+
+- a observação semântica das máscaras é calculada no mesmo frame mesmo quando a
+  presença global ainda está ambígua;
+- `F3PresenceAuthority` continua sendo a única autoridade de presença;
+- ela pode confirmar ocupação quando um padrão configurado possui todo o núcleo
+  ON confirmado e nenhuma observação confiante contradiz seus estados ON/OFF;
+- essa confirmação não aprova CHECK;
+- depois da presença, a energia produtiva e o analyzer estrito seguem o fluxo
+  normal;
+- EMPTY confirmado continua tendo precedência absoluta;
+- não foi reativado o antigo monkey patch de confirmação por máscaras e não foi
+  criada autoridade paralela, timer, thread ou worker.
+
+### Proteção contra recorrência
+
+Foram adicionadas regressões para:
+
+1. cena global ambígua + padrão H1 conhecido → presença confirmada;
+2. EMPTY confirmado + emissão candidata → EMPTY continua soberano;
+3. padrão incompleto/contraditório → não promove presença;
+4. builder canônico rompe o deadlock presença/energia e libera o gate;
+5. `F3PowerAuthority.apply` continua incapaz de ignorar ausência de presença por
+   conta própria.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+```text
+tracking OFF
+→ placa H1 no suporte
+→ 7 segmentos esperados ON ficam verdes
+→ padrão semântico confirma presença
+→ status deixa IDENTIFICANDO PRESENÇA
+→ energia fica CONFIRMADA
+→ strict analyzer confirma 7 ON + 21 OFF / 28 de 28
+→ H1 aprova
+→ sequência avança para BLUE
+```
+
+Teste de segurança adicional:
+
+```text
+retirar a placa
+→ EMPTY confirmado
+→ nenhuma emissão/reflexo residual promove presença
+→ fluxo permanece aguardando nova placa
+```
+
