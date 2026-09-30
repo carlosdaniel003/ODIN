@@ -1697,9 +1697,10 @@ D-040 complementa D-039 somente na apresentação:
 - repaints e o timer histórico de resultado não podem remover esse vermelho;
 - EMPTY encerra o vermelho terminal e muda para espera por nova placa;
 - a nova placa confirmada libera H1 e reabilita SEGREGAR;
-- máscaras e segmentos do visor continuam representando seu estado físico
-  ON/OFF/POUCA LUZ conforme D-032/D-035; D-040 não falsifica todas as ROIs como
-  defeituosas;
+- câmera ao vivo, contorno da placa, todas as máscaras e os 28 segmentos do
+  visor recebem override visual vermelho enquanto a segregação estiver terminal;
+- esse override é somente de apresentação: classificações, telemetria e decisões
+  continuam preservando o estado físico ON/OFF/POUCA LUZ de D-032/D-035;
 - nenhuma nova autoridade, thread, scheduler, fila ou timer é criada.
 
 ### Consequência
