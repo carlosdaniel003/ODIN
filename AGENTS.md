@@ -384,10 +384,12 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
   das próprias máscaras pode servir como evidência positiva de OCUPAÇÃO somente
   através da `F3PresenceAuthority`; energia/renderer não promovem presença por
   conta própria e EMPTY confirmado continua tendo precedência absoluta;
-- essa evidência de presença exige o núcleo ON completo de um estado configurado
-  e nenhuma contradição confiante nos estados ON/OFF observados; ela não aprova
-  o CHECK. A aprovação continua exigindo a conformidade estrita completa de
-  D-031/D-041;
+- D-042 identifica um CHECK pela presença quando existe padrão configurado
+  completo; D-044 refina a presença física: uma votação multi-máscara já
+  confirmada como `powered` pela autoridade canônica também pode provar apenas
+  OCUPAÇÃO quando o produto está defeituoso e nenhum CHECK fica 100% conforme;
+  isso não identifica nem aprova o CHECK. A aprovação continua exigindo a
+  conformidade estrita completa de D-031/D-041;
 - é proibido restaurar a dependência circular "só calcular máscaras/energia se a
   fotografia global já confirmou presença", pois isso recria o deadlock em que
   H1 está 28/28 conforme e ainda assim fica preso em AGUARDANDO H1.
@@ -395,9 +397,15 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
   pode confirmar a própria transição física quando o padrão ON/OFF do destino
   difere semanticamente do CHECK anterior; nesse caso score global/foto inteira
   não pode manter o destino bloqueado;
-- 27/28, análise incompleta, padrão semântico idêntico ao anterior ou CHECK
-  anterior ainda não concluído não usam esse atalho e continuam dependentes da
-  autoridade física independente de transição;
-- a regra D-043 confirma apenas a CHEGADA AO CHECK. NG de um destino defeituoso
-  continua exigindo confirmação física independente antes de reprovar, e EMPTY,
-  frescor, energia e rearme continuam soberanos.
+- 27/28 não usa o atalho de conformidade total de D-043. D-044 permite
+  confirmar a CHEGADA de um CHECK defeituoso somente quando a maioria estrita
+  das máscaras cujo estado ON/OFF mudou em relação ao CHECK anterior já segue o
+  padrão do destino; padrões idênticos, contexto stale, CHECK anterior ainda não
+  concluído ou assinatura que ainda prefere o estado anterior continuam
+  bloqueados;
+- D-044 separa chegada de julgamento: a assinatura parcial nunca concede OK e
+  nunca cria NG por si só. Depois que a chegada é confirmada, o analyzer
+  canônico e o debounce NG existente decidem a divergência; EMPTY, frescor,
+  energia e rearme continuam soberanos;
+- nenhuma correção de NG pode exigir que a placa defeituosa pareça um CHECK BOM
+  para provar presença, pois isso torna defeitos reais invisíveis por construção.
