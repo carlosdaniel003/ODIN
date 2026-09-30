@@ -198,10 +198,12 @@ Contratos atuais:
 - `F3PresenceAuthority` pode aceitar um lock de tracking como evidência positiva
   de placa somente quando `locked=true` e `evidence_current=true`; EMPTY
   confirmado continua tendo precedência e lock mantido/stale não promove presença;
-- energia produtiva recebe presença como gate e não pode ignorá-la; D-042
-  permite calcular a observação semântica das máscaras antes do gate somente
+- energia produtiva recebe presença como gate e não pode ignorá-la; D-042/D-044
+  permitem calcular a observação semântica das máscaras antes do gate somente
   para entregá-la à `F3PresenceAuthority`, que continua sendo a única autoridade
-  capaz de confirmar ocupação; EMPTY confirmado tem precedência;
+  capaz de confirmar ocupação; um padrão completo pode identificar o estado,
+  enquanto emissão multi-máscara `powered` sem padrão completo confirma apenas
+  que existe placa energizada; EMPTY confirmado tem precedência;
 - tracking estrutural localiza o filtro, mas o refinamento luminoso do CHECK
   atual prefere o espaço da própria referência daquele CHECK antes de compor
   novamente para o espaço canônico;
@@ -209,10 +211,13 @@ Contratos atuais:
   provar conformidade; enquanto o encaixe fino dos segmentos não estiver pronto,
   a autoridade de energia mantém OK/NG e avanço de CHECK bloqueados;
 - analyzer produtivo possui uma única instância/cache por sessão;
-- a autoridade de transição física entre CHECKS aceita duas formas de prova:
-  identificação física independente do destino ou, conforme D-043, análise
-  canônica 100% conforme do CHECK atual quando seu padrão ON/OFF difere do CHECK
-  anterior; 27/28 e padrões idênticos não liberam essa transição;
+- a autoridade de transição física entre CHECKS aceita identificação física
+  independente do destino; D-043 acrescenta conformidade canônica 100% quando o
+  padrão ON/OFF difere do anterior; D-044 acrescenta, para um destino defeituoso,
+  uma assinatura de chegada baseada somente nas máscaras que mudaram entre os
+  dois CHECKS, exigindo maioria estrita no padrão do destino. Essa assinatura
+  confirma chegada, não conformidade nem NG; padrões idênticos e assinaturas que
+  ainda preferem o CHECK anterior permanecem bloqueados;
 - mutações de sequência passam pela facade da state machine;
 - estado físico + presença + energia são calculados uma vez por
   `frame/projeto/CHECK/rearme` e reutilizados pelos adapters históricos;
