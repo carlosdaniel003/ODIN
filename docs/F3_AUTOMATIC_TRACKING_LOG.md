@@ -1606,3 +1606,70 @@ Próximo reteste:
 - capturar DEBUG no mesmo frame;
 - localizar explicitamente o gate/autoridade que impede o registro do CHECK.
 
+---
+
+## 30/09/2026 — D-042: deadlock presença/energia confirmado com tracking OFF
+
+Modo:
+- tracking OFF.
+
+Cenário:
+- CHECK: H1;
+- os sete ON esperados estavam verdes;
+- analyzer estrito: 28/28 conforme;
+- CHECK permaneceu em AGUARDANDO H1.
+
+Sintoma/evidência:
+- `board_present=false`;
+- `energy=null` no status da autoridade canônica;
+- motivo do gate: `placa_nao_confirmada_no_suporte`;
+- análise H1 já aprovada semanticamente, mas marcada
+  `blocked_by_power_gate=true`;
+- diagnóstico de máscaras do mesmo frame confirmou os sete ON esperados.
+
+Hipótese confirmada:
+- não é defeito do object tracking;
+- `F3RuntimeAuthorities.build_operational_state()` só calculava energia depois
+  de a presença global já estar confirmada;
+- com fotografia global ambígua, os segmentos nunca podiam fornecer a evidência
+  que faltava para destravar a própria presença.
+
+Tentativa:
+- consolidar a solução no proprietário canônico, sem reativar o antigo
+  `display_f3_runtime_contract_fix` como monkey patch produtivo;
+- calcular a observação semântica das máscaras antes do gate final quando o frame
+  não é EMPTY explícito;
+- entregar essa evidência à `F3PresenceAuthority`;
+- promover somente ocupação quando existe núcleo ON completo de um CHECK
+  configurado e nenhuma contradição confiante;
+- manter EMPTY soberano;
+- manter o analyzer estrito como única autoridade de conformidade do CHECK.
+
+Resultado:
+- CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+Decisão/ligação:
+- D-021, D-031, D-041 e D-042.
+
+Lição:
+- tracking OFF não significa que presença precise depender exclusivamente da
+  fotografia global;
+- estados semânticos das máscaras podem provar que há display/placa sem ganhar
+  autoridade para aprovar o CHECK;
+- a direção de dependência deve distinguir **calcular evidência** de **autorizar
+  decisão**.
+
+Não repetir:
+- não voltar a pular a leitura semântica das máscaras apenas porque
+  `board_present=false` na fotografia global;
+- não baixar threshold global de presença para mascarar o problema;
+- não instalar novamente um segundo wrapper que promova CHECK fora da
+  `F3PresenceAuthority`;
+- não permitir que evidência de segmentos sobrescreva EMPTY confirmado.
+
+Próximo reteste:
+- tracking OFF;
+- iniciar diretamente em H1 com os sete ON corretos;
+- confirmar presença/energia e avanço para BLUE;
+- depois retirar a placa e confirmar que EMPTY continua vencendo.
+
