@@ -391,3 +391,13 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
 - é proibido restaurar a dependência circular "só calcular máscaras/energia se a
   fotografia global já confirmou presença", pois isso recria o deadlock em que
   H1 está 28/28 conforme e ainda assim fica preso em AGUARDANDO H1.
+- D-043: para CHECKS posteriores, uma análise canônica pronta e 100% conforme
+  pode confirmar a própria transição física quando o padrão ON/OFF do destino
+  difere semanticamente do CHECK anterior; nesse caso score global/foto inteira
+  não pode manter o destino bloqueado;
+- 27/28, análise incompleta, padrão semântico idêntico ao anterior ou CHECK
+  anterior ainda não concluído não usam esse atalho e continuam dependentes da
+  autoridade física independente de transição;
+- a regra D-043 confirma apenas a CHEGADA AO CHECK. NG de um destino defeituoso
+  continua exigindo confirmação física independente antes de reprovar, e EMPTY,
+  frescor, energia e rearme continuam soberanos.
