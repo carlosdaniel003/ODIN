@@ -493,9 +493,11 @@ desabilita novas segregações e mantém a apresentação terminal **vermelha** 
 dos CHECKS, os contornos dos painéis de câmera/visor e os status de rearme
 permanecem vermelhos; os cards mostram `SEGREGADO`.
 
-Esse vermelho representa o **resultado da placa**. As máscaras sobre a câmera e
-os segmentos do VISOR DO DISPLAY continuam espelhando ON/OFF físico e não são
-artificialmente transformados em falha.
+Esse vermelho representa o **resultado terminal da placa**. Durante esse latch,
+a câmera ao vivo, o contorno da placa, todas as máscaras e os 28 segmentos do
+VISOR DO DISPLAY são apresentados em vermelho. Isso é somente um override de
+apresentação: a classificação e a telemetria internas continuam preservando o
+ON/OFF físico real e não alteram a lógica de decisão.
 
 Depois de EMPTY, a tela passa explicitamente a **COLOQUE OUTRA PLACA** e mantém
 SEGREGAR bloqueado. Somente a confirmação física da nova placa libera H1 e
