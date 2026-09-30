@@ -151,6 +151,297 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         self.assertNotIn("tracking_presence_confirmed", result)
         self.assertIsNone(owner._latch)
 
+    def test_semantic_mask_pattern_confirms_presence_when_scene_is_ambiguous(self):
+        repository = SimpleNamespace(
+            listar_checks=Mock(
+                return_value=[
+                    {
+                        "id": "CHECK_001",
+                        "name": "H1",
+                        "mask_states": {
+                            "MASK_008": "on",
+                            "MASK_009": "on",
+                            "MASK_011": "on",
+                            "MASK_012": "on",
+                            "MASK_013": "on",
+                            "MASK_017": "on",
+                            "MASK_020": "on",
+                            "MASK_001": "off",
+                            "MASK_002": "off",
+                        },
+                    }
+                ]
+            )
+        )
+        owner = authorities.F3PresenceAuthority(repository)
+        ambiguous = {
+            "available": False,
+            "board_present": False,
+            "presence_confirmed": False,
+            "empty_confirmed": False,
+            "reason": "separacao_ocupado_vs_empty_insuficiente",
+        }
+        details = [
+            {"mask_id": mask_id, "winner": "powered", "classified": "on"}
+            for mask_id in (
+                "MASK_008",
+                "MASK_009",
+                "MASK_011",
+                "MASK_012",
+                "MASK_013",
+                "MASK_017",
+                "MASK_020",
+            )
+        ] + [
+            {"mask_id": "MASK_001", "winner": "off", "classified": "off"},
+            {"mask_id": "MASK_002", "winner": "off", "classified": "off"},
+        ]
+        energy = {
+            "available": True,
+            "powered_confirmed": True,
+            "off_confirmed": False,
+            "details": details,
+        }
+
+        with patch.object(
+            authorities.presence_module,
+            "avaliar_presenca_melhor_ocupado_f3",
+            return_value=ambiguous,
+        ):
+            result = owner.evaluate(
+                {},
+                energy=energy,
+                project_name="CM_500_L",
+            )
+
+        self.assertTrue(result["board_present"])
+        self.assertTrue(result["presence_confirmed"])
+        self.assertTrue(result["semantic_mask_presence_confirmed"])
+        self.assertEqual(
+            authorities.F3_MASK_PATTERN_PRESENCE_SOURCE,
+            result["source"],
+        )
+        self.assertEqual(["CHECK_001"], result["semantic_mask_matched_check_ids"])
+
+    def test_semantic_mask_pattern_never_overrides_confirmed_empty(self):
+        repository = SimpleNamespace(
+            listar_checks=Mock(
+                return_value=[
+                    {
+                        "id": "CHECK_001",
+                        "name": "H1",
+                        "mask_states": {"MASK_008": "on"},
+                    }
+                ]
+            )
+        )
+        owner = authorities.F3PresenceAuthority(repository)
+        empty = {
+            "available": True,
+            "board_present": False,
+            "presence_confirmed": True,
+            "empty_confirmed": True,
+            "reason": "suporte_vazio_confirmado",
+        }
+        energy = {
+            "available": True,
+            "powered_confirmed": True,
+            "off_confirmed": False,
+            "details": [
+                {"mask_id": "MASK_008", "winner": "powered", "classified": "on"}
+            ],
+        }
+
+        with patch.object(
+            authorities.presence_module,
+            "avaliar_presenca_melhor_ocupado_f3",
+            return_value=empty,
+        ):
+            result = owner.evaluate(
+                {},
+                energy=energy,
+                project_name="CM_500_L",
+            )
+
+        self.assertTrue(result["empty_confirmed"])
+        self.assertFalse(result["board_present"])
+        self.assertNotIn("semantic_mask_presence_confirmed", result)
+
+    def test_semantic_presence_rejects_incomplete_or_contradictory_check_pattern(self):
+        repository = SimpleNamespace(
+            listar_checks=Mock(
+                return_value=[
+                    {
+                        "id": "CHECK_001",
+                        "name": "H1",
+                        "mask_states": {
+                            "MASK_008": "on",
+                            "MASK_009": "on",
+                            "MASK_001": "off",
+                        },
+                    }
+                ]
+            )
+        )
+        owner = authorities.F3PresenceAuthority(repository)
+        ambiguous = {
+            "available": False,
+            "board_present": False,
+            "presence_confirmed": False,
+            "empty_confirmed": False,
+        }
+        energy = {
+            "available": True,
+            "powered_confirmed": True,
+            "off_confirmed": False,
+            "details": [
+                {"mask_id": "MASK_008", "winner": "powered", "classified": "on"},
+                {"mask_id": "MASK_009", "winner": "tie", "classified": "on"},
+                {"mask_id": "MASK_001", "winner": "powered", "classified": "on"},
+            ],
+        }
+
+        with patch.object(
+            authorities.presence_module,
+            "avaliar_presenca_melhor_ocupado_f3",
+            return_value=ambiguous,
+        ):
+            result = owner.evaluate(
+                {},
+                energy=energy,
+                project_name="CM_500_L",
+            )
+
+        self.assertFalse(result["board_present"])
+        self.assertFalse(result["presence_confirmed"])
+        self.assertEqual(
+            [],
+            result["semantic_mask_presence_diagnostic"]["matched_check_ids"],
+        )
+
+    def test_builder_breaks_presence_energy_deadlock_with_known_h1_pattern(self):
+        app = _App()
+        repository = SimpleNamespace(
+            config_file="odin_display_projects.json",
+            listar_checks=Mock(
+                return_value=[
+                    {
+                        "id": "CHECK_001",
+                        "name": "H1",
+                        "mask_states": {
+                            "MASK_008": "on",
+                            "MASK_009": "on",
+                            "MASK_001": "off",
+                        },
+                    }
+                ]
+            ),
+        )
+        app.display_project_repository = repository
+        matcher = SimpleNamespace(
+            check_store=SimpleNamespace(get=Mock(return_value={})),
+        )
+        tracking_owner = SimpleNamespace(
+            stats=lambda: {"owner": "tracking"},
+            presence_evidence=Mock(
+                return_value={
+                    "locked": False,
+                    "evidence_current": False,
+                    "reference": "",
+                    "reason": "object_not_locked",
+                }
+            ),
+        )
+        analyzer_owner = SimpleNamespace(
+            analyzer=object(),
+            rebuild=Mock(return_value=object()),
+        )
+        with (
+            patch.object(authorities, "F3TrackingAuthority", return_value=tracking_owner),
+            patch.object(authorities, "F3CheckAnalyzerAuthority", return_value=analyzer_owner),
+            patch.object(
+                authorities.operational_module,
+                "DisplayVisualReferenceMatcher",
+                return_value=matcher,
+            ),
+        ):
+            owner = authorities.F3RuntimeAuthorities(app)
+
+        owner.power.evaluate = Mock(
+            return_value={
+                "available": True,
+                "powered_confirmed": True,
+                "off_confirmed": False,
+                "energy_state": "powered",
+                "details": [
+                    {"mask_id": "MASK_008", "winner": "powered", "classified": "on"},
+                    {"mask_id": "MASK_009", "winner": "powered", "classified": "on"},
+                    {"mask_id": "MASK_001", "winner": "off", "classified": "off"},
+                ],
+            }
+        )
+        ambiguous = {
+            "available": False,
+            "board_present": False,
+            "presence_confirmed": False,
+            "empty_confirmed": False,
+            "reason": "separacao_ocupado_vs_empty_insuficiente",
+        }
+        raw = {
+            "kind": "unknown",
+            "allow_auto": False,
+            "reference_scores": {
+                "off": 0.3689,
+                "check:CHECK_001": 0.3033,
+                "empty": 0.1779,
+            },
+        }
+        frame = _Frame()
+        context = {"check_id": "CHECK_001", "check_name": "H1"}
+
+        with (
+            patch.object(
+                authorities.transition_module,
+                "classificar_estado_fisico_referencias_f3",
+                return_value=raw,
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "corrigir_falso_check_ligado_pelas_mascaras_f3",
+                side_effect=lambda **kwargs: kwargs["state"],
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "aplicar_contexto_ao_estado_fisico_f3",
+                side_effect=lambda state, **kwargs: state,
+            ),
+            patch.object(
+                authorities.presence_module,
+                "avaliar_presenca_melhor_ocupado_f3",
+                return_value=ambiguous,
+            ),
+            patch.object(
+                authorities.live_runtime_module,
+                "aplicar_gate_rearme_ciclo_f3",
+                side_effect=lambda app, state: state,
+            ),
+        ):
+            result = owner.build_operational_state(frame, "CM_500_L", context)
+
+        self.assertEqual("powered", result["kind"])
+        self.assertTrue(result["allow_auto"])
+        self.assertTrue(
+            result[authorities.contract_module.F3_DECISION_ALLOWED_KEY]
+        )
+        self.assertTrue(
+            result["board_presence_evidence"]["semantic_mask_presence_confirmed"]
+        )
+        self.assertEqual(
+            ["CHECK_001"],
+            result["board_presence_evidence"]["semantic_mask_matched_check_ids"],
+        )
+        owner.power.evaluate.assert_called_once_with(frame, "CM_500_L", context)
+
     def test_power_owner_never_lets_energy_bypass_missing_presence(self):
         app = _App()
         owner = authorities.F3PowerAuthority(app)
@@ -611,7 +902,9 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         self.assertTrue(
             after_lock["board_presence_evidence"]["tracking_presence_confirmed"]
         )
-        self.assertEqual(1, owner.power.evaluate.call_count)
+        # D-042 calcula a observação semântica das máscaras antes do gate final
+        # de presença. O segundo build existe porque o tracking mudou a assinatura.
+        self.assertEqual(2, owner.power.evaluate.call_count)
         self.assertEqual(2, owner.build_count)
 
     def test_authority_module_owns_no_timer_or_thread(self):
