@@ -1182,3 +1182,72 @@ colocar nova placa
 → SEGREGAR reabilitado
 ~~~
 
+---
+
+## 30/09/2026 — H1 com segmentos esperados verdes, mas CHECK/análise visual não reconhece
+
+**Resultado físico:** FAIL recorrente informado pelo operador.
+
+### Sintoma observado
+
+No Display F3 ocorre repetidamente o cenário em que os segmentos que H1 deve
+manter acesos aparecem corretamente verdes no ao vivo, mas:
+
+- o CHECK H1 não recebe aprovação; ou
+- a análise visual não consegue reconhecer o estado como H1.
+
+Não foi fornecido nesta entrada um novo bloco de DEBUG que identifique qual gate
+específico vetou o registro. Portanto a causa técnica exata ainda não deve ser
+inventada.
+
+### Regra funcional confirmada pelo operador
+
+As imagens cadastradas nos CHECKS e em **Referências Visuais** já contêm:
+
+- contorno desenhado da placa/filtro;
+- máscaras locais alinhadas aos segmentos;
+- segmentos ACESOS e APAGADOS que compõem o estado ensinado.
+
+O ODIN não deve usar a fotografia inteira de H1 como classificador final contra
+a câmera inteira. A referência deve ser tratada como memória do padrão do
+display:
+
+```text
+contorno da placa
+→ recorte da região útil
+→ alinhamento dos segmentos/máscaras
+→ comparação dos mesmos MASK_xxx
+→ padrão ON/OFF conforme
+→ CHECK reconhecido
+```
+
+D-031 continua válida: além de todos os segmentos esperados ON estarem ON, os
+segmentos esperados OFF também precisam permanecer OFF; `ignore` não participa.
+Se o padrão estiver 100% conforme, diferença de fundo ou score de cena inteira
+não pode rejeitar o CHECK.
+
+### Providência desta etapa
+
+- regra registrada como D-041;
+- AGENTS.md e README.md atualizados para impedir que futuras correções voltem a
+  usar matching de cena inteira como segunda autoridade semântica;
+- nenhuma mudança de algoritmo foi aplicada nesta etapa, porque o relato atual
+  define o contrato, mas ainda não contém a evidência de qual proprietário está
+  bloqueando o H1 no runtime real.
+
+### Próximo diagnóstico esperado
+
+Reproduzir exatamente o caso em que todos os ON esperados de H1 aparecem verdes
+e capturar o DEBUG no mesmo instante. O diagnóstico precisa responder, no mínimo:
+
+- máscaras esperadas ON realmente classificadas ON;
+- máscaras esperadas OFF realmente classificadas OFF;
+- total de conformes e `failed_mask_ids`;
+- alinhamento/contorno considerado válido;
+- gate físico/frescor/rearme que eventualmente permaneceu bloqueado;
+- qual componente publicou a mensagem de análise visual.
+
+### Estado
+
+**FAIL REGISTRADO — CONTRATO D-041 DOCUMENTADO — CAUSA DE RUNTIME PENDENTE DE EVIDÊNCIA.**
+
