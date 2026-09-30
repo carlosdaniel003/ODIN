@@ -343,5 +343,10 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
   dupla contabilização;
 - o botão SEGREGAR deve refletir esse bloqueio visualmente e só voltar a ficar
   habilitado quando o rearme físico confirmar a nova placa;
+- enquanto uma placa SEGREGADA ainda aguarda retirada, o resultado terminal,
+  os cards dos CHECKS, os contornos de painel e os status de rearme permanecem
+  vermelhos; nenhum repaint pode voltar visualmente para H1;
+- o vermelho terminal não altera a verdade óptica das máscaras/visor: ON/OFF
+  físicos continuam sendo apresentados conforme D-032/D-035;
 - nenhuma correção desses contratos pode criar novo timer, worker, scheduler ou
   autoridade paralela.
