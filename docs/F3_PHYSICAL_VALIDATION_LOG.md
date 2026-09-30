@@ -1113,3 +1113,69 @@ No frame congelado da auditoria manual:
 → H1 volta a ficar ativo
 → SEGREGAR volta a ficar habilitado
 ~~~
+
+---
+
+## 30/09/2026 — Refinamento do SEGREGAR: estado deve permanecer vermelho
+
+**Resultado físico informado:** FAIL/AMBÍGUO de feedback visual antes do
+refinamento.
+
+### Relato do operador
+
+O operador informou que tanto a tecla **1** quanto o clique em
+**SEGREGAR PLACA** pareciam não funcionar, ou o resultado vermelho podia estar
+rápido demais. O requisito explícito é que, depois da segregação, o estado
+terminal permaneça vermelho enquanto a placa continuar no suporte.
+
+### Diagnóstico sobre o estado atual
+
+D-039 já impede que snapshots posteriores voltem o status principal para H1 e
+mantém SEGREGAR bloqueado durante o rearme. Porém:
+
+- os cards ainda podiam renderizar os estados normais H1/PRÓXIMO;
+- o status inferior do guard terminal era amarelo;
+- as bordas da coluna de câmera/visor permaneciam neutras;
+- portanto o latch existia, mas o feedback visual não era integralmente vermelho.
+
+### Correção D-040
+
+- registrar o tipo terminal `segregated` na própria janela;
+- cards de CHECK ficam vermelhos e mostram `SEGREGADO`;
+- painel principal continua em `COLOR_NG`;
+- bordas de preview/visor/projeto ficam vermelhas;
+- status operacional e status inferior ficam vermelhos e pedem retirada;
+- repaint durante `waiting_empty_rearm` preserva esse estado;
+- EMPTY remove o chrome vermelho e entra em espera por nova placa;
+- máscaras/visor mantêm a classificação física real, sem pintar todos os
+  segmentos de vermelho artificialmente.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+placa no suporte
+→ clicar SEGREGAR
+→ TOTAL +1 / NG +1
+→ PLACA SEGREGADA
+→ cards SEGREGADO em vermelho
+→ bordas/status permanecem vermelhos
+→ aguardar vários segundos
+→ NÃO voltar a H1 e NÃO perder o vermelho
+
+repetir com tecla 1 e NumPad 1 em nova placa
+→ mesmo resultado
+
+retirar placa
+→ EMPTY confirmado
+→ sai do terminal vermelho
+→ COLOQUE OUTRA PLACA
+
+colocar nova placa
+→ H1 liberado
+→ SEGREGAR reabilitado
+~~~
+
