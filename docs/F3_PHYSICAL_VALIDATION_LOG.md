@@ -1477,3 +1477,53 @@ BLUE com qualquer máscara divergente (ex.: 27/28)
 → NÃO concluir BLUE por conformidade parcial
 ```
 
+---
+
+## 30/09/2026 — D-043 validada fisicamente: BLUE 28/28 avançou para USB
+
+**Resultado físico:** PASS.
+
+### Cenário validado
+
+- Rastreamento Automático: DESATIVADO;
+- H1 já havia sido concluído corretamente;
+- CHECK atual: BLUE / CHECK_002;
+- BLUE atingiu conformidade semântica completa das máscaras;
+- o operador confirmou que, após a correção D-043, o CHECK não permaneceu mais
+  preso em `BLUE BLOQUEADO • aguardando mudança física H1 → BLUE`.
+
+### Resultado observado
+
+O fluxo esperado foi confirmado no equipamento real:
+
+```text
+H1 28/28
+→ H1 CONCLUÍDO
+→ BLUE
+→ padrão BLUE 100% conforme
+→ transição H1 → BLUE confirmada
+→ BLUE CONCLUÍDO
+→ sequência segue para USB
+```
+
+### Conclusão
+
+D-043 está **VALIDADA FISICAMENTE** para o caso que originou a correção.
+
+A validação confirma que a conformidade canônica 100% de um CHECK de destino,
+quando seu padrão ON/OFF difere do CHECK anterior já concluído, é evidência
+suficiente da chegada física à nova função e não deve ser vetada por matching de
+cena inteira ambíguo.
+
+As proteções permanecem obrigatórias e não foram alteradas pela validação:
+
+- leitura parcial continua sem usar D-043;
+- padrão semanticamente igual ao anterior continua sem provar transição;
+- análise de outro CHECK não libera o gate;
+- NG continua dependendo de confirmação de chegada da função defeituosa;
+- EMPTY, presença, energia, frescor e rearme continuam soberanos.
+
+### Estado
+
+**PASS — D-043 VALIDADA FISICAMENTE.**
+
