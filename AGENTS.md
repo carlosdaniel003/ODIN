@@ -351,3 +351,32 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
   óptica interna continua preservando o ON/OFF físico real;
 - nenhuma correção desses contratos pode criar novo timer, worker, scheduler ou
   autoridade paralela.
+
+### Invariantes de referência visual do Display F3 — D-041
+
+- imagens salvas em **CHECKS** e em **Referências Visuais** são memória do
+  padrão do display, não fotografias de cena inteira para decisão por
+  similaridade global;
+- cada referência pode possuir seu próprio contorno local da placa/filtro e suas
+  máscaras locais alinhadas aos mesmos IDs de segmento, preservando quais
+  segmentos estavam ACESOS e APAGADOS naquela referência;
+- a análise deve primeiro trabalhar na região delimitada pelo contorno da placa,
+  normalizar/alinha-la e então comparar o padrão das máscaras/segmentos; o resto
+  da cena não pode virar um segundo classificador de CHECK;
+- a geometria local da foto serve para localizar o mesmo segmento dentro daquela
+  referência e não substitui a geometria live canônica definida por D-036;
+- após alinhamento válido, um CHECK está semanticamente conforme quando todas as
+  máscaras esperadas `on` estão fisicamente ON e todas as esperadas `off`
+  estão fisicamente OFF; `ignore` não participa da conformidade;
+- D-031 continua obrigatória: qualquer máscara ativa divergente bloqueia OK;
+- se o padrão de máscaras estiver 100% conforme, comparação de imagem inteira,
+  score global de referência ou diferença de fundo não pode vetar o CHECK;
+- matching de cena inteira pode auxiliar presença, localização grosseira,
+  diagnóstico ou aquisição, mas não é autoridade semântica de H1/BLUE/USB/AUX;
+- se o operador vê todos os segmentos esperados ON corretamente verdes e o
+  CHECK não registra conformidade, o DEBUG deve expor o bloqueio restante
+  (máscara OFF divergente, alinhamento inválido, evidência stale, gate físico ou
+  rearme), em vez de falhar silenciosamente como "análise visual não reconheceu";
+- o aprendizado de NG deve partir de uma identificação positiva confiável dos
+  CHECKS corretos; um falso negativo causado por desalinhamento ou comparação
+  global não pode ser tratado como exemplo de defeito.
