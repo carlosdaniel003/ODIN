@@ -1932,6 +1932,114 @@ previsto por D-043.
 
 
 ---
+
+## D-044 — Produto NG pode provar presença e chegada ao CHECK sem precisar parecer um CHECK BOM
+
+**Status:** Accepted
+
+### Contexto
+
+Depois da validação física de D-043, foi apresentado um BLUE realmente
+**defeituoso**: o segmento/máscara 24 deveria estar ACESO, mas permaneceu
+APAGADO. A câmera e a leitura por mesma máscara reconheciam a anomalia.
+
+O DEBUG do frame congelado mostrou:
+
+- CHECK lógico BLUE;
+- configuração BLUE com 18 máscaras ON + 10 OFF;
+- energia física do CHECK: 17 votos `powered`, 1 voto `off`, zero empate;
+- `MASK_024`: esperada ON, classificada OFF com confiança alta;
+- análise pelas fotos/máscaras: BLUE 27/28, exatamente com `MASK_024` divergente;
+- mesmo assim a autoridade de presença publicou placa não confirmada porque
+  D-042 exigia algum CHECK configurado integralmente conforme para usar a
+  evidência semântica de presença.
+
+Isso cria um deadlock lógico para NG: se a presença exige um CHECK perfeito, um
+produto defeituoso não consegue chegar à etapa que deveria justamente detectar o
+defeito.
+
+Além disso, D-043 só permitia que conformidade 100% provasse a transição entre
+CHECKS. Um BLUE 27/28 precisava de uma identificação física independente por
+foto/contorno, que pode ficar ambígua exatamente nos casos em que a memória
+funcional das máscaras já mostra que a função mudou.
+
+### Decisão
+
+D-044 separa definitivamente três perguntas:
+
+1. **Há placa energizada?**
+2. **A função física já mudou do CHECK anterior para o CHECK atual?**
+3. **O CHECK atual está conforme?**
+
+#### Presença
+
+Quando a cena global estiver ambígua, `F3PresenceAuthority` pode confirmar
+somente **OCUPAÇÃO** se a autoridade canônica de energia já publicou
+`powered_confirmed=true` por votação multi-máscara discriminante, mesmo quando
+nenhum CHECK configurado está 100% conforme.
+
+Nesse modo:
+
+- a origem continua sendo a própria `F3PresenceAuthority`;
+- `matched_check_ids` permanece vazio;
+- nenhuma identidade H1/BLUE/USB/AUX é inventada;
+- nenhuma decisão OK/NG é concedida;
+- EMPTY confirmado continua tendo precedência absoluta.
+
+#### Chegada ao CHECK defeituoso
+
+Para CHECKS posteriores, a autoridade existente de transição também pode usar a
+assinatura das máscaras cujo estado ON/OFF **realmente mudou** entre o CHECK
+anterior e o atual.
+
+O procedimento é:
+
+```text
+CHECK anterior concluído
+→ listar somente MASK_xxx cujo estado mudou anterior → atual
+→ ler ON/OFF físico dessas máscaras pela autoridade de energia
+→ contar votos que seguem o padrão atual e o padrão anterior
+→ maioria estrita no padrão atual + atual > anterior
+→ chegada ao CHECK atual confirmada
+```
+
+Essa regra não é um novo classificador de resultado. Ela apenas responde que a
+função física já saiu do estado anterior e chegou predominantemente ao destino.
+Uma máscara que ainda conserva o estado anterior pode então ser julgada como
+falha pelo analyzer canônico.
+
+#### Resultado
+
+Depois de presença + energia + chegada válidas:
+
+- o analyzer estrito continua sendo a única autoridade semântica das máscaras;
+- uma máscara ativa divergente continua impedindo OK conforme D-031;
+- o debounce NG já existente continua obrigatório, inclusive para CHECK
+  intermitente como BLUE;
+- D-044 não cria timer, worker, scheduler, thread ou autoridade paralela;
+- análise parcial/stale de outro CHECK não ganha autoridade;
+- se a assinatura ainda prefere o CHECK anterior, NG permanece bloqueado para
+  não reprovar prematuramente durante uma transição.
+
+### Consequência
+
+Um produto defeituoso deixa de precisar imitar um produto BOM para entrar no
+fluxo de julgamento. No caso físico que originou D-044, 17 segmentos esperados
+ON de BLUE confirmam energia e a assinatura H1 → BLUE confirma que a função
+mudou, enquanto `MASK_024=OFF` permanece livre para ser detectada pelo analyzer
+como NG.
+
+D-044 refina D-042 e D-043 sem enfraquecer D-031:
+
+- D-042 continua válido para padrão completo e presença;
+- D-043 continua válido para transição de CHECK 100% conforme;
+- D-044 cobre especificamente **presença energizada com CHECK divergente** e
+  **chegada semântica forte de um CHECK defeituoso**.
+
+**Validação física:** pendente de reteste no cenário BLUE com MASK_024 apagada.
+
+
+---
 ## Como adicionar uma decisão
 
 Use:
