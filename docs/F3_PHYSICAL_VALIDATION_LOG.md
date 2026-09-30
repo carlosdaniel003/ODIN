@@ -925,3 +925,53 @@ segmento muda OFF -> ON
 → os dois passam para verde vivo
 ~~~
 
+---
+
+## 30/09/2026 — Tecla 1 não acionava SEGREGAR após mudança de foco
+
+**Resultado físico antes da correção:** FAIL.
+
+### Sintoma observado
+
+Na Produção Display F3, pressionar **1** não executava **SEGREGAR PLACA**.
+
+### Causa identificada
+
+O atalho estava associado somente a `self.container`, que é um `tk.Frame`.
+Ao abrir o F3 o Frame recebe foco, porém clicar em um widget filho — por exemplo
+ANALISAR, CONFIGURAR, DEBUG ou outro controle — transfere o foco. Eventos de
+teclado do widget filho não percorrem o binding particular do Frame pai.
+
+A ação `descartar_placa_display_f3()` e o botão continuavam conectados; o
+defeito estava na captura do atalho de teclado.
+
+### Correção
+
+- mantém os bindings existentes no container;
+- adiciona `1` e `KP_1` ao toplevel/root com `add="+"`, sem substituir
+  atalhos existentes;
+- o handler global só consome a tecla quando a janela F3 está visível;
+- a ação continua passando pela autoridade canônica de SEGREGAR e pelas guardas
+  contra dupla contabilização;
+- nenhuma regra de TOTAL/NG, rearme, tracking, câmera ou F2 foi alterada.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+abrir F3
+→ clicar em ANALISAR (ou outro controle)
+→ pressionar 1
+→ SEGREGAR PLACA
+→ TOTAL +1
+→ NG +1
+→ resultado PLACA SEGREGADA
+→ aguardar retirada/rearme normalmente
+
+repetir com NumPad 1
+→ mesmo comportamento
+~~~
+

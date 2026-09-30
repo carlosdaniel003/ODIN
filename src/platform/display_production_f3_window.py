@@ -224,6 +224,20 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self.container.bind("<Escape>", self._handle_close)
         self.container.bind("<KeyPress-1>", self._handle_discard)
         self.container.bind("<KP_1>", self._handle_discard)
+        # O container é um Frame. Depois de clicar em ANALISAR, CONFIGURAR ou
+        # outro filho, o foco deixa o Frame e bindings exclusivos dele não
+        # recebem mais a tecla. O bind no toplevel captura o mesmo evento dos
+        # widgets filhos sem substituir outros atalhos da aplicação.
+        self.root.bind(
+            "<KeyPress-1>",
+            self._handle_global_discard,
+            add="+",
+        )
+        self.root.bind(
+            "<KP_1>",
+            self._handle_global_discard,
+            add="+",
+        )
         self.container.unbind("<F1>")
 
         self.set_check_sequence(self._check_snapshot)
@@ -1138,6 +1152,16 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             self.on_discard()
 
     def _handle_discard(self, _event=None) -> str:
+        self._discard_plate()
+        return "break"
+
+    def _handle_global_discard(self, _event=None) -> str | None:
+        """Mantém [1] ativo quando o foco está em qualquer filho do painel F3."""
+        try:
+            if not self.visible:
+                return None
+        except Exception:
+            return None
         self._discard_plate()
         return "break"
 

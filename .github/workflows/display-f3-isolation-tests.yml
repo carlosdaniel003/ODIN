@@ -210,6 +210,8 @@ jobs:
             tests.test_display_f3_architecture.DisplayF3ArchitectureTests.test_segregar_placa_ativa_contabiliza_ng_sem_tocar_no_f2 \
             tests.test_display_f3_architecture.DisplayF3ArchitectureTests.test_segregar_nova_placa_presente_nao_fica_preso_em_waiting_new_board \
             tests.test_display_f3_architecture.DisplayF3ArchitectureTests.test_segregar_continua_bloqueado_antes_de_confirmar_nova_placa \
+            tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_atalho_1_global_funciona_com_foco_em_widget_filho \
+            tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_atalho_1_e_numpad_1_sao_capturados_no_toplevel_sem_sobrescrever_bindings \
             tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_desktop_instala_segregar_antes_de_construir_janela_f3 \
             -v
 

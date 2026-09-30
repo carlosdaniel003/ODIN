@@ -28,6 +28,43 @@ class DisplayF3SegregateActionTests(unittest.TestCase):
         self.assertIn("SEGREGATE_RESULT_TEXT", result_source)
         self.assertIn("discarded", result_source)
 
+    def test_atalho_1_global_funciona_com_foco_em_widget_filho(self):
+        class _Container:
+            def __init__(self, mapped: bool) -> None:
+                self.mapped = mapped
+
+            def winfo_ismapped(self):
+                return self.mapped
+
+        calls = []
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window.container = _Container(True)
+        window.on_discard = lambda: calls.append("segregar")
+
+        result = window._handle_global_discard()
+
+        self.assertEqual("break", result)
+        self.assertEqual(["segregar"], calls)
+
+        window.container.mapped = False
+        self.assertIsNone(window._handle_global_discard())
+        self.assertEqual(["segregar"], calls)
+
+    def test_atalho_1_e_numpad_1_sao_capturados_no_toplevel_sem_sobrescrever_bindings(self):
+        source = inspect.getsource(DisplayProductionF3Window.__init__)
+        self.assertIn(
+            'self.root.bind(\n            "<KeyPress-1>",',
+            source,
+        )
+        self.assertIn(
+            'self.root.bind(\n            "<KP_1>",',
+            source,
+        )
+        self.assertGreaterEqual(source.count('add="+"'), 2)
+        self.assertIn("_handle_global_discard", source)
+
     def test_desktop_instala_segregar_antes_de_construir_janela_f3(self):
         source = inspect.getsource(DesktopProductionApp.__init__)
         self.assertIn("instalar_acao_segregar_placa_display_f3()", source)
