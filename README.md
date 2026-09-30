@@ -359,6 +359,46 @@ As referências visuais podem utilizar uma ROI normalizada. A mesma região é r
 
 As comparações finais de presença possuem caminhos que trabalham **ROI primeiro e em resolução cheia**, antes das reduções usadas para acelerar partes do matching.
 
+### Memória visual de CHECKS e referências
+
+As fotografias de CHECK e as imagens cadastradas em **Referências Visuais** não
+são tratadas como gabaritos de cena inteira para decidir H1/BLUE/USB/AUX por
+similaridade global. Cada imagem pode manter:
+
+- o contorno local da placa/filtro;
+- as máscaras locais alinhadas aos mesmos IDs de segmento;
+- o estado observado/ensinado de cada segmento, incluindo ACESO e APAGADO.
+
+O fluxo conceitual da identificação é:
+
+```text
+frame ao vivo
+→ região delimitada pelo contorno da placa
+→ normalização/alinhamento da região de interesse
+→ correspondência dos mesmos IDs de máscara/segmento
+→ comparação do padrão ON/OFF aprendido
+→ conformidade semântica do CHECK
+```
+
+O objetivo é reconhecer o **padrão do display dentro da placa**, não o fundo,
+suporte, iluminação global ou pixels irrelevantes ao redor. Matching da cena
+inteira pode auxiliar presença, localização grosseira ou diagnóstico, mas não
+pode ser um segundo veto semântico depois que o padrão das máscaras está
+corretamente alinhado.
+
+D-031 continua valendo: para um CHECK estar semanticamente conforme, todas as
+máscaras esperadas `on` precisam estar ON e todas as esperadas `off` precisam
+estar OFF; máscaras `ignore` não participam. Assim, quando H1 possui exatamente
+o padrão aprendido após alinhamento válido, a identidade H1 está reconhecida e
+nenhum score global da fotografia pode negar essa conformidade. Gates físicos,
+frescor e rearme continuam protegendo o registro produtivo contra evidência
+stale ou ciclo inválido.
+
+A geometria desenhada dentro da fotografia continua sendo geometria local de
+treinamento/referência. Ela ajuda a localizar o mesmo segmento naquela imagem,
+mas não substitui a geometria live canônica da seção **Máscaras** definida em
+D-036.
+
 ## 5.4 Separação entre estado físico e julgamento das máscaras
 
 Uma regra central do F3 atual é que **presença física e análise de máscara são informações diferentes**.
