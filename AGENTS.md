@@ -15,7 +15,8 @@ Antes de analisar, planejar ou alterar código:
 7. Leia `docs/DECISIONS.md`.
 8. Leia documentação específica do subsistema afetado, quando existir.
 9. Para qualquer trabalho no Display F3, leia também `docs/F3_PHYSICAL_VALIDATION_LOG.md`.
-10. Inspecione a branch e o código atuais. Não assuma que o estado lembrado de uma conversa anterior ainda é o estado do repositório.
+10. Para qualquer trabalho no **Rastreamento Automático do Display F3**, leia também `docs/F3_AUTOMATIC_TRACKING_LOG.md` integralmente antes de analisar ou modificar o runtime.
+11. Inspecione a branch e o código atuais. Não assuma que o estado lembrado de uma conversa anterior ainda é o estado do repositório.
 
 Esses documentos são instruções obrigatórias do projeto.
 
@@ -106,6 +107,11 @@ O registro deve preservar:
 
 Não apague falhas antigas depois que uma correção funcionar. O histórico deve
 mostrar a sequência real de tentativa, evidência, correção e validação.
+
+Quando o teste, tentativa ou correção envolver **rastreamento automático do F3**,
+atualize também `docs/F3_AUTOMATIC_TRACKING_LOG.md` com o resultado e a lição,
+para preservar inclusive caminhos abandonados e impedir repetição de estratégias
+que já falharam.
 
 ## 6. Princípios arquiteturais obrigatórios
 
