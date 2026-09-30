@@ -746,7 +746,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             tracking.instalar_autoridade_final_instancia_rastreamento_f3
         )
         self.assertIn("renderizar_preview_claro_display_f3", source)
-        self.assertIn("_project_preview_context", source)
+        self.assertIn("preparar_contexto_espelho_visual_f3", source)
         self.assertIn("_mask_snapshot_for_current_check", source)
         self.assertIn('semantic_context["classifications"]', source)
         self.assertIn("MÁSCARA CLÁSSICA", source)
