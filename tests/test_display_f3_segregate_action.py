@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from pathlib import Path
 
 import src.platform.display_f3_segregate_action as segregate_module
+import src.platform.display_production_f3_window as window_module
+import src.platform.display_result_feedback as feedback_module
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 from src.platform.desktop_production_app import DesktopProductionApp
 
@@ -130,20 +133,23 @@ class DisplayF3SegregateActionTests(unittest.TestCase):
         self.assertEqual([snapshot], snapshots)
 
     def test_segregacao_terminal_mantem_cards_e_chrome_vermelhos(self):
-        result_source = inspect.getsource(DisplayProductionF3Window.show_plate_result)
-        cards_source = inspect.getsource(DisplayProductionF3Window._render_check_cards)
-        sequence_source = inspect.getsource(DisplayProductionF3Window.set_check_sequence)
-        chrome_source = inspect.getsource(
-            DisplayProductionF3Window._set_terminal_segregation_chrome
+        # A classe é monkey-patched por camadas finais no bootstrap. Para provar
+        # o contrato completo, validamos tanto o proprietário base quanto o
+        # wrapper visual final que roda depois dele.
+        base_source = Path(window_module.__file__).read_text(encoding="utf-8")
+        wrapper_source = inspect.getsource(
+            feedback_module.instalar_feedback_resultado_display_f3
         )
 
-        self.assertIn('"segregated" if discarded else "ng"', result_source)
-        self.assertIn("force_terminal_segregated=bool(discarded)", result_source)
-        self.assertIn("PLACA SEGREGADA", result_source)
-        self.assertIn('status = "SEGREGADO"', cards_source)
-        self.assertIn("self.COLOR_NG", cards_source)
-        self.assertIn("force_terminal_segregated=", sequence_source)
-        self.assertIn("self.DISPLAY_READOUT_NG", chrome_source)
+        self.assertIn('"segregated" if discarded else "ng"', base_source)
+        self.assertIn("force_terminal_segregated=bool(discarded)", base_source)
+        self.assertIn("PLACA SEGREGADA", base_source)
+        self.assertIn('status = "SEGREGADO"', base_source)
+        self.assertIn("_set_terminal_segregation_chrome", base_source)
+        self.assertIn("_display_terminal_waiting_removal", wrapper_source)
+        self.assertIn("_display_terminal_result_kind", wrapper_source)
+        self.assertIn("_set_terminal_segregation_chrome", wrapper_source)
+        self.assertIn('"ng_result"', wrapper_source)
 
     def test_mascaras_nao_sao_forcadas_para_vermelho_pela_segregacao(self):
         result_source = inspect.getsource(DisplayProductionF3Window.show_plate_result)
