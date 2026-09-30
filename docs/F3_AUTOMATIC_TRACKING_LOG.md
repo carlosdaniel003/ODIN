@@ -1548,3 +1548,61 @@ Próximo reteste:
 - retirar a placa e confirmar transição para espera por nova placa;
 - confirmar no debug/telemetria que ON/OFF físico continua preservado internamente.
 
+---
+
+## 30/09/2026 — D-041: referência visual é padrão segmentado dentro do contorno
+
+Modo:
+- tracking OFF como foco físico atual;
+- contrato semântico vale também com tracking ON.
+
+Cenário:
+- CHECK: H1 como caso relatado, extensível aos demais CHECKS;
+- referências: imagens dos CHECKS + Referências Visuais;
+- cada imagem possui contorno local, máscaras alinhadas e estados ON/OFF;
+- sintoma: segmentos ON esperados aparecem verdes, mas H1 pode continuar sem
+  aprovação ou sem reconhecimento pela análise visual.
+
+Regra confirmada:
+- a fotografia inteira não é a memória semântica do CHECK;
+- a memória útil é o padrão dos MASK_xxx dentro da região da placa;
+- o contorno fornece a região/crop de normalização;
+- a geometria local da referência localiza cada MASK_xxx naquela foto;
+- o alinhamento relaciona esses IDs com o frame atual;
+- a conformidade final continua sendo expected x observed por máscara.
+
+Interação com tracking:
+- tracking ON pode fornecer/projetar pose dinâmica antes da comparação;
+- tracking OFF continua usando a geometria live canônica fixa definida por
+  D-036, sem transformar geometrias locais de referência em ROIs produtivas;
+- em ambos os modos, matching de cena inteira não pode virar um segundo veto
+  semântico depois que o padrão de máscaras está 100% conforme.
+
+Resultado:
+- REGRA DOCUMENTADA — causa concreta do bloqueio de H1 ainda pendente de DEBUG.
+
+Decisão/ligação:
+- D-031, D-036, D-037 e D-041.
+
+Lição:
+- separar três papéis que historicamente se misturaram: localizar a placa,
+  alinhar a geometria e julgar o padrão ON/OFF;
+- reconhecimento visual de CHECK deve consumir a geometria/semântica ensinada,
+  não pixels irrelevantes do fundo;
+- uma análise visual global não deve contradizer uma conformidade semântica
+  completa sem apontar qual regra produtiva real bloqueou o registro.
+
+Não repetir:
+- não comparar H1 inteiro com câmera inteira como autoridade final;
+- não usar fundo/suporte/iluminação global para negar um padrão de segmentos
+  integralmente conforme;
+- não copiar a geometria local de CHECK para a câmera live com tracking OFF;
+- não afrouxar D-031 para "fazer H1 passar"; primeiro identificar o bloqueio
+  real quando todos os estados ON/OFF estiverem corretos.
+
+Próximo reteste:
+- reproduzir H1 com todos os ON esperados verdes;
+- confirmar também todos os OFF esperados;
+- capturar DEBUG no mesmo frame;
+- localizar explicitamente o gate/autoridade que impede o registro do CHECK.
+
