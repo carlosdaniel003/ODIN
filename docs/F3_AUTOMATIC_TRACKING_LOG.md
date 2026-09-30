@@ -1515,6 +1515,9 @@ Tentativa:
 - manter D-039 como autoridade de lifecycle;
 - adicionar somente o tipo terminal `segregated` à janela;
 - derivar dele cards/bordas/status vermelhos;
+- propagar um flag de apresentação `terminal_segregated` para câmera e visor;
+- renderizar contorno, máscaras e 28 segmentos em vermelho sem alterar a
+  classificação física interna;
 - limpar esse estado nos mesmos pontos de EMPTY/nova placa já existentes.
 
 Resultado:
@@ -1528,17 +1531,20 @@ Decisão/ligação:
 
 Lição:
 - feedback terminal deve ser derivado do rearme físico já existente;
-- vermelho de resultado não deve contaminar a classificação óptica das ROIs.
+- vermelho de resultado pode sobrescrever a apresentação das ROIs/visor, mas
+  nunca a classificação óptica ou a telemetria interna.
 
 Não repetir:
 - não adicionar outro binding para tecla 1;
 - não criar timer para prolongar o vermelho;
 - não alterar thresholds/tracking para um problema de feedback;
-- não pintar todas as máscaras como NG só porque a placa foi segregada.
+- não reescrever classificações ON/OFF como NG para obter o visual vermelho;
+  use somente o override de apresentação terminal.
 
 Próximo reteste:
 - SEGREGAR por clique, 1 e NumPad 1;
 - manter placa no suporte por vários segundos e confirmar vermelho persistente;
+- confirmar câmera, contorno, máscaras e visor integralmente vermelhos;
 - retirar a placa e confirmar transição para espera por nova placa;
-- confirmar que ON/OFF físico das máscaras continua correto durante o terminal.
+- confirmar no debug/telemetria que ON/OFF físico continua preservado internamente.
 
