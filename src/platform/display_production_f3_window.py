@@ -605,6 +605,9 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 "live_luminous_only": bool(
                     context.get("live_luminous_only")
                 ),
+                "terminal_segregated": bool(
+                    context.get("terminal_segregated")
+                ),
                 "luminous_mask_ids": {
                     str(mask_id)
                     for mask_id in (context.get("luminous_mask_ids") or ())
@@ -762,8 +765,12 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             if state == "on"
         )
 
+        terminal_segregated = bool(context.get("terminal_segregated"))
+
         for segment_name, mask_id in zip(segment_order, mask_ids):
-            if live_luminous_only:
+            if terminal_segregated:
+                state = "ng"
+            elif live_luminous_only:
                 # D-034: câmera e visor consomem o MESMO mapa físico.
                 # A cor independe de gate/expected; classified descreve somente
                 # o que a câmera observou naquele segmento.
@@ -872,7 +879,17 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         )
         x += digit_width + group_gap
 
-        # O ":" não pertence às 28 máscaras; permanece neutro.
+        terminal_segregated = bool(context.get("terminal_segregated"))
+        colon_fill = (
+            self.DISPLAY_READOUT_NG
+            if terminal_segregated
+            else self.DISPLAY_READOUT_INACTIVE
+        )
+        colon_outline = (
+            self.DISPLAY_READOUT_NG_OUTLINE
+            if terminal_segregated
+            else self.DISPLAY_READOUT_INACTIVE_OUTLINE
+        )
         colon_x = x + colon_width / 2.0
         dot_radius = 3.2
         for cy in (y + digit_height * 0.36, y + digit_height * 0.66):
@@ -881,8 +898,8 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 cy - dot_radius,
                 colon_x + dot_radius,
                 cy + dot_radius,
-                fill=self.DISPLAY_READOUT_INACTIVE,
-                outline=self.DISPLAY_READOUT_INACTIVE_OUTLINE,
+                fill=colon_fill,
+                outline=colon_outline,
                 tags=("display-readout-colon",),
             )
 
@@ -1074,6 +1091,9 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             self.DISPLAY_READOUT_NG if active else self.DISPLAY_READOUT_BORDER
         )
         try:
+            readout = getattr(self, "_display_readout_context", None)
+            if isinstance(readout, dict):
+                readout["terminal_segregated"] = active
             self.check_flow_frame.configure(
                 bg=self.COLOR_NG if active else self.COLOR_WAITING
             )
@@ -1087,6 +1107,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             self.project_frame.configure(
                 highlightbackground=readout_border if active else "#334155"
             )
+            self._redraw_display_readout()
         except Exception:
             pass
 
