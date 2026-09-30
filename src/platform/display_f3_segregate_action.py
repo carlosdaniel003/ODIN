@@ -7,7 +7,8 @@ SEGREGATE_BUTTON_TEXT = "SEGREGAR PLACA  [1]"
 SEGREGATE_FOOTER_TEXT = "1: SEGREGAR PLACA  •  F3 ou ESC: voltar ao ODIN"
 SEGREGATE_RESULT_TEXT = "PLACA SEGREGADA"
 SEGREGATE_RESULT_DETAIL = (
-    "Retire a placa do suporte. A próxima placa começará pelo primeiro CHECK."
+    "Retire a placa do suporte. O resultado vermelho permanece até "
+    "PLACA FORA DO SUPORTE ser confirmada."
 )
 
 
