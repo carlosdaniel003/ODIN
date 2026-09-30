@@ -407,6 +407,37 @@ def instalar_feedback_resultado_display_f3() -> None:
             )
             return
 
+        # O wrapper visual final não pode neutralizar o latch físico terminal.
+        # O método base já preserva o texto/cards; esta camada preserva também
+        # a identidade cromática até EMPTY/nova placa.
+        if bool(getattr(self, "_display_terminal_waiting_removal", False)):
+            terminal_kind = str(
+                getattr(self, "_display_terminal_result_kind", "") or ""
+            )
+            aplicar_tema_visual_display_f3(
+                self,
+                "ok_result" if terminal_kind == "ok" else "ng_result",
+                snapshot=data,
+                force_all_completed=bool(terminal_kind == "ok"),
+            )
+            if terminal_kind == "segregated":
+                keep_red = getattr(
+                    self,
+                    "_set_terminal_segregation_chrome",
+                    None,
+                )
+                if callable(keep_red):
+                    keep_red(True)
+            return
+
+        if bool(getattr(self, "_display_waiting_new_board_ui", False)):
+            aplicar_tema_visual_display_f3(
+                self,
+                "ng_waiting",
+                snapshot=data,
+            )
+            return
+
         feedback = obter_feedback_espera_display_f3(data)
 
         if (
@@ -467,6 +498,14 @@ def instalar_feedback_resultado_display_f3() -> None:
             snapshot=snapshot,
             force_all_completed=bool(is_ok),
         )
+        if bool(discarded):
+            keep_red = getattr(
+                self,
+                "_set_terminal_segregation_chrome",
+                None,
+            )
+            if callable(keep_red):
+                keep_red(True)
 
     cls.set_check_sequence = set_check_sequence
     cls.show_plate_result = show_plate_result
