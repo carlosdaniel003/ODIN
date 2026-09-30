@@ -1783,3 +1783,61 @@ Não repetir:
 Estado:
 - D-043 VALIDADA FISICAMENTE NO CENÁRIO H1 → BLUE COM TRACKING OFF.
 
+---
+
+## 30/09/2026 — D-044: BLUE NG com MASK_024 apagada não é defeito de tracking
+
+Modo:
+- tracking OFF.
+
+Cenário:
+- H1 concluído;
+- BLUE atual;
+- 18 segmentos esperados ON;
+- 17 confirmados como powered;
+- MASK_024, esperada ON, permaneceu OFF;
+- aprendizado semântico manual do mesmo frame: BLUE 27/28.
+
+Sintoma:
+- apesar da emissão evidente e do defeito corretamente observado, o runtime
+  permaneceu em `IDENTIFICANDO PRESENÇA DA PLACA` e não chegou ao NG.
+
+Diagnóstico:
+- a falha não pertence ao object tracking;
+- D-042 exigia padrão completo de algum CHECK para usar máscaras como presença,
+  o que excluía por construção produtos NG;
+- D-043 também exigia 100% para usar semântica como prova de handoff;
+- a imagem global preferia placa desligada/ficava abaixo dos thresholds, portanto
+  não oferecia a confirmação independente necessária.
+
+Correção D-044:
+- manter `F3PresenceAuthority` como único proprietário de presença, aceitando
+  energia multi-máscara confirmada como prova apenas de ocupação quando o CHECK
+  diverge;
+- manter a autoridade existente de transição e acrescentar uma assinatura baseada
+  somente nas máscaras que mudaram anterior → atual;
+- exigir maioria estrita no padrão do destino e mais votos de destino que do
+  estado anterior;
+- a assinatura não decide OK/NG; o analyzer/debounce continuam responsáveis;
+- não modificar tracking, geometria, thresholds globais ou scheduler.
+
+Resultado:
+- CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+Decisão/ligação:
+- D-031, D-041, D-042, D-043 e D-044.
+
+Não repetir:
+- não exigir CHECK perfeito para confirmar que uma placa defeituosa está
+  fisicamente presente;
+- não liberar qualquer 27/28 como transição sem comparar o padrão das máscaras
+  que realmente mudaram;
+- não usar score de cena inteira como autoridade final de defeito;
+- não atribuir ao tracking um bloqueio reproduzido com tracking OFF.
+
+Próximo reteste:
+- reproduzir BLUE com somente MASK_024 apagada;
+- confirmar presença + energia + chegada BLUE;
+- confirmar NG terminal sem avanço para USB;
+- confirmar que H1 ainda presente não gera falso NG de BLUE.
+
