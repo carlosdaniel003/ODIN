@@ -1553,6 +1553,38 @@ contexto/configuração recarregado.
 
 
 ---
+
+## D-037 — Contorno canônico da placa permanece visível na câmera F3
+
+**Status:** Accepted
+
+### Contexto
+
+No modo com Rastreamento Automático desativado, D-036 já tornava a seção
+**Máscaras** a autoridade das ROIs live, mas o preview fixo ainda publicava
+`board_points=()`. Assim o contorno da placa desenhado em **Placa + Máscaras**
+não aparecia na câmera ao vivo, apesar de estar persistido no sidecar canônico de
+tracking.
+
+### Decisão
+
+- o contorno salvo em **Placa + Máscaras** é parte da geometria live do projeto;
+- tracking OFF usa o contorno canônico fixo no mesmo espaço mestre das máscaras;
+- tracking ON usa esse mesmo contorno canônico projetado pela pose do tracker;
+- contornos locais de CHECK/referência continuam pertencendo somente à foto de
+  treinamento;
+- o cache do preview fixo inclui a assinatura dos pontos do contorno para que uma
+  edição seja refletida sem reutilizar geometria antiga;
+- o contorno é apresentação/geometria e não cria autoridade de presença,
+  energia, OK/NG ou sequência.
+
+### Consequência
+
+Câmera ao vivo, máscaras e contorno passam a representar a mesma geometria
+canônica quando tracking está OFF, enquanto o modo tracking ON preserva a
+projeção móvel já existente.
+
+---
 ## Como adicionar uma decisão
 
 Use:

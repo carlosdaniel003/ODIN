@@ -224,10 +224,15 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
     # Rastreamento ativo: contorno e ROIs já estão projetados para o frame RAW
     # atual. Rotacionamos essa geometria apenas para a orientação visual escolhida
     # pelo operador e NÃO usamos cache, pois ela muda junto com a placa.
+    tracking_runtime = None
+    canonical_board_points_fn = None
     try:
         from src.platform.display_f3_object_tracking import (
+            canonical_board_points as canonical_board_points_fn,
+            get_tracking_runtime,
             tracking_enabled as tracking_runtime_enabled,
         )
+        tracking_runtime = get_tracking_runtime(app)
         tracking_enabled = bool(tracking_runtime_enabled(app))
     except Exception:
         tracking_enabled = bool(
@@ -338,11 +343,30 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
     if resolution is None:
         return None
 
+    fixed_board_points = []
+    if tracking_runtime is not None and callable(canonical_board_points_fn):
+        try:
+            fixed_board_points = canonical_board_points_fn(
+                project,
+                tracking_runtime.store,
+            )
+        except Exception:
+            fixed_board_points = []
+
+    board_signature = tuple(
+        (
+            round(float(point[0]), 3),
+            round(float(point[1]), 3),
+        )
+        for point in fixed_board_points
+        if isinstance(point, (list, tuple)) and len(point) >= 2
+    )
     cache_key = (
         project_name,
         check_id,
         int(visual_rotation or 0) % 360,
         overlay_module._config_signature(repository),
+        board_signature,
     )
     if cache_key == getattr(window, "_display_f3_clear_preview_project_key", None):
         cached = getattr(window, "_display_f3_clear_preview_project_context", None)
@@ -357,6 +381,12 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
             effective_masks,
             int(visual_rotation or 0) % 360,
         )
+        visual_board = preparar_pontos_visuais_display(
+            fixed_board_points,
+            int(resolution[0]),
+            int(resolution[1]),
+            int(visual_rotation or 0) % 360,
+        )
     except Exception:
         return None
 
@@ -365,7 +395,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "check_id": check_id,
         "resolution": tuple(visual_resolution),
         "masks": tuple(visual_masks),
-        "board_points": (),
+        "board_points": tuple(visual_board),
         "expected_states": expected,
         "intermittent": bool(check.get("intermittent", False)),
         "readout_mask_ids": readout_mask_ids,

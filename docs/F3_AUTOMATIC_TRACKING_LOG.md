@@ -1377,3 +1377,56 @@ Próximo reteste:
 - repetir trocando formato e tamanho;
 - confirmar que o treinamento do CHECK continua usando sua geometria local.
 
+---
+
+## 30/09/2026 — Contorno canônico passa a integrar o preview live
+
+Modo:
+- tracking OFF como foco do teste;
+- contrato também preservado no tracking ON.
+
+Cenário:
+- CHECK: H1 / fluxo normal;
+- placa/posição: posição cadastrada no modo fixo;
+- condição de iluminação: indiferente;
+- comportamento esperado: o contorno desenhado em **Placa + Máscaras** deve
+  aparecer na câmera ao vivo junto das máscaras.
+
+Sintoma/evidência:
+- o renderer final já possuía suporte a `board_points`;
+- tracking ON publicava o contorno projetado quando havia LOCK;
+- tracking OFF publicava `board_points=()`, eliminando o contorno do contexto.
+
+Hipótese:
+- defeito de composição do contexto visual fixo, não de tracking óptico.
+
+Tentativa:
+- consumir `canonical_board_points` do mesmo store canônico já usado pelo
+  tracker;
+- rotacionar os pontos para a orientação visual;
+- incluir a assinatura do contorno na chave de cache;
+- não usar contorno local de CHECK como geometria live.
+
+Resultado:
+- PENDENTE DE RETESTE FÍSICO
+
+Commit(s):
+- commit desta correção D-037.
+
+Decisão/ligação:
+- D-036 e D-037.
+
+Lição:
+- tracking OFF e ON devem divergir somente na transformação espacial; a
+  identidade do contorno live nasce da mesma geometria canônica.
+
+Não repetir:
+- não deixar `board_points=()` no contexto live fixo quando existe contorno;
+- não copiar `board_points_reference` de CHECK para a câmera;
+- não criar segunda persistência de contorno.
+
+Próximo reteste:
+- confirmar contorno fixo com tracking OFF;
+- confirmar contorno móvel com tracking ON + LOCK;
+- editar o contorno canônico e confirmar invalidação visual do cache.
+

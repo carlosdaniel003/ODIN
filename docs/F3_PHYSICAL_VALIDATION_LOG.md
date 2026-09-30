@@ -975,3 +975,55 @@ repetir com NumPad 1
 → mesmo comportamento
 ~~~
 
+---
+
+## 30/09/2026 — Contorno desenhado da placa não aparecia na câmera ao vivo
+
+**Resultado físico antes da correção:** FAIL visual.
+
+### Cenário
+
+- Produção Display F3;
+- foco atual em Rastreamento Automático desativado;
+- contorno da placa já desenhado e salvo em **Placa + Máscaras**;
+- máscaras live já usam a geometria canônica da seção **Máscaras**.
+
+### Sintoma observado
+
+O operador solicitou que o contorno da placa desenhado durante a configuração
+também apareça sobre a câmera ao vivo. O preview fixo mostrava as máscaras, mas
+não publicava os pontos do contorno canônico.
+
+### Causa identificada
+
+No caminho final de preview com tracking OFF,
+`_project_preview_context()` preenchia explicitamente `board_points=()`.
+O renderer já sabia desenhar `board_points`, portanto a falha era de contexto,
+não de desenho OpenCV.
+
+### Correção D-037
+
+- carregar o contorno por `canonical_board_points(...)` usando o store canônico;
+- aplicar a mesma rotação visual usada pelas máscaras;
+- publicar `board_points` no contexto live;
+- incluir os pontos na chave de cache do preview fixo;
+- manter contornos locais de CHECK/referência fora da câmera live.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+tracking OFF
+→ abrir F3
+→ confirmar máscaras fixas + contorno da placa desenhado na câmera ao vivo
+→ editar somente o contorno em Placa + Máscaras
+→ reabrir/atualizar F3
+→ confirmar novo contorno sem mover as máscaras
+
+tracking ON + LOCK
+→ confirmar que o mesmo contorno acompanha a pose rastreada
+~~~
+

@@ -315,6 +315,13 @@ Geometrias desenhadas dentro de CHECKS ou referências visuais pertencem somente
 câmera. Com tracking ativado, o tracker projeta a geometria canônica da seção
 **Máscaras** para a pose atual da placa.
 
+O **contorno da placa** desenhado em **Placa + Máscaras** também faz parte da
+geometria canônica visível. Com tracking desativado, esse contorno aparece fixo
+na câmera ao vivo na mesma resolução/orientação das máscaras. Com tracking
+ativado e LOCK válido, o mesmo contorno canônico é projetado para a pose atual da
+placa. Contornos locais de CHECK/referência continuam restritos ao treinamento e
+não substituem o contorno live.
+
 ## 5.2 Aprendizado semântico do F3
 
 O F3 possui armazenamento de aprendizado próprio em `odin_display_learning.json`.
