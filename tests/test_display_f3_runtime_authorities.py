@@ -507,6 +507,137 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         )
         owner.power.evaluate.assert_called_once_with(frame, "CM_500_L", context)
 
+    def test_builder_libera_gate_para_blue_energizado_com_mascara_ng(self):
+        app = _App()
+        repository = SimpleNamespace(
+            config_file="odin_display_projects.json",
+            listar_checks=Mock(
+                return_value=[
+                    {
+                        "id": "CHECK_002",
+                        "name": "BLUE",
+                        "mask_states": {
+                            "MASK_001": "on",
+                            "MASK_004": "on",
+                            "MASK_024": "on",
+                            "MASK_002": "off",
+                        },
+                    }
+                ]
+            ),
+        )
+        app.display_project_repository = repository
+        matcher = SimpleNamespace(
+            check_store=SimpleNamespace(get=Mock(return_value={})),
+        )
+        tracking_owner = SimpleNamespace(
+            stats=lambda: {"owner": "tracking"},
+            presence_evidence=Mock(
+                return_value={
+                    "locked": False,
+                    "evidence_current": False,
+                    "reference": "",
+                    "reason": "object_not_locked",
+                }
+            ),
+        )
+        analyzer_owner = SimpleNamespace(
+            analyzer=object(),
+            rebuild=Mock(return_value=object()),
+        )
+        with (
+            patch.object(authorities, "F3TrackingAuthority", return_value=tracking_owner),
+            patch.object(authorities, "F3CheckAnalyzerAuthority", return_value=analyzer_owner),
+            patch.object(
+                authorities.operational_module,
+                "DisplayVisualReferenceMatcher",
+                return_value=matcher,
+            ),
+        ):
+            owner = authorities.F3RuntimeAuthorities(app)
+
+        owner.power.evaluate = Mock(
+            return_value={
+                "available": True,
+                "powered_confirmed": True,
+                "off_confirmed": False,
+                "energy_state": "powered",
+                "powered_votes": 17,
+                "off_votes": 1,
+                "tie_votes": 0,
+                "required_powered_votes": 4,
+                "project_name": "CM_500_L",
+                "check_id": "CHECK_002",
+                "details": [
+                    {"mask_id": "MASK_001", "winner": "powered", "classified": "on"},
+                    {"mask_id": "MASK_004", "winner": "powered", "classified": "on"},
+                    {"mask_id": "MASK_024", "winner": "off", "classified": "off"},
+                    {"mask_id": "MASK_002", "winner": "off", "classified": "off"},
+                ],
+            }
+        )
+        ambiguous = {
+            "available": False,
+            "board_present": False,
+            "presence_confirmed": False,
+            "empty_confirmed": False,
+            "reason": "separacao_ocupado_vs_empty_insuficiente",
+        }
+        raw = {
+            "kind": "unknown",
+            "allow_auto": False,
+            "reference_scores": {
+                "off": 0.4568,
+                "check:CHECK_002": 0.3492,
+                "empty": 0.1741,
+            },
+        }
+        frame = _Frame()
+        context = {"check_id": "CHECK_002", "check_name": "BLUE"}
+
+        with (
+            patch.object(
+                authorities.transition_module,
+                "classificar_estado_fisico_referencias_f3",
+                return_value=raw,
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "corrigir_falso_check_ligado_pelas_mascaras_f3",
+                side_effect=lambda **kwargs: kwargs["state"],
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "aplicar_contexto_ao_estado_fisico_f3",
+                side_effect=lambda state, **kwargs: state,
+            ),
+            patch.object(
+                authorities.presence_module,
+                "avaliar_presenca_melhor_ocupado_f3",
+                return_value=ambiguous,
+            ),
+            patch.object(
+                authorities.live_runtime_module,
+                "aplicar_gate_rearme_ciclo_f3",
+                side_effect=lambda app, state: state,
+            ),
+        ):
+            result = owner.build_operational_state(frame, "CM_500_L", context)
+
+        self.assertEqual("powered", result["kind"])
+        self.assertTrue(result["allow_auto"])
+        self.assertTrue(result[authorities.contract_module.F3_DECISION_ALLOWED_KEY])
+        presence = result["board_presence_evidence"]
+        self.assertTrue(presence["semantic_mask_presence_confirmed"])
+        self.assertEqual([], presence["semantic_mask_matched_check_ids"])
+        self.assertEqual(
+            "emissao_semantica_confirma_placa_com_check_divergente",
+            presence["reason"],
+        )
+        self.assertTrue(app._display_f3_power_authority_status["board_present"])
+        self.assertEqual(17, app._display_f3_power_authority_status["energy"]["powered_votes"])
+        self.assertEqual(1, app._display_f3_power_authority_status["energy"]["off_votes"])
+
     def test_power_owner_never_lets_energy_bypass_missing_presence(self):
         app = _App()
         owner = authorities.F3PowerAuthority(app)
