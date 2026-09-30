@@ -57,6 +57,7 @@ jobs:
             src/platform/display_f3_exact_check_template.py \
             src/platform/display_f3_contour_check_identity.py \
             src/platform/display_f3_strict_mask_conformity.py \
+            src/platform/display_f3_runtime_authorities.py \
             src/platform/display_f3_segregate_action.py \
             src/platform/display_f3_object_tracking.py \
             src/platform/display_f3_h1_registration.py \
@@ -94,6 +95,7 @@ jobs:
             tests/test_display_f3_physical_learning_policy.py \
             tests/test_display_f3_exact_check_template.py \
             tests/test_display_f3_contour_check_identity.py \
+            tests/test_display_f3_runtime_authorities.py \
             tests/test_display_f3_object_tracking_isolation.py \
             tests/test_display_f3_h1_registration.py \
             tests/test_display_f3_tracking_ui_contract.py \
@@ -202,6 +204,16 @@ jobs:
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_tracking_off_geometria_live_vem_somente_da_secao_mascaras \
             tests.test_display_f3_same_mask_reference_fix.DisplayF3SameMaskReferenceFixTests.test_tracking_off_live_ignora_geometria_local_do_check \
             tests.test_display_f3_exact_check_template.DisplayF3ExactCheckTemplateTests.test_tracking_off_separa_geometria_live_da_geometria_da_referencia \
+            -v
+
+      - name: Run D-042 semantic presence regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_mask_pattern_confirms_presence_when_scene_is_ambiguous \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_mask_pattern_never_overrides_confirmed_empty \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_presence_rejects_incomplete_or_contradictory_check_pattern \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_builder_breaks_presence_energy_deadlock_with_known_h1_pattern \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_power_owner_never_lets_energy_bypass_missing_presence \
             -v
 
       - name: Run strict mask and segregation regressions
