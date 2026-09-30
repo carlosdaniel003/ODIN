@@ -413,13 +413,11 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             clarity,
             "detectar_emissao_visual_ao_vivo_f3",
             return_value={
-                "ready": True,
+                "ready": False,
                 "mask_ids": (),
-                "reason": "ok",
-                "sampled_mask_count": 4,
-                "threshold": 200.0,
-                "baseline": 100.0,
-                "peak": 120.0,
+                "sampled_mask_ids": (),
+                "reason": "amostras_insuficientes",
+                "sampled_mask_count": 0,
             },
         ):
             mirrored = clarity.aplicar_emissao_visual_ao_vivo_f3(
@@ -467,10 +465,12 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         )
 
         on_pixel = rendered[40, 60]
-        off_roi = rendered[27:54, 7:34]
+        off_pixel = rendered[40, 20]
         self.assertGreater(int(on_pixel[1]), int(on_pixel[2]))
         self.assertGreater(int(on_pixel[1]), int(on_pixel[0]))
-        self.assertGreater(int(off_roi.sum()), 0)
+        self.assertGreater(int(off_pixel[1]), int(off_pixel[2]))
+        self.assertGreater(int(off_pixel[1]), int(off_pixel[0]))
+        self.assertLess(int(off_pixel[1]), int(on_pixel[1]))
 
     def test_amostra_visual_latest_frame_apaga_visor_na_fase_escura(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
@@ -482,6 +482,10 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
 
         self.assertTrue(result["ready"])
         self.assertEqual((), result["mask_ids"])
+        self.assertEqual(
+            {"MASK_001", "MASK_002", "MASK_003", "MASK_004"},
+            set(result["sampled_mask_ids"]),
+        )
 
     def test_amostra_visual_e_calculada_uma_vez_por_frame_e_reutilizada(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
@@ -490,6 +494,12 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         sample = {
             "ready": True,
             "mask_ids": ("MASK_002",),
+            "sampled_mask_ids": (
+                "MASK_001",
+                "MASK_002",
+                "MASK_003",
+                "MASK_004",
+            ),
             "reason": "ok",
             "sampled_mask_count": 4,
             "baseline": 10.0,
@@ -527,6 +537,61 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             "latest_preview_frame_core_v",
             first["live_visual_sample_source"],
         )
+        self.assertEqual("on", first["live_visual_classifications"]["MASK_002"])
+        self.assertEqual("off", first["live_visual_classifications"]["MASK_001"])
+        self.assertEqual("off", first["live_visual_classifications"]["MASK_003"])
+        self.assertEqual("off", first["live_visual_classifications"]["MASK_004"])
+
+    def test_latest_frame_rebaixa_on_stale_para_off_no_mesmo_repaint(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        window = SimpleNamespace()
+        context = self._live_visual_test_context()
+        context["visual_physical_classifications"] = {
+            "MASK_001": "on",
+            "MASK_002": "on",
+            "MASK_003": "on",
+            "MASK_004": "on",
+        }
+
+        with patch.object(
+            clarity,
+            "detectar_emissao_visual_ao_vivo_f3",
+            return_value={
+                "ready": True,
+                "mask_ids": ("MASK_002",),
+                "sampled_mask_ids": (
+                    "MASK_001",
+                    "MASK_002",
+                    "MASK_003",
+                    "MASK_004",
+                ),
+                "reason": "ok",
+                "sampled_mask_count": 4,
+            },
+        ):
+            mirrored = clarity.aplicar_emissao_visual_ao_vivo_f3(
+                window,
+                frame,
+                context,
+                frame_token=("camera", 90),
+                geometry_token=("fixed", 0),
+            )
+
+        self.assertEqual(("MASK_002",), mirrored["live_visual_mask_ids"])
+        self.assertEqual("off", mirrored["live_visual_classifications"]["MASK_001"])
+        self.assertEqual("on", mirrored["live_visual_classifications"]["MASK_002"])
+        self.assertEqual("off", mirrored["live_visual_classifications"]["MASK_003"])
+        self.assertEqual("off", mirrored["live_visual_classifications"]["MASK_004"])
+
+    def test_paleta_live_on_verde_e_off_verde_escuro(self):
+        on_bgr = clarity.F3_PREVIEW_CLASSIC_LIGHT_BGR
+        off_bgr = clarity.F3_PREVIEW_CLASSIC_OFF_BGR
+
+        self.assertGreater(int(on_bgr[1]), int(on_bgr[2]))
+        self.assertGreater(int(on_bgr[1]), int(on_bgr[0]))
+        self.assertGreater(int(off_bgr[1]), int(off_bgr[2]))
+        self.assertGreater(int(off_bgr[1]), int(off_bgr[0]))
+        self.assertLess(int(off_bgr[1]), int(on_bgr[1]))
 
     def test_preview_classico_usa_amostra_do_mesmo_frame_mesmo_antes_do_gate(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)

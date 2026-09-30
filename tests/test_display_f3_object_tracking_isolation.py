@@ -278,7 +278,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3
         )
-        sample_pos = source.index("aplicar_emissao_visual_ao_vivo_f3(")
+        sample_pos = source.index("preparar_contexto_espelho_visual_f3(")
         readout_pos = source.index("set_display_readout_context(")
         renderer_pos = source.index("renderizar_preview_claro_display_f3(")
 
@@ -286,7 +286,27 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertGreater(readout_pos, sample_pos)
         self.assertGreater(renderer_pos, readout_pos)
         self.assertIn("live_frame_token", source)
+        self.assertIn('geometry_token=("fixed", rotation)', source)
         self.assertIn("geometry_token=id(geometry)", source)
+
+    def test_tracking_off_final_nao_bypassa_espelho_visual(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        start = source.index("if not tracking_is_enabled:")
+        end = source.index("geometry = getattr(", start)
+        tracking_off = source[start:end]
+
+        self.assertIn("preparar_contexto_espelho_visual_f3(", tracking_off)
+        self.assertIn("set_display_readout_context(", tracking_off)
+        self.assertIn("renderizar_preview_claro_display_f3(", tracking_off)
+        self.assertIn('"fixed_latest_frame_live_visual"', tracking_off)
+        self.assertIn('geometry_token=("fixed", rotation)', tracking_off)
+        early_return = tracking_off.split(
+            "preparar_contexto_espelho_visual_f3(",
+            1,
+        )[0]
+        self.assertNotIn("return previous_window_update(", early_return)
 
     def test_espelho_visual_publica_telemetria_de_cada_estagio_sem_novo_loop(self):
         source = inspect.getsource(

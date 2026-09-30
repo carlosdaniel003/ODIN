@@ -7,8 +7,8 @@ A classificação, a decisão OK/NG, o debounce e o fluxo produtivo continuam so
 as autoridades já instaladas.
 
 Regra visual final:
-- verde fino: segmento ACESO conforme;
-- azul/cinza fino: segmento APAGADO conforme;
+- verde vivo: segmento fisicamente ACESO;
+- verde escuro: segmento fisicamente APAGADO;
 - amarelo: leitura em validação/POUCA LUZ;
 - vermelho: somente falha efetiva confirmada;
 - no ao vivo, somente falhas recebem numero grande e linha-guia;
@@ -64,9 +64,11 @@ F3_PREVIEW_ALERT_ALPHA = 0.18
 F3_PREVIEW_ALERT_CONTOUR_THICKNESS = 3
 F3_PREVIEW_TRACKING_GUIDE_BGR = (139, 116, 100)
 F3_PREVIEW_TRACKING_GUIDE_THICKNESS = 1
-F3_PREVIEW_CLASSIC_MASK_BGR = (184, 163, 148)  # cinza/azul neutro #94A3B8
-F3_PREVIEW_CLASSIC_LIGHT_BGR = (94, 197, 34)   # verde #22C55E
+F3_PREVIEW_CLASSIC_MASK_BGR = (184, 163, 148)  # neutro/desconhecido #94A3B8
+F3_PREVIEW_CLASSIC_LIGHT_BGR = (94, 197, 34)   # verde aceso #22C55E
+F3_PREVIEW_CLASSIC_OFF_BGR = (45, 83, 20)      # verde escuro #14532D
 F3_PREVIEW_CLASSIC_LIGHT_ALPHA = 0.16
+F3_PREVIEW_CLASSIC_OFF_ALPHA = 0.16
 F3_PREVIEW_STARTUP_NUMBER_BGR = (203, 213, 225)
 F3_PREVIEW_FAILURE_BADGE_BGR = (68, 68, 239)
 F3_PREVIEW_FAILURE_BADGE_TEXT_BGR = (255, 255, 255)
@@ -96,14 +98,14 @@ F3_LIVE_VISUAL_STRONG_SCORE = 150.0
 F3_LIVE_VISUAL_STRONG_PEAK = 175.0
 
 F3_PREVIEW_CLEAR_COLORS = {
-    DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
-    DISPLAY_CHECK_STATE_OFF: (139, 116, 100),    # azul/cinza #64748B
+    DISPLAY_CHECK_STATE_ON: F3_PREVIEW_CLASSIC_LIGHT_BGR,
+    DISPLAY_CHECK_STATE_OFF: F3_PREVIEW_CLASSIC_OFF_BGR,
     "warning": (21, 204, 250),                   # amarelo #FACC15
     "alert": (68, 68, 239),                      # vermelho #EF4444
 }
 
 F3_PREVIEW_CLEAR_LEGEND = (
-    "VERDE: ACESO  •  AZUL/CINZA: APAGADO  •  "
+    "VERDE: ACESO  •  VERDE ESCURO: APAGADO  •  "
     "AMARELO: VALIDANDO  •  VERMELHO: FALHA CONFIRMADA"
 )
 
@@ -538,6 +540,7 @@ def _latest_physical_visual_classifications(
         DISPLAY_CHECK_STATE_OFF,
         DISPLAY_AUTO_CLASS_LOW_LIGHT,
     }
+    physical: dict[str, str] = {}
     for attr in (
         "_display_auto_last_analysis",
         "_display_f3_overlay_analysis_cache",
@@ -555,33 +558,55 @@ def _latest_physical_visual_classifications(
         ):
             continue
 
-        physical = {}
+        analysis_physical = {}
         for item in analysis.get("mask_results", []) or []:
             if not isinstance(item, dict):
                 continue
             mask_id = str(item.get("mask_id") or "")
             state = str(item.get("classified") or "").strip().lower()
             if mask_id and state in valid_states:
-                physical[mask_id] = state
+                analysis_physical[mask_id] = state
 
-        if not physical:
+        if not analysis_physical:
             for key in ("classifications", "effective_classifications"):
                 source = analysis.get(key)
                 if not isinstance(source, dict):
                     continue
-                physical = {
+                analysis_physical = {
                     str(mask_id): str(state or "").strip().lower()
                     for mask_id, state in source.items()
                     if str(mask_id)
                     and str(state or "").strip().lower() in valid_states
                 }
-                if physical:
+                if analysis_physical:
                     break
 
-        if physical:
-            return physical
+        if analysis_physical:
+            physical.update(analysis_physical)
+            break
 
-    return {}
+    # A autoridade de energia já mantém uma leitura física check-independente
+    # das máscaras discriminantes no frame do pipeline. Ela complementa a
+    # análise semântica para apresentação, mas nunca fornece expected/matched.
+    power_status = getattr(app, "_display_f3_power_authority_status", None)
+    energy = power_status.get("energy") if isinstance(power_status, dict) else None
+    if isinstance(energy, dict):
+        energy_project = str(energy.get("project_name") or "")
+        same_project = bool(
+            not energy_project
+            or not project_name
+            or energy_project == str(project_name)
+        )
+        raw_power_states = energy.get("mask_classifications")
+        if same_project and isinstance(raw_power_states, dict):
+            for mask_id, state in raw_power_states.items():
+                normalized = str(state or "").strip().lower()
+                if str(mask_id) and normalized in valid_states:
+                    # A autoridade física live é mais atual para as máscaras
+                    # que ela consegue discriminar.
+                    physical[str(mask_id)] = normalized
+
+    return physical
 
 
 def _mask_snapshot_for_current_check(
@@ -957,6 +982,9 @@ def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
         return {
             "ready": False,
             "mask_ids": (),
+            "sampled_mask_ids": tuple(
+                str(row["mask_id"]) for row in rows
+            ),
             "reason": "amostras_insuficientes",
             "sampled_mask_count": len(rows),
         }
@@ -1027,6 +1055,9 @@ def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
     return {
         "ready": True,
         "mask_ids": luminous_ids,
+        "sampled_mask_ids": tuple(
+            str(row["mask_id"]) for row in rows
+        ),
         "reason": "ok",
         "sampled_mask_count": len(rows),
         "baseline": round(baseline, 2),
@@ -1035,6 +1066,42 @@ def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
         "threshold": round(float(threshold), 2),
         "cluster_gap": round(cluster_gap, 2),
     }
+
+
+def preparar_contexto_espelho_visual_f3(
+    window,
+    visual_frame,
+    visual_rotation: int,
+    *,
+    frame_token=None,
+    geometry_token=None,
+) -> dict | None:
+    """Monta o contexto único de câmera + máscaras + visor.
+
+    Funciona com tracking ON e OFF. Tracking altera somente a geometria retornada
+    por _project_preview_context; a semântica visual é sempre latest-frame.
+    """
+    context = _project_preview_context(
+        window,
+        int(visual_rotation or 0) % 360,
+    )
+    if not isinstance(context, dict):
+        return None
+
+    context = dict(context)
+    context["visual_physical_classifications"] = (
+        _latest_physical_visual_classifications(
+            window,
+            project_name=str(context.get("project_name") or ""),
+        )
+    )
+    return aplicar_emissao_visual_ao_vivo_f3(
+        window,
+        visual_frame,
+        context,
+        frame_token=frame_token,
+        geometry_token=geometry_token,
+    )
 
 
 def aplicar_emissao_visual_ao_vivo_f3(
@@ -1081,11 +1148,14 @@ def aplicar_emissao_visual_ao_vivo_f3(
         for mask_id in (sample.get("mask_ids") or ())
         if str(mask_id)
     }
+    sampled_mask_ids = {
+        str(mask_id)
+        for mask_id in (sample.get("sampled_mask_ids") or ())
+        if str(mask_id)
+    }
 
-    # D-034: a interface já pode possuir uma classificação física válida das
-    # máscaras enquanto o CHECK lógico assíncrono está em outra etapa. Isso é
-    # exatamente o que o resumo "15 ACESOS / 13 APAGADOS" representa. Para a
-    # apresentação, classified é evidência física e não depende de expected.
+    # Fallback físico: usado somente para máscaras que o sampler latest-frame
+    # não conseguiu medir. Nunca carrega expected/matched/OK/NG.
     visual_states = {
         str(mask_id): str(state or "").strip().lower()
         for mask_id, state in dict(
@@ -1100,34 +1170,24 @@ def aplicar_emissao_visual_ao_vivo_f3(
         }
     }
 
-    # O detector latest-frame só PROMOVE emissão ON. Ele não rebaixa uma
-    # classificação física ON já publicada pelo analyzer, evitando o caso
-    # observado em que a câmera mostrava 15 ACESOS mas o espelho ficava cinza.
-    for mask_id in sampled_on_ids:
-        visual_states[mask_id] = DISPLAY_CHECK_STATE_ON
+    # D-035: quando a amostra do MESMO frame está pronta, ela manda no espelho
+    # visual. Cada ROI amostrada vira ON ou OFF naquele repaint. Isso permite
+    # tanto acender quanto apagar imediatamente, sem herdar ON stale de análise
+    # assíncrona anterior.
+    if ready:
+        for mask_id in sampled_mask_ids:
+            visual_states[mask_id] = (
+                DISPLAY_CHECK_STATE_ON
+                if mask_id in sampled_on_ids
+                else DISPLAY_CHECK_STATE_OFF
+            )
 
     visual_on_ids = {
         mask_id
         for mask_id, state in visual_states.items()
         if state == DISPLAY_CHECK_STATE_ON
     }
-    visual_on_ids.update(sampled_on_ids)
     mask_ids = tuple(sorted(visual_on_ids))
-
-    # Para máscaras ainda sem classificação física, uma amostra pronta e sem
-    # emissão fornece apenas estado visual OFF; isso continua sem autoridade de
-    # produto e serve para o espelho câmera/visor.
-    if ready:
-        for mask in result.get("masks") or ():
-            if not isinstance(mask, dict):
-                continue
-            mask_id = str(mask.get("id") or "")
-            if mask_id and mask_id not in visual_states:
-                visual_states[mask_id] = (
-                    DISPLAY_CHECK_STATE_ON
-                    if mask_id in sampled_on_ids
-                    else DISPLAY_CHECK_STATE_OFF
-                )
 
     result["live_visual_sample_ready"] = ready
     result["live_visual_mask_ids"] = mask_ids
@@ -1313,9 +1373,9 @@ def _render_classic_luminous_preview(
 ):
     """Preview operacional: espelho físico visual independente dos gates.
 
-    Com tracking ativo, cor verde é apresentação do que está emitindo luz no
-    frame visível. Presença, energia, alinhamento produtivo, OK/NG e sequência
-    não podem suprimir essa reação visual.
+    Tracking ON ou OFF altera somente a geometria das ROIs. A apresentação do
+    mesmo frame usa verde vivo para ON e verde escuro para OFF. Presença,
+    energia, alinhamento produtivo, OK/NG e sequência não controlam essas cores.
     """
 
     result = frame.copy()
@@ -1377,7 +1437,9 @@ def _render_classic_luminous_preview(
             pass
 
     green_tint = result.copy()
+    off_tint = result.copy()
     green_geometries = []
+    off_geometries = []
     for mask in masks:
         if not isinstance(mask, dict):
             continue
@@ -1404,17 +1466,37 @@ def _render_classic_luminous_preview(
                 2,
             )
         elif visual_state == DISPLAY_CHECK_STATE_OFF:
-            _draw_contour(
-                result,
-                geometry,
-                F3_PREVIEW_CLEAR_COLORS[DISPLAY_CHECK_STATE_OFF],
-                1,
+            geometry = _draw_mask(
+                off_tint,
+                mask,
+                sx,
+                sy,
+                F3_PREVIEW_CLASSIC_OFF_BGR,
             )
+            if geometry is not None:
+                off_geometries.append(geometry)
         else:
             _draw_contour(
                 result,
                 geometry,
                 F3_PREVIEW_CLASSIC_MASK_BGR,
+                1,
+            )
+
+    if off_geometries:
+        cv2.addWeighted(
+            off_tint,
+            F3_PREVIEW_CLASSIC_OFF_ALPHA,
+            result,
+            1.0 - F3_PREVIEW_CLASSIC_OFF_ALPHA,
+            0.0,
+            dst=result,
+        )
+        for geometry in off_geometries:
+            _draw_contour(
+                result,
+                geometry,
+                F3_PREVIEW_CLASSIC_OFF_BGR,
                 1,
             )
 

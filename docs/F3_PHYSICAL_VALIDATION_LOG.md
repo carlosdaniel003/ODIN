@@ -847,3 +847,81 @@ continuam presos ao CHECK correto.
 
 **CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
 
+---
+
+## 30/09/2026 — Reteste D-034: DEBUG confirmou bypass do tracking OFF
+
+**Resultado físico:** FAIL visual, causa confirmada por telemetria.
+
+### Cenário
+
+- Rastreamento Automático: DESATIVADO;
+- CHECK lógico: AUX;
+- placa presente;
+- energia confirmada;
+- objetivo visual:
+  - ON = verde vivo;
+  - OFF = verde escuro;
+  - câmera e visor iguais.
+
+### Evidência objetiva
+
+O snapshot registrou 15 máscaras live ON e 11 live OFF confirmadas, mas o bloco
+do espelho visual informou:
+
+~~~text
+tracking_enabled=NÃO
+stage=tracking_disabled
+render_path=previous_window_update
+context_ready=NÃO
+sample_ready=NÃO
+visual_ids=0
+readout_ready=NÃO
+readout_visual_ids=0
+preview_rendered=SIM
+~~~
+
+Portanto o frame era renderizado, porém o callback final abandonava o espelho
+visual antes de construir contexto, amostrar ROIs e atualizar o visor.
+
+### Causa confirmada
+
+O `tracked_window_update` instalado diretamente na instância real possuía um
+retorno antecipado para `previous_window_update` quando tracking estava OFF.
+Essa camada era mais externa que as correções D-033/D-034 e anulava o caminho
+pretendido.
+
+### Correção D-035
+
+- removido o bypass visual antecipado no proprietário final;
+- tracking OFF usa geometria fixa e continua pelo espelho latest-frame;
+- tracking ON usa geometria móvel pelo mesmo builder;
+- sampler do frame atual publica ON e OFF por ROI;
+- ON usa verde vivo `#22C55E`;
+- OFF usa verde escuro `#14532D`;
+- câmera e VISOR DO DISPLAY consomem o mesmo contexto;
+- análise/power físico permanece somente fallback visual quando o sampler não
+  possui amostra de uma ROI;
+- nenhuma regra de OK/NG, energia, presença, debounce ou sequência foi alterada;
+- nenhum timer/thread/worker/scheduler novo foi criado.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+tracking OFF
+→ display aceso
+→ ROIs ON: verde vivo na câmera + visor
+→ ROIs OFF: verde escuro na câmera + visor
+
+segmento muda ON -> OFF
+→ os dois perdem verde vivo no mesmo repaint
+→ passam para verde escuro
+
+segmento muda OFF -> ON
+→ os dois passam para verde vivo
+~~~
+

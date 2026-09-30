@@ -1259,3 +1259,66 @@ Não repetir:
   estados físicos;
 - não reutilizar matched/expected de outro CHECK como decisão.
 
+---
+
+## 30/09/2026 — DEBUG provou bypass final do espelho com tracking OFF
+
+Modo:
+- tracking OFF
+
+Cenário:
+- CHECK: AUX;
+- placa presente e display ligado;
+- comportamento esperado: ON verde vivo, OFF verde escuro, iguais na câmera e
+  no VISOR DO DISPLAY.
+
+Sintoma/evidência:
+- câmera continuava com máscaras neutras;
+- visor continuava neutro;
+- DEBUG do caminho real publicou
+  `stage=tracking_disabled` e
+  `render_path=previous_window_update`;
+- no mesmo bloco:
+  `context_ready=NÃO`, `sample_ready=NÃO`, `visual_ids=0`,
+  `readout_ready=NÃO`, `readout_visual_ids=0`;
+- em paralelo a autoridade física já reportava 15 máscaras ON e 11 OFF
+  confirmadas.
+
+Causa:
+- a autoridade final instalada diretamente na instância da janela ainda tinha
+  um retorno antecipado quando tracking estava OFF;
+- por isso as mudanças feitas no renderer/contexto inferior não eram alcançadas
+  no caminho físico final.
+
+Tentativa D-035:
+- corrigir o proprietário final em vez de adicionar outro wrapper;
+- tracking OFF agora passa pelo mesmo builder de espelho visual;
+- OFF usa geometria fixa e ON usa geometria móvel;
+- o mesmo contexto é enviado ao visor e ao renderer da câmera;
+- sampler do frame atual é autoridade visual quando consegue medir a ROI;
+- ON = verde vivo; OFF = verde escuro.
+
+Resultado:
+- CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+Decisão/ligação:
+- D-035, substitui a parte operacional de D-034.
+
+Lição:
+- a telemetria `previous_window_update` provou que o problema era de roteamento
+  do callback final, não de threshold;
+- teste unitário do renderer inferior não prova que a instância final o consome.
+
+Não repetir:
+- não ajustar threshold para este defeito;
+- não criar outro wrapper/timer;
+- não permitir bypass do espelho apenas porque tracking está OFF;
+- não usar cinza para OFF quando existe estado físico válido.
+
+Próximo reteste:
+- tracking OFF;
+- confirmar câmera e visor juntos;
+- ON deve ficar verde vivo;
+- OFF deve ficar verde escuro;
+- apagar/acender um segmento e verificar reação no frame atual.
+

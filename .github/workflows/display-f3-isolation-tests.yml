@@ -159,6 +159,8 @@ jobs:
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_detecta_todos_acesos_por_evidencia_absoluta \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_latest_frame_apaga_visor_na_fase_escura \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_e_calculada_uma_vez_por_frame_e_reutilizada \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_latest_frame_rebaixa_on_stale_para_off_no_mesmo_repaint \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_paleta_live_on_verde_e_off_verde_escuro \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_luminoso_pinta_verde_mesmo_com_gate_off \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_usa_amostra_do_mesmo_frame_mesmo_antes_do_gate \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_tracking_off_usa_todas_as_mascaras_no_espelho_visual \
@@ -166,9 +168,11 @@ jobs:
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_renderer_visual_pinta_on_fisico_mesmo_se_detector_latest_frame_vazio \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_visor_luminoso_ignora_gate_e_classificacao_assincrona \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_visor_mostra_classificacao_fisica_mesmo_com_live_ids_vazios \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_visor_live_usa_verde_escuro_para_segmento_apagado \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_tracking_off_tambem_amostra_emissao_do_frame_atual \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_tracking_off_atualiza_visor_depois_da_amostra_visual \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_camera_e_visor_consumem_a_mesma_amostra_do_latest_frame \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_tracking_off_final_nao_bypassa_espelho_visual \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_espelho_visual_publica_telemetria_de_cada_estagio_sem_novo_loop \
             tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_debug_captura_telemetria_do_espelho_visual_d032 \
             tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_relatorio_expoe_etapa_e_ids_do_espelho_visual_d032 \

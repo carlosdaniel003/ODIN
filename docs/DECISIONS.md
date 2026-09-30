@@ -1363,7 +1363,7 @@ com tracking; esta decisão elimina a diferença visual entre os dois modos.
 
 ## D-034 — Estado físico visual não depende do CHECK lógico
 
-**Status:** Accepted
+**Status:** Superseded by D-035
 
 ### Contexto
 
@@ -1398,6 +1398,89 @@ O espelho visual F3 passa a manter um mapa compartilhado
 Se o analyzer informa 15 máscaras ON e 13 OFF, a interface não pode mostrar os
 28 segmentos como neutros. D-034 complementa D-032 e D-033 sem alterar a decisão
 produtiva.
+
+
+
+---
+
+## D-035 — Espelho visual final do F3 também é autoridade com tracking OFF
+
+**Status:** Accepted
+
+### Contexto
+
+O reteste físico de 30/09/2026 trouxe a evidência que faltava. Com tracking OFF,
+o DEBUG do próprio runtime publicou:
+
+~~~text
+stage=tracking_disabled
+render_path=previous_window_update
+context_ready=NÃO
+sample_ready=NÃO
+visual_ids=0
+readout_ready=NÃO
+readout_visual_ids=0
+~~~
+
+Ao mesmo tempo, a autoridade física já possuía máscaras ON/OFF. Logo, D-033 e
+D-034 estavam corretas como intenção, porém o proprietário final da janela
+continuava retornando antes de executar o espelho visual quando o tracking estava
+desativado.
+
+### Decisão
+
+O callback final `tracked_window_update`, já instalado diretamente na instância
+real da janela F3, é o proprietário final do repaint câmera + máscaras + visor nos
+dois modos.
+
+~~~text
+tracking ON
+→ geometria móvel
+→ amostra visual do frame atual
+→ mapa ON/OFF/LOW_LIGHT
+→ câmera + visor
+
+tracking OFF
+→ geometria fixa
+→ a MESMA amostra visual do frame atual
+→ o MESMO mapa ON/OFF/LOW_LIGHT
+→ câmera + visor
+~~~
+
+É proibido um `return previous_window_update` antes da construção do espelho
+visual apenas porque tracking está OFF.
+
+### Semântica visual obrigatória
+
+No ao vivo:
+
+- segmento fisicamente ON → **verde vivo** (`#22C55E`);
+- segmento fisicamente OFF → **verde escuro** (`#14532D`);
+- POUCA LUZ/validação → amarelo;
+- sem evidência válida → neutro/cinza;
+- câmera e VISOR DO DISPLAY consomem o mesmo mapa no mesmo repaint.
+
+A cor ON/OFF acima é apresentação física e independe de power gate, presença,
+expected, matched, aprovação, reprovação ou avanço de CHECK.
+
+### Frescor
+
+Quando o sampler do frame atual consegue medir uma ROI, esse resultado é a
+autoridade visual daquele repaint:
+
+- ROI no conjunto luminoso → ON;
+- ROI amostrada fora do conjunto luminoso → OFF.
+
+Classificações físicas assíncronas do analyzer/autoridade de energia são fallback
+somente quando uma ROI não pôde ser amostrada. Assim um ON antigo não pode
+permanecer verde depois que o segmento apagou no frame atual.
+
+### Consequência
+
+D-035 substitui a parte operacional de D-034 e consolida D-032/D-033 no
+proprietário final já existente. Nenhum novo timer, thread, worker, fila ou
+scheduler é criado. Tracking continua definindo geometria, não a existência do
+espelho visual.
 
 
 ---

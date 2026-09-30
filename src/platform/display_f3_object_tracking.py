@@ -7412,11 +7412,12 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
 
         def tracked_window_update(self_window, frame, visual_rotation: int = 0):
             tracking_is_enabled = bool(tracking_enabled(app))
+            rotation = int(visual_rotation or 0) % 360
             mirror_debug = {
                 "hook_active": True,
                 "tracking_enabled": tracking_is_enabled,
                 "frame_id": getattr(app, "camera_ultimo_frame_id", None),
-                "visual_rotation": int(visual_rotation or 0) % 360,
+                "visual_rotation": rotation,
                 "stage": "entry",
                 "render_path": "",
                 "error_type": "",
@@ -7424,18 +7425,8 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             }
             app._display_f3_live_visual_mirror_debug = mirror_debug
 
-            if not tracking_is_enabled:
-                mirror_debug["stage"] = "tracking_disabled"
-                mirror_debug["render_path"] = "previous_window_update"
-                return previous_window_update(
-                    frame,
-                    visual_rotation=visual_rotation,
-                )
-
-            # Nunca renderize o frame que entrou no worker de tracking. Ele pode
-            # ter muitos segundos quando ORB/AKAZE/reacquisition são caros.
-            # O argumento recebido vem do camera_frame_atual e é a única
-            # autoridade visual da câmera ao vivo.
+            # Nunca renderize o frame que entrou em worker. O argumento recebido
+            # é o camera_frame_atual e é a autoridade visual latest-frame.
             source = frame
             if not _valid_frame(source):
                 mirror_debug["stage"] = "invalid_frame"
@@ -7451,6 +7442,223 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 )
             except Exception:
                 mirror_debug["frame_shape"] = None
+
+            if not tracking_is_enabled:
+                # D-035: tracking OFF muda SOMENTE a origem geométrica. O
+                # proprietário final da preview não delega antes do espelho
+                # visual, porque isso era exatamente o bypass observado no
+                # equipamento (stage=tracking_disabled/previous_window_update).
+                mirror_debug["stage"] = "fixed_context_build"
+                try:
+                    from src.platform.display_f3_preview_clarity_fix import (
+                        F3_PREVIEW_CLEAR_LEGEND,
+                        preparar_contexto_espelho_visual_f3,
+                        renderizar_preview_claro_display_f3,
+                    )
+                    from src.platform.display_visual_rotation import (
+                        preparar_frame_visual_display,
+                    )
+
+                    visual = preparar_frame_visual_display(source, rotation)
+                    visual = _fit_live_preview_before_overlay(
+                        visual,
+                        self_window,
+                    )
+
+                    token_fn = getattr(app, "_display_auto_frame_token", None)
+                    try:
+                        live_frame_token = (
+                            token_fn(source)
+                            if callable(token_fn)
+                            else ("object", id(source))
+                        )
+                    except Exception:
+                        live_frame_token = ("object", id(source))
+
+                    semantic_context = preparar_contexto_espelho_visual_f3(
+                        self_window,
+                        visual,
+                        rotation,
+                        frame_token=live_frame_token,
+                        geometry_token=("fixed", rotation),
+                    )
+                    mirror_debug["context_ready"] = isinstance(
+                        semantic_context,
+                        dict,
+                    )
+
+                    if isinstance(semantic_context, dict):
+                        mirror_debug.update(
+                            {
+                                "stage": "fixed_visual_sample_ready",
+                                "render_path": "fixed_latest_frame_live_visual",
+                                "project_name": str(
+                                    semantic_context.get("project_name") or ""
+                                ),
+                                "check_id": str(
+                                    semantic_context.get("check_id") or ""
+                                ),
+                                "context_mask_count": len(
+                                    tuple(semantic_context.get("masks") or ())
+                                ),
+                                "readout_mask_id_count": len(
+                                    tuple(
+                                        semantic_context.get(
+                                            "readout_mask_ids"
+                                        )
+                                        or ()
+                                    )
+                                ),
+                                "readout_slot_count": len(
+                                    tuple(
+                                        semantic_context.get(
+                                            "readout_slot_mask_ids"
+                                        )
+                                        or ()
+                                    )
+                                ),
+                                "live_visual_sample_ready": bool(
+                                    semantic_context.get(
+                                        "live_visual_sample_ready"
+                                    )
+                                ),
+                                "live_visual_sample_reason": str(
+                                    semantic_context.get(
+                                        "live_visual_sample_reason"
+                                    )
+                                    or ""
+                                ),
+                                "live_visual_sampled_mask_count": int(
+                                    semantic_context.get(
+                                        "live_visual_sampled_mask_count",
+                                        0,
+                                    )
+                                    or 0
+                                ),
+                                "live_visual_mask_ids": tuple(
+                                    str(mask_id)
+                                    for mask_id in (
+                                        semantic_context.get(
+                                            "live_visual_mask_ids"
+                                        )
+                                        or ()
+                                    )
+                                    if str(mask_id)
+                                ),
+                                "live_visual_classification_count": len(
+                                    dict(
+                                        semantic_context.get(
+                                            "live_visual_classifications"
+                                        )
+                                        or {}
+                                    )
+                                ),
+                                "live_visual_frame_token": repr(
+                                    semantic_context.get(
+                                        "live_visual_frame_token"
+                                    )
+                                ),
+                            }
+                        )
+
+                        self_window.set_display_readout_context(
+                            semantic_context
+                        )
+                        readout_context = getattr(
+                            self_window,
+                            "_display_readout_context",
+                            None,
+                        )
+                        mirror_debug.update(
+                            {
+                                "readout_context_ready": isinstance(
+                                    readout_context,
+                                    dict,
+                                ),
+                                "readout_mask_slot_count": (
+                                    len(
+                                        tuple(
+                                            readout_context.get(
+                                                "mask_slots"
+                                            )
+                                            or ()
+                                        )
+                                    )
+                                    if isinstance(readout_context, dict)
+                                    else 0
+                                ),
+                                "readout_live_visual_mask_ids": (
+                                    tuple(
+                                        sorted(
+                                            str(mask_id)
+                                            for mask_id in (
+                                                readout_context.get(
+                                                    "live_visual_mask_ids"
+                                                )
+                                                or ()
+                                            )
+                                            if str(mask_id)
+                                        )
+                                    )
+                                    if isinstance(readout_context, dict)
+                                    else ()
+                                ),
+                            }
+                        )
+                        decorated = renderizar_preview_claro_display_f3(
+                            visual,
+                            semantic_context,
+                        )
+                    else:
+                        mirror_debug["stage"] = "fixed_context_unavailable"
+                        mirror_debug["render_path"] = "fixed_raw_preview"
+                        try:
+                            self_window.set_display_readout_context(None)
+                        except Exception:
+                            pass
+                        decorated = visual
+
+                    try:
+                        self_window.preview_legend.configure(
+                            text=F3_PREVIEW_CLEAR_LEGEND,
+                            fg=self_window.PREVIEW_MUTED,
+                        )
+                    except Exception:
+                        pass
+
+                    preview_h, preview_w = decorated.shape[:2]
+                    mirror_debug["decorated_shape"] = (
+                        int(preview_h),
+                        int(preview_w),
+                    )
+                    rendered = self_window.update_preview(decorated, leds=())
+                    mirror_debug["update_preview_rendered"] = bool(rendered)
+                    if rendered:
+                        raw_h, raw_w = source.shape[:2]
+                        camera_w, camera_h = (
+                            (raw_h, raw_w)
+                            if rotation in (90, 270)
+                            else (raw_w, raw_h)
+                        )
+                        self_window.show_camera_ready(
+                            int(camera_w),
+                            int(camera_h),
+                            rotation,
+                        )
+                    return rendered
+                except Exception as exc:
+                    mirror_debug.update(
+                        {
+                            "stage": "fixed_render_exception",
+                            "render_path": "previous_window_update",
+                            "error_type": type(exc).__name__,
+                            "error": str(exc)[:240],
+                        }
+                    )
+                    return previous_window_update(
+                        frame,
+                        visual_rotation=visual_rotation,
+                    )
 
             geometry = getattr(
                 app,
@@ -7513,8 +7721,7 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     from src.platform.display_f3_preview_clarity_fix import (
                         _effective_phase_mask_ids_for_current_check,
                         _mask_snapshot_for_current_check,
-                        _project_preview_context,
-                        aplicar_emissao_visual_ao_vivo_f3,
+                        preparar_contexto_espelho_visual_f3,
                         renderizar_preview_claro_display_f3,
                     )
                     from src.platform.display_visual_rotation import (
@@ -7529,9 +7736,22 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         visual,
                         self_window,
                     )
-                    semantic_context = _project_preview_context(
+                    token_fn = getattr(app, "_display_auto_frame_token", None)
+                    try:
+                        live_frame_token = (
+                            token_fn(source)
+                            if callable(token_fn)
+                            else ("object", id(source))
+                        )
+                    except Exception:
+                        live_frame_token = ("object", id(source))
+
+                    semantic_context = preparar_contexto_espelho_visual_f3(
                         self_window,
+                        visual,
                         int(visual_rotation or 0) % 360,
+                        frame_token=live_frame_token,
+                        geometry_token=id(geometry),
                     )
                     mirror_debug["context_ready"] = isinstance(
                         semantic_context,
@@ -7567,22 +7787,6 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                                     )
                                 ),
                             }
-                        )
-                        token_fn = getattr(app, "_display_auto_frame_token", None)
-                        try:
-                            live_frame_token = (
-                                token_fn(source)
-                                if callable(token_fn)
-                                else ("object", id(source))
-                            )
-                        except Exception:
-                            live_frame_token = ("object", id(source))
-                        semantic_context = aplicar_emissao_visual_ao_vivo_f3(
-                            self_window,
-                            visual,
-                            semantic_context,
-                            frame_token=live_frame_token,
-                            geometry_token=id(geometry),
                         )
                         mirror_debug.update(
                             {

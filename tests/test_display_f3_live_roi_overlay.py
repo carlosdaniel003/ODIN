@@ -348,6 +348,24 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             fills.count(DisplayProductionF3Window.DISPLAY_READOUT_WARNING),
         )
 
+    def test_visor_live_usa_verde_escuro_para_segmento_apagado(self):
+        self.assertEqual(
+            "#22C55E",
+            DisplayProductionF3Window.DISPLAY_READOUT_ACTIVE,
+        )
+        self.assertEqual(
+            "#14532D",
+            DisplayProductionF3Window.DISPLAY_READOUT_OFF,
+        )
+        self.assertEqual(
+            "#166534",
+            DisplayProductionF3Window.DISPLAY_READOUT_OFF_OUTLINE,
+        )
+        self.assertNotEqual(
+            DisplayProductionF3Window.DISPLAY_READOUT_OFF,
+            DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE,
+        )
+
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(
             getattr(DisplayProductionF3Window, "_odin_display_live_roi_overlay", False)
