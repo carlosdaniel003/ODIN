@@ -221,13 +221,35 @@ def _semantic_mask_pattern_presence_evidence(
         contradictions_by_check=contradictions_by_check,
     )
     if not matched_ids:
-        result["reason"] = "nenhum_padrao_configurado_completo_nas_mascaras"
+        # D-044: presença física não pode depender de o produto estar BOM.
+        # A autoridade global de energia já exige votação multi-máscara
+        # discriminante para publicar powered_confirmed. Se essa emissão existe,
+        # existe uma placa/display energizado no suporte mesmo quando UMA ou mais
+        # máscaras divergem do CHECK e, portanto, nenhum padrão configurado fica
+        # 100% conforme. Isso confirma somente OCUPAÇÃO; não identifica CHECK e
+        # não concede OK/NG por conta própria.
+        result.update(
+            board_present=True,
+            presence_confirmed=True,
+            empty_confirmed=False,
+            presence_mode="powered_semantic_energy_without_check_identity",
+            powered_votes=int(data.get("powered_votes", 0) or 0),
+            off_votes=int(data.get("off_votes", 0) or 0),
+            tie_votes=int(data.get("tie_votes", 0) or 0),
+            required_powered_votes=int(
+                data.get("required_powered_votes", 0)
+                or data.get("required_consensus_votes", 0)
+                or 0
+            ),
+            reason="emissao_semantica_confirma_placa_com_check_divergente",
+        )
         return result
 
     result.update(
         board_present=True,
         presence_confirmed=True,
         empty_confirmed=False,
+        presence_mode="complete_configured_check_pattern",
         reason="padrao_semantico_energizado_confirma_placa",
     )
     return result
