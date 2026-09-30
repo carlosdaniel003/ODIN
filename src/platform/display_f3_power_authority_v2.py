@@ -9,9 +9,17 @@ Resolve duas inconsistências observadas em produção:
 2. o DEBUG TÉCNICO podia comparar vários CHECKs reutilizando analisadores/cache e
    mostrar resultados incompatíveis para o mesmo frame.
 
-A autoridade fica única e hierárquica:
+A autoridade produtiva continua hierárquica, mas D-042 separa OBSERVAÇÃO de
+AUTORIZAÇÃO:
 
-    PRESENÇA GLOBAL -> ENERGIA PELAS MÁSCARAS -> CHECK -> CONFORMIDADE
+    observar máscaras live
+        -> F3PresenceAuthority resolve PLACA x EMPTY
+        -> energia produtiva recebe presença confirmada
+        -> CHECK -> CONFORMIDADE
+
+A observação semântica das máscaras pode ser calculada antes do gate final de
+presença somente para fornecer evidência positiva à F3PresenceAuthority quando a
+cena global estiver ambígua. Ela nunca aprova CHECK e nunca sobrescreve EMPTY.
 
 A energia primária é independente do CHECK lógico. O frame físico atual é lido
 nas máscaras rastreadas e cada máscara disputa entre exemplos ON e OFF da própria
