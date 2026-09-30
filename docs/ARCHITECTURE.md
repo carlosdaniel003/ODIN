@@ -198,7 +198,10 @@ Contratos atuais:
 - `F3PresenceAuthority` pode aceitar um lock de tracking como evidência positiva
   de placa somente quando `locked=true` e `evidence_current=true`; EMPTY
   confirmado continua tendo precedência e lock mantido/stale não promove presença;
-- energia recebe presença como entrada e não pode ignorá-la;
+- energia produtiva recebe presença como gate e não pode ignorá-la; D-042
+  permite calcular a observação semântica das máscaras antes do gate somente
+  para entregá-la à `F3PresenceAuthority`, que continua sendo a única autoridade
+  capaz de confirmar ocupação; EMPTY confirmado tem precedência;
 - tracking estrutural localiza o filtro, mas o refinamento luminoso do CHECK
   atual prefere o espaço da própria referência daquele CHECK antes de compor
   novamente para o espaço canônico;
