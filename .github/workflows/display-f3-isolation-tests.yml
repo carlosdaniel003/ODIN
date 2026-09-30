@@ -221,6 +221,7 @@ jobs:
             tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_segregacao_terminal_mantem_cards_e_chrome_vermelhos \
             tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_mascaras_nao_sao_forcadas_para_vermelho_pela_segregacao \
             tests.test_display_f3_final_rearm_guard.DisplayF3FinalRearmGuardTests.test_segregacao_terminal_permanece_vermelha_ate_empty \
+            tests.test_display_f3_result_feedback.DisplayF3ResultFeedbackTests.test_wrapper_final_nao_neutraliza_segregacao_terminal \
             -v
 
       - name: Run F3 object tracking tests
