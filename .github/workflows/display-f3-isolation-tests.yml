@@ -218,6 +218,9 @@ jobs:
             tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_atalho_1_global_funciona_com_foco_em_widget_filho \
             tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_atalho_1_e_numpad_1_sao_capturados_no_toplevel_sem_sobrescrever_bindings \
             tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_desktop_instala_segregar_antes_de_construir_janela_f3 \
+            tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_segregacao_terminal_mantem_cards_e_chrome_vermelhos \
+            tests.test_display_f3_segregate_action.DisplayF3SegregateActionTests.test_mascaras_nao_sao_forcadas_para_vermelho_pela_segregacao \
+            tests.test_display_f3_final_rearm_guard.DisplayF3FinalRearmGuardTests.test_segregacao_terminal_permanece_vermelha_ate_empty \
             -v
 
       - name: Run F3 object tracking tests
