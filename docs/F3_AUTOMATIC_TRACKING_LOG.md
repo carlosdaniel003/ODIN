@@ -1744,3 +1744,42 @@ Próximo reteste:
 - quando BLUE chegar a 28/28, confirmar avanço imediato para USB;
 - depois validar que uma divergência real em BLUE continua sem receber OK.
 
+---
+
+## 30/09/2026 — D-043 PASS físico com tracking OFF
+
+Modo:
+- tracking OFF.
+
+Cenário:
+- H1 já concluído;
+- BLUE atual;
+- padrão BLUE integralmente conforme;
+- correção D-043 ativa.
+
+Resultado:
+- PASS FÍSICO;
+- BLUE deixou de ficar preso no gate `H1 → BLUE`;
+- a conformidade semântica completa confirmou a mudança de função;
+- a sequência avançou para USB conforme esperado.
+
+Decisão/ligação:
+- D-024, D-031, D-041, D-042 e D-043.
+
+Lição:
+- o bloqueio não era causado pelo object tracking;
+- com tracking OFF, o próprio padrão ON/OFF completo e diferente do CHECK
+  anterior pode provar positivamente a transição sem depender de matching global
+  da fotografia;
+- isso preserva a separação entre geometria, presença, energia, conformidade e
+  sequência, sem criar autoridade paralela.
+
+Não repetir:
+- não restaurar o veto por cena inteira sobre um CHECK 100% conforme;
+- não remover as guardas de análise parcial ou de padrões semanticamente iguais;
+- não atribuir ao tracking um defeito confirmado na autoridade de transição
+  semântica.
+
+Estado:
+- D-043 VALIDADA FISICAMENTE NO CENÁRIO H1 → BLUE COM TRACKING OFF.
+
