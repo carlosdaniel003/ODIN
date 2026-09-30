@@ -369,8 +369,12 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
         mask_geometry_resolution=None,
         mask_geometry_source: str = "",
     ) -> dict:
-        previous = self._strict_current_check_id
-        previous_validated = self._strict_validated_self_on_mask_ids
+        previous = getattr(self, "_strict_current_check_id", "")
+        previous_validated = getattr(
+            self,
+            "_strict_validated_self_on_mask_ids",
+            (),
+        )
         self._strict_current_check_id = _normalized_check_id(check_id)
         self._strict_validated_self_on_mask_ids = ()
         validated_self_on_mask_ids = ()
