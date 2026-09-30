@@ -1789,6 +1789,69 @@ sistema precisa aprender primeiro os estados corretos antes de usar exemplos NG.
 
 
 ---
+
+## D-042 — Padrão semântico energizado pode confirmar presença quando a cena global é ambígua
+
+**Status:** Accepted
+
+### Contexto
+
+Em 30/09/2026 um novo reteste físico reproduziu o defeito recorrente de H1:
+visualmente os sete segmentos esperados estavam acesos e verdes, e o analyzer
+estrito já classificava o próprio H1 como **28/28 conforme**, porém o CHECK não
+avançava.
+
+O DEBUG mostrou uma dependência circular no runtime canônico:
+
+```text
+foto global não confirma presença
+→ F3RuntimeAuthorities não calcula a energia semântica das máscaras
+→ gate publica placa_nao_confirmada_no_suporte
+→ análise 28/28 fica raw_diagnostic_only
+→ H1 nunca ganha autoridade
+```
+
+A cena global estava ambígua por diferença de enquadramento/foco/iluminação, mas
+a informação funcional do display já era muito mais específica que o score da
+fotografia inteira.
+
+### Decisão
+
+A separação **presença / energia / CHECK** permanece, mas observação e autoridade
+passam a ser explicitamente diferentes:
+
+1. a leitura semântica live das máscaras pode ser calculada antes do gate final
+   de presença como **observação do mesmo frame**;
+2. somente a `F3PresenceAuthority` pode transformar essa observação em
+   `board_present=true`;
+3. para isso, a energia precisa estar confirmada, o padrão precisa conter **todos
+   os segmentos esperados ON** de pelo menos um CHECK configurado e nenhuma
+   observação confiante pode contradizer os estados ON/OFF desse padrão;
+4. essa correspondência serve exclusivamente para provar **OCUPAÇÃO física**;
+   ela não aprova nem seleciona o CHECK produtivo;
+5. depois da presença, a energia produtiva volta ao fluxo normal e o
+   `F3StrictMaskConformityAnalyzer` continua exigindo a conformidade completa do
+   CHECK lógico atual conforme D-031/D-041;
+6. `EMPTY` confirmado possui precedência absoluta e nunca pode ser sobrescrito
+   por emissão residual, reflexo ou evidência semântica;
+7. tracking atual continua podendo confirmar presença conforme D-021; D-042 é o
+   equivalente semântico necessário principalmente no caminho tracking OFF;
+8. a implementação reutiliza o mesmo classificador/cache de energia por máscara;
+   não cria timer, thread, worker, scheduler ou segunda autoridade.
+
+### Consequência
+
+A fotografia global deixa de ser um pré-requisito circular para que os próprios
+segmentos provem que existe uma placa energizada. Um H1 real pode sair de
+`IDENTIFICANDO PRESENÇA` quando o padrão aprendido está fisicamente presente,
+mas somente o analyzer estrito pode concluir H1.
+
+D-042 **refina a direção presença → energia descrita em D-015/D-022**: a
+autorização produtiva de energia continua depois da presença, porém sua leitura
+óptica pode existir antes como evidência entregue ao proprietário de presença.
+
+
+---
 ## Como adicionar uma decisão
 
 Use:
