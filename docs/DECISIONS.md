@@ -1852,6 +1852,79 @@ autorização produtiva de energia continua depois da presença, porém sua leit
 
 
 ---
+
+## D-043 — Conformidade 100% do CHECK atual pode provar a transição física quando o padrão mudou
+
+**Status:** Accepted
+
+### Contexto
+
+No reteste físico de 30/09/2026, D-042 foi validada: H1 passou corretamente e
+a sequência avançou para BLUE. Em BLUE surgiu um bloqueio diferente.
+
+O DEBUG do mesmo frame mostrava simultaneamente:
+
+- presença confirmada;
+- energia confirmada;
+- gate produtivo liberado;
+- BLUE configurado com 18 ON + 10 OFF;
+- leitura semântica BLUE integralmente conforme, 28/28;
+- ausência de máscaras divergentes na apresentação;
+- porém o resultado final era vetado por
+  `physical_transition_not_confirmed`, com a mensagem
+  `BLUE BLOQUEADO • aguardando mudança física H1 → BLUE`.
+
+A causa estava em `display_f3_physical_transition_authority.py`: para CHECKS
+posteriores ao primeiro, a autoridade aceitava somente identificação visual
+independente por contorno/estado físico ou comparação de fotos entre o CHECK
+anterior e o atual. Mesmo quando o analyzer canônico provava que **todas** as
+máscaras do padrão de destino estavam fisicamente no estado esperado, essa prova
+não participava da confirmação da transição.
+
+Isso contradizia D-041 no caso em que a fotografia inteira ficava ambígua: uma
+comparação global/relativa de cena acabava funcionando como veto sobre um padrão
+funcional já completamente identificado.
+
+### Decisão
+
+A autoridade física de transição continua existindo, mas passa a aceitar uma
+segunda forma de prova positiva para CHECKS posteriores:
+
+1. o CHECK anterior precisa estar concluído na máquina de estados;
+2. a análise canônica precisa pertencer exatamente ao CHECK lógico atual;
+3. a análise precisa estar `ready=true`, `approved=true` e com todas as máscaras
+   ativas conformes (`matched == active`);
+4. os `mask_states` do CHECK atual precisam diferir semanticamente do CHECK
+   anterior em pelo menos uma máscara ON/OFF;
+5. cumpridas essas condições, a conformidade 100% do destino é prova física de
+   que a função mudou e a transição é confirmada;
+6. 27/28, análise incompleta, análise de outro CHECK ou dois CHECKS com o mesmo
+   padrão ON/OFF **não** usam essa confirmação e continuam dependentes da
+   comparação física independente;
+7. a regra confirma somente a chegada ao CHECK. Um CHECK defeituoso continua
+   precisando de identificação física independente antes que um NG possa ser
+   aplicado, evitando reprovar uma função anterior durante uma transição;
+8. EMPTY, presença, energia, frescor, alinhamento e rearme continuam com suas
+   autoridades e precedências atuais;
+9. nenhuma nova thread, worker, scheduler, timer ou autoridade paralela é criada.
+
+### Consequência
+
+A sequência H1 → BLUE → USB → AUX não fica presa quando o padrão funcional do
+CHECK de destino já está inequivocamente presente, mesmo que a fotografia global
+ou a comparação entre cenas não prefira o destino.
+
+Ao mesmo tempo, a proteção histórica contra avanço prematuro continua válida
+para leituras parciais/defeituosas: somente conformidade total de um padrão que
+realmente difere do anterior pode confirmar a transição por semântica.
+
+D-043 refina a cláusula de D-024 que mantinha CHECKS posteriores sujeitos ao
+gate de transição física: **o gate permanece; a conformidade estrita 100% passa
+a ser uma evidência física válida do próprio handoff quando existe mudança real
+de padrão**.
+
+
+---
 ## Como adicionar uma decisão
 
 Use:
