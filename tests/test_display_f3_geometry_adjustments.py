@@ -387,27 +387,32 @@ class DisplayF3GeometryAdjustmentTests(unittest.TestCase):
         overlay_source = inspect.getsource(live_overlay._overlay_context)
         self.assertIn("mascaras_geometria_check_display", overlay_source)
 
-    def test_check_analyzer_applies_local_mask_overrides(self):
+    def test_check_analyzer_uses_canonical_project_masks_for_live_frame(self):
         source = inspect.getsource(analyzer.DisplayAutomaticCheckAnalyzer.analyze)
-        self.assertIn("mascaras_geometria_check_display(project, check)", source)
+        self.assertIn("mascaras_geometria_runtime_fixa_display(project)", source)
+        self.assertNotIn("mascaras_geometria_check_display(project, check)", source)
 
-    def test_final_f3_analysis_and_previews_use_effective_check_geometry(self):
-        self.assertIn(
-            "mascaras_geometria_check_display",
-            inspect.getsource(exact_template),
-        )
-        self.assertIn(
-            "mascaras_geometria_check_display",
-            inspect.getsource(same_mask),
-        )
-        self.assertIn(
-            "mascaras_geometria_check_display",
-            inspect.getsource(preview_clarity),
-        )
-        self.assertIn(
-            "mascaras_geometria_check_display",
-            inspect.getsource(live_overlay),
-        )
+    def test_final_f3_separates_live_geometry_from_reference_geometry(self):
+        exact_source = inspect.getsource(exact_template)
+        same_mask_source = inspect.getsource(same_mask)
+        preview_source = inspect.getsource(preview_clarity)
+        overlay_source = inspect.getsource(live_overlay)
+
+        # Foto/treinamento ainda pode usar geometria local do CHECK.
+        self.assertIn("mascaras_geometria_check_display", exact_source)
+        self.assertIn("mascaras_geometria_check_display", same_mask_source)
+
+        # Frame ao vivo tracking OFF sempre usa a seção canônica "Máscaras".
+        for source in (
+            exact_source,
+            same_mask_source,
+            preview_source,
+            overlay_source,
+        ):
+            self.assertIn(
+                "mascaras_geometria_runtime_fixa_display",
+                source,
+            )
 
     def test_check_editor_exposes_board_and_mask_adjustment(self):
         source = Path(check_editor.__file__).read_text(encoding="utf-8")
