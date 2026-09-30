@@ -64,6 +64,143 @@ def _current_check_id(app) -> str:
     return str(current.get("id") or "")
 
 
+def _prepare_live_visual_mirror_context(
+    window,
+    visual_frame,
+    context: dict | None,
+    visual_rotation: int,
+) -> dict | None:
+    """Aplica o espelho visual latest-frame também com tracking desligado.
+
+    Tracking ON e OFF diferem somente na origem geométrica das ROIs:
+    - ON: geometria móvel publicada pelo tracker;
+    - OFF: geometria fixa do Projeto Display.
+
+    A leitura visual continua sendo a mesma amostra leve do frame que será
+    exibido. Não participa de energia, OK/NG, debounce ou avanço de CHECK.
+    """
+    if not isinstance(context, dict):
+        return context
+    if not bool(context.get("live_luminous_only")):
+        return context
+
+    app = _app_from_window(window)
+    frame_token = ("object", id(visual_frame))
+    if app is not None:
+        token_fn = getattr(app, "_display_auto_frame_token", None)
+        if callable(token_fn):
+            try:
+                frame_token = token_fn(
+                    getattr(app, "camera_frame_atual", visual_frame)
+                )
+            except Exception:
+                frame_token = ("object", id(visual_frame))
+
+    repository = (
+        getattr(app, "display_project_repository", None)
+        if app is not None
+        else None
+    )
+    geometry_token = (
+        "fixed",
+        str(context.get("project_name") or ""),
+        str(context.get("check_id") or ""),
+        int(visual_rotation or 0) % 360,
+        _config_signature(repository) if repository is not None else (0, 0),
+    )
+    if bool(context.get("tracking_active")) and app is not None:
+        geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+        geometry_token = ("tracked", id(geometry))
+
+    debug = {
+        "hook_active": True,
+        "tracking_enabled": bool(context.get("tracking_active")),
+        "frame_id": getattr(app, "camera_ultimo_frame_id", None)
+        if app is not None
+        else None,
+        "visual_rotation": int(visual_rotation or 0) % 360,
+        "stage": "fixed_visual_sampling"
+        if not bool(context.get("tracking_active"))
+        else "tracked_visual_sampling",
+        "render_path": "",
+        "geometry_present": True,
+        "geometry_locked": bool(
+            context.get("tracking_locked")
+            or not bool(context.get("tracking_active"))
+        ),
+        "geometry_mask_count": len(tuple(context.get("masks") or ())),
+        "context_ready": True,
+        "context_mask_count": len(tuple(context.get("masks") or ())),
+        "readout_mask_id_count": len(
+            tuple(context.get("readout_mask_ids") or ())
+        ),
+        "readout_slot_count": len(
+            tuple(context.get("readout_slot_mask_ids") or ())
+        ),
+        "error_type": "",
+        "error": "",
+    }
+
+    try:
+        from src.platform.display_f3_preview_clarity_fix import (
+            aplicar_emissao_visual_ao_vivo_f3,
+        )
+
+        result = aplicar_emissao_visual_ao_vivo_f3(
+            window,
+            visual_frame,
+            context,
+            frame_token=frame_token,
+            geometry_token=geometry_token,
+        )
+        if isinstance(result, dict):
+            debug.update(
+                {
+                    "stage": "fixed_visual_sample_ready"
+                    if not bool(context.get("tracking_active"))
+                    else "tracked_visual_sample_ready",
+                    "render_path": "fixed_latest_frame_live_visual"
+                    if not bool(context.get("tracking_active"))
+                    else "tracked_latest_frame_live_visual",
+                    "live_visual_sample_ready": bool(
+                        result.get("live_visual_sample_ready")
+                    ),
+                    "live_visual_sample_reason": str(
+                        result.get("live_visual_sample_reason") or ""
+                    ),
+                    "live_visual_sampled_mask_count": int(
+                        result.get("live_visual_sampled_mask_count", 0) or 0
+                    ),
+                    "live_visual_mask_ids": tuple(
+                        str(mask_id)
+                        for mask_id in (
+                            result.get("live_visual_mask_ids") or ()
+                        )
+                        if str(mask_id)
+                    ),
+                    "live_visual_frame_token": repr(
+                        result.get("live_visual_frame_token")
+                    ),
+                }
+            )
+            if app is not None:
+                app._display_f3_live_visual_mirror_debug = debug
+            return result
+    except Exception as exc:
+        debug.update(
+            {
+                "stage": "fixed_visual_sample_exception",
+                "render_path": "fixed_visual_context_fallback",
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:240],
+            }
+        )
+
+    if app is not None:
+        app._display_f3_live_visual_mirror_debug = debug
+    return context
+
+
 def _overlay_context(window, visual_rotation: int):
     app = _app_from_window(window)
     if app is None:
@@ -511,6 +648,75 @@ def instalar_overlay_rois_ao_vivo_display_f3() -> None:
             return original_update(self, frame, visual_rotation=visual_rotation)
 
         context = _overlay_context(self, rotation)
+        context = _prepare_live_visual_mirror_context(
+            self,
+            visual_frame,
+            context,
+            rotation,
+        )
+
+        # O visor recebe exatamente o contexto já amostrado do mesmo frame que
+        # será desenhado na câmera. Assim tracking OFF não volta ao caminho cinza
+        # condicionado ao power gate.
+        if isinstance(context, dict) and bool(
+            context.get("live_luminous_only")
+        ):
+            app = _app_from_window(self)
+            try:
+                self.set_display_readout_context(context)
+                readout = getattr(self, "_display_readout_context", None)
+                if app is not None:
+                    debug = getattr(
+                        app,
+                        "_display_f3_live_visual_mirror_debug",
+                        None,
+                    )
+                    if isinstance(debug, dict):
+                        debug.update(
+                            {
+                                "readout_context_ready": isinstance(
+                                    readout,
+                                    dict,
+                                ),
+                                "readout_mask_slot_count": (
+                                    len(tuple(readout.get("mask_slots") or ()))
+                                    if isinstance(readout, dict)
+                                    else 0
+                                ),
+                                "readout_live_visual_mask_ids": (
+                                    tuple(
+                                        sorted(
+                                            str(mask_id)
+                                            for mask_id in (
+                                                readout.get(
+                                                    "live_visual_mask_ids"
+                                                )
+                                                or ()
+                                            )
+                                            if str(mask_id)
+                                        )
+                                    )
+                                    if isinstance(readout, dict)
+                                    else ()
+                                ),
+                            }
+                        )
+            except Exception as exc:
+                if app is not None:
+                    debug = getattr(
+                        app,
+                        "_display_f3_live_visual_mirror_debug",
+                        None,
+                    )
+                    if isinstance(debug, dict):
+                        debug.update(
+                            {
+                                "readout_context_ready": False,
+                                "readout_error_type": type(exc).__name__,
+                                "readout_error": str(exc)[:240],
+                            }
+                        )
+
         try:
             self._display_last_overlay_context = deepcopy(context)
         except Exception:
@@ -525,6 +731,21 @@ def instalar_overlay_rois_ao_vivo_display_f3() -> None:
 
         height, width = decorated.shape[:2]
         rendered = self.update_preview(decorated, leds=())
+        app = _app_from_window(self)
+        if app is not None:
+            debug = getattr(
+                app,
+                "_display_f3_live_visual_mirror_debug",
+                None,
+            )
+            if isinstance(debug, dict):
+                debug["update_preview_rendered"] = bool(rendered)
+                if bool(context and context.get("live_luminous_only")):
+                    debug["stage"] = (
+                        "fixed_live_mirror_rendered"
+                        if not bool(context.get("tracking_active"))
+                        else "tracked_live_mirror_rendered"
+                    )
         if rendered:
             detail = f"Câmera {int(width)}x{int(height)} • Visual {int(rotation)}°"
             if not self._camera_ready or self._camera_detail != detail:

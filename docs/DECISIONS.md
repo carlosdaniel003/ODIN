@@ -1295,6 +1295,71 @@ que exigia energia confirmada para apresentar verde. As proteções produtivas d
 D-020 a D-031 permanecem válidas.
 
 ---
+
+## D-033 — Espelho visual F3 vale com tracking ligado e desligado
+
+**Status:** Accepted
+
+### Contexto
+
+Após D-032, o reteste físico foi inicialmente interpretado como sendo do modo
+Rastreamento Automático. O operador esclareceu em 30/09/2026 que o problema
+observado naquele momento ocorria com **Rastreamento Automático desativado**:
+
+- as máscaras da câmera permaneciam cinzas;
+- o VISOR DO DISPLAY não mostrava os segmentos acesos.
+
+A implementação D-032 estava conectada ao caminho final da instância de
+tracking. Com tracking OFF, esse wrapper delegava para o renderer fixo anterior.
+Esse caminho ainda:
+
+- não executava a amostra visual latest-frame;
+- deixava `live_luminous_only=false`;
+- atualizava o visor antes de existir a amostra do frame;
+- usava somente máscaras ativas do CHECK para o overlay;
+- podia neutralizar a apresentação conforme power gate/classificação.
+
+Portanto a regra visual estava correta, mas incompleta no caminho de execução.
+
+### Decisão
+
+O espelho visual D-032 é uma regra do **Display F3**, não uma característica
+exclusiva do tracking.
+
+~~~text
+TRACKING ON
+→ ROIs móveis
+→ amostra visual latest-frame
+→ câmera/máscaras + visor
+
+TRACKING OFF
+→ ROIs fixas do Projeto Display
+→ a MESMA amostra visual latest-frame
+→ câmera/máscaras + visor
+~~~
+
+Regras obrigatórias:
+
+- as 28 máscaras configuradas permanecem disponíveis para o espelho visual,
+  inclusive quando uma máscara está `ignore` no CHECK atual;
+- `ignore` controla decisão do CHECK, não a existência visual da máscara;
+- tracking OFF usa geometria fixa; tracking ON usa geometria móvel;
+- a diferença de geometria não pode alterar a semântica visual;
+- se um segmento físico está emitindo, sua máscara e seu segmento no visor ficam
+  verdes no mesmo repaint;
+- o visor é atualizado somente depois da amostra visual do frame atual;
+- power gate, presença, H1, debounce, OK/NG e state machine não controlam essa
+  cor visual;
+- a amostra continua sem autoridade produtiva;
+- não criar segundo scheduler, thread, worker ou fila para essa apresentação.
+
+### Consequência
+
+D-033 **estende D-032 para tracking OFF**. D-032 continua válida para o caminho
+com tracking; esta decisão elimina a diferença visual entre os dois modos.
+
+
+---
 ## Como adicionar uma decisão
 
 Use:

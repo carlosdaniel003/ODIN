@@ -621,6 +621,19 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             ),
         )
 
+    def test_tracking_off_usa_todas_as_mascaras_no_espelho_visual(self):
+        source = inspect.getsource(clarity._project_preview_context)
+        fixed_pos = source.index("# Modo legado/desligado")
+        fixed_source = source[fixed_pos:]
+
+        self.assertIn(
+            "for mask in mascaras_geometria_check_display(project, check)",
+            fixed_source,
+        )
+        self.assertIn('"tracking_active": False', fixed_source)
+        self.assertIn('"live_luminous_only": True', fixed_source)
+        self.assertNotIn("active_masks", fixed_source)
+
     def test_renderer_final_e_reaplicavel_sem_duplicar_contexto(self):
         source = inspect.getsource(clarity._aplicar_render_final)
         self.assertIn("_display_f3_clear_preview_context_installed", source)

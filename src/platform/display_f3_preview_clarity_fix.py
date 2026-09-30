@@ -346,20 +346,17 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         cached = getattr(window, "_display_f3_clear_preview_project_context", None)
         return deepcopy(cached) if isinstance(cached, dict) else None
 
-    effective_masks = mascaras_geometria_check_display(project, check)
-    active_masks = [
+    effective_masks = [
         deepcopy(mask)
-        for mask in effective_masks
+        for mask in mascaras_geometria_check_display(project, check)
         if isinstance(mask, dict)
-        and expected.get(str(mask.get("id") or ""))
-        in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
     ]
 
     try:
         _, visual_resolution, visual_masks = preparar_check_visual_display(
             None,
             resolution,
-            active_masks,
+            effective_masks,
             int(visual_rotation or 0) % 360,
         )
     except Exception:
@@ -377,7 +374,9 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "readout_slot_mask_ids": readout_slot_mask_ids,
         "tracking_active": False,
         "tracking_locked": False,
-        "live_luminous_only": False,
+        # D-033: tracking OFF muda somente a geometria (fixa em vez de móvel).
+        # O espelho visual continua latest-frame e independente dos gates.
+        "live_luminous_only": True,
         "luminous_mask_ids": (),
     }
     window._display_f3_clear_preview_project_key = cache_key
@@ -714,10 +713,9 @@ def _contexto_preview_claro(original):
             if isinstance(energy, dict)
             else ""
         )
-        try:
-            window.set_display_readout_context(result)
-        except (AttributeError, TypeError):
-            pass
+        # O contexto é apenas preparado aqui. O VISOR é atualizado pelo
+        # consumidor do frame, DEPOIS da amostra visual latest-frame. Isso evita
+        # um repaint intermediário cinza e garante câmera + visor no mesmo estado.
         return result
 
     return build

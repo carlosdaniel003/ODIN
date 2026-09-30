@@ -5,6 +5,7 @@ import unittest
 
 import numpy as np
 
+import src.platform.display_live_roi_overlay as overlay_module
 from src.platform.display_live_roi_overlay import (
     DISPLAY_ROI_OVERLAY_ALPHA,
     renderizar_overlay_rois_display_f3,
@@ -205,6 +206,83 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             6,
             fills.count(DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE),
         )
+
+    def test_tracking_off_tambem_amostra_emissao_do_frame_atual(self):
+        frame = np.full((80, 160, 3), 35, dtype=np.uint8)
+        frame[30:51, 10:31] = 210
+
+        class _Repository:
+            pass
+
+        class _App:
+            def __init__(self):
+                self.camera_frame_atual = frame
+                self.camera_ultimo_frame_id = 77
+                self.display_project_repository = _Repository()
+                self._display_f3_live_visual_mirror_debug = None
+
+            def configure_display(self):
+                return None
+
+            def _display_auto_frame_token(self, _frame):
+                return ("camera", self.camera_ultimo_frame_id)
+
+        app = _App()
+
+        class _Window:
+            def __init__(self):
+                self.on_configure = app.configure_display
+
+        window = _Window()
+        masks = (
+            {"id": "MASK_001", "type": "circle", "cx": 20, "cy": 40, "radius": 10},
+            {"id": "MASK_002", "type": "circle", "cx": 60, "cy": 40, "radius": 10},
+            {"id": "MASK_003", "type": "circle", "cx": 100, "cy": 40, "radius": 10},
+            {"id": "MASK_004", "type": "circle", "cx": 140, "cy": 40, "radius": 10},
+        )
+        context = {
+            "project_name": "DISPLAY",
+            "check_id": "CHECK_001",
+            "resolution": (160, 80),
+            "masks": masks,
+            "readout_mask_ids": tuple(mask["id"] for mask in masks),
+            "readout_slot_mask_ids": (),
+            "tracking_active": False,
+            "tracking_locked": False,
+            "live_luminous_only": True,
+            "luminous_mask_ids": (),
+        }
+
+        result = overlay_module._prepare_live_visual_mirror_context(
+            window,
+            frame,
+            context,
+            0,
+        )
+
+        self.assertTrue(result["live_visual_sample_ready"])
+        self.assertEqual(
+            ("MASK_001",),
+            result["live_visual_mask_ids"],
+        )
+        self.assertEqual(
+            "fixed_latest_frame_live_visual",
+            app._display_f3_live_visual_mirror_debug["render_path"],
+        )
+        self.assertFalse(
+            app._display_f3_live_visual_mirror_debug["tracking_enabled"]
+        )
+
+    def test_tracking_off_atualiza_visor_depois_da_amostra_visual(self):
+        source = inspect.getsource(
+            overlay_module.instalar_overlay_rois_ao_vivo_display_f3
+        )
+        sample_pos = source.index("_prepare_live_visual_mirror_context(")
+        readout_pos = source.index("set_display_readout_context(context)")
+        render_pos = source.index("renderizar_overlay_rois_display_f3(")
+
+        self.assertGreater(readout_pos, sample_pos)
+        self.assertGreater(render_pos, readout_pos)
 
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(

@@ -1187,3 +1187,41 @@ Próximo reteste:
 - verificar o bloco
   `[ESPELHO VISUAL LIVE D-032 / CÂMERA + MÁSCARAS + VISOR]`.
 
+---
+
+## 30/09/2026 — Clarificação: falha visual era tracking OFF
+
+Modo observado:
+- tracking OFF
+
+Clarificação do operador:
+- o teste em que as máscaras continuavam cinzas e o VISOR DO DISPLAY não reagia
+  foi executado com Rastreamento Automático desativado.
+
+Causa confirmada no caminho de execução:
+- `tracked_window_update` detectava tracking OFF e delegava imediatamente para
+  o renderer anterior;
+- a amostra D-032 estava conectada somente ao caminho tracking ON;
+- o contexto fixo publicava `live_luminous_only=false`;
+- o renderer fixo continuava dependente de análise/power gate para cor;
+- o visor era atualizado antes da amostra latest-frame porque essa amostra nem
+  existia nesse caminho;
+- a geometria fixa continha somente máscaras ativas do CHECK, não todas as 28.
+
+Correção D-033:
+- tracking OFF passa a usar a mesma amostra visual latest-frame;
+- muda somente a geometria: fixa em vez de rastreada;
+- todas as máscaras do projeto podem participar do espelho visual;
+- câmera e visor consomem a amostra depois de calculada e no mesmo repaint;
+- decisão produtiva permanece separada.
+
+Lição:
+- não usar a flag de tracking para decidir se o espelho visual existe;
+- tracking define **onde** estão as ROIs, não **se** o operador pode ver a
+  emissão física representada.
+
+Não repetir:
+- não voltar a `live_luminous_only=false` apenas porque tracking está OFF;
+- não limitar o espelho visual às máscaras ativas do CHECK;
+- não atualizar o visor antes da amostra do frame atual.
+

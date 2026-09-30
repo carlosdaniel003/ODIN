@@ -737,3 +737,70 @@ renderer caiu no fallback por exceção
 
 **FAIL CONFIRMADO — DIAGNÓSTICO INSTRUMENTADO, AGUARDANDO EVIDÊNCIA DO EQUIPAMENTO.**
 
+---
+
+## 30/09/2026 — Clarificação do reteste D-032: tracking estava OFF
+
+**Resultado físico observado:** FAIL visual.
+
+### Clarificação
+
+O operador informou que o cenário anterior em que:
+
+- as máscaras da câmera estavam cinzas;
+- o VISOR DO DISPLAY não mostrava os segmentos;
+
+estava sendo executado com **Rastreamento Automático desativado**.
+
+Portanto o diagnóstico anterior tratou o modo errado. A instrumentação colocada
+no wrapper de tracking não poderia explicar esse cenário porque, com tracking
+OFF, o runtime delegava para o renderer fixo.
+
+### Causa confirmada no código
+
+No caminho tracking OFF:
+
+~~~text
+tracked_window_update
+→ tracking_enabled = false
+→ previous_window_update
+→ contexto fixo
+→ live_luminous_only = false
+→ sem amostra visual latest-frame
+→ cor dependente de análise/power gate
+→ máscaras cinzas / visor sem emissão
+~~~
+
+Além disso, o contexto fixo usava somente máscaras ativas do CHECK.
+
+### Correção D-033
+
+~~~text
+tracking OFF
+→ geometria fixa das máscaras
+→ TODAS as máscaras disponíveis
+→ amostra luminosa no frame atual
+→ mesmos live_visual_mask_ids
+   ├── overlay da câmera
+   └── VISOR DO DISPLAY
+→ mesmo repaint
+~~~
+
+A mudança não altera energia, OK/NG, debounce, sequência ou conformidade.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+Com tracking OFF:
+
+1. abrir o F3;
+2. manter a placa na posição cadastrada;
+3. acender segmentos físicos;
+4. confirmar que as máscaras correspondentes ficam verdes;
+5. confirmar que o VISOR mostra exatamente os mesmos segmentos verdes;
+6. apagar segmentos e confirmar que ambos perdem o verde juntos;
+7. repetir mesmo enquanto power gate ainda não confirmou energia.
+
