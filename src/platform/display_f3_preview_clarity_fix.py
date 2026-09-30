@@ -783,6 +783,12 @@ def _contexto_preview_claro(original):
         result["luminous_mask_ids"] = tuple(
             project_context.get("luminous_mask_ids") or ()
         )
+        result["terminal_segregated"] = bool(
+            getattr(window, "_display_terminal_waiting_removal", False)
+            and str(
+                getattr(window, "_display_terminal_result_kind", "") or ""
+            ) == "segregated"
+        )
 
         classifications, failed_mask_ids = _mask_snapshot_for_current_check(
             window,
@@ -1840,6 +1846,69 @@ def _draw_display_zoom_inset(
     )
 
 
+def _render_terminal_segregated_preview(
+    frame,
+    context: dict,
+    sx: float,
+    sy: float,
+):
+    """Pinta toda a geometria live de vermelho sem alterar a semântica óptica."""
+    result = frame.copy()
+    tint = result.copy()
+    alert = F3_PREVIEW_CLEAR_COLORS["alert"]
+    geometries = []
+
+    for mask in tuple(context.get("masks") or ()):
+        if not isinstance(mask, dict):
+            continue
+        geometry = _draw_mask(tint, mask, sx, sy, alert)
+        if geometry is not None:
+            geometries.append(geometry)
+
+    if geometries:
+        cv2.addWeighted(
+            tint,
+            F3_PREVIEW_ALERT_ALPHA,
+            result,
+            1.0 - F3_PREVIEW_ALERT_ALPHA,
+            0.0,
+            dst=result,
+        )
+        for geometry in geometries:
+            _draw_contour(
+                result,
+                geometry,
+                alert,
+                F3_PREVIEW_ALERT_CONTOUR_THICKNESS,
+            )
+
+    board_points = tuple(context.get("board_points") or ())
+    if len(board_points) >= 3:
+        try:
+            board = np.asarray(
+                [
+                    [
+                        int(round(float(point[0]) * sx)),
+                        int(round(float(point[1]) * sy)),
+                    ]
+                    for point in board_points
+                ],
+                dtype=np.int32,
+            )
+            cv2.polylines(
+                result,
+                [board],
+                True,
+                alert,
+                max(2, F3_PREVIEW_ALERT_CONTOUR_THICKNESS),
+                cv2.LINE_AA,
+            )
+        except Exception:
+            pass
+
+    return result
+
+
 def renderizar_preview_claro_display_f3(frame, context):
     """Render final: máscara normal suave e divergência amarela muito evidente."""
     if frame is None or getattr(frame, "size", 0) == 0:
@@ -1861,6 +1930,17 @@ def renderizar_preview_claro_display_f3(frame, context):
     frame_height, frame_width = frame.shape[:2]
     sx = frame_width / float(source_width)
     sy = frame_height / float(source_height)
+
+    # SEGREGAR é um override exclusivamente visual e terminal. A classificação
+    # física continua intacta no contexto/telemetria; somente a apresentação
+    # produtiva fica integralmente vermelha até EMPTY.
+    if bool(context.get("terminal_segregated")):
+        return _render_terminal_segregated_preview(
+            frame,
+            context,
+            sx,
+            sy,
+        )
 
     if bool(context.get("live_luminous_only")):
         return _render_classic_luminous_preview(
