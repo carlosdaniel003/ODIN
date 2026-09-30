@@ -267,17 +267,81 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         self.assertFalse(result["board_present"])
         self.assertNotIn("semantic_mask_presence_confirmed", result)
 
-    def test_semantic_presence_rejects_incomplete_or_contradictory_check_pattern(self):
+    def test_semantic_presence_accepts_powered_divergent_check_as_occupancy(self):
         repository = SimpleNamespace(
             listar_checks=Mock(
                 return_value=[
                     {
-                        "id": "CHECK_001",
-                        "name": "H1",
+                        "id": "CHECK_002",
+                        "name": "BLUE",
                         "mask_states": {
-                            "MASK_008": "on",
-                            "MASK_009": "on",
-                            "MASK_001": "off",
+                            "MASK_001": "on",
+                            "MASK_024": "on",
+                            "MASK_002": "off",
+                        },
+                    }
+                ]
+            )
+        )
+        owner = authorities.F3PresenceAuthority(repository)
+        ambiguous = {
+            "available": False,
+            "board_present": False,
+            "presence_confirmed": False,
+            "empty_confirmed": False,
+            "reason": "separacao_ocupado_vs_empty_insuficiente",
+        }
+        # BLUE energizado, porém MASK_024 ficou APAGADO. Não existe CHECK
+        # completo, mas isso não pode transformar uma placa NG em placa ausente.
+        energy = {
+            "available": True,
+            "powered_confirmed": True,
+            "off_confirmed": False,
+            "powered_votes": 17,
+            "off_votes": 1,
+            "tie_votes": 0,
+            "required_powered_votes": 4,
+            "details": [
+                {"mask_id": "MASK_001", "winner": "powered", "classified": "on"},
+                {"mask_id": "MASK_024", "winner": "off", "classified": "off"},
+                {"mask_id": "MASK_002", "winner": "off", "classified": "off"},
+            ],
+        }
+
+        with patch.object(
+            authorities.presence_module,
+            "avaliar_presenca_melhor_ocupado_f3",
+            return_value=ambiguous,
+        ):
+            result = owner.evaluate(
+                {},
+                energy=energy,
+                project_name="CM_500_L",
+            )
+
+        self.assertTrue(result["board_present"])
+        self.assertTrue(result["presence_confirmed"])
+        self.assertTrue(result["semantic_mask_presence_confirmed"])
+        self.assertEqual([], result["semantic_mask_matched_check_ids"])
+        self.assertEqual(
+            "emissao_semantica_confirma_placa_com_check_divergente",
+            result["reason"],
+        )
+        diagnostic = result["semantic_mask_presence_diagnostic"]
+        self.assertEqual([], diagnostic["matched_check_ids"])
+        self.assertEqual(17, diagnostic["powered_votes"])
+        self.assertEqual(1, diagnostic["off_votes"])
+
+    def test_semantic_presence_rejects_divergent_pattern_without_confirmed_power(self):
+        repository = SimpleNamespace(
+            listar_checks=Mock(
+                return_value=[
+                    {
+                        "id": "CHECK_002",
+                        "name": "BLUE",
+                        "mask_states": {
+                            "MASK_001": "on",
+                            "MASK_024": "on",
                         },
                     }
                 ]
@@ -292,12 +356,13 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         }
         energy = {
             "available": True,
-            "powered_confirmed": True,
+            "powered_confirmed": False,
             "off_confirmed": False,
+            "powered_votes": 1,
+            "off_votes": 1,
             "details": [
-                {"mask_id": "MASK_008", "winner": "powered", "classified": "on"},
-                {"mask_id": "MASK_009", "winner": "tie", "classified": "on"},
                 {"mask_id": "MASK_001", "winner": "powered", "classified": "on"},
+                {"mask_id": "MASK_024", "winner": "off", "classified": "off"},
             ],
         }
 
@@ -315,8 +380,8 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         self.assertFalse(result["board_present"])
         self.assertFalse(result["presence_confirmed"])
         self.assertEqual(
-            [],
-            result["semantic_mask_presence_diagnostic"]["matched_check_ids"],
+            "mascaras_nao_confirmam_padrao_energizado",
+            result["semantic_mask_presence_diagnostic"]["reason"],
         )
 
     def test_builder_breaks_presence_energy_deadlock_with_known_h1_pattern(self):
