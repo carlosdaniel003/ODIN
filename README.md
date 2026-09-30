@@ -406,13 +406,18 @@ confirmar **PLACA** ou **EMPTY**, mas ela não precisa atingir sozinha um score
 absoluto para que o runtime sequer considere a evidência dos segmentos.
 
 Quando a cena global está ambígua, a leitura semântica live das mesmas máscaras
-pode ser calculada como **evidência pré-gate**. Se um estado configurado possui
-todo o seu núcleo esperado ON realmente ON e nenhuma máscara com leitura
-confiante contradiz os estados ON/OFF daquele padrão, a
-`F3PresenceAuthority` pode confirmar que existe placa/display ocupando o suporte.
+pode ser calculada como **evidência pré-gate**. Um padrão configurado completo
+continua sendo a forma mais específica de confirmar presença e identidade.
+
+D-044 cobre o caso defeituoso: a placa não deixa de existir só porque um
+segmento que deveria acender falhou. Se a autoridade física de energia já
+publicou `powered_confirmed=true` por votação multi-máscara, a
+`F3PresenceAuthority` pode confirmar somente **OCUPAÇÃO** mesmo sem encontrar um
+CHECK 100% conforme. Nesse modo, `matched_check_ids` permanece vazio: presença
+não é transformada em identidade nem em resultado.
 
 Essa promoção significa somente **PRESENÇA**. Ela não aprova H1/BLUE/USB/AUX.
-Depois dela, o analyzer estrito ainda precisa cumprir todas as máscaras ativas do
+Depois dela, o analyzer estrito ainda precisa julgar todas as máscaras ativas do
 CHECK atual. Se EMPTY estiver confirmado, EMPTY sempre vence qualquer evidência
 de segmentos.
 
@@ -495,7 +500,20 @@ Entre as proteções do runtime:
 - para confirmar esse tipo de NG, deve existir evidência independente de que a placa está realmente energizada;
 - um segmento ACESO onde deveria estar APAGADO é uma inconsistência semântica;
 - POUCA LUZ, quando a classe está disponível e é identificada onde não deveria ocorrer, é tratada como condição de falha;
-- o estado visual de cena inteira não é, sozinho, autoridade para declarar um NG de máscara.
+- o estado visual de cena inteira não é, sozinho, autoridade para declarar um NG de máscara;
+- para CHECKS posteriores, um produto defeituoso pode provar que **chegou ao
+  CHECK atual** sem precisar parecer um produto BOM: a autoridade de transição
+  compara somente máscaras cujo ON/OFF mudou do CHECK anterior para o atual e
+  exige maioria estrita dessas mudanças já no padrão do destino;
+- essa assinatura de transição não decide NG. Ela apenas libera o analyzer
+  canônico e o debounce NG já existente para julgar as divergências do CHECK.
+
+Exemplo BLUE: se 17 das 18 máscaras esperadas ON acenderam e uma máscara, como
+`MASK_024`, permaneceu OFF, energia pode continuar confirmada e a assinatura das
+mudanças H1 → BLUE pode provar que BLUE realmente chegou. O analyzer então vê a
+máscara faltante e, após a estabilidade NG existente, reprova a placa. A foto de
+cena inteira não precisa reconhecer um BLUE perfeito para que um BLUE defeituoso
+seja testável.
 
 A política separa `SEARCHING`, `OK` e `NG`, com gate de confiança e estabilidade próprios.
 
