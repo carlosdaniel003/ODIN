@@ -30,6 +30,7 @@ from src.platform.display_f3_object_tracking import (
 
 F3_RUNTIME_AUTHORITIES_SOURCE = "f3_runtime_authorities"
 F3_TRACKING_PRESENCE_SOURCE = "f3_tracking_current_lock_presence"
+F3_MASK_PATTERN_PRESENCE_SOURCE = "f3_semantic_mask_pattern_presence"
 
 
 def _valid_frame(frame) -> bool:
@@ -104,6 +105,134 @@ def _current_luminous_alignment_for_check(
     return True
 
 
+def _semantic_mask_pattern_presence_evidence(
+    repository,
+    project_name: str,
+    energy: dict | None,
+) -> dict:
+    """Transforma padrão luminoso conhecido em evidência positiva de ocupação.
+
+    Não aprova CHECK. A função somente produz evidência para a autoridade de
+    presença. EMPTY confirmado continua tendo precedência absoluta.
+    """
+    data = energy if isinstance(energy, dict) else {}
+    result = {
+        "available": False,
+        "source": F3_MASK_PATTERN_PRESENCE_SOURCE,
+        "board_present": False,
+        "presence_confirmed": False,
+        "empty_confirmed": False,
+        "powered_confirmed": bool(data.get("powered_confirmed")),
+        "matched_check_ids": [],
+        "matched_check_names": [],
+        "reason": "evidencia_semantica_mascaras_indisponivel",
+    }
+
+    if not (
+        bool(data.get("available"))
+        and bool(data.get("powered_confirmed"))
+        and not bool(data.get("off_confirmed"))
+    ):
+        result["reason"] = "mascaras_nao_confirmam_padrao_energizado"
+        return result
+
+    details = [
+        item
+        for item in (data.get("details") or ())
+        if isinstance(item, dict) and str(item.get("mask_id") or "")
+    ]
+    if not details:
+        result["reason"] = "mascaras_sem_detalhes_semanticos"
+        return result
+
+    observed: dict[str, str] = {}
+    uncertain_ids: list[str] = []
+    for item in details:
+        mask_id = str(item.get("mask_id") or "")
+        winner = str(item.get("winner") or "").strip().lower()
+        classified = str(item.get("classified") or "").strip().lower()
+        if winner == "powered" and classified in {"on", "low_light"}:
+            observed[mask_id] = "on"
+        elif winner == "off" and classified == "off":
+            observed[mask_id] = "off"
+        else:
+            uncertain_ids.append(mask_id)
+
+    if not observed:
+        result["reason"] = "nenhuma_mascara_com_estado_confiavel"
+        result["uncertain_mask_ids"] = uncertain_ids
+        return result
+
+    try:
+        checks = repository.listar_checks(project_name)
+    except Exception:
+        checks = []
+
+    matched_ids: list[str] = []
+    matched_names: list[str] = []
+    matched_expected_on_counts: dict[str, int] = {}
+    contradictions_by_check: dict[str, list[str]] = {}
+
+    for check in checks or ():
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get("id") or "")
+        if not check_id:
+            continue
+        states = (
+            check.get("mask_states", {})
+            if isinstance(check.get("mask_states"), dict)
+            else {}
+        )
+        expected_on_ids = [
+            str(mask_id)
+            for mask_id, state in states.items()
+            if str(state or "").strip().lower() == "on"
+        ]
+        if not expected_on_ids:
+            continue
+
+        # Presença positiva exige o núcleo ON completo do estado aprendido.
+        if any(observed.get(mask_id) != "on" for mask_id in expected_on_ids):
+            continue
+
+        contradictions = []
+        for mask_id, physical_state in observed.items():
+            expected = str(states.get(mask_id) or "").strip().lower()
+            if expected not in {"on", "off"}:
+                continue
+            if physical_state != expected:
+                contradictions.append(mask_id)
+        if contradictions:
+            contradictions_by_check[check_id] = contradictions
+            continue
+
+        matched_ids.append(check_id)
+        matched_names.append(str(check.get("name") or check_id).strip().upper())
+        matched_expected_on_counts[check_id] = len(expected_on_ids)
+
+    result.update(
+        available=True,
+        confident_observed_mask_count=len(observed),
+        uncertain_mask_ids=uncertain_ids,
+        matched_check_ids=matched_ids,
+        matched_check_names=matched_names,
+        matched_expected_on_counts=matched_expected_on_counts,
+        contradictions_by_check=contradictions_by_check,
+    )
+    if not matched_ids:
+        result["reason"] = "nenhum_padrao_configurado_completo_nas_mascaras"
+        return result
+
+    result.update(
+        board_present=True,
+        presence_confirmed=True,
+        empty_confirmed=False,
+        reason="padrao_semantico_energizado_confirma_placa",
+    )
+    return result
+
+
 class F3TrackingAuthority:
     """Proprietário explícito da instância stateful do tracker F3."""
 
@@ -168,9 +297,10 @@ class F3TrackingAuthority:
 
 
 class F3PresenceAuthority:
-    """Única memória de estabilidade de presença do runtime canônico."""
+    """Única memória de estabilidade e decisão de presença do runtime canônico."""
 
-    def __init__(self) -> None:
+    def __init__(self, repository=None) -> None:
+        self.repository = repository
         self._latch: dict | None = None
 
     def reset(self) -> None:
@@ -180,6 +310,9 @@ class F3PresenceAuthority:
         self,
         state: dict | None,
         tracking: dict | None = None,
+        *,
+        energy: dict | None = None,
+        project_name: str = "",
     ) -> dict:
         evidence = presence_module.avaliar_presenca_melhor_ocupado_f3(state)
         result = deepcopy(evidence)
@@ -218,6 +351,34 @@ class F3PresenceAuthority:
                 tracking_reason=str(tracking_evidence.get("reason") or ""),
                 reason="tracking_lock_atual_confirma_placa",
             )
+            return result
+
+        # D-042: se a cena global não separa PLACA x EMPTY, a memória
+        # semântica das máscaras pode provar ocupação. A energia só fornece a
+        # observação; esta autoridade continua sendo a única que promove presença.
+        semantic = _semantic_mask_pattern_presence_evidence(
+            self.repository,
+            str(project_name or ""),
+            energy,
+        )
+        result["semantic_mask_presence_diagnostic"] = deepcopy(semantic)
+        if bool(semantic.get("presence_confirmed")):
+            result.update(
+                available=True,
+                source=F3_MASK_PATTERN_PRESENCE_SOURCE,
+                board_present=True,
+                presence_confirmed=True,
+                empty_confirmed=False,
+                semantic_mask_presence_confirmed=True,
+                semantic_mask_matched_check_ids=list(
+                    semantic.get("matched_check_ids") or ()
+                ),
+                semantic_mask_matched_check_names=list(
+                    semantic.get("matched_check_names") or ()
+                ),
+                reason="padrao_semantico_energizado_confirma_placa",
+            )
+            self._latch = {"frames": 0, "evidence": deepcopy(result)}
             return result
 
         latch = self._latch
@@ -509,7 +670,7 @@ class F3RuntimeAuthorities:
         self.app = app
         self.repository = app.display_project_repository
         self.tracking = F3TrackingAuthority(app)
-        self.presence = F3PresenceAuthority()
+        self.presence = F3PresenceAuthority(self.repository)
         self.power = F3PowerAuthority(app)
         self.check_analyzer = F3CheckAnalyzerAuthority(app)
         self.state_machine = F3StateMachineAuthority(app.display_check_runtime)
@@ -687,15 +848,22 @@ class F3RuntimeAuthorities:
             dict,
         )
 
+        # A leitura das máscaras é uma observação do mesmo frame e pode existir
+        # antes do gate final de presença. Isso remove a dependência circular
+        # sem dar à energia autoridade para declarar presença por conta própria.
+        energy = (
+            self.power.evaluate(frame, project_name, context)
+            if str(state.get("kind") or "").strip().lower() != "empty"
+            else {}
+        )
         presence = self.presence.evaluate(
             state,
             tracking_evidence,
+            energy=energy,
+            project_name=project_name,
         )
-        energy = (
-            self.power.evaluate(frame, project_name, context)
-            if bool(presence.get("board_present"))
-            else {}
-        )
+        if bool(presence.get("empty_confirmed")):
+            energy = {}
         state = self.power.apply(
             state,
             presence,
