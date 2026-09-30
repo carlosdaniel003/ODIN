@@ -601,6 +601,13 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                     for mask_id in (context.get("live_visual_mask_ids") or ())
                     if str(mask_id)
                 },
+                "live_visual_classifications": {
+                    str(mask_id): str(state or "").strip().lower()
+                    for mask_id, state in dict(
+                        context.get("live_visual_classifications") or {}
+                    ).items()
+                    if str(mask_id)
+                },
                 "live_visual_frame_token": context.get(
                     "live_visual_frame_token"
                 ),
@@ -721,22 +728,39 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             for item in (context.get("live_visual_mask_ids") or ())
             if str(item)
         }
+        live_visual_classifications = {
+            str(mask_id): str(state or "").strip().lower()
+            for mask_id, state in dict(
+                context.get("live_visual_classifications") or {}
+            ).items()
+            if str(mask_id)
+        }
 
-        live_display_ids = (
-            live_visual_ids
-            if live_visual_ready
-            else luminous_mask_ids
+        live_display_ids = set(live_visual_ids)
+        if not live_visual_ready:
+            live_display_ids.update(luminous_mask_ids)
+        live_display_ids.update(
+            mask_id
+            for mask_id, state in live_visual_classifications.items()
+            if state == "on"
         )
 
         for segment_name, mask_id in zip(segment_order, mask_ids):
             if live_luminous_only:
-                # D-032: câmera/overlay/visor formam um único espelho visual.
-                # Gate produtivo e classificação assíncrona não controlam cor.
-                state = (
-                    "on"
-                    if mask_id in live_display_ids
-                    else "neutral"
-                )
+                # D-034: câmera e visor consomem o MESMO mapa físico.
+                # A cor independe de gate/expected; classified descreve somente
+                # o que a câmera observou naquele segmento.
+                visual_state = str(
+                    live_visual_classifications.get(mask_id) or ""
+                ).strip().lower()
+                if mask_id in live_display_ids or visual_state == "on":
+                    state = "on"
+                elif visual_state == "low_light":
+                    state = "warning"
+                elif visual_state == "off":
+                    state = "off"
+                else:
+                    state = "neutral"
             else:
                 state = self._display_readout_semantic_state(
                     classifications.get(mask_id),

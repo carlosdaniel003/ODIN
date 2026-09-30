@@ -359,6 +359,119 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             set(result["mask_ids"]),
         )
 
+    def test_classificacao_fisica_visual_nao_depende_do_check_logico(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+
+        class _App:
+            def __init__(self):
+                self._display_auto_last_analysis = {
+                    "project_name": "P1",
+                    "check_id": "CHECK_AUX",
+                    "mask_results": [
+                        {
+                            "mask_id": "MASK_001",
+                            "classified": "on",
+                        },
+                        {
+                            "mask_id": "MASK_002",
+                            "classified": "off",
+                        },
+                        {
+                            "mask_id": "MASK_003",
+                            "classified": "low_light",
+                        },
+                    ],
+                }
+
+            def configure_display(self):
+                return None
+
+        app = _App()
+        window = SimpleNamespace(
+            on_configure=app.configure_display,
+        )
+
+        physical = clarity._latest_physical_visual_classifications(
+            window,
+            project_name="P1",
+        )
+
+        self.assertEqual(
+            {
+                "MASK_001": "on",
+                "MASK_002": "off",
+                "MASK_003": "low_light",
+            },
+            physical,
+        )
+
+        context = self._live_visual_test_context()
+        context["check_id"] = "CHECK_USB"
+        context["visual_physical_classifications"] = physical
+
+        with patch.object(
+            clarity,
+            "detectar_emissao_visual_ao_vivo_f3",
+            return_value={
+                "ready": True,
+                "mask_ids": (),
+                "reason": "ok",
+                "sampled_mask_count": 4,
+                "threshold": 200.0,
+                "baseline": 100.0,
+                "peak": 120.0,
+            },
+        ):
+            mirrored = clarity.aplicar_emissao_visual_ao_vivo_f3(
+                window,
+                frame,
+                context,
+                frame_token=("camera", 77),
+                geometry_token=("fixed", "P1"),
+            )
+
+        self.assertEqual(("MASK_001",), mirrored["live_visual_mask_ids"])
+        self.assertEqual(
+            "on",
+            mirrored["live_visual_classifications"]["MASK_001"],
+        )
+        self.assertEqual(
+            "off",
+            mirrored["live_visual_classifications"]["MASK_002"],
+        )
+        self.assertEqual(
+            "low_light",
+            mirrored["live_visual_classifications"]["MASK_003"],
+        )
+
+    def test_renderer_visual_pinta_on_fisico_mesmo_se_detector_latest_frame_vazio(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        context = self._live_visual_test_context()
+        context.update(
+            live_visual_sample_ready=True,
+            live_visual_mask_ids=(),
+            live_visual_classifications={
+                "MASK_001": "off",
+                "MASK_002": "on",
+                "MASK_003": "off",
+                "MASK_004": "off",
+            },
+            power_confirmed=False,
+            power_off_confirmed=True,
+            energy_state="off",
+        )
+
+        rendered = clarity.renderizar_preview_claro_display_f3(
+            frame,
+            context,
+        )
+
+        on_pixel = rendered[40, 60]
+        off_pixel = rendered[40, 20]
+        self.assertGreater(int(on_pixel[1]), int(on_pixel[2]))
+        self.assertGreater(int(on_pixel[1]), int(on_pixel[0]))
+        self.assertGreater(int(off_pixel.sum()), 0)
+
     def test_amostra_visual_latest_frame_apaga_visor_na_fase_escura(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
 

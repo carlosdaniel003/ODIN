@@ -284,6 +284,70 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertGreater(readout_pos, sample_pos)
         self.assertGreater(render_pos, readout_pos)
 
+    def test_visor_mostra_classificacao_fisica_mesmo_com_live_ids_vazios(self):
+        class _Canvas:
+            def __init__(self):
+                self.polygons = []
+
+            def create_polygon(self, *args, **kwargs):
+                self.polygons.append(dict(kwargs))
+
+            def create_text(self, *args, **kwargs):
+                return None
+
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window.display_readout_canvas = _Canvas()
+        window._draw_fixed_segment_number = lambda *args, **kwargs: None
+        mask_ids = [f"MASK_{index:03d}" for index in range(1, 8)]
+        context = {
+            "classifications": {},
+            "expected_states": {},
+            "failed_mask_ids": set(),
+            "validating_mask_ids": set(),
+            "ui_mask_authority": "",
+            "live_luminous_only": True,
+            "luminous_mask_ids": set(),
+            "live_visual_sample_ready": True,
+            "live_visual_mask_ids": set(),
+            "live_visual_classifications": {
+                "MASK_001": "on",
+                "MASK_002": "off",
+                "MASK_003": "low_light",
+            },
+            "power_confirmed": False,
+            "power_off_confirmed": True,
+            "energy_state": "off",
+        }
+
+        window._draw_fixed_semantic_digit(
+            0.0,
+            0.0,
+            80.0,
+            140.0,
+            mask_ids,
+            context,
+            ready=False,
+        )
+
+        fills = [
+            item.get("fill")
+            for item in window.display_readout_canvas.polygons
+        ]
+        self.assertEqual(
+            1,
+            fills.count(DisplayProductionF3Window.DISPLAY_READOUT_ACTIVE),
+        )
+        self.assertEqual(
+            1,
+            fills.count(DisplayProductionF3Window.DISPLAY_READOUT_OFF),
+        )
+        self.assertEqual(
+            1,
+            fills.count(DisplayProductionF3Window.DISPLAY_READOUT_WARNING),
+        )
+
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(
             getattr(DisplayProductionF3Window, "_odin_display_live_roi_overlay", False)

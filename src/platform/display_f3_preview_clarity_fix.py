@@ -514,6 +514,76 @@ def _failed_mask_ids_from_analysis(
     return failed
 
 
+def _latest_physical_visual_classifications(
+    window,
+    *,
+    project_name: str,
+) -> dict[str, str]:
+    """Retorna estados físicos recentes sem atrelar a cor ao CHECK lógico.
+
+    O campo classified de cada máscara descreve o que a câmera observou
+    fisicamente (ON/OFF/POUCA LUZ). O check_id só é necessário para avaliar
+    conformidade/expected; ele não pode impedir o espelho visual de mostrar uma
+    luz que o próprio analyzer já reconheceu.
+
+    A fonte continua limitada ao projeto ativo para nunca reaproveitar uma
+    análise antiga de outro produto.
+    """
+    app = overlay_module._app_from_window(window)
+    if app is None:
+        return {}
+
+    valid_states = {
+        DISPLAY_CHECK_STATE_ON,
+        DISPLAY_CHECK_STATE_OFF,
+        DISPLAY_AUTO_CLASS_LOW_LIGHT,
+    }
+    for attr in (
+        "_display_auto_last_analysis",
+        "_display_f3_overlay_analysis_cache",
+        "_display_f3_live_probe_last_analysis",
+    ):
+        analysis = getattr(app, attr, None)
+        if not isinstance(analysis, dict):
+            continue
+
+        analysis_project = str(analysis.get("project_name") or "")
+        if (
+            analysis_project
+            and project_name
+            and analysis_project != str(project_name)
+        ):
+            continue
+
+        physical = {}
+        for item in analysis.get("mask_results", []) or []:
+            if not isinstance(item, dict):
+                continue
+            mask_id = str(item.get("mask_id") or "")
+            state = str(item.get("classified") or "").strip().lower()
+            if mask_id and state in valid_states:
+                physical[mask_id] = state
+
+        if not physical:
+            for key in ("classifications", "effective_classifications"):
+                source = analysis.get(key)
+                if not isinstance(source, dict):
+                    continue
+                physical = {
+                    str(mask_id): str(state or "").strip().lower()
+                    for mask_id, state in source.items()
+                    if str(mask_id)
+                    and str(state or "").strip().lower() in valid_states
+                }
+                if physical:
+                    break
+
+        if physical:
+            return physical
+
+    return {}
+
+
 def _mask_snapshot_for_current_check(
     window,
     *,
@@ -684,6 +754,12 @@ def _contexto_preview_claro(original):
 
         result["classifications"] = classifications
         result["effective_classifications"] = dict(classifications)
+        result["visual_physical_classifications"] = (
+            _latest_physical_visual_classifications(
+                window,
+                project_name=str(project_context.get("project_name") or ""),
+            )
+        )
         result["failed_mask_ids"] = tuple(sorted(failed_mask_ids))
         result["effective_failed_mask_ids"] = tuple(sorted(failed_mask_ids))
         result["effective_confirmed_failed_mask_ids"] = tuple(
@@ -1000,15 +1076,68 @@ def aplicar_emissao_visual_ao_vivo_f3(
         }
 
     ready = bool(sample.get("ready"))
-    mask_ids = tuple(
+    sampled_on_ids = {
         str(mask_id)
         for mask_id in (sample.get("mask_ids") or ())
         if str(mask_id)
-    )
+    }
+
+    # D-034: a interface já pode possuir uma classificação física válida das
+    # máscaras enquanto o CHECK lógico assíncrono está em outra etapa. Isso é
+    # exatamente o que o resumo "15 ACESOS / 13 APAGADOS" representa. Para a
+    # apresentação, classified é evidência física e não depende de expected.
+    visual_states = {
+        str(mask_id): str(state or "").strip().lower()
+        for mask_id, state in dict(
+            result.get("visual_physical_classifications") or {}
+        ).items()
+        if str(mask_id)
+        and str(state or "").strip().lower()
+        in {
+            DISPLAY_CHECK_STATE_ON,
+            DISPLAY_CHECK_STATE_OFF,
+            DISPLAY_AUTO_CLASS_LOW_LIGHT,
+        }
+    }
+
+    # O detector latest-frame só PROMOVE emissão ON. Ele não rebaixa uma
+    # classificação física ON já publicada pelo analyzer, evitando o caso
+    # observado em que a câmera mostrava 15 ACESOS mas o espelho ficava cinza.
+    for mask_id in sampled_on_ids:
+        visual_states[mask_id] = DISPLAY_CHECK_STATE_ON
+
+    visual_on_ids = {
+        mask_id
+        for mask_id, state in visual_states.items()
+        if state == DISPLAY_CHECK_STATE_ON
+    }
+    visual_on_ids.update(sampled_on_ids)
+    mask_ids = tuple(sorted(visual_on_ids))
+
+    # Para máscaras ainda sem classificação física, uma amostra pronta e sem
+    # emissão fornece apenas estado visual OFF; isso continua sem autoridade de
+    # produto e serve para o espelho câmera/visor.
+    if ready:
+        for mask in result.get("masks") or ():
+            if not isinstance(mask, dict):
+                continue
+            mask_id = str(mask.get("id") or "")
+            if mask_id and mask_id not in visual_states:
+                visual_states[mask_id] = (
+                    DISPLAY_CHECK_STATE_ON
+                    if mask_id in sampled_on_ids
+                    else DISPLAY_CHECK_STATE_OFF
+                )
+
     result["live_visual_sample_ready"] = ready
     result["live_visual_mask_ids"] = mask_ids
+    result["live_visual_classifications"] = dict(visual_states)
     result["live_visual_frame_token"] = frame_token
-    result["live_visual_sample_source"] = "latest_preview_frame_core_v"
+    result["live_visual_sample_source"] = (
+        "latest_preview_frame_core_v+latest_physical_classification"
+        if visual_states
+        else "latest_preview_frame_core_v"
+    )
     result["live_visual_sample_reason"] = str(sample.get("reason") or "")
     result["live_visual_sample_threshold"] = sample.get("threshold")
     result["live_visual_sample_baseline"] = sample.get("baseline")
@@ -1016,10 +1145,11 @@ def aplicar_emissao_visual_ao_vivo_f3(
     result["live_visual_sampled_mask_count"] = int(
         sample.get("sampled_mask_count", 0) or 0
     )
+    result["live_visual_physical_classification_count"] = len(visual_states)
 
-    # Quando a amostra do frame atual existe, ela substitui APENAS a emissão
-    # visual antiga do tracker. Classificações produtivas permanecem intactas.
-    if ready:
+    # A emissão visual é compartilhada por câmera e visor. Nada aqui altera
+    # classificação produtiva, conformidade, gate ou sequência.
+    if ready or visual_states:
         result["luminous_mask_ids"] = mask_ids
         result["has_any_on"] = bool(mask_ids)
 
@@ -1206,13 +1336,24 @@ def _render_classic_luminous_preview(
         for mask_id in (context.get("luminous_mask_ids") or ())
         if str(mask_id)
     }
-    # Câmera e visor usam a mesma fonte: amostra latest-frame quando pronta;
-    # antes disso, o mesmo snapshot luminoso do tracking. Nenhum gate produtivo
-    # participa desta escolha e classificação semântica não entra como fallback.
-    luminous_ids = (
-        live_visual_ids
-        if live_visual_ready
-        else fallback_luminous_ids
+    visual_states = {
+        str(mask_id): str(state or "").strip().lower()
+        for mask_id, state in dict(
+            context.get("live_visual_classifications") or {}
+        ).items()
+        if str(mask_id)
+    }
+
+    # Câmera e visor recebem a mesma fonte visual composta. O mapa físico
+    # permite mostrar os estados que o analyzer já reconheceu mesmo quando o
+    # current_check avançou antes da publicação dessa análise.
+    luminous_ids = set(live_visual_ids)
+    if not live_visual_ready:
+        luminous_ids.update(fallback_luminous_ids)
+    luminous_ids.update(
+        mask_id
+        for mask_id, state in visual_states.items()
+        if state == DISPLAY_CHECK_STATE_ON
     )
 
     board_points = context.get("board_points") or ()
@@ -1248,7 +1389,8 @@ def _render_classic_luminous_preview(
         geometry = _mask_geometry(mask, sx, sy)
         if geometry is None:
             continue
-        if mask_id in luminous_ids:
+        visual_state = str(visual_states.get(mask_id) or "").strip().lower()
+        if mask_id in luminous_ids or visual_state == DISPLAY_CHECK_STATE_ON:
             geometry = _draw_mask(
                 green_tint,
                 mask,
@@ -1258,6 +1400,20 @@ def _render_classic_luminous_preview(
             )
             if geometry is not None:
                 green_geometries.append(geometry)
+        elif visual_state == DISPLAY_AUTO_CLASS_LOW_LIGHT:
+            _draw_contour(
+                result,
+                geometry,
+                F3_PREVIEW_CLEAR_COLORS["warning"],
+                2,
+            )
+        elif visual_state == DISPLAY_CHECK_STATE_OFF:
+            _draw_contour(
+                result,
+                geometry,
+                F3_PREVIEW_CLEAR_COLORS[DISPLAY_CHECK_STATE_OFF],
+                1,
+            )
         else:
             _draw_contour(
                 result,

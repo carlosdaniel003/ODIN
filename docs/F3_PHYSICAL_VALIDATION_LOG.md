@@ -804,3 +804,46 @@ Com tracking OFF:
 6. apagar segmentos e confirmar que ambos perdem o verde juntos;
 7. repetir mesmo enquanto power gate ainda não confirmou energia.
 
+---
+
+## 30/09/2026 — Screenshot: 15 ACESOS no analyzer e visor neutro
+
+**Resultado físico:** FAIL visual confirmado.
+
+### Evidência
+
+No mesmo estado de tela:
+
+~~~text
+PLACA NO SUPORTE • LIGADA • ANALISANDO USB
+19/28 CONFORMES • 15 ACESOS • 13 APAGADOS
+ANÁLISE VISUAL: CHECK AUX • 93%
+~~~
+
+Apesar disso:
+
+- as máscaras desenhadas sobre o display estavam neutras;
+- o VISOR DO DISPLAY também estava totalmente neutro.
+
+### Diagnóstico
+
+A análise automática já havia identificado estados físicos para as máscaras.
+Logo, o defeito estava na ligação entre essa evidência e a apresentação.
+
+A diferença entre o CHECK lógico e o CHECK da análise recente confirma que o
+pipeline pode publicar essas informações em momentos diferentes. Para cor
+visual, o estado físico classified continua utilizável; expected/matched
+continuam presos ao CHECK correto.
+
+### Correção D-034
+
+- o espelho visual aceita classified da análise recente do mesmo projeto;
+- detector latest-frame e classificação física são combinados para ON visual;
+- câmera e visor consomem o mesmo mapa físico;
+- ON = verde, OFF = azul/cinza, LOW_LIGHT = amarelo;
+- gates e decisão produtiva permanecem inalterados.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+

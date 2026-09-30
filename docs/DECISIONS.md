@@ -1360,6 +1360,47 @@ com tracking; esta decisão elimina a diferença visual entre os dois modos.
 
 
 ---
+
+## D-034 — Estado físico visual não depende do CHECK lógico
+
+**Status:** Accepted
+
+### Contexto
+
+No reteste de 30/09/2026 com tracking OFF, a interface mostrou ao mesmo tempo
+`15 ACESOS` e `13 APAGADOS`, enquanto as máscaras da câmera e o VISOR DO
+DISPLAY permaneciam neutros.
+
+Também havia defasagem assíncrona entre o CHECK lógico exibido e o CHECK da
+análise visual recente. Isso mostrou que o analyzer já possuía estados físicos
+das máscaras, mas a apresentação os descartava por exigir o CHECK lógico atual
+e por depender exclusivamente dos IDs produzidos pelo detector visual leve.
+
+### Decisão
+
+O espelho visual F3 passa a manter um mapa compartilhado
+`live_visual_classifications` com estados físicos `on`, `off` e
+`low_light`.
+
+- o mapa pode consumir `mask_results[].classified` da análise recente do mesmo
+  projeto, mesmo se o CHECK lógico já tiver avançado;
+- `expected`, `matched`, aprovação e sequência continuam vinculados ao CHECK
+  correto e não são reaproveitados;
+- ON detectado no frame atual também pode promover a máscara para ON;
+- um detector visual vazio não pode neutralizar um ON físico que o analyzer já
+  publicou;
+- câmera e VISOR DO DISPLAY recebem o mesmo mapa;
+- ON = verde, OFF = azul/cinza, LOW_LIGHT = amarelo;
+- gates produtivos não controlam essa apresentação.
+
+### Consequência
+
+Se o analyzer informa 15 máscaras ON e 13 OFF, a interface não pode mostrar os
+28 segmentos como neutros. D-034 complementa D-032 e D-033 sem alterar a decisão
+produtiva.
+
+
+---
 ## Como adicionar uma decisão
 
 Use:

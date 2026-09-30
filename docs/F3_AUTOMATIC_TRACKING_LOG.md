@@ -1225,3 +1225,37 @@ Não repetir:
 - não limitar o espelho visual às máscaras ativas do CHECK;
 - não atualizar o visor antes da amostra do frame atual.
 
+---
+
+## 30/09/2026 — Screenshot confirmou analyzer com 15 ON e espelho neutro
+
+Modo:
+- tracking OFF
+
+Evidência:
+- resumo visual: 19/28 conformes, 15 ACESOS, 13 APAGADOS;
+- análise visual recente: CHECK AUX;
+- estado operacional ainda mostrava ANALISANDO USB;
+- máscaras da câmera e VISOR DO DISPLAY continuavam neutros.
+
+Interpretação:
+- o analyzer físico já conhecia os estados das máscaras;
+- havia defasagem normal entre o CHECK lógico e a análise recente;
+- o espelho dependia demais do detector visual leve e descartava a classificação
+  física quando o CHECK não coincidia.
+
+Tentativa D-034:
+- usar somente o campo físico classified da análise recente do mesmo projeto;
+- manter expected/matched estritamente presos ao CHECK correto;
+- combinar o ON físico já conhecido com o ON do detector latest-frame;
+- enviar um único mapa físico para câmera e visor.
+
+Resultado:
+- CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+Não repetir:
+- não apagar cor física só porque o check_id mudou;
+- não depender exclusivamente do detector leve quando o analyzer já possui
+  estados físicos;
+- não reutilizar matched/expected de outro CHECK como decisão.
+
