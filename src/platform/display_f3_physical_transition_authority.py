@@ -37,6 +37,9 @@ F3_PHYSICAL_TRANSITION_AUTHORITY_SOURCE = (
 F3_FIRST_CHECK_FULL_MASK_AUTHORITY_SOURCE = (
     "f3_first_check_full_mask_conformity"
 )
+F3_CURRENT_CHECK_FULL_MASK_TRANSITION_SOURCE = (
+    "f3_current_check_full_mask_transition"
+)
 
 
 def _context(app) -> dict | None:
@@ -104,6 +107,96 @@ def _analise_completa_check_atual(
     return {
         "active_mask_count": int(active),
         "matched_mask_count": int(matched),
+    }
+
+
+def _carregar_check_por_id(repository, project_name: str, check_id: str) -> dict | None:
+    if repository is None or not str(check_id or "").strip():
+        return None
+    loader = getattr(repository, "carregar_check", None)
+    if callable(loader):
+        try:
+            value = loader(project_name, check_id)
+        except Exception:
+            value = None
+        if isinstance(value, dict):
+            return value
+    listar = getattr(repository, "listar_checks", None)
+    if callable(listar):
+        try:
+            checks = listar(project_name)
+        except Exception:
+            checks = []
+        wanted = str(check_id or "").strip().upper()
+        for item in checks or ():
+            if (
+                isinstance(item, dict)
+                and str(item.get("id") or "").strip().upper() == wanted
+            ):
+                return item
+    return None
+
+
+def _diferenca_semantica_checks_consecutivos(
+    repository,
+    project_name: str,
+    previous_check_id: str,
+    current_check_id: str,
+) -> dict:
+    """Prova se os dois CHECKS realmente possuem padrões ON/OFF diferentes.
+
+    Conformidade 100% do destino só pode servir como evidência de transição se
+    existir pelo menos uma máscara ativa cujo estado mudou em relação ao CHECK
+    anterior. CHECKS semanticamente idênticos continuam dependendo da autoridade
+    física independente.
+    """
+    previous = _carregar_check_por_id(
+        repository,
+        project_name,
+        previous_check_id,
+    )
+    current = _carregar_check_por_id(
+        repository,
+        project_name,
+        current_check_id,
+    )
+    if not isinstance(previous, dict) or not isinstance(current, dict):
+        return {
+            "available": False,
+            "different": False,
+            "reason": "configuracao_checks_transicao_indisponivel",
+            "different_mask_ids": (),
+        }
+
+    previous_states = (
+        previous.get("mask_states", {})
+        if isinstance(previous.get("mask_states"), dict)
+        else {}
+    )
+    current_states = (
+        current.get("mask_states", {})
+        if isinstance(current.get("mask_states"), dict)
+        else {}
+    )
+    active_states = {"on", "off"}
+    mask_ids = sorted(set(previous_states).union(current_states))
+    different_ids = []
+    for mask_id in mask_ids:
+        before = str(previous_states.get(mask_id) or "").strip().lower()
+        after = str(current_states.get(mask_id) or "").strip().lower()
+        if before in active_states and after in active_states and before != after:
+            different_ids.append(str(mask_id))
+
+    return {
+        "available": True,
+        "different": bool(different_ids),
+        "reason": (
+            "checks_possuem_mudanca_semantica"
+            if different_ids
+            else "checks_sem_mudanca_semantica"
+        ),
+        "different_mask_ids": tuple(different_ids),
+        "different_mask_count": len(different_ids),
     }
 
 
@@ -234,6 +327,41 @@ def avaliar_entrada_fisica_check_f3(
             "current_check_name": current_name,
             "current_index": index,
         }
+
+    # D-043: o padrão funcional completo do destino também é evidência física
+    # da transição quando ele DIFERE semanticamente do CHECK anterior. Isso não
+    # é um atalho por score global: exige análise canônica pronta, 100% conforme
+    # e pelo menos uma máscara ON/OFF cujo estado mudou entre os dois CHECKS.
+    # Assim BLUE 28/28 não pode ficar bloqueado por uma foto de cena inteira que
+    # ainda prefira H1/OFF, enquanto 27/28 continua incapaz de liberar o gate.
+    current_analysis = (
+        analysis
+        if isinstance(analysis, dict)
+        else getattr(app, "_display_auto_last_analysis", None)
+    )
+    conformity = _analise_completa_check_atual(current_analysis, ctx)
+    if isinstance(conformity, dict):
+        project_name = str((ctx or {}).get("project_name") or "").strip()
+        semantic_delta = _diferenca_semantica_checks_consecutivos(
+            getattr(app, "display_project_repository", None),
+            project_name,
+            previous_id,
+            current_id,
+        )
+        if bool(semantic_delta.get("available") and semantic_delta.get("different")):
+            return {
+                "source": F3_CURRENT_CHECK_FULL_MASK_TRANSITION_SOURCE,
+                "available": True,
+                "confirmed": True,
+                "reason": "check_atual_100pct_confirma_transicao_semantica",
+                "previous_check_id": previous_id,
+                "previous_check_name": previous_name,
+                "current_check_id": current_id,
+                "current_check_name": current_name,
+                "current_index": index,
+                "semantic_transition": deepcopy(semantic_delta),
+                **conformity,
+            }
 
     # A identidade por contorno compara TODOS os CHECKS no mesmo espaço
     # canônico. Se ela está conclusiva, é uma evidência física mais independente
