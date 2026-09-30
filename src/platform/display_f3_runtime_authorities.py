@@ -398,7 +398,13 @@ class F3PresenceAuthority:
                 semantic_mask_matched_check_names=list(
                     semantic.get("matched_check_names") or ()
                 ),
-                reason="padrao_semantico_energizado_confirma_placa",
+                semantic_mask_presence_mode=str(
+                    semantic.get("presence_mode") or ""
+                ),
+                reason=str(
+                    semantic.get("reason")
+                    or "padrao_semantico_energizado_confirma_placa"
+                ),
             )
             self._latch = {"frames": 0, "evidence": deepcopy(result)}
             return result
