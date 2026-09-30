@@ -266,6 +266,152 @@ class DisplayF3PhysicalTransitionAuthorityTests(unittest.TestCase):
         self.assertFalse(result["confirmed"])
         self.assertEqual("contorno_identificou_outro_check", result["reason"])
 
+    def test_blue_28_de_28_confirma_transicao_mesmo_se_foto_nao_prefere_blue(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=1)
+        checks = {
+            "CHECK_001": {
+                "id": "CHECK_001",
+                "name": "H1",
+                "mask_states": {
+                    "MASK_001": "off",
+                    "MASK_002": "on",
+                    "MASK_003": "off",
+                },
+            },
+            "CHECK_002": {
+                "id": "CHECK_002",
+                "name": "BLUE",
+                "mask_states": {
+                    "MASK_001": "on",
+                    "MASK_002": "off",
+                    "MASK_003": "off",
+                },
+            },
+        }
+        app.display_project_repository = SimpleNamespace(
+            carregar_check=lambda _project, check_id: checks.get(check_id)
+        )
+        analysis = {
+            "ready": True,
+            "approved": True,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "active_mask_count": 28,
+            "matched_mask_count": 28,
+        }
+
+        with patch.object(
+            authority,
+            "avaliar_transicao_fisica_checks_f3",
+            return_value={
+                "available": True,
+                "current_preferred": False,
+                "reason": "frame_ainda_nao_prefere_check_atual",
+            },
+        ) as visual_transition:
+            result = authority.avaliar_entrada_fisica_check_f3(
+                app,
+                analysis=analysis,
+            )
+
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(
+            authority.F3_CURRENT_CHECK_FULL_MASK_TRANSITION_SOURCE,
+            result["source"],
+        )
+        self.assertEqual(
+            "check_atual_100pct_confirma_transicao_semantica",
+            result["reason"],
+        )
+        self.assertEqual(2, result["semantic_transition"]["different_mask_count"])
+        self.assertEqual(28, result["matched_mask_count"])
+        visual_transition.assert_not_called()
+
+    def test_blue_27_de_28_continua_dependendo_da_transicao_fisica(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=1)
+        checks = {
+            "CHECK_001": {
+                "id": "CHECK_001",
+                "mask_states": {"MASK_001": "off"},
+            },
+            "CHECK_002": {
+                "id": "CHECK_002",
+                "mask_states": {"MASK_001": "on"},
+            },
+        }
+        app.display_project_repository = SimpleNamespace(
+            carregar_check=lambda _project, check_id: checks.get(check_id)
+        )
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "active_mask_count": 28,
+            "matched_mask_count": 27,
+        }
+
+        with patch.object(
+            authority,
+            "avaliar_transicao_fisica_checks_f3",
+            return_value={
+                "available": True,
+                "current_preferred": False,
+                "reason": "frame_ainda_nao_prefere_check_atual",
+            },
+        ):
+            result = authority.avaliar_entrada_fisica_check_f3(
+                app,
+                analysis=analysis,
+            )
+
+        self.assertFalse(result["confirmed"])
+        self.assertEqual("frame_ainda_nao_prefere_check_atual", result["reason"])
+
+    def test_28_de_28_nao_prova_transicao_se_checks_sao_semanticamente_iguais(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=1)
+        same_states = {
+            "MASK_001": "on",
+            "MASK_002": "off",
+        }
+        checks = {
+            "CHECK_001": {"id": "CHECK_001", "mask_states": dict(same_states)},
+            "CHECK_002": {"id": "CHECK_002", "mask_states": dict(same_states)},
+        }
+        app.display_project_repository = SimpleNamespace(
+            carregar_check=lambda _project, check_id: checks.get(check_id)
+        )
+        analysis = {
+            "ready": True,
+            "approved": True,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_002",
+            "active_mask_count": 28,
+            "matched_mask_count": 28,
+        }
+
+        with patch.object(
+            authority,
+            "avaliar_transicao_fisica_checks_f3",
+            return_value={
+                "available": True,
+                "current_preferred": False,
+                "reason": "frame_ainda_nao_prefere_check_atual",
+            },
+        ):
+            result = authority.avaliar_entrada_fisica_check_f3(
+                app,
+                analysis=analysis,
+            )
+
+        self.assertFalse(result["confirmed"])
+        self.assertEqual("frame_ainda_nao_prefere_check_atual", result["reason"])
+
     def test_check_defeituoso_pode_entrar_fisicamente_e_depois_gerar_ng(self):
         app = _App()
         defective_aux = {
