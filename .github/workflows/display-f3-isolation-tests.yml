@@ -211,7 +211,8 @@ jobs:
           python -m unittest \
             tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_mask_pattern_confirms_presence_when_scene_is_ambiguous \
             tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_mask_pattern_never_overrides_confirmed_empty \
-            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_presence_rejects_incomplete_or_contradictory_check_pattern \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_presence_accepts_powered_divergent_check_as_occupancy \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_semantic_presence_rejects_divergent_pattern_without_confirmed_power \
             tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_builder_breaks_presence_energy_deadlock_with_known_h1_pattern \
             tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_power_owner_never_lets_energy_bypass_missing_presence \
             -v
