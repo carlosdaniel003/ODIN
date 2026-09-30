@@ -129,6 +129,27 @@ class DisplayF3SegregateActionTests(unittest.TestCase):
         self.assertEqual("normal", window.discard_button.state)
         self.assertEqual([snapshot], snapshots)
 
+    def test_segregacao_terminal_mantem_cards_e_chrome_vermelhos(self):
+        result_source = inspect.getsource(DisplayProductionF3Window.show_plate_result)
+        cards_source = inspect.getsource(DisplayProductionF3Window._render_check_cards)
+        sequence_source = inspect.getsource(DisplayProductionF3Window.set_check_sequence)
+        chrome_source = inspect.getsource(
+            DisplayProductionF3Window._set_terminal_segregation_chrome
+        )
+
+        self.assertIn('"segregated" if discarded else "ng"', result_source)
+        self.assertIn("force_terminal_segregated=bool(discarded)", result_source)
+        self.assertIn("PLACA SEGREGADA", result_source)
+        self.assertIn('status = "SEGREGADO"', cards_source)
+        self.assertIn("self.COLOR_NG", cards_source)
+        self.assertIn("force_terminal_segregated=", sequence_source)
+        self.assertIn("self.DISPLAY_READOUT_NG", chrome_source)
+
+    def test_mascaras_nao_sao_forcadas_para_vermelho_pela_segregacao(self):
+        result_source = inspect.getsource(DisplayProductionF3Window.show_plate_result)
+        self.assertNotIn("live_visual_classifications", result_source)
+        self.assertNotIn("failed_mask_ids", result_source)
+
     def test_desktop_instala_segregar_antes_de_construir_janela_f3(self):
         source = inspect.getsource(DesktopProductionApp.__init__)
         self.assertIn("instalar_acao_segregar_placa_display_f3()", source)
