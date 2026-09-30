@@ -22,6 +22,7 @@ from src.platform.display_f3_cycle_rearm_release_fix import (
 F3_FINAL_REARM_GUARD_SOURCE = "f3_final_terminal_rearm_guard"
 F3_REARM_PHASE_WAIT_EMPTY = "waiting_empty"
 F3_REARM_PHASE_WAIT_NEW_BOARD = "waiting_new_board"
+F3_SEGREGATION_TERMINAL_COLOR = "#FCA5A5"
 
 
 def fase_rearme_terminal_f3(app) -> str:
@@ -32,7 +33,12 @@ def fase_rearme_terminal_f3(app) -> str:
     return ""
 
 
-def estado_visivel_rearme_terminal_f3(state: dict | None, phase: str) -> dict:
+def estado_visivel_rearme_terminal_f3(
+    state: dict | None,
+    phase: str,
+    *,
+    segregated: bool = False,
+) -> dict:
     """Torna explícito que reconhecer H1 não significa poder avançar o ciclo."""
     result = dict(state or {})
     result["rearm_underlying_kind"] = str(result.get("kind") or "unknown")
@@ -50,10 +56,15 @@ def estado_visivel_rearme_terminal_f3(state: dict | None, phase: str) -> dict:
         result["cycle_rearmed_waiting_new_board"] = True
         result["final_rearm_reason"] = "aguardando_nova_placa"
     else:
-        result["text"] = "SEGREGAÇÃO/RESULTADO CONCLUÍDO • RETIRE A PLACA DO SUPORTE"
+        if bool(segregated):
+            result["text"] = "PLACA SEGREGADA • RETIRE A PLACA DO SUPORTE"
+            result["color"] = F3_SEGREGATION_TERMINAL_COLOR
+            result["final_rearm_reason"] = "segregacao_aguardando_suporte_vazio"
+        else:
+            result["text"] = "RESULTADO CONCLUÍDO • RETIRE A PLACA DO SUPORTE"
+            result["final_rearm_reason"] = "aguardando_suporte_vazio"
         result["cycle_rearm_waiting"] = True
         result["cycle_rearmed_waiting_new_board"] = False
-        result["final_rearm_reason"] = "aguardando_suporte_vazio"
     return result
 
 
@@ -127,7 +138,18 @@ def _atualizar_rearme_terminal_f3(self) -> str:
                 except Exception:
                     pass
 
-        state = estado_visivel_rearme_terminal_f3(state, phase_after)
+        state = estado_visivel_rearme_terminal_f3(
+            state,
+            phase_after,
+            segregated=bool(
+                phase_after == F3_REARM_PHASE_WAIT_EMPTY
+                and getattr(
+                    window,
+                    "_display_terminal_result_kind",
+                    "",
+                ) == "segregated"
+            ),
+        )
         _publicar_estado_rearme(self, state)
     else:
         # O builder acabou de confirmar a nova placa. So agora a UI volta ao
@@ -189,9 +211,25 @@ def instalar_guard_rearme_terminal_final_display_f3() -> None:
                     "#FDE68A",
                 )
             else:
+                window = getattr(self, "display_f3_window", None)
+                segregated = bool(
+                    getattr(
+                        window,
+                        "_display_terminal_result_kind",
+                        "",
+                    ) == "segregated"
+                )
                 self._display_auto_set_preview_status(
-                    "AUTO • ciclo encerrado • RETIRE A PLACA DO SUPORTE",
-                    "#FDE68A",
+                    (
+                        "AUTO • PLACA SEGREGADA • RETIRE A PLACA DO SUPORTE"
+                        if segregated
+                        else "AUTO • ciclo encerrado • RETIRE A PLACA DO SUPORTE"
+                    ),
+                    (
+                        F3_SEGREGATION_TERMINAL_COLOR
+                        if segregated
+                        else "#FDE68A"
+                    ),
                 )
         except Exception:
             pass
