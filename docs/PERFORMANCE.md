@@ -116,6 +116,13 @@ Portanto, se adapters históricos consultarem o estado mais de uma vez no mesmo
 frame/contexto, o matching pesado não deve ser repetido. O runtime expõe
 `build_count` e `cache_hits` para validar esse contrato.
 
+Desde D-042, em uma cena cuja presença global ainda está ambígua, a observação
+semântica das máscaras pode ser calculada antes da decisão final de presença.
+Isso **não cria um segundo analyzer, worker ou loop**: reutiliza a autoridade de
+energia unificada, seu cache por frame/contexto e o mesmo conjunto de ROIs. Se o
+padrão confirmar ocupação, a mesma evidência já calculada é reutilizada pelo gate
+de energia depois que a `F3PresenceAuthority` confirmar a placa.
+
 A prioridade `HIGH` é usada pelo tracking e pela classificação semântica
 automática do F3. ORB/AKAZE, fallback por template, warp e
 `analyzer.analyze()` saem do thread Tk e retornam resultados versionados. O Tk
