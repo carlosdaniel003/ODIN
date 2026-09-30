@@ -482,16 +482,24 @@ não interfere no F2
 
 ## 5.11 Resultado e rearme do F3
 
-Depois de um resultado terminal, o F3 mantém a apresentação de OK/NG por aproximadamente **2 segundos** e então entra no estado de troca de placa.
+Resultado terminal e rearme físico formam um único contrato visual. Enquanto a
+placa anterior ainda aguarda retirada, a interface não pode voltar a apresentar
+H1 como se um novo ciclo estivesse liberado.
 
-O painel passa a mostrar:
+No caso manual **SEGREGAR PLACA**, botão, tecla **1** e **NumPad 1** usam a mesma
+ação canônica. A primeira segregação válida contabiliza `TOTAL + 1 / NG + 1`,
+desabilita novas segregações e mantém a apresentação terminal **vermelha** até
+`PLACA FORA DO SUPORTE / EMPTY` ser confirmado. O painel principal, os cards
+dos CHECKS, os contornos dos painéis de câmera/visor e os status de rearme
+permanecem vermelhos; os cards mostram `SEGREGADO`.
 
-```text
-PLACA JÁ ANALISADA
-COLOQUE OUTRA PLACA
-```
+Esse vermelho representa o **resultado da placa**. As máscaras sobre a câmera e
+os segmentos do VISOR DO DISPLAY continuam espelhando ON/OFF físico e não são
+artificialmente transformados em falha.
 
-O texto usa duas linhas reais para não ser cortado na interface.
+Depois de EMPTY, a tela passa explicitamente a **COLOQUE OUTRA PLACA** e mantém
+SEGREGAR bloqueado. Somente a confirmação física da nova placa libera H1 e
+reativa o botão/atalho para o próximo ciclo.
 
 O automático não pode iniciar uma nova inspeção apenas porque a máquina de CHECKS voltou ao primeiro item. O rearme físico ocorre em duas etapas:
 
