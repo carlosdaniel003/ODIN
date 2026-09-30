@@ -585,3 +585,71 @@ CHECK posterior energizado
 Repetir o mesmo teste com tracking habilitado e desabilitado para confirmar que a
 autoridade semântica não muda com o modo de tracking.
 
+---
+
+## 30/09/2026 — Tracking ON / câmera, máscaras e visor não espelharam a mesma emissão
+
+**Resultado físico antes da correção:** FAIL visual.
+
+### Cenário
+
+Modo **Rastreamento Automático do Display F3** ativo. Segmentos fisicamente
+acesos eram visíveis na própria imagem da câmera, porém a máscara correspondente
+e/ou o segmento equivalente do VISOR DO DISPLAY não reagiam em verde junto com
+a emissão real.
+
+### Requisito confirmado
+
+A apresentação visual é independente dos gates produtivos:
+
+~~~text
+segmento físico aceso
+→ máscara correspondente verde
+→ segmento correspondente do visor verde
+→ mesma atualização visual
+~~~
+
+Power gate, presença, spatial gate, H1, debounce e decisão OK/NG podem continuar
+bloqueando a produção, mas não podem neutralizar esse espelho visual.
+
+### Causa encontrada no código
+
+D-029 já possuía amostra visual latest-frame, porém ainda existiam fallbacks
+históricos que:
+
+- condicionavam a apresentação ao estado de energia;
+- permitiam ao visor usar classificação assíncrona;
+- entravam em conflito com a intenção de fonte visual única;
+- podiam perder maioria/todos os segmentos ON porque o threshold relativo subia
+  junto com o baseline das máscaras.
+
+### Correção D-032
+
+- câmera/overlay e visor passam a consumir a mesma fonte visual;
+- gate produtivo deixa de participar da cor do modo tracking;
+- classificação semântica deixa de ser fallback do espelho visual;
+- detector latest-frame cobre também maioria/todos ON por cluster gap + evidência
+  absoluta forte;
+- nenhum novo worker, thread, scheduler ou I/O foi adicionado.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+tracking ON + LOCK
+→ segmento acende fisicamente
+→ máscara fica verde no mesmo repaint
+→ visor fica verde no mesmo repaint
+
+segmento apaga
+→ máscara perde verde
+→ visor perde verde
+
+repetir com power gate bloqueado
+→ a cor visual continua reagindo
+→ OK/NG permanece bloqueado normalmente
+~~~
+

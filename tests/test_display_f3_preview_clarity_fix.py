@@ -148,7 +148,7 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
 
         self.assertEqual(0, int(rendered.sum()))
 
-    def test_preview_classico_luminoso_nao_pinta_verde_com_display_off(self):
+    def test_preview_classico_luminoso_pinta_verde_mesmo_com_gate_off(self):
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
         context = {
             "resolution": (100, 100),
@@ -163,7 +163,7 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
                     "angle": 0.0,
                 },
             ),
-            "classifications": {"MASK_001": "on"},
+            "classifications": {"MASK_001": "off"},
             "live_luminous_only": True,
             "luminous_mask_ids": ("MASK_001",),
             "power_confirmed": False,
@@ -177,10 +177,8 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         )
 
         center = rendered[50, 50]
-        self.assertLess(
-            int(center[0]) + int(center[1]) + int(center[2]),
-            20,
-        )
+        self.assertGreater(int(center[1]), int(center[2]))
+        self.assertGreater(int(center[1]), int(center[0]))
 
     def test_guia_de_tracking_sem_energia_e_cinza_neutra(self):
         b, g, r = clarity.F3_PREVIEW_TRACKING_GUIDE_BGR
@@ -325,6 +323,42 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         )
         self.assertGreater(result["dynamic_range"], 100.0)
 
+    def test_amostra_visual_detecta_maioria_acesa_com_contraste_moderado(self):
+        frame = np.full((80, 160, 3), 100, dtype=np.uint8)
+        frame[30:51, 50:71] = 180
+        frame[30:51, 90:111] = 180
+        frame[30:51, 130:151] = 180
+
+        result = clarity.detectar_emissao_visual_ao_vivo_f3(
+            frame,
+            self._live_visual_test_context(),
+        )
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(
+            {"MASK_002", "MASK_003", "MASK_004"},
+            set(result["mask_ids"]),
+        )
+        self.assertGreaterEqual(result["cluster_gap"], 70.0)
+
+    def test_amostra_visual_detecta_todos_acesos_por_evidencia_absoluta(self):
+        frame = np.full((80, 160, 3), 40, dtype=np.uint8)
+        frame[30:51, 10:31] = 185
+        frame[30:51, 50:71] = 185
+        frame[30:51, 90:111] = 185
+        frame[30:51, 130:151] = 185
+
+        result = clarity.detectar_emissao_visual_ao_vivo_f3(
+            frame,
+            self._live_visual_test_context(),
+        )
+
+        self.assertTrue(result["ready"])
+        self.assertEqual(
+            {"MASK_001", "MASK_002", "MASK_003", "MASK_004"},
+            set(result["mask_ids"]),
+        )
+
     def test_amostra_visual_latest_frame_apaga_visor_na_fase_escura(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
 
@@ -388,8 +422,8 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             live_visual_sample_ready=True,
             live_visual_mask_ids=("MASK_003",),
             power_confirmed=False,
-            power_off_confirmed=False,
-            energy_state="unconfirmed",
+            power_off_confirmed=True,
+            energy_state="off",
         )
 
         rendered = clarity.renderizar_preview_claro_display_f3(

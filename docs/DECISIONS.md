@@ -533,6 +533,11 @@ três bancos manuais de imagens angulares.
 Esta decisão remove o caminho de referências angulares da implementação anterior
 e preserva D-020, D-021 e D-022.
 
+**Nota de 30/09/2026:** a cláusula de apresentação que condicionava o verde à
+energia física confirmada foi **substituída por D-032**. Gates de energia
+continuam obrigatórios para decisão produtiva, mas não controlam o espelho visual
+latest-frame da câmera/máscaras/visor.
+
 ---
 
 ## D-024 — Um frame integralmente conforme aprova qualquer CHECK F3
@@ -1198,6 +1203,96 @@ Uma máscara ausente não pode ser escondida pela troca de analyzer feita pelo
 tracking. Em particular, se MASK_024 deveria estar ON e permanece OFF em um
 CHECK posterior com display energizado, a decisão esperada é NG após o debounce
 normal.
+
+---
+
+## D-032 — Câmera, máscaras e visor F3 formam um espelho visual único e independente dos gates
+
+**Status:** Accepted
+
+### Contexto
+
+O requisito operacional do modo **Rastreamento Automático do Display F3** é que o
+operador veja a mesma realidade em três representações simultâneas:
+
+1. segmento físico presente na câmera ao vivo;
+2. máscara/ROI desenhada sobre esse segmento;
+3. segmento correspondente no VISOR DO DISPLAY.
+
+Em 30/09/2026 foi observado novamente que um segmento fisicamente aceso podia
+permanecer sem verde na máscara/visor. O histórico continha duas intenções
+concorrentes: D-029 criou uma amostra visual latest-frame, mas D-023 e fallbacks
+do renderer ainda permitiam condicionar cor ao gate de energia ou a
+classificações assíncronas.
+
+Gate produtivo e espelho visual são responsabilidades diferentes.
+
+### Decisão
+
+Com tracking ativo e geometria válida:
+
+- o frame visível da câmera é a fonte temporal do espelho;
+- uma única amostra luminosa leve do **mesmo frame de preview** produz
+  `live_visual_mask_ids`;
+- câmera/overlay e VISOR DO DISPLAY consomem exatamente esses mesmos IDs no mesmo
+  repaint;
+- se a amostra latest-frame ainda não estiver disponível, ambos usam o mesmo
+  snapshot `luminous_mask_ids`; não é permitido que um use classificação
+  semântica e o outro use tracking;
+- presença, energia, power gate, spatial gate, gate de H1, debounce, OK/NG e
+  avanço de CHECK **não podem apagar, atrasar ou neutralizar a cor do espelho
+  visual**;
+- se um segmento está fisicamente emitindo e a ROI visual o detecta, a máscara
+  sobre a câmera fica verde e o mesmo segmento do visor fica verde;
+- se a emissão desaparece no frame atual, ambos deixam o verde juntos;
+- classificações assíncronas de ON/OFF/POUCA LUZ não são fallback do espelho
+  visual com tracking ativo;
+- essa cor não possui autoridade de produção. Um verde visual não prova energia,
+  conformidade, OK nem autorização para avançar;
+- a única pré-condição geométrica é existir uma ROI/pose válida para saber onde
+  amostrar e desenhar. Isso não é um gate de decisão;
+- o detector visual permanece leve, sem ORB, AKAZE, template matching, acesso a
+  disco, novo scheduler, thread ou worker.
+
+### Robustez da amostra visual
+
+O detector latest-frame não pode depender somente de um percentil global das
+máscaras, porque CHECKS com maioria ou todos os segmentos acesos elevam o
+baseline e podem esconder emissão real.
+
+Por isso a apresentação pode combinar, sem participar da decisão produtiva:
+
+- separação relativa de brilho;
+- maior gap entre grupos de scores das ROIs;
+- evidência absoluta forte dentro do núcleo da própria ROI.
+
+### Consequência
+
+A regra visual obrigatória é:
+
+~~~text
+SEGMENTO FÍSICO ACENDE NO FRAME N
+        ↓
+amostra visual do frame N
+        ↓
+MASK_xxx entra nos IDs visuais
+        ├── máscara sobre a câmera = VERDE
+        └── segmento do visor      = VERDE
+        ↓
+NO MESMO REPAINT
+~~~
+
+e, independentemente disso:
+
+~~~text
+presença / energia / alinhamento produtivo / analyzer / state machine
+        ↓
+decidem se existe autoridade para OK/NG/avanço
+~~~
+
+D-032 **refina D-029** e **substitui somente a antiga restrição visual de D-023**
+que exigia energia confirmada para apresentar verde. As proteções produtivas de
+D-020 a D-031 permanecem válidas.
 
 ---
 ## Como adicionar uma decisão

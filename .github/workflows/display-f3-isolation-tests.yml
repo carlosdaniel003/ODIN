@@ -155,9 +155,13 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_latest_frame_detecta_emissao_sem_worker_semantico \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_detecta_maioria_acesa_com_contraste_moderado \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_detecta_todos_acesos_por_evidencia_absoluta \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_latest_frame_apaga_visor_na_fase_escura \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_e_calculada_uma_vez_por_frame_e_reutilizada \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_luminoso_pinta_verde_mesmo_com_gate_off \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_usa_amostra_do_mesmo_frame_mesmo_antes_do_gate \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_visor_luminoso_ignora_gate_e_classificacao_assincrona \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_camera_e_visor_consumem_a_mesma_amostra_do_latest_frame \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_reference_bank_materializa_akaze_somente_no_fallback \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_configure_indexa_referencias_sem_decodificar_banco_inteiro \

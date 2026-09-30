@@ -142,9 +142,69 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertIn('context.get("live_visual_sample_ready")', source)
         self.assertIn('context.get("live_visual_mask_ids")', source)
         self.assertIn('context.get("luminous_mask_ids")', source)
-        self.assertIn('state = "on" if mask_id in live_visual_ids else "neutral"', source)
-        self.assertIn('classifications.get(mask_id) == "on"', source)
-        self.assertIn("ready", source)
+        self.assertIn("live_display_ids", source)
+        self.assertIn("mask_id in live_display_ids", source)
+
+    def test_visor_luminoso_ignora_gate_e_classificacao_assincrona(self):
+        class _Canvas:
+            def __init__(self):
+                self.polygons = []
+
+            def create_polygon(self, *args, **kwargs):
+                self.polygons.append(dict(kwargs))
+
+            def create_text(self, *args, **kwargs):
+                return None
+
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window.display_readout_canvas = _Canvas()
+        window._draw_fixed_segment_number = lambda *args, **kwargs: None
+        mask_ids = [f"MASK_{index:03d}" for index in range(1, 8)]
+        context = {
+            "classifications": {
+                mask_id: "on"
+                for mask_id in mask_ids
+            },
+            "expected_states": {
+                mask_id: "on"
+                for mask_id in mask_ids
+            },
+            "failed_mask_ids": set(),
+            "validating_mask_ids": set(),
+            "ui_mask_authority": "effective_mask_results_v1",
+            "live_luminous_only": True,
+            "luminous_mask_ids": {"MASK_002"},
+            "live_visual_sample_ready": True,
+            "live_visual_mask_ids": {"MASK_005"},
+            "power_confirmed": False,
+            "power_off_confirmed": True,
+            "energy_state": "off",
+        }
+
+        window._draw_fixed_semantic_digit(
+            0.0,
+            0.0,
+            80.0,
+            140.0,
+            mask_ids,
+            context,
+            ready=False,
+        )
+
+        fills = [
+            item.get("fill")
+            for item in window.display_readout_canvas.polygons
+        ]
+        self.assertEqual(
+            1,
+            fills.count(DisplayProductionF3Window.DISPLAY_READOUT_ACTIVE),
+        )
+        self.assertEqual(
+            6,
+            fills.count(DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE),
+        )
 
     def test_overlay_foi_instalado_somente_na_janela_f3(self):
         self.assertTrue(

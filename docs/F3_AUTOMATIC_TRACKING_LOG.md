@@ -228,6 +228,13 @@ pesado não vira autoridade visual quando o worker termina.
 12. **H1 não deve fabricar NG antes de existir referencial válido.**
     A regra de entrada do primeiro CHECK continua separada da correção D-031.
 
+13. **Câmera + máscara + visor são um único espelho visual com tracking ON.**
+    A cor visual não depende de gate de energia, presença, alinhamento produtivo,
+    OK/NG ou avanço. Segmento físico detectado como emitindo no frame visível
+    precisa ficar verde na máscara e no visor no mesmo repaint. A decisão
+    produtiva continua separada. Esta regra é D-032 e não deve ser revertida
+    para o comportamento antigo de "verde somente após power gate".
+
 ---
 
 ## 6. Linha do tempo das tentativas e aprendizados
@@ -779,6 +786,65 @@ CHECK não pode receber OK
 ~~~
 
 Essa regra vale com tracking ON e OFF.
+
+---
+
+### D-032 — Espelho visual independente dos gates
+
+**Data:** 30/09/2026.  
+**Modo:** tracking ON.  
+**Estado:** correção implementada, pendente de reteste físico.
+
+#### Sintoma observado
+
+Mesmo com o segmento fisicamente aceso na câmera ao vivo, a máscara
+correspondente e o segmento equivalente no VISOR DO DISPLAY podiam não ficar
+verdes.
+
+Isso viola o contrato visual: câmera real, overlay e visor precisam reagir como
+uma única representação do mesmo frame.
+
+#### Conflito encontrado
+
+- D-029 já havia criado uma amostra latest-frame somente visual;
+- o renderer clássico ainda possuía fallback condicionado a power gate;
+- o visor ainda podia cair em classificação assíncrona/ready;
+- D-023 continha a regra antiga de verde somente com energia física confirmada;
+- o detector relativo podia perder CHECKS com maioria/todos os segmentos acesos
+  porque o baseline global subia junto com o grupo ON.
+
+#### Alteração
+
+- D-032 torna explícito que gates produtivos não controlam cor visual;
+- câmera/overlay e visor usam os mesmos `live_visual_mask_ids`;
+- fallback de ambos é o mesmo `luminous_mask_ids`;
+- classificação semântica não entra como fallback visual no tracking ON;
+- detector ganhou separação pelo maior gap de scores e evidência absoluta forte
+  para cobrir maioria/todos ON;
+- nenhuma dessas evidências visuais participa de energia, OK/NG ou sequência.
+
+#### Não repetir
+
+Não voltar a neutralizar segmentos visualmente acesos porque:
+
+- `power_confirmed=false`;
+- `power_off_confirmed=true`;
+- `spatial_alignment_ready=false`;
+- H1 ainda não foi liberado;
+- analyzer ainda não terminou.
+
+Essas condições podem bloquear **decisão**, nunca o espelho visual D-032.
+
+#### Próximo reteste
+
+~~~text
+tracking ON + LOCK
+→ acender/apagar segmentos físicos
+→ confirmar que máscara sobre câmera e visor mudam juntos
+→ repetir enquanto power gate ainda está bloqueado
+→ repetir em CHECK com maioria dos segmentos ON
+→ confirmar que cor visual não altera decisão produtiva
+~~~
 
 ---
 

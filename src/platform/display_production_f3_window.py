@@ -722,26 +722,21 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             if str(item)
         }
 
+        live_display_ids = (
+            live_visual_ids
+            if live_visual_ready
+            else luminous_mask_ids
+        )
+
         for segment_name, mask_id in zip(segment_order, mask_ids):
             if live_luminous_only:
-                # Visor operacional: quando existe amostra do frame visual atual,
-                # ela é a única fonte de animação. Assim o visor muda no MESMO
-                # repaint da câmera, sem esperar o worker semântico.
-                if live_visual_ready:
-                    state = "on" if mask_id in live_visual_ids else "neutral"
-                else:
-                    # Fallback durante aquisição inicial sem amostra visual.
-                    state = (
-                        "on"
-                        if (
-                            ready
-                            and (
-                                mask_id in luminous_mask_ids
-                                or classifications.get(mask_id) == "on"
-                            )
-                        )
-                        else "neutral"
-                    )
+                # D-032: câmera/overlay/visor formam um único espelho visual.
+                # Gate produtivo e classificação assíncrona não controlam cor.
+                state = (
+                    "on"
+                    if mask_id in live_display_ids
+                    else "neutral"
+                )
             else:
                 state = self._display_readout_semantic_state(
                     classifications.get(mask_id),

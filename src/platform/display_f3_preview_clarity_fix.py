@@ -87,6 +87,13 @@ F3_LIVE_VISUAL_MIN_PEAK = 135.0
 F3_LIVE_VISUAL_MIN_DYNAMIC_RANGE = 22.0
 F3_LIVE_VISUAL_THRESHOLD_RANGE_FRACTION = 0.58
 F3_LIVE_VISUAL_MIN_THRESHOLD_MARGIN = 16.0
+# A visualização não é autoridade produtiva. Para espelhar o que o operador vê,
+# também aceitamos uma separação clara entre dois grupos de brilho e uma emissão
+# absoluta forte. Isso cobre CHECKS com maioria (ou todos) os segmentos acesos,
+# cenário em que o percentil-base sozinho sobe e pode esconder luz real.
+F3_LIVE_VISUAL_MIN_CLUSTER_GAP = 12.0
+F3_LIVE_VISUAL_STRONG_SCORE = 150.0
+F3_LIVE_VISUAL_STRONG_PEAK = 175.0
 
 F3_PREVIEW_CLEAR_COLORS = {
     DISPLAY_CHECK_STATE_ON: (94, 197, 34),       # verde #22C55E
@@ -887,27 +894,61 @@ def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
     peak = float(np.max(scores))
     dynamic_range = max(0.0, peak - baseline)
 
-    luminous_ids = ()
-    threshold = baseline + max(
+    adaptive_threshold = baseline + max(
         F3_LIVE_VISUAL_MIN_THRESHOLD_MARGIN,
         dynamic_range * F3_LIVE_VISUAL_THRESHOLD_RANGE_FRACTION,
     )
-    if (
+
+    # Quando a maioria das máscaras está acesa, o percentil 25 pode cair dentro
+    # do próprio grupo ON. O maior gap dos ~28 scores é uma separação barata e
+    # determinística entre o grupo escuro e o grupo luminoso no MESMO frame.
+    sorted_scores = np.sort(scores)
+    cluster_gap = 0.0
+    cluster_threshold = None
+    if sorted_scores.size >= 2:
+        gaps = np.diff(sorted_scores)
+        gap_index = int(np.argmax(gaps))
+        cluster_gap = float(gaps[gap_index])
+        if cluster_gap >= F3_LIVE_VISUAL_MIN_CLUSTER_GAP:
+            cluster_threshold = float(
+                (sorted_scores[gap_index] + sorted_scores[gap_index + 1]) / 2.0
+            )
+
+    threshold = float(adaptive_threshold)
+    if cluster_threshold is not None:
+        threshold = min(threshold, cluster_threshold)
+
+    luminous = set()
+    relative_evidence_ready = bool(
         peak >= F3_LIVE_VISUAL_MIN_PEAK
-        and dynamic_range >= F3_LIVE_VISUAL_MIN_DYNAMIC_RANGE
-    ):
+        and (
+            dynamic_range >= F3_LIVE_VISUAL_MIN_DYNAMIC_RANGE
+            or cluster_threshold is not None
+        )
+    )
+    if relative_evidence_ready:
         minimum_high = max(
             F3_LIVE_VISUAL_MIN_PEAK,
             threshold + 4.0,
         )
-        luminous_ids = tuple(
-            sorted(
-                row["mask_id"]
-                for row in rows
-                if row["score"] >= threshold
-                and row["p_high"] >= minimum_high
-            )
+        luminous.update(
+            row["mask_id"]
+            for row in rows
+            if row["score"] >= threshold
+            and row["p_high"] >= minimum_high
         )
+
+    # Caso todos (ou quase todos) os segmentos estejam realmente acesos, pode
+    # não existir grupo escuro suficiente para formar contraste global. Emissão
+    # forte cobrindo o núcleo da própria ROI continua sendo evidência VISUAL.
+    # Esta regra nunca entra em energia, OK/NG ou avanço de CHECK.
+    luminous.update(
+        row["mask_id"]
+        for row in rows
+        if row["score"] >= F3_LIVE_VISUAL_STRONG_SCORE
+        and row["p_high"] >= F3_LIVE_VISUAL_STRONG_PEAK
+    )
+    luminous_ids = tuple(sorted(str(mask_id) for mask_id in luminous))
 
     return {
         "ready": True,
@@ -918,6 +959,7 @@ def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
         "peak": round(peak, 2),
         "dynamic_range": round(dynamic_range, 2),
         "threshold": round(float(threshold), 2),
+        "cluster_gap": round(cluster_gap, 2),
     }
 
 
@@ -1145,55 +1187,35 @@ def _render_classic_luminous_preview(
     sx: float,
     sy: float,
 ):
-    """Preview operacional simples: forma canônica + verde somente onde há luz."""
+    """Preview operacional: espelho físico visual independente dos gates.
+
+    Com tracking ativo, cor verde é apresentação do que está emitindo luz no
+    frame visível. Presença, energia, alinhamento produtivo, OK/NG e sequência
+    não podem suprimir essa reação visual.
+    """
 
     result = frame.copy()
     masks = tuple(context.get("masks") or ())
-    classifications = {
-        str(key): str(value).strip().lower()
-        for key, value in dict(
-            context.get("effective_classifications")
-            or context.get("classifications")
-            or {}
-        ).items()
-    }
-    energy_gate_declared = any(
-        key in context
-        for key in (
-            "power_confirmed",
-            "power_off_confirmed",
-            "energy_state",
-        )
-    )
-    energy_state = str(context.get("energy_state") or "").strip().lower()
-    semantic_power_ready = bool(
-        context.get("power_confirmed")
-        and not bool(context.get("power_off_confirmed"))
-        and energy_state != "off"
-    )
 
     live_visual_ready = bool(context.get("live_visual_sample_ready"))
-    if live_visual_ready:
-        # A câmera e o visor usam exatamente a MESMA amostra do frame visual
-        # latest-frame-wins. É apresentação somente; não concede autoridade.
-        luminous_ids = {
-            str(mask_id)
-            for mask_id in (context.get("live_visual_mask_ids") or ())
-            if str(mask_id)
-        }
-    else:
-        luminous_ids = set()
-        if not energy_gate_declared or semantic_power_ready:
-            luminous_ids = {
-                str(mask_id)
-                for mask_id in (context.get("luminous_mask_ids") or ())
-                if str(mask_id)
-            }
-            luminous_ids.update(
-                mask_id
-                for mask_id, state in classifications.items()
-                if state == DISPLAY_CHECK_STATE_ON
-            )
+    live_visual_ids = {
+        str(mask_id)
+        for mask_id in (context.get("live_visual_mask_ids") or ())
+        if str(mask_id)
+    }
+    fallback_luminous_ids = {
+        str(mask_id)
+        for mask_id in (context.get("luminous_mask_ids") or ())
+        if str(mask_id)
+    }
+    # Câmera e visor usam a mesma fonte: amostra latest-frame quando pronta;
+    # antes disso, o mesmo snapshot luminoso do tracking. Nenhum gate produtivo
+    # participa desta escolha e classificação semântica não entra como fallback.
+    luminous_ids = (
+        live_visual_ids
+        if live_visual_ready
+        else fallback_luminous_ids
+    )
 
     board_points = context.get("board_points") or ()
     if len(board_points) >= 3:
