@@ -209,6 +209,10 @@ Contratos atuais:
   provar conformidade; enquanto o encaixe fino dos segmentos não estiver pronto,
   a autoridade de energia mantém OK/NG e avanço de CHECK bloqueados;
 - analyzer produtivo possui uma única instância/cache por sessão;
+- a autoridade de transição física entre CHECKS aceita duas formas de prova:
+  identificação física independente do destino ou, conforme D-043, análise
+  canônica 100% conforme do CHECK atual quando seu padrão ON/OFF difere do CHECK
+  anterior; 27/28 e padrões idênticos não liberam essa transição;
 - mutações de sequência passam pela facade da state machine;
 - estado físico + presença + energia são calculados uma vez por
   `frame/projeto/CHECK/rearme` e reutilizados pelos adapters históricos;
