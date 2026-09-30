@@ -1133,11 +1133,7 @@ def aplicar_emissao_visual_ao_vivo_f3(
     result["live_visual_mask_ids"] = mask_ids
     result["live_visual_classifications"] = dict(visual_states)
     result["live_visual_frame_token"] = frame_token
-    result["live_visual_sample_source"] = (
-        "latest_preview_frame_core_v+latest_physical_classification"
-        if visual_states
-        else "latest_preview_frame_core_v"
-    )
+    result["live_visual_sample_source"] = "latest_preview_frame_core_v"
     result["live_visual_sample_reason"] = str(sample.get("reason") or "")
     result["live_visual_sample_threshold"] = sample.get("threshold")
     result["live_visual_sample_baseline"] = sample.get("baseline")

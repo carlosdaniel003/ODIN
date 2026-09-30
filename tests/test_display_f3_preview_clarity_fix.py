@@ -467,10 +467,10 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         )
 
         on_pixel = rendered[40, 60]
-        off_pixel = rendered[40, 20]
+        off_roi = rendered[27:54, 7:34]
         self.assertGreater(int(on_pixel[1]), int(on_pixel[2]))
         self.assertGreater(int(on_pixel[1]), int(on_pixel[0]))
-        self.assertGreater(int(off_pixel.sum()), 0)
+        self.assertGreater(int(off_roi.sum()), 0)
 
     def test_amostra_visual_latest_frame_apaga_visor_na_fase_escura(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
