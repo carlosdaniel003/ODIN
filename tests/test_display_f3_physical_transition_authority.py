@@ -372,6 +372,243 @@ class DisplayF3PhysicalTransitionAuthorityTests(unittest.TestCase):
         self.assertFalse(result["confirmed"])
         self.assertEqual("frame_ainda_nao_prefere_check_atual", result["reason"])
 
+    def test_blue_ng_27_de_28_confirma_chegada_por_assinatura_das_mascaras(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=1)
+        h1_states = {
+            "MASK_001": "off",
+            "MASK_004": "off",
+            "MASK_005": "off",
+            "MASK_006": "off",
+            "MASK_007": "off",
+            "MASK_010": "off",
+            "MASK_011": "on",
+            "MASK_012": "on",
+            "MASK_013": "on",
+            "MASK_015": "off",
+            "MASK_019": "off",
+            "MASK_021": "off",
+            "MASK_022": "off",
+            "MASK_023": "off",
+            "MASK_024": "off",
+            "MASK_025": "off",
+            "MASK_026": "off",
+        }
+        blue_states = {
+            mask_id: ("off" if state == "on" else "on")
+            for mask_id, state in h1_states.items()
+        }
+        checks = {
+            "CHECK_001": {
+                "id": "CHECK_001",
+                "name": "H1",
+                "mask_states": h1_states,
+            },
+            "CHECK_002": {
+                "id": "CHECK_002",
+                "name": "BLUE",
+                "mask_states": blue_states,
+            },
+        }
+        app.display_project_repository = SimpleNamespace(
+            carregar_check=lambda _project, check_id: checks.get(check_id)
+        )
+        # Todas as 17 mudanças H1 -> BLUE já chegaram ao destino, exceto
+        # MASK_024, que permaneceu OFF e deve ser tratada depois como NG.
+        details = []
+        for mask_id, expected in blue_states.items():
+            observed = "off" if mask_id == "MASK_024" else expected
+            details.append(
+                {
+                    "mask_id": mask_id,
+                    "classified": observed,
+                    "winner": "powered" if observed == "on" else "off",
+                }
+            )
+        app._display_f3_power_authority_status = {
+            "board_present": True,
+            "energy": {
+                "available": True,
+                "powered_confirmed": True,
+                "off_confirmed": False,
+                "project_name": "CM_500_L",
+                "check_id": "CHECK_002",
+                "frame_token": ("camera", 100),
+                "details": details,
+            },
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "active_mask_count": 28,
+            "matched_mask_count": 27,
+            "failed_mask_ids": ["MASK_024"],
+        }
+
+        with patch.object(
+            authority,
+            "avaliar_transicao_fisica_checks_f3",
+            return_value={
+                "available": True,
+                "current_preferred": False,
+                "reason": "frame_ainda_nao_prefere_check_atual",
+            },
+        ) as visual_transition:
+            result = authority.avaliar_entrada_fisica_check_f3(
+                app,
+                analysis=analysis,
+            )
+
+        self.assertTrue(result["confirmed"])
+        self.assertEqual(
+            authority.F3_CURRENT_CHECK_MASK_SIGNATURE_TRANSITION_SOURCE,
+            result["source"],
+        )
+        signature = result["semantic_transition"]
+        self.assertEqual(16, signature["current_pattern_votes"])
+        self.assertEqual(1, signature["previous_pattern_votes"])
+        self.assertEqual(("MASK_024",), signature["transition_defect_candidate_mask_ids"])
+        visual_transition.assert_not_called()
+
+    def test_blue_ng_nao_confirma_chegada_se_assinatura_ainda_e_h1(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=1)
+        checks = {
+            "CHECK_001": {
+                "id": "CHECK_001",
+                "mask_states": {
+                    "MASK_001": "off",
+                    "MASK_004": "off",
+                    "MASK_011": "on",
+                },
+            },
+            "CHECK_002": {
+                "id": "CHECK_002",
+                "mask_states": {
+                    "MASK_001": "on",
+                    "MASK_004": "on",
+                    "MASK_011": "off",
+                },
+            },
+        }
+        app.display_project_repository = SimpleNamespace(
+            carregar_check=lambda _project, check_id: checks.get(check_id)
+        )
+        app._display_f3_power_authority_status = {
+            "board_present": True,
+            "energy": {
+                "available": True,
+                "powered_confirmed": True,
+                "off_confirmed": False,
+                "project_name": "CM_500_L",
+                "check_id": "CHECK_002",
+                "details": [
+                    {"mask_id": "MASK_001", "classified": "off", "winner": "off"},
+                    {"mask_id": "MASK_004", "classified": "off", "winner": "off"},
+                    {"mask_id": "MASK_011", "classified": "on", "winner": "powered"},
+                ],
+            },
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_002",
+            "active_mask_count": 28,
+            "matched_mask_count": 12,
+        }
+
+        with patch.object(
+            authority,
+            "avaliar_transicao_fisica_checks_f3",
+            return_value={
+                "available": True,
+                "current_preferred": False,
+                "reason": "frame_ainda_nao_prefere_check_atual",
+            },
+        ):
+            result = authority.avaliar_entrada_fisica_check_f3(
+                app,
+                analysis=analysis,
+            )
+
+        self.assertFalse(result["confirmed"])
+        self.assertEqual("frame_ainda_nao_prefere_check_atual", result["reason"])
+
+    def test_result_guard_permite_ng_depois_da_assinatura_confirmar_blue(self):
+        app = _App()
+        app.display_check_runtime = _Runtime(current_index=1)
+        checks = {
+            "CHECK_001": {
+                "id": "CHECK_001",
+                "mask_states": {
+                    "MASK_001": "off",
+                    "MASK_004": "off",
+                    "MASK_011": "on",
+                },
+            },
+            "CHECK_002": {
+                "id": "CHECK_002",
+                "mask_states": {
+                    "MASK_001": "on",
+                    "MASK_004": "on",
+                    "MASK_011": "off",
+                },
+            },
+        }
+        app.display_project_repository = SimpleNamespace(
+            carregar_check=lambda _project, check_id: checks.get(check_id)
+        )
+        app._display_auto_last_analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "CM_500_L",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
+            "active_mask_count": 28,
+            "matched_mask_count": 27,
+            "failed_mask_ids": ["MASK_004"],
+        }
+        app._display_f3_power_authority_status = {
+            "board_present": True,
+            "energy": {
+                "available": True,
+                "powered_confirmed": True,
+                "off_confirmed": False,
+                "project_name": "CM_500_L",
+                "check_id": "CHECK_002",
+                "details": [
+                    {"mask_id": "MASK_001", "classified": "on", "winner": "powered"},
+                    {"mask_id": "MASK_004", "classified": "off", "winner": "off"},
+                    {"mask_id": "MASK_011", "classified": "off", "winner": "off"},
+                ],
+            },
+        }
+
+        with patch.object(
+            authority,
+            "avaliar_transicao_fisica_checks_f3",
+            return_value={
+                "available": True,
+                "current_preferred": False,
+                "reason": "frame_ainda_nao_prefere_check_atual",
+            },
+        ):
+            authority._install_instance_result_guard(app)
+            event = app.registrar_resultado_check_display_f3(False)
+
+        self.assertEqual("plate_ok", event["event"])
+        self.assertEqual([False], app._registered)
+        status = app._display_f3_physical_transition_authority_status
+        self.assertTrue(status["confirmed"])
+        self.assertEqual(
+            authority.F3_CURRENT_CHECK_MASK_SIGNATURE_TRANSITION_SOURCE,
+            status["source"],
+        )
+
     def test_28_de_28_nao_prova_transicao_se_checks_sao_semanticamente_iguais(self):
         app = _App()
         app.display_check_runtime = _Runtime(current_index=1)
