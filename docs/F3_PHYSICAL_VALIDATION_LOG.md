@@ -1349,3 +1349,131 @@ retirar a placa
 → fluxo permanece aguardando nova placa
 ```
 
+---
+
+## 30/09/2026 — Reteste D-042 PASS e BLUE 28/28 bloqueado na transição H1 → BLUE
+
+### Parte 1 — validação física de D-042
+
+**Resultado:** PASS.
+
+O operador confirmou que, com Rastreamento Automático desativado, o H1 passou a
+ser reconhecido corretamente depois da correção D-042 e a sequência avançou para
+BLUE.
+
+Isso valida no equipamento real o contrato:
+
+```text
+H1 correto
+→ padrão semântico confirma presença
+→ energia confirmada
+→ conformidade estrita H1
+→ H1 concluído
+→ BLUE atual
+```
+
+A entrada anterior de D-042 permanece preservada como histórico da falha e da
+correção; este registro é a confirmação física posterior.
+
+### Parte 2 — novo FAIL em BLUE
+
+**Resultado antes da correção:** FAIL.
+
+Cenário:
+
+- Rastreamento Automático: DESATIVADO;
+- H1 já concluído;
+- CHECK lógico atual: BLUE / CHECK_002;
+- BLUE configurado com 18 máscaras ON + 10 OFF;
+- câmera e visor mostravam o padrão BLUE esperado.
+
+Evidência do mesmo snapshot:
+
+- presença: confirmada;
+- energia: confirmada;
+- gate produtivo: liberado;
+- aprendizado semântico de BLUE: `ready=true`, `approved=true`, 28/28;
+- UI: `BLUE DETECTADO • 28/28 CONFORMES • 18 ACESOS • 10 APAGADOS`;
+- mesmo assim o status inferior permaneceu
+  `BLUE BLOQUEADO • aguardando mudança física H1 → BLUE`;
+- sequência: H1 completed / BLUE current;
+- tracking: desativado.
+
+### Causa confirmada
+
+A falha não estava em presença, energia, máscaras ou no analyzer de BLUE.
+
+O bloqueio vinha da camada mais externa de entrada física entre CHECKS,
+`display_f3_physical_transition_authority.py`. Para CHECKS posteriores ao H1,
+essa autoridade ainda exigia identificação independente por contorno/estado
+físico ou preferência entre as fotos do CHECK anterior e do CHECK atual.
+
+Como as fotografias globais permaneciam ambíguas, a comparação H1 → BLUE podia
+falhar mesmo quando o padrão funcional BLUE já estava integralmente identificado
+pelas 28 máscaras. O resultado era uma contradição interna:
+
+```text
+BLUE semanticamente 28/28
++ presença confirmada
++ energia confirmada
++ gate produtivo liberado
+
+mas
+
+transição física H1 → BLUE = não confirmada
+→ registro do CHECK vetado
+```
+
+### Correção D-043
+
+A autoridade existente de transição foi corrigida; não foi criada uma segunda
+autoridade.
+
+Agora, para CHECKS posteriores, a transição também pode ser confirmada quando:
+
+1. o CHECK anterior já está concluído;
+2. a análise canônica pertence ao CHECK atual;
+3. a análise está pronta e 100% conforme;
+4. `matched_mask_count == active_mask_count`;
+5. o padrão ON/OFF do CHECK atual difere do CHECK anterior em pelo menos uma
+   máscara ativa.
+
+A conformidade 100% prova somente que a função de destino já chegou fisicamente.
+Ela não enfraquece D-031 e não transforma análise parcial em autorização.
+
+Proteções mantidas:
+
+- 27/28 não libera a transição;
+- análise de outro CHECK não libera;
+- CHECK anterior não concluído não libera;
+- dois CHECKS com o mesmo padrão ON/OFF não podem provar transição um ao outro;
+- um CHECK defeituoso continua precisando da identificação física independente
+  da chegada antes que NG seja permitido;
+- EMPTY, presença, energia, frescor, alinhamento e rearme mantêm precedência;
+- nenhum timer, worker, scheduler ou thread foi adicionado.
+
+### Estado
+
+**D-042 VALIDADA FISICAMENTE. D-043 IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Próximo reteste esperado
+
+```text
+tracking OFF
+→ H1 correto 28/28
+→ H1 CONCLUÍDO
+→ mudar fisicamente para BLUE
+→ BLUE mostra 18 ON + 10 OFF / 28 de 28
+→ transição H1 → BLUE é confirmada pelo padrão semântico completo
+→ BLUE CONCLUÍDO
+→ sequência avança para USB
+```
+
+Teste negativo de segurança:
+
+```text
+BLUE com qualquer máscara divergente (ex.: 27/28)
+→ NÃO usar D-043
+→ NÃO concluir BLUE por conformidade parcial
+```
+
