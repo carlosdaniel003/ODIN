@@ -1147,8 +1147,10 @@ mantém SEGREGAR bloqueado durante o rearme. Porém:
 - status operacional e status inferior ficam vermelhos e pedem retirada;
 - repaint durante `waiting_empty_rearm` preserva esse estado;
 - EMPTY remove o chrome vermelho e entra em espera por nova placa;
-- máscaras/visor mantêm a classificação física real, sem pintar todos os
-  segmentos de vermelho artificialmente.
+- câmera, contorno, máscaras e VISOR DO DISPLAY recebem vermelho terminal
+  integral enquanto a placa segregada permanece no suporte;
+- o vermelho é apenas apresentação; a classificação física interna permanece
+  intacta para diagnóstico e telemetria.
 
 ### Estado
 
@@ -1162,6 +1164,7 @@ placa no suporte
 → TOTAL +1 / NG +1
 → PLACA SEGREGADA
 → cards SEGREGADO em vermelho
+→ câmera, contorno, máscaras e visor ficam vermelhos
 → bordas/status permanecem vermelhos
 → aguardar vários segundos
 → NÃO voltar a H1 e NÃO perder o vermelho
