@@ -1670,6 +1670,45 @@ ativo durante um ciclo já encerrado e não interpreta uma ação corretamente
 bloqueada como botão/atalho quebrado.
 
 ---
+
+## D-040 — SEGREGAR usa vermelho terminal persistente até EMPTY
+
+**Status:** Accepted
+
+### Contexto
+
+D-039 corrigiu a divergência em que a máquina já estava aguardando retirada,
+mas a tela voltava a H1. O requisito operacional foi refinado: depois de
+**SEGREGAR PLACA**, não basta impedir o retorno a H1; o estado terminal precisa
+permanecer visualmente vermelho enquanto a mesma placa continua no suporte.
+
+### Decisão
+
+D-040 complementa D-039 somente na apresentação:
+
+- uma segregação válida registra o tipo terminal como `segregated`;
+- enquanto `waiting_empty_rearm` estiver ativo, painel de resultado e cards de
+  CHECK permanecem vermelhos;
+- cards usam o texto `SEGREGADO`;
+- bordas do preview, do VISOR DO DISPLAY e do painel de projeto permanecem
+  vermelhas;
+- o status operacional e o status inferior mostram
+  `PLACA SEGREGADA • RETIRE A PLACA DO SUPORTE` em vermelho;
+- repaints e o timer histórico de resultado não podem remover esse vermelho;
+- EMPTY encerra o vermelho terminal e muda para espera por nova placa;
+- a nova placa confirmada libera H1 e reabilita SEGREGAR;
+- máscaras e segmentos do visor continuam representando seu estado físico
+  ON/OFF/POUCA LUZ conforme D-032/D-035; D-040 não falsifica todas as ROIs como
+  defeituosas;
+- nenhuma nova autoridade, thread, scheduler, fila ou timer é criada.
+
+### Consequência
+
+Clique, tecla `1` e NumPad `1` passam a ter feedback visual inequívoco e
+durável: se a placa foi segregada e ainda não saiu do suporte, a tela continua
+vermelha.
+
+---
 ## Como adicionar uma decisão
 
 Use:
