@@ -1923,6 +1923,13 @@ gate de transição física: **o gate permanece; a conformidade estrita 100% pas
 a ser uma evidência física válida do próprio handoff quando existe mudança real
 de padrão**.
 
+### Validação física — 30/09/2026
+
+**PASS.** Com Rastreamento Automático desativado, H1 foi concluído, BLUE atingiu
+conformidade completa e deixou de permanecer bloqueado em `H1 → BLUE`. A
+sequência avançou para USB, confirmando no equipamento real o comportamento
+previsto por D-043.
+
 
 ---
 ## Como adicionar uma decisão
