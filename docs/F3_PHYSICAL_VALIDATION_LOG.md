@@ -1527,3 +1527,109 @@ As proteções permanecem obrigatórias e não foram alteradas pela validação:
 
 **PASS — D-043 VALIDADA FISICAMENTE.**
 
+---
+
+## 30/09/2026 — BLUE NG real: MASK_024 esperada ON permaneceu OFF
+
+**Resultado físico antes da correção:** FAIL de captura de NG.
+
+### Cenário
+
+- Rastreamento Automático: DESATIVADO;
+- H1 já concluído;
+- CHECK lógico atual: BLUE / CHECK_002;
+- BLUE configurado com 18 máscaras ON + 10 OFF;
+- defeito físico intencional/real observado: segmento 24 não acendeu junto com
+  os demais segmentos esperados de BLUE.
+
+### Evidência objetiva do DEBUG
+
+No frame congelado do mesmo clique:
+
+- gate produtivo: BLOQUEADO;
+- motivo: placa não confirmada no suporte;
+- análise bruta produtiva ficou sem autoridade enquanto o gate permaneceu
+  fechado;
+- a evidência física de energia do próprio BLUE estava disponível e dizia:
+  `powered_confirmed=true`, 18 ON esperados, **17 votos powered + 1 voto off**;
+- `MASK_024` estava configurada como ON em BLUE;
+- `MASK_024` foi classificada fisicamente como OFF, `matched=false`, confiança
+  aproximada de 0,845 e `winner_semantic=off`;
+- a análise por aprendizado ON/OFF das fotos dos CHECKS fechou BLUE em **27/28**;
+- nessa análise, a divergência observada era exatamente `MASK_024 expected=on /
+  classified=off`.
+
+### Causa confirmada
+
+A primeira trava era consequência direta do contrato anterior de presença:
+D-042 só promovia presença sem cena global quando algum CHECK configurado
+formava um padrão semântico completo.
+
+Isso funciona para produto BOM, mas é circular para NG:
+
+```text
+BLUE defeituoso
+→ 17 ON corretos + MASK_024 OFF
+→ energia física está confirmada
+→ nenhum CHECK fica 100% conforme
+→ presença semântica não confirma placa
+→ energia perde autoridade produtiva
+→ analyzer não pode registrar NG
+```
+
+Mesmo depois de destravar presença, havia uma segunda proteção a preservar:
+D-043 permitia provar H1 → BLUE semanticamente somente com BLUE 100% conforme.
+Não seria seguro simplesmente transformar qualquer 27/28 em chegada, pois um
+frame ainda em H1 poderia ser reprovado como BLUE antes da mudança física.
+
+### Correção D-044
+
+A correção foi aplicada nos proprietários existentes:
+
+1. `F3PresenceAuthority` agora aceita a votação multi-máscara
+   `powered_confirmed` como prova de **ocupação física** quando nenhum CHECK está
+   completo. Nesse modo ela não inventa identidade de CHECK.
+2. A autoridade de transição H1 → BLUE agora possui uma assinatura semântica
+   adicional para CHECK defeituoso: considera somente máscaras cujo ON/OFF muda
+   entre H1 e BLUE e exige maioria estrita dessas diferenças no padrão BLUE.
+3. A assinatura confirma somente que BLUE chegou; ela não concede OK e não cria
+   NG.
+4. O analyzer estrito e o debounce NG existente continuam decidindo o defeito.
+5. Se a assinatura ainda preferir H1, o NG permanece bloqueado.
+6. EMPTY confirmado continua soberano.
+7. Nenhum timer, worker, scheduler, thread ou autoridade paralela foi criado.
+
+### Proteção contra regressão
+
+Foram adicionados testes para:
+
+- placa energizada com CHECK divergente ainda confirmar presença;
+- emissão insuficiente não promover presença;
+- BLUE 27/28 com assinatura H1 → BLUE predominantemente no destino confirmar a
+  chegada física;
+- assinatura ainda em H1 continuar bloqueando;
+- o guard final permitir registrar `False/NG` somente depois da chegada
+  semântica confirmada.
+
+### Estado
+
+**CORREÇÃO D-044 IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+```text
+tracking OFF
+→ H1 correto conclui
+→ entrar em BLUE
+→ manter MASK_024 fisicamente apagada
+→ presença permanece confirmada
+→ energia permanece confirmada
+→ assinatura H1 → BLUE confirma chegada
+→ analyzer identifica MASK_024 esperada ON / observada OFF
+→ debounce NG existente confirma falha
+→ placa recebe NG terminal
+→ NÃO avançar para USB
+→ TOTAL +1 e NG +1 exatamente uma vez
+→ aguardar retirada/rearme conforme contrato terminal
+```
+
