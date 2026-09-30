@@ -399,6 +399,41 @@ treinamento/referência. Ela ajuda a localizar o mesmo segmento naquela imagem,
 mas não substitui a geometria live canônica da seção **Máscaras** definida em
 D-036.
 
+### Presença quando a fotografia global fica ambígua
+
+D-042 remove um deadlock importante do F3. A fotografia global continua podendo
+confirmar **PLACA** ou **EMPTY**, mas ela não precisa atingir sozinha um score
+absoluto para que o runtime sequer considere a evidência dos segmentos.
+
+Quando a cena global está ambígua, a leitura semântica live das mesmas máscaras
+pode ser calculada como **evidência pré-gate**. Se um estado configurado possui
+todo o seu núcleo esperado ON realmente ON e nenhuma máscara com leitura
+confiante contradiz os estados ON/OFF daquele padrão, a
+`F3PresenceAuthority` pode confirmar que existe placa/display ocupando o suporte.
+
+Essa promoção significa somente **PRESENÇA**. Ela não aprova H1/BLUE/USB/AUX.
+Depois dela, o analyzer estrito ainda precisa cumprir todas as máscaras ativas do
+CHECK atual. Se EMPTY estiver confirmado, EMPTY sempre vence qualquer evidência
+de segmentos.
+
+Assim, o fluxo deixa de formar o ciclo impossível:
+
+```text
+presença global ambígua
+→ não calcula/aceita energia das máscaras
+→ máscaras corretas ficam sem autoridade
+→ presença nunca é destravada
+```
+
+e passa a ser:
+
+```text
+cena global + observação semântica das máscaras
+→ F3PresenceAuthority decide PLACA x EMPTY
+→ energia produtiva recebe presença
+→ analyzer estrito decide o CHECK
+```
+
 ## 5.4 Separação entre estado físico e julgamento das máscaras
 
 Uma regra central do F3 atual é que **presença física e análise de máscara são informações diferentes**.
