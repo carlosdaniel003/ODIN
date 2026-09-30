@@ -28,6 +28,7 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
     mascaras_geometria_check_display,
+    mascaras_geometria_runtime_fixa_display,
     normalizar_mascaras_display,
     normalizar_resolucao_display,
 )
@@ -708,7 +709,9 @@ class F3SameMaskReferenceAnalyzer:
         if master_resolution is None:
             return self._not_ready("resolucao_mestra_ausente")
 
-        masks = mascaras_geometria_check_display(project, check)
+        # Frame ao vivo com tracking OFF: somente a seção "Máscaras".
+        # Overrides de CHECK ficam restritos às fotos de treinamento.
+        masks = mascaras_geometria_runtime_fixa_display(project)
         states = (
             check.get("mask_states", {})
             if isinstance(check.get("mask_states"), dict)

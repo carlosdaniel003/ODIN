@@ -799,6 +799,72 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             ),
         )
 
+    def test_tracking_off_geometria_live_vem_somente_da_secao_mascaras(self):
+        project = {
+            "name": "P1",
+            "master_resolution": {"width": 160, "height": 80},
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 30,
+                    "cy": 40,
+                    "radius": 8,
+                }
+            ],
+            "checks": [
+                {
+                    "id": "CHECK_001",
+                    "name": "H1",
+                    "mask_states": {"MASK_001": "on"},
+                    "mask_overrides_reference": {
+                        "MASK_001": {
+                            "id": "MASK_001",
+                            "type": "circle",
+                            "cx": 120,
+                            "cy": 40,
+                            "radius": 12,
+                        }
+                    },
+                }
+            ],
+        }
+
+        class _Repository:
+            def obter_projeto_ativo(self):
+                return "P1"
+
+            def carregar_projeto(self, _name):
+                return project
+
+        class _Runtime:
+            def snapshot(self):
+                return {"current_check": {"id": "CHECK_001"}}
+
+        app = SimpleNamespace(
+            display_project_repository=_Repository(),
+            display_check_runtime=_Runtime(),
+            _display_f3_object_tracking_enabled=False,
+            _display_f3_tracking_live_geometry=None,
+        )
+        window = SimpleNamespace(
+            _display_f3_clear_preview_project_key=None,
+            _display_f3_clear_preview_project_context=None,
+        )
+
+        with patch.object(
+            clarity.overlay_module,
+            "_app_from_window",
+            return_value=app,
+        ):
+            context = clarity._project_preview_context(window, 0)
+
+        self.assertIsNotNone(context)
+        self.assertFalse(context["tracking_active"])
+        self.assertEqual(1, len(context["masks"]))
+        self.assertEqual(30, int(context["masks"][0]["cx"]))
+        self.assertNotEqual(120, int(context["masks"][0]["cx"]))
+
     def test_tracking_off_usa_todas_as_mascaras_no_espelho_visual(self):
         source = inspect.getsource(clarity._project_preview_context)
         fixed_pos = source.index("# Modo legado/desligado")

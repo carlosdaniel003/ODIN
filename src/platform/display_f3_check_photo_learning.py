@@ -6,14 +6,17 @@ Cada CHECK já possui tudo o que o analisador precisa para saber como aquele
 estado deve parecer fisicamente:
 
 * uma foto capturada em ``REFERÊNCIA VISUAL / PRESENÇA``;
-* as máscaras persistidas do Projeto Display;
+* as máscaras canônicas persistidas na seção "Máscaras";
+* geometrias locais de CHECK/referência, usadas apenas sobre a foto de treino;
 * ``mask_states`` dizendo, para cada máscara, se naquele CHECK ela é ACESA,
   APAGADA ou IGNORADA.
 
-Esta camada transforma esse conjunto no aprendizado produtivo final do F3. A
-mesma máscara do frame ao vivo é comparada com a mesma máscara da foto daquele
-CHECK. O bloco legado ``REFERÊNCIAS / APRENDIZADO`` (amostras manuais globais de
-ACESO/APAGADO/POUCA LUZ) não é consultado por esta autoridade e deixa de ser
+Esta camada transforma esse conjunto no aprendizado produtivo final do F3.
+Com tracking OFF, a máscara do frame ao vivo usa sempre posição, tamanho e
+formato da seção "Máscaras". A geometria desenhada no CHECK pertence somente à
+foto daquele CHECK e serve para extrair o treinamento da mesma identidade de
+máscara. O bloco legado ``REFERÊNCIAS / APRENDIZADO`` (amostras manuais globais
+de ACESO/APAGADO/POUCA LUZ) não é consultado por esta autoridade e deixa de ser
 exibido na configuração do Projeto Display.
 
 A classe deriva do gabarito exato já existente, preservando a comparação por

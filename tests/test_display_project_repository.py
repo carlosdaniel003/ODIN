@@ -8,11 +8,67 @@ from pathlib import Path
 from src.platform.display_project_repository import (
     DISPLAY_PROJECT_SCHEMA_VERSION,
     DisplayProjectRepository,
+    mascaras_geometria_check_display,
+    mascaras_geometria_runtime_fixa_display,
     normalizar_mascaras_display,
 )
 
 
 class DisplayProjectRepositoryTests(unittest.TestCase):
+    def test_runtime_fixo_usa_somente_mascaras_canonicas_do_projeto(self):
+        project = {
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 30,
+                    "cy": 40,
+                    "radius": 10,
+                },
+                {
+                    "id": "MASK_002",
+                    "type": "polygon",
+                    "points": [[70, 30], [90, 30], [90, 50], [70, 50]],
+                },
+            ]
+        }
+        check = {
+            "mask_overrides_reference": {
+                "MASK_001": {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 105,
+                    "cy": 65,
+                    "radius": 14,
+                },
+                "MASK_002": {
+                    "id": "MASK_002",
+                    "type": "polygon",
+                    "points": [[10, 10], [35, 10], [35, 35], [10, 35]],
+                },
+            }
+        }
+
+        runtime_masks = mascaras_geometria_runtime_fixa_display(project)
+        reference_masks = mascaras_geometria_check_display(project, check)
+
+        self.assertEqual(project["masks"], runtime_masks)
+        self.assertEqual(30, runtime_masks[0]["cx"])
+        self.assertEqual("polygon", runtime_masks[1]["type"])
+        self.assertNotEqual(
+            runtime_masks[0]["cx"],
+            reference_masks[0]["cx"],
+        )
+        self.assertNotEqual(
+            runtime_masks[1]["points"],
+            reference_masks[1]["points"],
+        )
+
+        # O helper devolve cópia: edição de runtime nunca pode reescrever o
+        # cadastro canônico por referência compartilhada.
+        runtime_masks[0]["cx"] = 999
+        self.assertEqual(30, project["masks"][0]["cx"])
+
     def test_round_trip_reabre_projeto_resolucao_e_mascaras_exatamente_iguais(self):
         masks = [
             {

@@ -255,10 +255,12 @@ def sincronizar_formato_mascara_display(
 ) -> dict:
     """Mantém o FORMATO canônico e reaproveita apenas a pose local.
 
-    A máscara desenhada em "Desenhar placa e máscaras" é a autoridade do formato.
-    CHECKS/rastreamento podem manter posição, escala e rotação próprias, mas um
-    triângulo continua triângulo, um segmento continua segmento e um círculo
-    continua círculo.
+    A máscara desenhada em "Máscaras" é a autoridade canônica. Geometrias de
+    CHECK/referência podem manter pose local apenas sobre a própria foto de
+    treinamento. Elas nunca substituem a geometria fixa da câmera ao vivo com
+    tracking OFF. Com tracking ON, a máscara canônica é projetada dinamicamente
+    pelo tracker. Um triângulo continua triângulo, um segmento continua segmento
+    e um círculo continua círculo.
     """
     base = converter_mascara_legada_para_editor(deepcopy(mascara_base or {}))
     local = converter_mascara_legada_para_editor(

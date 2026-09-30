@@ -46,7 +46,7 @@ from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LOW_LIGH
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
-    mascaras_geometria_check_display,
+    mascaras_geometria_runtime_fixa_display,
     normalizar_resolucao_display,
 )
 from src.platform.display_visual_rotation import (
@@ -348,11 +348,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         cached = getattr(window, "_display_f3_clear_preview_project_context", None)
         return deepcopy(cached) if isinstance(cached, dict) else None
 
-    effective_masks = [
-        deepcopy(mask)
-        for mask in mascaras_geometria_check_display(project, check)
-        if isinstance(mask, dict)
-    ]
+    effective_masks = mascaras_geometria_runtime_fixa_display(project)
 
     try:
         _, visual_resolution, visual_masks = preparar_check_visual_display(

@@ -8,7 +8,7 @@ import numpy as np
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
-    mascaras_geometria_check_display,
+    mascaras_geometria_runtime_fixa_display,
     normalizar_resolucao_display,
 )
 from src.platform.display_visual_rotation import (
@@ -256,7 +256,7 @@ def _overlay_context(window, visual_rotation: int):
             if isinstance(check.get("mask_states"), dict)
             else {}
         )
-        effective_masks = mascaras_geometria_check_display(project, check)
+        effective_masks = mascaras_geometria_runtime_fixa_display(project)
         active_masks = [
             deepcopy(mask)
             for mask in effective_masks
@@ -385,7 +385,7 @@ def montar_contexto_overlay_snapshot_display_f3(
         if isinstance(check.get("mask_states"), dict)
         else {}
     )
-    effective_masks = mascaras_geometria_check_display(project, check)
+    effective_masks = mascaras_geometria_runtime_fixa_display(project)
     active_masks = [
         deepcopy(mask)
         for mask in effective_masks

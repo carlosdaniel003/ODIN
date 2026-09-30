@@ -4,6 +4,7 @@ import inspect
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -237,6 +238,109 @@ class DisplayF3SameMaskReferenceFixTests(unittest.TestCase):
             self.assertEqual(2, blue["matched_mask_count"])
             self.assertEqual(F3_CHECK_PHOTO_LEARNING_SOURCE, blue["reference_authority"])
             self.assertEqual(2, blue["same_mask_reference_used_count"])
+
+    def test_tracking_off_live_ignora_geometria_local_do_check(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repository, _masks, checks = _project_with_two_masks(root)
+            check_id = str(checks[0]["id"])
+            self.assertTrue(
+                repository.salvar_estados_check(
+                    "DISPLAY A",
+                    check_id,
+                    {"MASK_001": "on", "MASK_002": "off"},
+                )
+            )
+            self.assertTrue(
+                repository.salvar_geometria_check(
+                    "DISPLAY A",
+                    check_id,
+                    [],
+                    {
+                        "MASK_001": {
+                            "id": "MASK_001",
+                            "type": "circle",
+                            "cx": 105,
+                            "cy": 40,
+                            "radius": 10,
+                        }
+                    },
+                )
+            )
+            configured = repository.carregar_check("DISPLAY A", check_id)
+            self.assertEqual(
+                105,
+                int(
+                    configured["mask_overrides_reference"]["MASK_001"]["cx"]
+                ),
+            )
+
+            analyzer = F3SameMaskReferenceAnalyzer(repository)
+            learning = {
+                "by_mask": {
+                    "MASK_001": {
+                        "on": [_features(220)],
+                        "off": [_features(35)],
+                        "sources": {
+                            "on": [{"check_id": check_id}],
+                            "off": [{"check_id": "CHECK_002"}],
+                        },
+                    },
+                    "MASK_002": {
+                        "on": [_features(220)],
+                        "off": [_features(35)],
+                        "sources": {
+                            "on": [{"check_id": "CHECK_002"}],
+                            "off": [{"check_id": check_id}],
+                        },
+                    },
+                },
+                "by_state": {
+                    "on": [_features(220), _features(220)],
+                    "off": [_features(35), _features(35)],
+                },
+                "state_sources": {
+                    "on": [{"check_id": check_id}, {"check_id": "CHECK_002"}],
+                    "off": [{"check_id": check_id}, {"check_id": "CHECK_002"}],
+                },
+                "photo_count": 2,
+                "sample_count": 4,
+                "board_off_reference_configured": False,
+                "board_off_sample_count": 0,
+            }
+            live_frame = _frame(220, 35)
+
+            with patch.object(
+                analyzer,
+                "_check_photo_learning",
+                return_value=learning,
+            ), patch.object(
+                same_mask_module,
+                "preparar_check_visual_display",
+                wraps=same_mask_module.preparar_check_visual_display,
+            ) as prepare:
+                analyzer.analyze(
+                    live_frame,
+                    "DISPLAY A",
+                    check_id,
+                    0,
+                )
+
+            self.assertTrue(prepare.called)
+            live_masks = prepare.call_args_list[-1].args[2]
+            live_by_id = {
+                str(mask["id"]): mask
+                for mask in live_masks
+                if isinstance(mask, dict)
+            }
+            self.assertEqual(30, int(live_by_id["MASK_001"]["cx"]))
+            self.assertEqual(90, int(live_by_id["MASK_002"]["cx"]))
+            self.assertNotEqual(
+                int(
+                    configured["mask_overrides_reference"]["MASK_001"]["cx"]
+                ),
+                int(live_by_id["MASK_001"]["cx"]),
+            )
 
     def test_board_off_completa_par_local_para_mascara_sempre_acesa(self):
         with tempfile.TemporaryDirectory() as temp:

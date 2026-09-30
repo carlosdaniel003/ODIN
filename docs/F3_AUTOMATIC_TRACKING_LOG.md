@@ -1322,3 +1322,58 @@ Próximo reteste:
 - OFF deve ficar verde escuro;
 - apagar/acender um segmento e verificar reação no frame atual.
 
+---
+
+## 30/09/2026 — D-036 separa máscara live fixa de máscara de referência
+
+Modo:
+- tracking OFF como foco atual;
+- contrato também define a origem canônica do tracking ON.
+
+Cenário:
+- seção **Máscaras** do F3;
+- geometrias locais existentes em CHECKS e referências visuais;
+- operador pode mover, redimensionar ou trocar o formato da máscara.
+
+Comportamento esperado:
+- tracking OFF: câmera usa exatamente a geometria da seção **Máscaras**;
+- CHECK/referência: geometria local serve somente para treinamento sobre a foto;
+- mudar uma referência nunca desloca a ROI live;
+- mudar **Máscaras** muda a ROI live.
+
+Causa arquitetural encontrada:
+- `mascaras_geometria_check_display()` era usado tanto para foto de referência
+  quanto por alguns consumidores do frame ao vivo;
+- isso misturava duas responsabilidades.
+
+Tentativa:
+- introduzir fonte explícita de geometria fixa do runtime;
+- migrar preview, overlay, analyzer live e assinatura 4x7 para essa fonte;
+- manter o helper de CHECK exclusivamente para referência/treinamento;
+- preservar tracking ON como projeção da máscara canônica.
+
+Resultado:
+- IMPLEMENTADO — PENDENTE DE RETESTE FÍSICO.
+
+Decisão/ligação:
+- D-036.
+
+Lição:
+- identidade da máscara e pose da foto de treinamento não são a mesma coisa;
+- CHECK pode ensinar o estado óptico da mesma MASK_xxx sem possuir autoridade
+  para mover essa MASK_xxx na câmera ao vivo.
+
+Não repetir:
+- não usar `mask_overrides_reference` como geometria do frame atual com
+  tracking OFF;
+- não copiar geometria de referência para a seção **Máscaras** automaticamente;
+- não criar uma segunda coleção de ROIs produtivas por CHECK.
+
+Próximo reteste:
+- tracking OFF;
+- mover uma máscara somente em **Máscaras** e confirmar movimento na câmera;
+- mover a mesma máscara somente na referência do CHECK e confirmar que a câmera
+  NÃO muda;
+- repetir trocando formato e tamanho;
+- confirmar que o treinamento do CHECK continua usando sua geometria local.
+

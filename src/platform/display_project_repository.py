@@ -170,23 +170,39 @@ def normalizar_mascaras_display(mascaras) -> list[dict]:
     return resultado
 
 
-def mascaras_geometria_check_display(
+def mascaras_geometria_runtime_fixa_display(
     project: dict | None,
-    check: dict | None,
 ) -> list[dict]:
-    """Resolve a geometria efetiva das máscaras para um CHECK.
+    """Geometria canônica do runtime F3 quando o tracking está desligado.
 
-    As máscaras definidas em "Editar máscaras visualmente" continuam sendo a
-    base canônica do Projeto Display. Um CHECK pode guardar somente correções
-    locais por id; IDs sem correção continuam usando a máscara canônica.
+    A seção "Máscaras" do Projeto Display é a única autoridade de posição,
+    tamanho e formato sobre a câmera ao vivo nesse modo. Geometrias salvas
+    dentro de CHECKS/referências pertencem somente à foto de referência e nunca
+    substituem estas ROIs fixas no frame atual.
     """
     if not isinstance(project, dict):
         return []
-    base = [
+    return [
         deepcopy(mask)
         for mask in (project.get("masks", []) or [])
         if isinstance(mask, dict)
     ]
+
+
+def mascaras_geometria_check_display(
+    project: dict | None,
+    check: dict | None,
+) -> list[dict]:
+    """Resolve geometria LOCAL da foto/referência de um CHECK.
+
+    A máscara definida em "Máscaras" continua sendo a identidade canônica. Os
+    overrides do CHECK existem somente para localizar a mesma máscara dentro da
+    foto usada como referência/treinamento. Eles não são geometria do runtime
+    ao vivo quando o Rastreamento Automático está desativado.
+    """
+    base = mascaras_geometria_runtime_fixa_display(project)
+    if not base:
+        return []
     overrides = (
         check.get("mask_overrides_reference", {})
         if isinstance(check, dict)

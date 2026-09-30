@@ -197,6 +197,10 @@ jobs:
             tests.test_roi_geometry_f2_f3_consistency \
             tests.test_freeform_segment_roi \
             tests.test_freeform_project_roundtrip \
+            tests.test_display_project_repository.DisplayProjectRepositoryTests.test_runtime_fixo_usa_somente_mascaras_canonicas_do_projeto \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_tracking_off_geometria_live_vem_somente_da_secao_mascaras \
+            tests.test_display_f3_same_mask_reference_fix.DisplayF3SameMaskReferenceFixTests.test_tracking_off_live_ignora_geometria_local_do_check \
+            tests.test_display_f3_exact_check_template.DisplayF3ExactCheckTemplateTests.test_tracking_off_separa_geometria_live_da_geometria_da_referencia \
             -v
 
       - name: Run strict mask and segregation regressions

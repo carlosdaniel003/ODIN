@@ -301,6 +301,20 @@ H1 -> BLUE -> AUX -> USB
 
 Essa lista é apenas o padrão inicial. A sequência é configurável e o runtime trabalha pelos IDs/ordem dos CHECKS, permitindo outros nomes e novos CHECKS.
 
+### Autoridade geométrica das máscaras
+
+Com **Rastreamento Automático do Display desativado**, a seção **Máscaras** do
+Projeto Display é a única autoridade de posição, tamanho e formato das ROIs na
+câmera ao vivo. Se uma máscara for movida, redimensionada ou tiver seu formato
+alterado nessa seção, a geometria fixa usada pela produção acompanha essa
+alteração.
+
+Geometrias desenhadas dentro de CHECKS ou referências visuais pertencem somente
+à respectiva foto de referência/treinamento. Elas podem localizar a mesma
+`MASK_xxx` em outra posição na foto, mas não deslocam a máscara produtiva da
+câmera. Com tracking ativado, o tracker projeta a geometria canônica da seção
+**Máscaras** para a pose atual da placa.
+
 ## 5.2 Aprendizado semântico do F3
 
 O F3 possui armazenamento de aprendizado próprio em `odin_display_learning.json`.

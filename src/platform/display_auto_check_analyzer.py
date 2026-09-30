@@ -19,7 +19,7 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
-    mascaras_geometria_check_display,
+    mascaras_geometria_runtime_fixa_display,
     normalizar_resolucao_display,
 )
 from src.platform.display_reference_store import (
@@ -332,7 +332,9 @@ class DisplayAutomaticCheckAnalyzer:
         if master_resolution is None:
             return self._not_ready("resolucao_mestra_ausente")
 
-        masks = mascaras_geometria_check_display(project, check)
+        # Tracking OFF: a câmera usa exclusivamente as máscaras
+        # canônicas da seção "Máscaras". Geometria de CHECK é referência.
+        masks = mascaras_geometria_runtime_fixa_display(project)
         states = (
             check.get("mask_states", {})
             if isinstance(check.get("mask_states"), dict)

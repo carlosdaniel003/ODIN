@@ -4,6 +4,7 @@ import inspect
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -66,6 +67,91 @@ class DisplayF3ExactCheckTemplateTests(unittest.TestCase):
         self.assertIn("classification_source", source)
         self.assertIn("intermittent_tolerated", source)
         self.assertIn("avaliar_match_check_display", source)
+
+    def test_tracking_off_separa_geometria_live_da_geometria_da_referencia(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repository, _masks, check_id = _repository(root)
+            self.assertTrue(
+                repository.salvar_geometria_check(
+                    "DISPLAY A",
+                    check_id,
+                    [],
+                    {
+                        "MASK_001": {
+                            "id": "MASK_001",
+                            "type": "circle",
+                            "cx": 105,
+                            "cy": 40,
+                            "radius": 10,
+                        }
+                    },
+                )
+            )
+            analyzer = F3ExactCheckTemplateAnalyzer(repository)
+            seen_reference_masks = {}
+
+            def fake_reference_context(
+                _project_name,
+                _check_id,
+                _project,
+                reference_masks,
+                _rotation,
+            ):
+                seen_reference_masks["masks"] = list(reference_masks)
+                return (
+                    np.zeros((80, 120, 3), dtype=np.uint8),
+                    {
+                        str(mask["id"]): dict(mask)
+                        for mask in reference_masks
+                    },
+                    {},
+                )
+
+            comparison = {
+                "similarity": 1.0,
+                "pixel_similarity": 1.0,
+                "energy_similarity": 1.0,
+                "reference_v_mean": 100.0,
+                "current_v_mean": 100.0,
+            }
+            live_frame = _frame(220, 35)
+            with patch.object(
+                analyzer,
+                "_reference_visual_context",
+                side_effect=fake_reference_context,
+            ), patch.object(
+                exact_module,
+                "preparar_check_visual_display",
+                wraps=exact_module.preparar_check_visual_display,
+            ) as prepare, patch.object(
+                exact_module,
+                "comparar_mascara_com_gabarito_f3",
+                return_value=comparison,
+            ):
+                analyzer.analyze(
+                    live_frame,
+                    "DISPLAY A",
+                    check_id,
+                    0,
+                )
+
+            reference_by_id = {
+                str(mask["id"]): mask
+                for mask in seen_reference_masks["masks"]
+            }
+            live_masks = prepare.call_args_list[-1].args[2]
+            live_by_id = {
+                str(mask["id"]): mask
+                for mask in live_masks
+            }
+
+            self.assertEqual(105, int(reference_by_id["MASK_001"]["cx"]))
+            self.assertEqual(30, int(live_by_id["MASK_001"]["cx"]))
+            self.assertNotEqual(
+                int(reference_by_id["MASK_001"]["cx"]),
+                int(live_by_id["MASK_001"]["cx"]),
+            )
 
     def test_current_check_photo_alone_is_enough_to_approve_same_scene(self):
         with tempfile.TemporaryDirectory() as temp:

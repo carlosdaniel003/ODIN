@@ -18,7 +18,7 @@ from src.platform.display_mask_geometry import (
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
-    mascaras_geometria_check_display,
+    mascaras_geometria_runtime_fixa_display,
 )
 
 
@@ -582,7 +582,7 @@ class DisplayAutomaticCheckF3Mixin:
         if not isinstance(project, dict) or not isinstance(check, dict):
             return analysis
 
-        masks = mascaras_geometria_check_display(project, check)
+        masks = mascaras_geometria_runtime_fixa_display(project)
         slots = mapear_slots_sete_segmentos_display(masks, digit_count=4)
         if len(slots) != 28:
             return analysis

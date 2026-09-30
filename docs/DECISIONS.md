@@ -1483,6 +1483,75 @@ scheduler é criado. Tracking continua definindo geometria, não a existência d
 espelho visual.
 
 
+
+---
+
+## D-036 — Máscaras do projeto são a única geometria live com tracking OFF
+
+**Status:** Accepted
+
+### Contexto
+
+No F3 existem duas geometrias com finalidades diferentes:
+
+1. a seção **Máscaras** do Projeto Display;
+2. geometrias locais desenhadas dentro de CHECKS/referências visuais.
+
+Historicamente, `mascaras_geometria_check_display()` combinava a máscara
+canônica com `mask_overrides_reference` do CHECK e alguns consumidores de
+runtime usavam esse resultado também sobre a câmera ao vivo. Isso permitia que
+uma máscara desenhada apenas para recortar uma foto de treinamento deslocasse ou
+redimensionasse a ROI produtiva quando o Rastreamento Automático estava
+desativado.
+
+### Decisão
+
+Com **Rastreamento Automático desativado**, a única autoridade geométrica sobre o
+frame atual é:
+
+~~~text
+Projeto Display
+→ Máscaras
+→ posição + tamanho + formato
+→ câmera ao vivo
+→ análise produtiva
+→ overlay/visor
+~~~
+
+Logo:
+
+- mover uma máscara em **Máscaras** move a ROI fixa da câmera;
+- redimensionar uma máscara em **Máscaras** redimensiona a ROI fixa da câmera;
+- trocar círculo/segmento/polígono ponto-a-ponto em **Máscaras** troca o formato
+  usado no frame ao vivo;
+- `mask_overrides_reference`, `masks_reference` e geometrias salvas dentro de
+  CHECK/referência visual pertencem somente à respectiva foto de
+  referência/treinamento;
+- uma geometria local de CHECK nunca substitui a geometria live fixa;
+- IDs continuam ligando a máscara canônica aos exemplos de treinamento;
+- `mask_states` continua dizendo ON/OFF/IGNORE por CHECK e não altera posição.
+
+Com **Rastreamento Automático ativado**, a identidade geométrica ainda nasce da
+mesma seção **Máscaras**, mas o tracker projeta essa geometria canônica para a
+pose atual da placa. Referências de CHECK podem auxiliar a localizar/calibrar a
+pose, mas não viram uma segunda máscara produtiva.
+
+### Contrato de implementação
+
+- `mascaras_geometria_runtime_fixa_display(project)` é a fonte canônica para
+  consumidores live sem tracking;
+- `mascaras_geometria_check_display(project, check)` fica restrita à geometria
+  local de foto/referência;
+- apresentação, análise semântica e assinatura 4x7 no modo fixo usam a primeira;
+- construção de dataset/foto de CHECK continua autorizada a usar a segunda.
+
+### Consequência
+
+Editar uma referência visual pode melhorar o treinamento sem deslocar a câmera.
+Editar **Máscaras** muda imediatamente a geometria produtiva fixa no próximo
+contexto/configuração recarregado.
+
+
 ---
 ## Como adicionar uma decisão
 
