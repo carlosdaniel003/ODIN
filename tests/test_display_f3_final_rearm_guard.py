@@ -6,6 +6,7 @@ import unittest
 from src.platform.display_f3_final_rearm_guard import (
     F3_REARM_PHASE_WAIT_EMPTY,
     F3_REARM_PHASE_WAIT_NEW_BOARD,
+    F3_SEGREGATION_TERMINAL_COLOR,
     estado_visivel_rearme_terminal_f3,
     fase_rearme_terminal_f3,
     instalar_guard_rearme_terminal_final_display_f3,
@@ -47,6 +48,25 @@ class DisplayF3FinalRearmGuardTests(unittest.TestCase):
         self.assertEqual(
             "PLACA NO SUPORTE • LIGADA • DISPLAY EM H1",
             result["rearm_underlying_text"],
+        )
+
+    def test_segregacao_terminal_permanece_vermelha_ate_empty(self):
+        result = estado_visivel_rearme_terminal_f3(
+            {
+                "kind": "check",
+                "text": "PLACA NO SUPORTE • LIGADA • H1",
+                "allow_auto": True,
+            },
+            F3_REARM_PHASE_WAIT_EMPTY,
+            segregated=True,
+        )
+        self.assertFalse(result["allow_auto"])
+        self.assertTrue(result["cycle_rearm_waiting"])
+        self.assertEqual(F3_SEGREGATION_TERMINAL_COLOR, result["color"])
+        self.assertIn("PLACA SEGREGADA", result["text"])
+        self.assertEqual(
+            "segregacao_aguardando_suporte_vazio",
+            result["final_rearm_reason"],
         )
 
     def test_estado_apos_empty_exige_nova_placa(self):
