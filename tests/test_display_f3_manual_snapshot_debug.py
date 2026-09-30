@@ -258,6 +258,69 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertIn('"luminous_tracking"', source)
         self.assertIn("_display_f3_luminous_tracking_debug", source)
 
+    def test_debug_captura_telemetria_do_espelho_visual_d032(self):
+        source = inspect.getsource(snapshot_module._runtime_state_at_frame)
+        self.assertIn('"live_visual_mirror"', source)
+        self.assertIn("_display_f3_live_visual_mirror_debug", source)
+
+    def test_relatorio_expoe_etapa_e_ids_do_espelho_visual_d032(self):
+        snapshot = {
+            "source": snapshot_module.F3_MANUAL_SNAPSHOT_SOURCE,
+            "capture": {},
+            "frame": {},
+            "logical_context": {},
+            "project": {},
+            "d025_h1_registration": None,
+            "reference_analysis": [],
+            "physical_analysis": {},
+            "check_configuration": [],
+            "mask_configuration": [],
+            "check_analyses": [],
+            "runtime_at_click": {
+                "live_visual_mirror": {
+                    "hook_active": True,
+                    "tracking_enabled": True,
+                    "stage": "visual_sample_ready",
+                    "render_path": "latest_frame_live_visual",
+                    "geometry_locked": True,
+                    "geometry_mask_count": 28,
+                    "context_ready": True,
+                    "context_mask_count": 28,
+                    "live_visual_sample_ready": True,
+                    "live_visual_sample_reason": "ok",
+                    "live_visual_sampled_mask_count": 28,
+                    "live_visual_mask_ids": (
+                        "MASK_001",
+                        "MASK_002",
+                    ),
+                    "readout_context_ready": True,
+                    "readout_mask_slot_count": 28,
+                    "readout_live_visual_mask_ids": (
+                        "MASK_001",
+                        "MASK_002",
+                    ),
+                    "update_preview_rendered": True,
+                }
+            },
+            "errors": [],
+        }
+
+        report = snapshot_module.montar_relatorio_snapshot_display_f3(
+            snapshot
+        )
+
+        self.assertIn(
+            "[ESPELHO VISUAL LIVE D-032 / CÂMERA + MÁSCARAS + VISOR]",
+            report,
+        )
+        self.assertIn("stage=visual_sample_ready", report)
+        self.assertIn("geometry_masks=28", report)
+        self.assertIn("sampled_masks=28", report)
+        self.assertIn("visual_ids=2", report)
+        self.assertIn("readout_slots=28", report)
+        self.assertIn("readout_visual_ids=2", report)
+        self.assertIn("live_visual_mask_ids=MASK_001,MASK_002", report)
+
     def test_estado_visual_do_debug_herda_energia_e_analise_do_runtime(self):
         visual = {
             "readout_context": {

@@ -163,6 +163,9 @@ jobs:
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_usa_amostra_do_mesmo_frame_mesmo_antes_do_gate \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_visor_luminoso_ignora_gate_e_classificacao_assincrona \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_camera_e_visor_consumem_a_mesma_amostra_do_latest_frame \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_espelho_visual_publica_telemetria_de_cada_estagio_sem_novo_loop \
+            tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_debug_captura_telemetria_do_espelho_visual_d032 \
+            tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_relatorio_expoe_etapa_e_ids_do_espelho_visual_d032 \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_reference_bank_materializa_akaze_somente_no_fallback \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_configure_indexa_referencias_sem_decodificar_banco_inteiro \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_referencia_lazy_materializa_uma_vez_e_fica_em_cache \

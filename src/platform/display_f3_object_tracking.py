@@ -7411,7 +7411,22 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
         previous_window_update = window.update_camera_preview
 
         def tracked_window_update(self_window, frame, visual_rotation: int = 0):
-            if not tracking_enabled(app):
+            tracking_is_enabled = bool(tracking_enabled(app))
+            mirror_debug = {
+                "hook_active": True,
+                "tracking_enabled": tracking_is_enabled,
+                "frame_id": getattr(app, "camera_ultimo_frame_id", None),
+                "visual_rotation": int(visual_rotation or 0) % 360,
+                "stage": "entry",
+                "render_path": "",
+                "error_type": "",
+                "error": "",
+            }
+            app._display_f3_live_visual_mirror_debug = mirror_debug
+
+            if not tracking_is_enabled:
+                mirror_debug["stage"] = "tracking_disabled"
+                mirror_debug["render_path"] = "previous_window_update"
                 return previous_window_update(
                     frame,
                     visual_rotation=visual_rotation,
@@ -7423,10 +7438,19 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             # autoridade visual da câmera ao vivo.
             source = frame
             if not _valid_frame(source):
+                mirror_debug["stage"] = "invalid_frame"
+                mirror_debug["render_path"] = "previous_window_update"
                 return previous_window_update(
                     frame,
                     visual_rotation=visual_rotation,
                 )
+
+            try:
+                mirror_debug["frame_shape"] = tuple(
+                    int(value) for value in source.shape[:3]
+                )
+            except Exception:
+                mirror_debug["frame_shape"] = None
 
             geometry = getattr(
                 app,
@@ -7437,12 +7461,35 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 isinstance(geometry, dict)
                 and geometry.get("locked")
             )
+            mirror_debug.update(
+                {
+                    "geometry_present": isinstance(geometry, dict),
+                    "geometry_locked": locked,
+                    "geometry_check_id": (
+                        str(geometry.get("check_id") or "")
+                        if isinstance(geometry, dict)
+                        else ""
+                    ),
+                    "geometry_mask_count": (
+                        len(tuple(geometry.get("masks") or ()))
+                        if isinstance(geometry, dict)
+                        else 0
+                    ),
+                    "geometry_source_type": (
+                        str(geometry.get("source_type") or "")
+                        if isinstance(geometry, dict)
+                        else ""
+                    ),
+                }
+            )
 
             # Sem LOCK não existem ROIs móveis válidas. Nesse estado de startup,
             # renderize somente o frame real reduzido: não recarregue projeto,
             # máscaras e contexto semântico a cada repaint enquanto o worker
             # ainda procura a placa.
             if not locked:
+                mirror_debug["stage"] = "tracking_not_locked"
+                mirror_debug["render_path"] = "raw_without_moving_rois"
                 try:
                     from src.platform.display_visual_rotation import (
                         preparar_frame_visual_display,
@@ -7461,6 +7508,7 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             else:
                 # Com LOCK, o preview operacional usa a máscara clássica:
                 # geometria canônica móvel e verde somente onde existe luz.
+                mirror_debug["stage"] = "locked_context_build"
                 try:
                     from src.platform.display_f3_preview_clarity_fix import (
                         _effective_phase_mask_ids_for_current_check,
@@ -7485,7 +7533,41 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         self_window,
                         int(visual_rotation or 0) % 360,
                     )
+                    mirror_debug["context_ready"] = isinstance(
+                        semantic_context,
+                        dict,
+                    )
                     if isinstance(semantic_context, dict):
+                        mirror_debug.update(
+                            {
+                                "stage": "visual_sampling",
+                                "project_name": str(
+                                    semantic_context.get("project_name") or ""
+                                ),
+                                "check_id": str(
+                                    semantic_context.get("check_id") or ""
+                                ),
+                                "context_mask_count": len(
+                                    tuple(semantic_context.get("masks") or ())
+                                ),
+                                "readout_mask_id_count": len(
+                                    tuple(
+                                        semantic_context.get(
+                                            "readout_mask_ids"
+                                        )
+                                        or ()
+                                    )
+                                ),
+                                "readout_slot_count": len(
+                                    tuple(
+                                        semantic_context.get(
+                                            "readout_slot_mask_ids"
+                                        )
+                                        or ()
+                                    )
+                                ),
+                            }
+                        )
                         token_fn = getattr(app, "_display_auto_frame_token", None)
                         try:
                             live_frame_token = (
@@ -7501,6 +7583,61 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                             semantic_context,
                             frame_token=live_frame_token,
                             geometry_token=id(geometry),
+                        )
+                        mirror_debug.update(
+                            {
+                                "stage": "visual_sample_ready",
+                                "live_visual_sample_ready": bool(
+                                    isinstance(semantic_context, dict)
+                                    and semantic_context.get(
+                                        "live_visual_sample_ready"
+                                    )
+                                ),
+                                "live_visual_sample_reason": (
+                                    str(
+                                        semantic_context.get(
+                                            "live_visual_sample_reason"
+                                        )
+                                        or ""
+                                    )
+                                    if isinstance(semantic_context, dict)
+                                    else ""
+                                ),
+                                "live_visual_sampled_mask_count": (
+                                    int(
+                                        semantic_context.get(
+                                            "live_visual_sampled_mask_count",
+                                            0,
+                                        )
+                                        or 0
+                                    )
+                                    if isinstance(semantic_context, dict)
+                                    else 0
+                                ),
+                                "live_visual_mask_ids": (
+                                    tuple(
+                                        str(mask_id)
+                                        for mask_id in (
+                                            semantic_context.get(
+                                                "live_visual_mask_ids"
+                                            )
+                                            or ()
+                                        )
+                                        if str(mask_id)
+                                    )
+                                    if isinstance(semantic_context, dict)
+                                    else ()
+                                ),
+                                "live_visual_frame_token": (
+                                    repr(
+                                        semantic_context.get(
+                                            "live_visual_frame_token"
+                                        )
+                                    )
+                                    if isinstance(semantic_context, dict)
+                                    else ""
+                                ),
+                            }
                         )
 
                         classifications, failed_mask_ids = _mask_snapshot_for_current_check(
@@ -7571,27 +7708,98 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                             if isinstance(energy, dict)
                             else ""
                         )
+                        mirror_debug["stage"] = "readout_update"
                         try:
                             self_window.set_display_readout_context(
                                 semantic_context
                             )
-                        except (AttributeError, TypeError):
-                            pass
+                            readout_context = getattr(
+                                self_window,
+                                "_display_readout_context",
+                                None,
+                            )
+                            mirror_debug.update(
+                                {
+                                    "readout_context_ready": isinstance(
+                                        readout_context,
+                                        dict,
+                                    ),
+                                    "readout_live_visual_mask_ids": (
+                                        tuple(
+                                            sorted(
+                                                str(mask_id)
+                                                for mask_id in (
+                                                    readout_context.get(
+                                                        "live_visual_mask_ids"
+                                                    )
+                                                    or ()
+                                                )
+                                                if str(mask_id)
+                                            )
+                                        )
+                                        if isinstance(readout_context, dict)
+                                        else ()
+                                    ),
+                                    "readout_mask_slot_count": (
+                                        len(
+                                            tuple(
+                                                readout_context.get(
+                                                    "mask_slots"
+                                                )
+                                                or ()
+                                            )
+                                        )
+                                        if isinstance(readout_context, dict)
+                                        else 0
+                                    ),
+                                }
+                            )
+                        except Exception as exc:
+                            mirror_debug.update(
+                                {
+                                    "readout_context_ready": False,
+                                    "readout_error_type": type(exc).__name__,
+                                    "readout_error": str(exc)[:240],
+                                }
+                            )
+
+                        mirror_debug["stage"] = "camera_overlay_render"
                         decorated = renderizar_preview_claro_display_f3(
                             visual,
                             semantic_context,
                         )
+                        mirror_debug["stage"] = "rendered_live_mirror"
+                        mirror_debug["render_path"] = (
+                            "latest_frame_live_visual"
+                        )
                     else:
+                        mirror_debug["stage"] = "context_unavailable"
+                        mirror_debug["render_path"] = (
+                            "tracking_geometry_fallback"
+                        )
                         try:
                             self_window.set_display_readout_context(None)
-                        except (AttributeError, TypeError):
-                            pass
+                        except Exception as exc:
+                            mirror_debug.update(
+                                {
+                                    "readout_error_type": type(exc).__name__,
+                                    "readout_error": str(exc)[:240],
+                                }
+                            )
                         decorated = _draw_tracking_geometry_visual(
                             source,
                             geometry,
                             visual_rotation,
                         )
-                except Exception:
+                except Exception as exc:
+                    mirror_debug.update(
+                        {
+                            "stage": "render_exception",
+                            "render_path": "tracking_geometry_fallback",
+                            "error_type": type(exc).__name__,
+                            "error": str(exc)[:240],
+                        }
+                    )
                     decorated = _draw_tracking_geometry_visual(
                         source,
                         geometry,
@@ -7647,7 +7855,12 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             except Exception:
                 pass
             preview_h, preview_w = decorated.shape[:2]
+            mirror_debug["decorated_shape"] = (
+                int(preview_h),
+                int(preview_w),
+            )
             rendered = self_window.update_preview(decorated, leds=())
+            mirror_debug["update_preview_rendered"] = bool(rendered)
             if rendered:
                 try:
                     raw_h, raw_w = source.shape[:2]

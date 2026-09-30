@@ -288,6 +288,22 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("live_frame_token", source)
         self.assertIn("geometry_token=id(geometry)", source)
 
+    def test_espelho_visual_publica_telemetria_de_cada_estagio_sem_novo_loop(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("_display_f3_live_visual_mirror_debug", source)
+        self.assertIn('"tracking_not_locked"', source)
+        self.assertIn('"visual_sampling"', source)
+        self.assertIn('"visual_sample_ready"', source)
+        self.assertIn('"readout_update"', source)
+        self.assertIn('"camera_overlay_render"', source)
+        self.assertIn('"render_exception"', source)
+        self.assertIn('"live_visual_sample_reason"', source)
+        self.assertIn('"readout_error_type"', source)
+        self.assertNotIn("threading.Thread", source)
+        self.assertNotIn("after(", source)
+
     def test_live_preview_never_prefers_worker_raw_frame(self):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3

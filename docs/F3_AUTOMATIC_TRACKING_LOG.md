@@ -1128,3 +1128,62 @@ Próximo reteste:
 
 Quando uma tentativa falhar, ela permanece no arquivo. Quando uma tentativa
 posterior resolver, acrescentar nova entrada em vez de reescrever a história.
+
+---
+
+## 30/09/2026 — Reteste D-032 falhou; ativada regra das duas tentativas
+
+Modo:
+- tracking ON
+
+Cenário:
+- câmera F3 ao vivo;
+- máscara móvel sobre o display;
+- VISOR DO DISPLAY;
+- D-032 já aplicada.
+
+Sintoma/evidência:
+- segmentos físicos continuam sem produzir a reação visual esperada nas máscaras;
+- o visor também não acompanha;
+- os testes automatizados dos helpers haviam passado, portanto eles não provavam
+  que o caminho real de runtime estava executando até o fim.
+
+Hipótese atual:
+- o defeito pode estar antes do detector visual ou em um fallback silencioso do
+  `tracked_window_update`;
+- o bloco de apresentação possuía um `except Exception` amplo que podia cair
+  para geometria neutra sem deixar evidência da etapa que falhou;
+- também é necessário separar objetivamente ausência de LOCK, contexto ausente,
+  amostra visual vazia e falha do readout.
+
+Tentativa:
+- não alterar novamente threshold ou algoritmo visual;
+- adicionar telemetria por estágio ao caminho real de repaint;
+- anexar a telemetria ao DEBUG TÉCNICO capturado por ANALISAR.
+
+Resultado:
+- PENDENTE DE RETESTE / COLETA DE DEBUG
+
+Decisão/ligação:
+- D-032;
+- regra das duas tentativas de AGENTS.md/ENGINEERING_RULES.md.
+
+Lição:
+- teste isolado de detector + inspeção de código não garante que o renderer final
+  da instância chegou a consumir a amostra no equipamento;
+- exceções silenciosas em apresentação impedem diagnóstico confiável;
+- antes de nova correção, medir o caminho real.
+
+Não repetir:
+- não ajustar novamente thresholds do detector;
+- não adicionar outro renderer/wrapper;
+- não criar timer/thread paralelo para "forçar atualização";
+- não presumir que `live_visual_mask_ids` chegou ao visor sem telemetria.
+
+Próximo reteste:
+- reproduzir a falha;
+- clicar ANALISAR;
+- copiar DEBUG;
+- verificar o bloco
+  `[ESPELHO VISUAL LIVE D-032 / CÂMERA + MÁSCARAS + VISOR]`.
+

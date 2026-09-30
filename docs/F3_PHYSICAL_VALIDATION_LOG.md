@@ -653,3 +653,87 @@ repetir com power gate bloqueado
 → OK/NG permanece bloqueado normalmente
 ~~~
 
+---
+
+## 30/09/2026 — Reteste D-032 / máscaras e visor continuam sem reagir
+
+**Resultado físico:** FAIL.
+
+### Sintoma observado
+
+Após o commit D-032, o operador continua sem ver:
+
+- as máscaras da câmera ao vivo reagirem/colorirem conforme os segmentos físicos;
+- o VISOR DO DISPLAY acompanhar os segmentos físicos.
+
+Portanto a alteração anterior não resolveu o caminho real de apresentação no
+equipamento.
+
+### Interpretação
+
+Este é o segundo ciclo de correção do mesmo defeito visual sem validação física
+positiva. Conforme a regra das duas tentativas do projeto, não será feita nova
+mudança de algoritmo/threshold por hipótese.
+
+A etapa atual passa a ser **diagnóstico instrumentado do caminho real**.
+
+### Instrumentação adicionada
+
+Foi adicionada telemetria leve, somente em memória, para identificar em qual
+ponto o espelho visual D-032 deixa de funcionar:
+
+- hook visual final ativo;
+- tracking realmente habilitado;
+- geometria presente/LOCK;
+- quantidade de máscaras na geometria;
+- contexto visual construído;
+- quantidade de máscaras no contexto;
+- amostra latest-frame pronta ou não;
+- motivo da amostra;
+- IDs visualmente luminosos;
+- contexto do visor atualizado ou não;
+- 28 slots do visor disponíveis ou não;
+- IDs recebidos pelo visor;
+- resultado do repaint;
+- exceção e estágio exatos quando houver fallback silencioso.
+
+Nenhum novo timer, thread, worker, scheduler, I/O ou processamento pesado foi
+adicionado.
+
+### Próximo teste
+
+Com o defeito visível:
+
+1. clicar em **ANALISAR**;
+2. abrir **DEBUG TÉCNICO**;
+3. usar **COPIAR DEBUG**;
+4. enviar o bloco inteiro.
+
+O relatório passa a conter:
+
+~~~text
+[ESPELHO VISUAL LIVE D-032 / CÂMERA + MÁSCARAS + VISOR]
+~~~
+
+Esse bloco permitirá distinguir objetivamente:
+
+~~~text
+tracking não está ativo
+vs
+não existe LOCK/geometria
+vs
+contexto visual não foi construído
+vs
+amostra não está lendo as 28 máscaras
+vs
+amostra produz 0 IDs
+vs
+visor não recebeu contexto
+vs
+renderer caiu no fallback por exceção
+~~~
+
+### Estado
+
+**FAIL CONFIRMADO — DIAGNÓSTICO INSTRUMENTADO, AGUARDANDO EVIDÊNCIA DO EQUIPAMENTO.**
+

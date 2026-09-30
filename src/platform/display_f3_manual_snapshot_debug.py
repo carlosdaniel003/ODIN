@@ -473,6 +473,9 @@ def _runtime_state_at_frame(app) -> dict:
             "luminous_tracking": _safe_deepcopy(
                 runtime_debug.get("luminous_tracking")
             ),
+            "live_visual_mirror": _safe_deepcopy(
+                runtime_debug.get("live_visual_mirror")
+            ),
             "live_performance": _safe_deepcopy(
                 runtime_debug.get("live_performance")
             ),
@@ -541,6 +544,9 @@ def _runtime_state_at_frame(app) -> dict:
         ),
         "luminous_tracking": _safe_deepcopy(
             getattr(app, "_display_f3_luminous_tracking_debug", None)
+        ),
+        "live_visual_mirror": _safe_deepcopy(
+            getattr(app, "_display_f3_live_visual_mirror_debug", None)
         ),
         "live_performance": _safe_deepcopy(
             getattr(app, "_display_f3_live_performance", None)
@@ -2112,6 +2118,63 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
         if isinstance(runtime_context, dict)
         else None
     )
+    live_visual_mirror = (
+        runtime_context.get("live_visual_mirror")
+        if isinstance(runtime_context, dict)
+        else None
+    )
+    lines.append("[ESPELHO VISUAL LIVE D-032 / CÂMERA + MÁSCARAS + VISOR]")
+    if isinstance(live_visual_mirror, dict):
+        lines.append(
+            " | ".join(
+                (
+                    f"hook_active={_yes_no(live_visual_mirror.get('hook_active'))}",
+                    f"tracking_enabled={_yes_no(live_visual_mirror.get('tracking_enabled'))}",
+                    f"stage={live_visual_mirror.get('stage', '--')}",
+                    f"render_path={live_visual_mirror.get('render_path', '--')}",
+                    f"geometry_locked={_yes_no(live_visual_mirror.get('geometry_locked'))}",
+                    f"geometry_masks={live_visual_mirror.get('geometry_mask_count', '--')}",
+                    f"context_ready={_yes_no(live_visual_mirror.get('context_ready'))}",
+                    f"context_masks={live_visual_mirror.get('context_mask_count', '--')}",
+                    f"sample_ready={_yes_no(live_visual_mirror.get('live_visual_sample_ready'))}",
+                    f"sample_reason={live_visual_mirror.get('live_visual_sample_reason', '--')}",
+                    f"sampled_masks={live_visual_mirror.get('live_visual_sampled_mask_count', '--')}",
+                    f"visual_ids={len(tuple(live_visual_mirror.get('live_visual_mask_ids') or ())) }",
+                    f"readout_ready={_yes_no(live_visual_mirror.get('readout_context_ready'))}",
+                    f"readout_slots={live_visual_mirror.get('readout_mask_slot_count', '--')}",
+                    f"readout_visual_ids={len(tuple(live_visual_mirror.get('readout_live_visual_mask_ids') or ())) }",
+                    f"preview_rendered={_yes_no(live_visual_mirror.get('update_preview_rendered'))}",
+                    f"error_type={live_visual_mirror.get('error_type') or '--'}",
+                    f"error={live_visual_mirror.get('error') or '--'}",
+                    f"readout_error_type={live_visual_mirror.get('readout_error_type') or '--'}",
+                    f"readout_error={live_visual_mirror.get('readout_error') or '--'}",
+                )
+            )
+        )
+        lines.append(
+            "live_visual_mask_ids="
+            + ",".join(
+                str(mask_id)
+                for mask_id in (
+                    live_visual_mirror.get("live_visual_mask_ids") or ()
+                )
+            )
+        )
+        lines.append(
+            "readout_live_visual_mask_ids="
+            + ",".join(
+                str(mask_id)
+                for mask_id in (
+                    live_visual_mirror.get("readout_live_visual_mask_ids") or ()
+                )
+            )
+        )
+    else:
+        lines.append(
+            "telemetria_ausente: o hook visual não publicou estado antes do clique"
+        )
+    lines.append("")
+
     lines.append("[REFINAMENTO LUMINOSO DO CHECK]")
     if isinstance(luminous_tracking, dict):
         lines.append(
