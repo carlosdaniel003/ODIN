@@ -1710,6 +1710,85 @@ durável: se a placa foi segregada e ainda não saiu do suporte, a tela continua
 vermelha.
 
 ---
+
+## D-041 — Referências visuais F3 são memória alinhada do padrão de segmentos, não classificador de cena inteira
+
+**Status:** Accepted
+
+### Contexto
+
+Em 30/09/2026 o operador relatou um defeito recorrente no H1: os segmentos que
+H1 deveria manter acesos podiam aparecer corretamente verdes no ao vivo e,
+ainda assim, o CHECK não era aprovado ou a análise visual não reconhecia H1.
+
+O requisito operacional foi esclarecido: as imagens cadastradas dentro dos
+CHECKS e as imagens cadastradas em **Referências Visuais** já possuem a
+informação relevante para identificar o estado do display — contorno da placa,
+máscaras alinhadas aos segmentos e padrão de segmentos ACESOS/APAGADOS. A
+fotografia inteira contém fundo, suporte e variações globais que não devem
+competir com essa memória semântica.
+
+### Decisão
+
+A unidade de comparação visual do F3 passa a ser conceitualmente a **região da
+placa + padrão alinhado de segmentos**, e não a cena inteira.
+
+```text
+REFERÊNCIA APRENDIDA
+contorno local da placa
++ máscaras locais por MASK_xxx
++ estados ON/OFF do CHECK
+        ↓
+recortar/normalizar a região da placa
+        ↓
+alinhar os mesmos IDs de segmento
+        ↓
+comparar padrão ON/OFF
+        ↓
+identificar o CHECK
+```
+
+Regras obrigatórias:
+
+- toda foto de CHECK ou Referência Visual pode manter seu próprio contorno local
+  e suas máscaras locais alinhadas aos segmentos visíveis naquela foto;
+- essas geometrias locais ensinam **onde está o mesmo MASK_xxx na referência**;
+  elas não substituem a geometria live canônica da seção **Máscaras**, conforme
+  D-036;
+- a análise deve priorizar o crop delimitado pelo contorno da placa/filtro e o
+  alinhamento do padrão de segmentos dentro dessa região;
+- comparação global da fotografia, fundo, suporte ou iluminação geral pode ser
+  usada para presença, localização grosseira, aquisição ou diagnóstico, mas não
+  pode ser uma segunda autoridade semântica de H1/BLUE/USB/AUX;
+- após alinhamento válido, um CHECK está semanticamente conforme quando todas as
+  máscaras ativas cumprem `mask_states`: esperadas `on` estão ON e esperadas
+  `off` estão OFF; `ignore` não participa;
+- portanto D-031 permanece intacta: uma única máscara ativa divergente continua
+  bloqueando OK;
+- quando o padrão estiver 100% conforme, um score de imagem inteira ou diferença
+  visual de fundo não pode negar a identidade do CHECK;
+- em H1, se o padrão aprendido estiver integralmente presente, H1 está
+  reconhecido semanticamente; o registro produtivo ainda respeita somente os
+  gates físicos/frescor/rearme já existentes para impedir decisão sobre frame
+  stale, placa ausente ou ciclo encerrado;
+- se todos os segmentos esperados ON estão visivelmente verdes, mas o CHECK não
+  é registrado, o runtime/debug precisa indicar objetivamente qual condição
+  restante bloqueou a decisão, em vez de resumir o caso como falha genérica de
+  "análise visual";
+- o aprendizado de NG só deve ser usado depois que a identificação positiva dos
+  estados corretos estiver estável. Falso negativo causado por desalinhamento ou
+  comparação global não deve virar memória de defeito.
+
+### Consequência
+
+A memória visual do F3 passa a representar **o desenho funcional do display**.
+O ODIN procura a placa, trabalha na sua região útil, alinha os segmentos e decide
+pela conformidade das máscaras. Isso evita que uma fotografia correta de H1 seja
+negada por diferenças irrelevantes fora do display e torna explícito que o
+sistema precisa aprender primeiro os estados corretos antes de usar exemplos NG.
+
+
+---
 ## Como adicionar uma decisão
 
 Use:
