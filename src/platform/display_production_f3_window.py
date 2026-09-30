@@ -59,6 +59,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._display_ng_evidence_frozen = False
         self._display_terminal_waiting_removal = False
         self._display_waiting_new_board_ui = False
+        self._display_terminal_result_kind = ""
         self._display_readout_frozen = False
         self._display_frozen_readout_context = None
         self._display_frozen_analysis_statuses = {}
@@ -1065,16 +1066,44 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         except Exception:
             pass
 
+    def _set_terminal_segregation_chrome(self, active: bool) -> None:
+        """Mantém SEGREGAR vermelho sem falsificar a leitura física das ROIs."""
+        active = bool(active)
+        border = self.DISPLAY_READOUT_NG if active else self.PREVIEW_BORDER
+        readout_border = (
+            self.DISPLAY_READOUT_NG if active else self.DISPLAY_READOUT_BORDER
+        )
+        try:
+            self.check_flow_frame.configure(
+                bg=self.COLOR_NG if active else self.COLOR_WAITING
+            )
+            self.preview_frame.configure(highlightbackground=border)
+            self.display_readout_frame.configure(
+                highlightbackground=readout_border
+            )
+            self.display_readout_canvas.configure(
+                highlightbackground=readout_border
+            )
+            self.project_frame.configure(
+                highlightbackground=readout_border if active else "#334155"
+            )
+        except Exception:
+            pass
+
     def reset_terminal_rearm_ui(self) -> None:
         """Limpa latches visuais de um ciclo terminal ao abrir/reiniciar o F3."""
         self._display_terminal_waiting_removal = False
         self._display_waiting_new_board_ui = False
+        self._display_terminal_result_kind = ""
+        self._set_terminal_segregation_chrome(False)
         self._set_segregation_action_enabled(True)
 
     def release_terminal_rearm(self, snapshot: dict | None = None) -> None:
         """Reabilita SEGREGAR somente depois de EMPTY + nova placa confirmada."""
         self._display_terminal_waiting_removal = False
         self._display_waiting_new_board_ui = False
+        self._display_terminal_result_kind = ""
+        self._set_terminal_segregation_chrome(False)
         self._set_segregation_action_enabled(True)
         if snapshot is not None:
             self.set_check_sequence(snapshot)
@@ -1128,6 +1157,8 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         """Estado exibido após EMPTY: evidência liberada e próximo ciclo armado."""
         self._display_terminal_waiting_removal = False
         self._display_waiting_new_board_ui = True
+        self._display_terminal_result_kind = ""
+        self._set_terminal_segregation_chrome(False)
         self._set_segregation_action_enabled(False)
         self._waiting_camera_ui_active = False
         self._check_snapshot = dict(snapshot or self._check_snapshot or {})
@@ -1210,6 +1241,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self,
         snapshot: dict,
         force_all_completed: bool = False,
+        force_terminal_segregated: bool = False,
     ) -> None:
         for child in self.check_flow_frame.winfo_children():
             child.destroy()
@@ -1229,7 +1261,12 @@ class DisplayProductionF3Window(DesktopOperationWindow):
 
         for indice, check in enumerate(checks):
             state = "completed" if force_all_completed else str(check.get("state", "pending"))
-            if state == "completed":
+            if force_terminal_segregated:
+                bg = self.COLOR_NG
+                border = self.DISPLAY_READOUT_NG_OUTLINE
+                status = "SEGREGADO"
+                fg = "#FFFFFF"
+            elif state == "completed":
                 bg = self.CHECK_COMPLETED
                 border = "#22C55E"
                 status = "CONCLUÍDO"
@@ -1327,7 +1364,17 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             getattr(self, "_display_terminal_waiting_removal", False)
             or getattr(self, "_display_waiting_new_board_ui", False)
         ):
-            self._render_check_cards(incoming_snapshot)
+            self._render_check_cards(
+                incoming_snapshot,
+                force_terminal_segregated=bool(
+                    getattr(self, "_display_terminal_waiting_removal", False)
+                    and getattr(
+                        self,
+                        "_display_terminal_result_kind",
+                        "",
+                    ) == "segregated"
+                ),
+            )
             return
 
         self._render_check_cards(incoming_snapshot)
@@ -1380,6 +1427,10 @@ class DisplayProductionF3Window(DesktopOperationWindow):
     ) -> None:
         self._display_terminal_waiting_removal = True
         self._display_waiting_new_board_ui = False
+        self._display_terminal_result_kind = (
+            "ok" if is_ok else ("segregated" if discarded else "ng")
+        )
+        self._set_terminal_segregation_chrome(bool(discarded))
         self._set_segregation_action_enabled(False)
         self._waiting_camera_ui_active = False
         self._check_snapshot = dict(snapshot or {})
@@ -1409,8 +1460,14 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             self._render_check_cards(
                 frozen_snapshot
                 if frozen_ng and isinstance(frozen_snapshot, dict)
-                else self._check_snapshot
+                else self._check_snapshot,
+                force_terminal_segregated=bool(discarded),
             )
+            if discarded:
+                self.set_preview_status(
+                    "AUTO • PLACA SEGREGADA • RETIRE A PLACA DO SUPORTE",
+                    self.DISPLAY_READOUT_NG_OUTLINE,
+                )
             self._set_state(
                 background=self.COLOR_NG,
                 foreground="#FFFFFF",
