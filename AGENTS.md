@@ -380,3 +380,14 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
 - o aprendizado de NG deve partir de uma identificação positiva confiável dos
   CHECKS corretos; um falso negativo causado por desalinhamento ou comparação
   global não pode ser tratado como exemplo de defeito.
+- D-042: quando a cena global de presença estiver ambígua, a leitura semântica
+  das próprias máscaras pode servir como evidência positiva de OCUPAÇÃO somente
+  através da `F3PresenceAuthority`; energia/renderer não promovem presença por
+  conta própria e EMPTY confirmado continua tendo precedência absoluta;
+- essa evidência de presença exige o núcleo ON completo de um estado configurado
+  e nenhuma contradição confiante nos estados ON/OFF observados; ela não aprova
+  o CHECK. A aprovação continua exigindo a conformidade estrita completa de
+  D-031/D-041;
+- é proibido restaurar a dependência circular "só calcular máscaras/energia se a
+  fotografia global já confirmou presença", pois isso recria o deadlock em que
+  H1 está 28/28 conforme e ainda assim fica preso em AGUARDANDO H1.
