@@ -79,6 +79,9 @@ jobs:
             tests.test_display_f3_final_check_stability.DisplayF3FinalCheckStabilityTests.test_future_check_registers_on_first_fully_approved_frame \
             tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_h1_28_de_28_confirma_mesmo_se_contorno_ainda_prefere_aux \
             tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_h1_27_de_28_nao_bypassa_identidade_do_contorno \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_blue_28_de_28_confirma_transicao_mesmo_se_foto_nao_prefere_blue \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_blue_27_de_28_continua_dependendo_da_transicao_fisica \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_28_de_28_nao_prova_transicao_se_checks_sao_semanticamente_iguais \
             -v
 
       - name: Validate canonical CHECK analyzer ownership
