@@ -124,6 +124,20 @@ class DisplayF3ResultFeedbackTests(unittest.TestCase):
         self.assertIn("_display_frozen_check_snapshot", source)
         self.assertIn("restore_frozen_analysis_statuses", source)
 
+    def test_wrapper_final_nao_neutraliza_segregacao_terminal(self):
+        import inspect
+        from src.platform import display_result_feedback as feedback_module
+
+        source = inspect.getsource(
+            feedback_module.instalar_feedback_resultado_display_f3
+        )
+        self.assertIn("_display_terminal_waiting_removal", source)
+        self.assertIn("_display_terminal_result_kind", source)
+        self.assertIn("_display_waiting_new_board_ui", source)
+        self.assertIn("_set_terminal_segregation_chrome", source)
+        self.assertIn('"ng_result"', source)
+        self.assertIn('"ng_waiting"', source)
+
     def test_f3_window_received_feedback_extension(self):
         self.assertTrue(DisplayProductionF3Window._odin_display_result_feedback)
         self.assertTrue(DisplayProductionF3Window._odin_display_full_result_theme)
