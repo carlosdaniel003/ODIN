@@ -65,6 +65,70 @@ class DisplayF3SegregateActionTests(unittest.TestCase):
         self.assertGreaterEqual(source.count('add="+"'), 2)
         self.assertIn("_handle_global_discard", source)
 
+    def test_botao_e_teclas_usam_a_mesma_acao_de_segregacao(self):
+        init_source = inspect.getsource(DisplayProductionF3Window.__init__)
+        discard_source = inspect.getsource(DisplayProductionF3Window._discard_plate)
+        self.assertIn("command=self._discard_plate", init_source)
+        self.assertIn(
+            'self.container.bind("<KeyPress-1>", self._handle_discard)',
+            init_source,
+        )
+        self.assertIn("_handle_global_discard", init_source)
+        self.assertIn("self.on_discard()", discard_source)
+
+    def test_snapshot_nao_reverte_resultado_terminal_para_h1_antes_do_rearme(self):
+        state_changes = []
+        rendered = []
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window._display_ng_evidence_frozen = False
+        window._display_terminal_waiting_removal = True
+        window._display_waiting_new_board_ui = False
+        window._check_snapshot = {}
+        window._set_counters = lambda *_args: None
+        window._render_check_cards = lambda snapshot, **_kwargs: rendered.append(snapshot)
+        window._set_state = lambda **kwargs: state_changes.append(kwargs)
+
+        snapshot = {
+            "checks": [{"id": "CHECK_001", "name": "H1", "state": "current"}],
+            "current_check": {"id": "CHECK_001", "name": "H1"},
+            "current_index": 0,
+            "total": 1,
+            "ok": 0,
+            "ng": 1,
+        }
+        window.set_check_sequence(snapshot)
+
+        self.assertEqual([], state_changes)
+        self.assertEqual([snapshot], rendered)
+
+    def test_nova_placa_confirmada_reativa_segregar_e_fluxo(self):
+        class _Button:
+            def __init__(self):
+                self.state = "disabled"
+
+            def configure(self, **kwargs):
+                if "state" in kwargs:
+                    self.state = kwargs["state"]
+
+        snapshots = []
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window.discard_button = _Button()
+        window._display_terminal_waiting_removal = True
+        window._display_waiting_new_board_ui = True
+        window.set_check_sequence = lambda snapshot: snapshots.append(snapshot)
+
+        snapshot = {"current_check": {"id": "CHECK_001", "name": "H1"}}
+        window.release_terminal_rearm(snapshot)
+
+        self.assertFalse(window._display_terminal_waiting_removal)
+        self.assertFalse(window._display_waiting_new_board_ui)
+        self.assertEqual("normal", window.discard_button.state)
+        self.assertEqual([snapshot], snapshots)
+
     def test_desktop_instala_segregar_antes_de_construir_janela_f3(self):
         source = inspect.getsource(DesktopProductionApp.__init__)
         self.assertIn("instalar_acao_segregar_placa_display_f3()", source)

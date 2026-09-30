@@ -313,3 +313,35 @@ Uma tarefa só está concluída quando:
 O objetivo não é adicionar código até o sintoma desaparecer.
 
 O objetivo é deixar uma única solução clara, mensurável e sustentável.
+
+
+## 16. Invariantes de regressão do Display F3 — D-038 e D-039
+
+As seguintes regras são obrigatórias em qualquer alteração futura do Display F3:
+
+- a conformidade estrita de D-031 continua sendo a autoridade semântica:
+  uma máscara configurada divergente continua bloqueando OK;
+- excluir a foto do CHECK atual não pode transformar um segmento fisicamente
+  ACESO e corretamente configurado em falso APAGADO apenas por diferença de
+  brilho/cor entre funções;
+- a única exceção permitida à exclusão da foto atual é uma referência **ON**
+  local da **mesma máscara física**, validada contra referências OFF externas
+  dessa mesma máscara por separação óptica mínima já definida pelo F3;
+- referência OFF do próprio CHECK nunca pode autoaprovar esse CHECK;
+- a exceção ON validada nunca entra no pool global nem pode substituir
+  `mask_states`;
+- qualquer alteração nessa política exige dois testes opostos:
+  1. CHECK correto/segmento realmente ON continua aprovável;
+  2. segmento esperado ON, mas realmente apagado, continua incapaz de ensinar o
+     defeito como correto;
+- resultado terminal (APROVADA, NG ou SEGREGADA) e rearme físico são um único
+  contrato visual: a tela não pode voltar a mostrar H1 como ativo enquanto a
+  placa anterior ainda aguarda retirada;
+- SEGREGAR por botão, tecla `1` e NumPad `1` deve chamar a mesma ação oficial;
+- a primeira SEGREGAÇÃO válida contabiliza exatamente uma vez; enquanto aguarda
+  suporte vazio/nova placa, novas tentativas permanecem bloqueadas para impedir
+  dupla contabilização;
+- o botão SEGREGAR deve refletir esse bloqueio visualmente e só voltar a ficar
+  habilitado quando o rearme físico confirmar a nova placa;
+- nenhuma correção desses contratos pode criar novo timer, worker, scheduler ou
+  autoridade paralela.

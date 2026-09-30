@@ -1027,3 +1027,89 @@ tracking ON + LOCK
 → confirmar que o mesmo contorno acompanha a pose rastreada
 ~~~
 
+
+
+---
+
+## 30/09/2026 — H1 correto não aprovava e SEGREGAR parecia inoperante
+
+**Resultado físico antes da correção:** FAIL de decisão/apresentação.
+
+### Cenário
+
+- Rastreamento Automático: DESATIVADO;
+- CHECK lógico exibido: H1;
+- sete segmentos esperados ON visivelmente acesos;
+- operador tentou SEGREGAR pelo botão e pela tecla 1.
+
+### Evidência objetiva do DEBUG
+
+No frame congelado da auditoria manual:
+
+- H1 possui 7 máscaras esperadas ON e 21 OFF;
+- o aprendizado por mesma máscara classificou o CHECK como
+  `approved=True`, 28/28;
+- a autoridade de energia encontrou as sete máscaras ON esperadas como
+  energizadas;
+- a análise estrita observada pelo runtime tinha 21/28 e marcava justamente as
+  sete máscaras ON de H1 como faltantes;
+- simultaneamente o ciclo já estava terminal:
+  `waiting_empty_rearm=true`, TOTAL 1, NG 1, `last_result=null`;
+- a UI principal havia voltado para `AGUARDANDO H1`, apesar do status
+  operacional informar `RETIRE A PLACA DO SUPORTE`.
+
+### Causas
+
+1. **D-038 / falso OFF do CHECK correto:** a proteção D-031 removia
+   absolutamente a foto do CHECK atual do aprendizado. Em segmentos cuja
+   assinatura óptica muda entre funções, H1 podia ficar mais próximo de OFF de
+   outra função mesmo estando fisicamente aceso.
+2. **D-039 / SEGREGAR aparentemente morto:** a segregação já havia sido
+   contabilizada. O runtime resetou internamente a sequência para H1 e o hold
+   visual terminou, mas o rearme físico ainda bloqueava qualquer novo ciclo e
+   qualquer nova segregação. A apresentação não espelhava esse latch.
+
+### Correções implementadas
+
+- ON do próprio CHECK só pode ser referência local da mesma máscara quando prova
+  emissão contra OFF externo com a margem óptica mínima já existente;
+- OFF próprio continua proibido;
+- uma máscara live divergente continua bloqueando OK;
+- tela terminal não pode ser sobrescrita por H1 enquanto aguarda retirada;
+- após EMPTY, a tela mostra explicitamente espera por nova placa;
+- SEGREGAR fica visualmente desabilitado durante todo o rearme e volta somente
+  após nova placa confirmada;
+- botão, `1` e NumPad `1` permanecem na mesma ação oficial;
+- regressões automatizadas cobrem o ON próprio válido, o ON escuro inválido,
+  o latch terminal e o handoff visual do rearme.
+
+### Estado
+
+**CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+~~~text
+1) nova placa confirmada
+→ H1 realmente aceso
+→ 28/28
+→ H1 aprova com um frame conforme
+
+2) segmento esperado ON fisicamente apagado
+→ continua divergente
+→ nunca recebe OK por auto-referência
+
+3) pressionar 1 ou clicar SEGREGAR uma vez
+→ TOTAL +1 / NG +1
+→ PLACA SEGREGADA permanece visível
+→ botão SEGREGAR desabilitado
+→ repetir 1 não duplica contagem
+
+4) retirar placa
+→ suporte vazio confirmado
+→ AGUARDANDO NOVA PLACA
+
+5) colocar nova placa
+→ H1 volta a ficar ativo
+→ SEGREGAR volta a ficar habilitado
+~~~

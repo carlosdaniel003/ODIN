@@ -1,7 +1,9 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
+from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_FEATURE_WEIGHTS
 from src.platform.display_auto_check_policy import (
     DISPLAY_AUTO_DECISION_NG,
     DISPLAY_AUTO_DECISION_SEARCHING,
@@ -15,6 +17,7 @@ from src.platform.display_f3_strict_mask_conformity import (
     _failure_items,
     F3_STRICT_MASK_AUTHORITY,
     filtrar_aprendizado_sem_check_atual_f3,
+    reinjetar_on_proprio_validado_f3,
     resumir_falhas_mascaras_f3,
 )
 from src.platform.display_project_repository import (
@@ -30,6 +33,21 @@ def _source(check_id: str, mask_id: str, state: str):
         "mask_id": mask_id,
         "state": state,
     }
+
+
+def _features(level: float):
+    value = float(level)
+    values = {name: value for name in DISPLAY_AUTO_FEATURE_WEIGHTS}
+    values.update(
+        {
+            "v_mean": value,
+            "v_max": value,
+            "v_p95": value,
+            "v_p99": value,
+            "glow_score": value / 3.0,
+        }
+    )
+    return SimpleNamespace(**values)
 
 
 class DisplayF3StrictMaskConformityTests(TestCase):
@@ -117,6 +135,101 @@ class DisplayF3StrictMaskConformityTests(TestCase):
         self.assertEqual(["aux_off"], filtered["by_state"]["off"])
         self.assertTrue(filtered["self_reference_excluded"])
         self.assertEqual("CHECK_004", filtered["excluded_check_id"])
+
+    def test_on_proprio_so_reentra_no_pool_local_quando_prova_emissao(self):
+        self_on = _features(250)
+        other_on = _features(180)
+        other_off = _features(40)
+        learning = {
+            "by_mask": {
+                "MASK_008": {
+                    "on": [self_on, other_on],
+                    "off": [other_off],
+                    "sources": {
+                        "on": [
+                            _source("CHECK_001", "MASK_008", "on"),
+                            _source("CHECK_002", "MASK_008", "on"),
+                        ],
+                        "off": [_source("CHECK_003", "MASK_008", "off")],
+                    },
+                }
+            },
+            "by_state": {"on": [self_on, other_on], "off": [other_off]},
+            "state_sources": {
+                "on": [
+                    _source("CHECK_001", "MASK_008", "on"),
+                    _source("CHECK_002", "MASK_008", "on"),
+                ],
+                "off": [_source("CHECK_003", "MASK_008", "off")],
+            },
+            "photo_count": 3,
+            "sample_count": 3,
+        }
+
+        filtered = filtrar_aprendizado_sem_check_atual_f3(
+            learning,
+            "CHECK_001",
+        )
+        rescued = reinjetar_on_proprio_validado_f3(
+            learning,
+            filtered,
+            "CHECK_001",
+        )
+
+        self.assertIn(self_on, rescued["by_mask"]["MASK_008"]["on"])
+        self.assertNotIn(self_on, rescued["by_state"]["on"])
+        self.assertEqual(("MASK_008",), rescued["validated_self_on_mask_ids"])
+        sources = rescued["by_mask"]["MASK_008"]["sources"]["on"]
+        self.assertTrue(any(item.get("validated_self_on") for item in sources))
+
+    def test_on_proprio_escuro_nao_pode_ensinar_defeito_como_aceso(self):
+        dark_self_on = _features(44)
+        other_on = _features(180)
+        other_off = _features(40)
+        learning = {
+            "by_mask": {
+                "MASK_024": {
+                    "on": [dark_self_on, other_on],
+                    "off": [other_off],
+                    "sources": {
+                        "on": [
+                            _source("CHECK_004", "MASK_024", "on"),
+                            _source("CHECK_002", "MASK_024", "on"),
+                        ],
+                        "off": [_source("CHECK_003", "MASK_024", "off")],
+                    },
+                }
+            },
+            "by_state": {
+                "on": [dark_self_on, other_on],
+                "off": [other_off],
+            },
+            "state_sources": {
+                "on": [
+                    _source("CHECK_004", "MASK_024", "on"),
+                    _source("CHECK_002", "MASK_024", "on"),
+                ],
+                "off": [_source("CHECK_003", "MASK_024", "off")],
+            },
+            "photo_count": 3,
+            "sample_count": 3,
+        }
+
+        filtered = filtrar_aprendizado_sem_check_atual_f3(
+            learning,
+            "CHECK_004",
+        )
+        rescued = reinjetar_on_proprio_validado_f3(
+            learning,
+            filtered,
+            "CHECK_004",
+        )
+
+        self.assertNotIn(
+            dark_self_on,
+            rescued["by_mask"]["MASK_024"]["on"],
+        )
+        self.assertEqual((), rescued["validated_self_on_mask_ids"])
 
     def test_uma_unica_mascara_divergente_impede_aprovacao(self):
         base_analysis = {

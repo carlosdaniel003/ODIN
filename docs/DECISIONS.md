@@ -1585,6 +1585,91 @@ canônica quando tracking está OFF, enquanto o modo tracking ON preserva a
 projeção móvel já existente.
 
 ---
+
+## D-038 — ON próprio validado pode calibrar a mesma máscara sem enfraquecer D-031
+
+**Status:** Accepted
+
+### Contexto
+
+No reteste físico de 30/09/2026 com tracking OFF, H1 estava visualmente aceso,
+mas a conformidade estrita publicou 21/28: exatamente as sete máscaras que H1
+esperava ON foram tratadas como OFF. No mesmo frame congelado, o aprendizado por
+mesma máscara classificou H1 como 28/28 conforme.
+
+A causa arquitetural é a exclusão absoluta da foto do CHECK atual introduzida
+para impedir autoaprendizado de defeito. A proteção é correta para impedir que
+um segmento salvo defeituoso ensine o próprio erro, porém ficou excessivamente
+forte quando o mesmo segmento possui distribuição óptica diferente entre H1,
+BLUE, USB e AUX.
+
+### Decisão
+
+D-031 permanece válida e não é relaxada: uma única máscara divergente ainda
+bloqueia OK. A política de referência passa a ser assimétrica:
+
+- a foto do CHECK atual continua excluída dos pools globais;
+- OFF do próprio CHECK continua sempre excluído;
+- ON do próprio CHECK pode voltar somente ao pool **local da mesma MASK_xxx**;
+- essa reinjeção só é válida quando a energia óptica da amostra ON fica acima de
+  todas as referências OFF externas da mesma máscara por pelo menos
+  `F3_LOW_LIGHT_MIN_ENERGY_SPAN`;
+- a referência reinjetada é marcada explicitamente como
+  `validated_self_on`;
+- `mask_states` continua sendo o gabarito funcional;
+- a leitura live continua precisando classificar cada máscara e cumprir 100% do
+  CHECK para receber OK.
+
+### Consequência
+
+Um H1 realmente aceso deixa de ser reprovado apenas porque outras funções
+produzem outra intensidade/cor no mesmo segmento. Ao mesmo tempo, uma foto em
+que o segmento esperado ON esteja realmente apagado não possui separação física
+contra OFF suficiente e não pode ensinar o defeito como correto.
+
+---
+
+## D-039 — Resultado terminal e SEGREGAR compartilham o latch do rearme físico
+
+**Status:** Accepted
+
+### Contexto
+
+No mesmo reteste, a interface mostrava `AGUARDANDO H1` enquanto o runtime
+estava em `waiting_empty_rearm=true` e o status operacional dizia para retirar
+a placa anterior. Os contadores já estavam em TOTAL 1 / NG 1 e
+`last_result=null`, assinatura do fluxo de SEGREGAR, mas depois do hold visual
+o snapshot da máquina de CHECKS voltou a renderizar H1.
+
+Isso fazia duas proteções corretas parecerem defeitos:
+
+1. H1 não podia aprovar porque o ciclo anterior ainda estava terminal;
+2. botão/tecla 1 pareciam não funcionar porque novas segregações eram
+   corretamente bloqueadas contra dupla contabilização.
+
+### Decisão
+
+O estado visual terminal passa a usar o mesmo latch do rearme físico:
+
+- APROVADA, NG e SEGREGADA permanecem na apresentação enquanto
+  `waiting_empty_rearm` estiver ativo;
+- ao confirmar EMPTY, a tela muda explicitamente para
+  `AGUARDANDO NOVA PLACA`, sem fingir que H1 já está ativo;
+- o botão SEGREGAR fica desabilitado durante espera por EMPTY e durante espera
+  pela nova placa;
+- botão, tecla `1` e NumPad `1` continuam chamando a mesma ação canônica;
+- somente depois de a nova placa ser confirmada o latch visual é liberado, H1 é
+  renderizado novamente e SEGREGAR volta a ser habilitado;
+- as guardas existentes contra dupla contabilização permanecem intactas;
+- nenhum novo timer/thread/worker é criado.
+
+### Consequência
+
+A UI passa a refletir o estado real da máquina física. Um operador não vê H1
+ativo durante um ciclo já encerrado e não interpreta uma ação corretamente
+bloqueada como botão/atalho quebrado.
+
+---
 ## Como adicionar uma decisão
 
 Use:

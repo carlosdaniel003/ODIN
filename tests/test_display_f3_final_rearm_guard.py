@@ -58,6 +58,17 @@ class DisplayF3FinalRearmGuardTests(unittest.TestCase):
         self.assertFalse(result["cycle_rearm_waiting"])
         self.assertIn("AGUARDANDO NOVA PLACA", result["text"])
 
+    def test_handoff_visual_usa_mesmo_latch_do_rearme_fisico(self):
+        source = inspect.getsource(
+            __import__(
+                "src.platform.display_f3_final_rearm_guard",
+                fromlist=["_atualizar_rearme_terminal_f3"],
+            )._atualizar_rearme_terminal_f3
+        )
+        self.assertIn("show_waiting_new_plate", source)
+        self.assertIn("release_terminal_rearm", source)
+        self.assertIn("phase_before", source)
+
     def test_instalador_reaplica_builder_dedicado_antes_do_guard_final(self):
         source = inspect.getsource(instalar_guard_rearme_terminal_final_display_f3)
         self.assertIn("instalar_rearme_fisico_final_display_f3()", source)

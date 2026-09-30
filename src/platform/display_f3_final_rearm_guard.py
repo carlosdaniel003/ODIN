@@ -75,6 +75,7 @@ def _publicar_estado_rearme(self, state: dict) -> None:
 
 def _atualizar_rearme_terminal_f3(self) -> str:
     """Deixa o builder final consumir EMPTY/nova placa sem executar o CHECK."""
+    phase_before = fase_rearme_terminal_f3(self)
     frame = getattr(self, "camera_frame_atual", None)
     repository = getattr(self, "display_project_repository", None)
     if frame is None or getattr(frame, "size", 0) == 0 or repository is None:
@@ -103,12 +104,49 @@ def _atualizar_rearme_terminal_f3(self) -> str:
         state = dict(getattr(self, "_display_f3_operational_state", {}) or {})
 
     phase_after = fase_rearme_terminal_f3(self)
+    window = getattr(self, "display_f3_window", None)
+    runtime = getattr(self, "display_check_runtime", None)
+    try:
+        sequence_snapshot = runtime.snapshot() if runtime is not None else None
+    except Exception:
+        sequence_snapshot = None
+
     if phase_after:
+        # A UI terminal pertence ao mesmo latch fisico do rearme. Ao confirmar
+        # EMPTY, deixa de exibir o resultado anterior e passa explicitamente a
+        # aguardar a nova placa; ainda nao existe um H1 produtivo nesse ponto.
+        if (
+            phase_after == F3_REARM_PHASE_WAIT_NEW_BOARD
+            and phase_before != F3_REARM_PHASE_WAIT_NEW_BOARD
+            and window is not None
+        ):
+            show_waiting = getattr(window, "show_waiting_new_plate", None)
+            if callable(show_waiting):
+                try:
+                    show_waiting(sequence_snapshot)
+                except Exception:
+                    pass
+
         state = estado_visivel_rearme_terminal_f3(state, phase_after)
         _publicar_estado_rearme(self, state)
     else:
-        # O builder acabou de confirmar a nova placa. Publicamos o estado já
-        # liberado e deixamos o pipeline produtivo executar no mesmo preview.
+        # O builder acabou de confirmar a nova placa. So agora a UI volta ao
+        # primeiro CHECK e a acao SEGREGAR e reabilitada.
+        if phase_before and window is not None:
+            release_terminal = getattr(window, "release_terminal_rearm", None)
+            if callable(release_terminal):
+                try:
+                    release_terminal(sequence_snapshot)
+                except Exception:
+                    pass
+            else:
+                render = getattr(self, "_renderizar_fluxo_checks_display_f3", None)
+                if callable(render):
+                    try:
+                        render()
+                    except Exception:
+                        pass
+
         if isinstance(state, dict):
             _publicar_estado_rearme(self, state)
     return phase_after

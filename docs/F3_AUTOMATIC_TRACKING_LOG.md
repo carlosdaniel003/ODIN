@@ -1430,3 +1430,59 @@ Próximo reteste:
 - confirmar contorno móvel com tracking ON + LOCK;
 - editar o contorno canônico e confirmar invalidação visual do cache.
 
+
+
+---
+
+## 30/09/2026 — D-038/D-039: falso OFF de H1 e latch terminal com tracking OFF
+
+Modo:
+- tracking OFF;
+- geometria live continua regida por D-036/D-037.
+
+Evidência:
+- H1 manual no mesmo frame: 28/28;
+- strict runtime observado: 21/28, com as sete máscaras esperadas ON marcadas
+  como OFF;
+- energia/máscaras live confirmavam os sete ON;
+- o runtime já estava em `waiting_empty_rearm=true`, TOTAL 1 / NG 1,
+  `last_result=null`;
+- a tela principal, porém, havia voltado para H1.
+
+Interpretação:
+- o primeiro defeito é semântico no aprendizado estrito, não no object tracking;
+- o segundo é sincronização entre apresentação terminal e rearme físico, não
+  captura de tecla nem geometria;
+- o fato de a sequência interna voltar a H1 após evento terminal não significa
+  que um novo ciclo esteja autorizado.
+
+Correção D-038:
+- preserva `F3StrictMaskConformityAnalyzer` como autoridade;
+- preserva exclusão do CHECK atual dos pools globais;
+- permite somente ON próprio validado no pool local da mesma máscara;
+- OFF próprio nunca é reinjetado;
+- margem física usa o limiar óptico já existente do F3;
+- live ainda precisa cumprir todas as máscaras.
+
+Correção D-039:
+- resultado terminal, espera por EMPTY e espera por nova placa formam um único
+  latch visual;
+- SEGREGAR é desabilitado nesse latch e reabilitado somente com nova placa;
+- tecla e botão continuam na mesma ação canônica;
+- nenhuma autoridade de tracking, timer, thread, executor ou scheduler foi
+  adicionada.
+
+Não repetir:
+- não corrigir falso OFF afrouxando a regra de 100% das máscaras;
+- não voltar a aceitar OFF do próprio CHECK como auto-referência;
+- não usar tracking para mascarar defeito de classificação com tracking OFF;
+- não renderizar H1 como ativo enquanto `waiting_empty_rearm` ou
+  `waiting_new_board_after_empty` estiverem ativos;
+- não liberar SEGREGAR repetidamente para contornar o rearme.
+
+Reteste obrigatório:
+- H1 correto aprova com tracking OFF;
+- segmento ON defeituoso continua bloqueando;
+- SEGREGAR por botão, 1 e NumPad 1 contabiliza uma única vez;
+- retirar e recolocar a placa faz a sequência visual
+  TERMINAL -> EMPTY -> NOVA PLACA -> H1.

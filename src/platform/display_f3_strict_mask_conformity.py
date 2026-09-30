@@ -7,10 +7,15 @@ ser a propria referencia que aprova os segmentos daquele CHECK. Caso contrario,
 uma placa defeituosa fotografada durante a configuracao ensina o defeito como se
 fosse o padrao correto.
 
-Esta camada mantem ``mask_states`` como gabarito funcional e classifica cada
-mascara contra exemplos ACESO/APAGADO vindos de OUTROS CHECKS. Qualquer mascara
-configurada que divergir bloqueia o OK. O overlay e o status apenas exibem a
-falha; eles nao participam do julgamento.
+Esta camada mantem ``mask_states`` como gabarito funcional e usa prioritariamente
+exemplos ACESO/APAGADO vindos de OUTROS CHECKS. A foto do proprio CHECK continua
+fora dos pools globais e nunca fornece referencia OFF para se autoaprovar. Uma
+referencia ON do proprio CHECK so pode voltar ao pool LOCAL da mesma mascara
+quando sua emissao e fisicamente discriminante de todas as referencias OFF da
+mesma mascara. Isso preserva a rejeicao estrita sem transformar variacoes de
+brilho entre funcoes em falso APAGADO. Qualquer mascara configurada que divergir
+bloqueia o OK. O overlay e o status apenas exibem a falha; eles nao participam
+do julgamento.
 """
 
 import cv2
@@ -22,6 +27,8 @@ import src.platform.display_live_roi_overlay as overlay_module
 from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LOW_LIGHT
 from src.platform.display_f3_same_mask_reference_fix import (
     F3SameMaskReferenceAnalyzer,
+    F3_LOW_LIGHT_MIN_ENERGY_SPAN,
+    _optical_energy,
 )
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
@@ -138,6 +145,131 @@ def filtrar_aprendizado_sem_check_atual_f3(
     }
 
 
+def reinjetar_on_proprio_validado_f3(
+    global_learning: dict | None,
+    filtered_learning: dict | None,
+    check_id: str,
+) -> dict:
+    """Reintroduz somente ON proprio que prove emissao contra OFF da mesma mascara.
+
+    A exclusao integral da foto atual evita autoaprendizado de defeito, mas pode
+    gerar falso OFF quando a mesma mascara possui intensidade/cor diferente entre
+    funcoes. A excecao abaixo e propositalmente assimetrica:
+
+    - nunca reintroduz OFF do CHECK atual;
+    - nunca alimenta o pool global;
+    - exige ao menos uma referencia OFF da MESMA mascara vinda de outra captura;
+    - exige separacao de energia optica maior ou igual ao limiar fisico ja usado
+      pelo aprendizado de pouca luz.
+
+    Assim uma foto configurada com segmento esperado ON, porem realmente apagado,
+    continua incapaz de ensinar o defeito como correto.
+    """
+    result = filtered_learning if isinstance(filtered_learning, dict) else {}
+    global_data = global_learning if isinstance(global_learning, dict) else {}
+    current_check_id = _normalized_check_id(check_id)
+    if not current_check_id:
+        result["validated_self_on_mask_ids"] = ()
+        result["validated_self_on_reference_count"] = 0
+        result["self_reference_policy"] = "exclude_current_except_validated_self_on"
+        return result
+
+    global_by_mask = (
+        global_data.get("by_mask", {})
+        if isinstance(global_data.get("by_mask"), dict)
+        else {}
+    )
+    filtered_by_mask = (
+        result.get("by_mask", {})
+        if isinstance(result.get("by_mask"), dict)
+        else {}
+    )
+
+    validated_mask_ids = []
+    validated_reference_count = 0
+
+    for mask_id, filtered_profile in filtered_by_mask.items():
+        if not isinstance(filtered_profile, dict):
+            continue
+        global_profile = global_by_mask.get(str(mask_id), {})
+        if not isinstance(global_profile, dict):
+            continue
+
+        global_sources = (
+            global_profile.get("sources", {})
+            if isinstance(global_profile.get("sources"), dict)
+            else {}
+        )
+        on_features = list(global_profile.get(DISPLAY_CHECK_STATE_ON, []) or ())
+        on_sources = list(global_sources.get(DISPLAY_CHECK_STATE_ON, []) or ())
+        off_references = list(
+            filtered_profile.get(DISPLAY_CHECK_STATE_OFF, []) or ()
+        )
+        if not off_references:
+            continue
+
+        try:
+            off_energy_ceiling = max(
+                _optical_energy(reference)
+                for reference in off_references
+            )
+        except Exception:
+            continue
+
+        profile_sources = filtered_profile.get("sources")
+        if not isinstance(profile_sources, dict):
+            profile_sources = {
+                DISPLAY_CHECK_STATE_ON: [],
+                DISPLAY_CHECK_STATE_OFF: [],
+            }
+            filtered_profile["sources"] = profile_sources
+        local_on_sources = profile_sources.setdefault(
+            DISPLAY_CHECK_STATE_ON,
+            [],
+        )
+        local_on_features = filtered_profile.setdefault(
+            DISPLAY_CHECK_STATE_ON,
+            [],
+        )
+
+        for index, feature in enumerate(on_features):
+            source = on_sources[index] if index < len(on_sources) else {}
+            source = dict(source) if isinstance(source, dict) else {}
+            if _normalized_check_id(source.get("check_id")) != current_check_id:
+                continue
+
+            try:
+                energy_gap = float(_optical_energy(feature)) - float(
+                    off_energy_ceiling
+                )
+            except Exception:
+                continue
+            if energy_gap < float(F3_LOW_LIGHT_MIN_ENERGY_SPAN):
+                continue
+
+            validated_source = dict(source)
+            validated_source["validated_self_on"] = True
+            validated_source["validation"] = (
+                "optical_energy_above_other_same_mask_off"
+            )
+            validated_source["energy_gap_to_off_ceiling"] = round(
+                float(energy_gap),
+                4,
+            )
+            local_on_features.append(feature)
+            local_on_sources.append(validated_source)
+            validated_reference_count += 1
+            if str(mask_id) not in validated_mask_ids:
+                validated_mask_ids.append(str(mask_id))
+
+    result["validated_self_on_mask_ids"] = tuple(validated_mask_ids)
+    result["validated_self_on_reference_count"] = int(
+        validated_reference_count
+    )
+    result["self_reference_policy"] = "exclude_current_except_validated_self_on"
+    return result
+
+
 def resumir_falhas_mascaras_f3(analysis: dict | None) -> dict:
     data = analysis if isinstance(analysis, dict) else {}
     results = [
@@ -196,6 +328,7 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
 
     def __init__(self, repository) -> None:
         self._strict_current_check_id = ""
+        self._strict_validated_self_on_mask_ids = ()
         super().__init__(repository)
 
     def _check_photo_learning(
@@ -211,10 +344,19 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
             masks,
             visual_rotation,
         )
-        return filtrar_aprendizado_sem_check_atual_f3(
+        filtered_learning = filtrar_aprendizado_sem_check_atual_f3(
             global_learning,
             self._strict_current_check_id,
         )
+        filtered_learning = reinjetar_on_proprio_validado_f3(
+            global_learning,
+            filtered_learning,
+            self._strict_current_check_id,
+        )
+        self._strict_validated_self_on_mask_ids = tuple(
+            filtered_learning.get("validated_self_on_mask_ids", ()) or ()
+        )
+        return filtered_learning
 
     def analyze(
         self,
@@ -228,7 +370,10 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
         mask_geometry_source: str = "",
     ) -> dict:
         previous = self._strict_current_check_id
+        previous_validated = self._strict_validated_self_on_mask_ids
         self._strict_current_check_id = _normalized_check_id(check_id)
+        self._strict_validated_self_on_mask_ids = ()
+        validated_self_on_mask_ids = ()
         try:
             analysis = super().analyze(
                 frame=frame,
@@ -239,8 +384,12 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
                 mask_geometry_resolution=mask_geometry_resolution,
                 mask_geometry_source=mask_geometry_source,
             )
+            validated_self_on_mask_ids = tuple(
+                self._strict_validated_self_on_mask_ids or ()
+            )
         finally:
             self._strict_current_check_id = previous
+            self._strict_validated_self_on_mask_ids = previous_validated
 
         if not isinstance(analysis, dict):
             return analysis
@@ -248,6 +397,15 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
         analysis["reference_authority"] = F3_STRICT_MASK_AUTHORITY
         analysis["self_reference_excluded"] = True
         analysis["excluded_reference_check_id"] = _normalized_check_id(check_id)
+        analysis["self_reference_policy"] = (
+            "exclude_current_except_validated_self_on"
+        )
+        analysis["validated_self_on_mask_ids"] = list(
+            validated_self_on_mask_ids
+        )
+        analysis["validated_self_on_reference_count"] = len(
+            validated_self_on_mask_ids
+        )
 
         if not bool(analysis.get("ready")):
             return analysis

@@ -57,6 +57,8 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._camera_detail = "Aguardando câmera"
         self._waiting_camera_ui_active = False
         self._display_ng_evidence_frozen = False
+        self._display_terminal_waiting_removal = False
+        self._display_waiting_new_board_ui = False
         self._display_readout_frozen = False
         self._display_frozen_readout_context = None
         self._display_frozen_analysis_statuses = {}
@@ -1054,6 +1056,29 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             return
         super().set_preview_status(message, color)
 
+    def _set_segregation_action_enabled(self, enabled: bool) -> None:
+        button = getattr(self, "discard_button", None)
+        if button is None:
+            return
+        try:
+            button.configure(state="normal" if bool(enabled) else "disabled")
+        except Exception:
+            pass
+
+    def reset_terminal_rearm_ui(self) -> None:
+        """Limpa latches visuais de um ciclo terminal ao abrir/reiniciar o F3."""
+        self._display_terminal_waiting_removal = False
+        self._display_waiting_new_board_ui = False
+        self._set_segregation_action_enabled(True)
+
+    def release_terminal_rearm(self, snapshot: dict | None = None) -> None:
+        """Reabilita SEGREGAR somente depois de EMPTY + nova placa confirmada."""
+        self._display_terminal_waiting_removal = False
+        self._display_waiting_new_board_ui = False
+        self._set_segregation_action_enabled(True)
+        if snapshot is not None:
+            self.set_check_sequence(snapshot)
+
     def freeze_ng_evidence(self) -> None:
         """Mantém câmera, visor, CHECK e status no frame que fechou o NG."""
         # Capture ANTES de levantar o latch. A partir daqui qualquer setter
@@ -1076,12 +1101,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             )
             self._redraw_display_readout()
 
-        button = getattr(self, "discard_button", None)
-        if button is not None:
-            try:
-                button.configure(state="disabled")
-            except Exception:
-                pass
+        self._set_segregation_action_enabled(False)
 
         # Não substitui o preview_status por "retire a placa": ele precisa
         # continuar mostrando exatamente a decisão/status do frame NG.
@@ -1098,15 +1118,17 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._display_readout_context = None
         self._redraw_display_readout()
 
-        button = getattr(self, "discard_button", None)
-        if button is not None:
-            try:
-                button.configure(state="normal")
-            except Exception:
-                pass
+        if not bool(
+            getattr(self, "_display_terminal_waiting_removal", False)
+            or getattr(self, "_display_waiting_new_board_ui", False)
+        ):
+            self._set_segregation_action_enabled(True)
 
     def show_waiting_new_plate(self, snapshot: dict | None = None) -> None:
         """Estado exibido após EMPTY: evidência liberada e próximo ciclo armado."""
+        self._display_terminal_waiting_removal = False
+        self._display_waiting_new_board_ui = True
+        self._set_segregation_action_enabled(False)
         self._waiting_camera_ui_active = False
         self._check_snapshot = dict(snapshot or self._check_snapshot or {})
         self._set_counters(
@@ -1298,6 +1320,16 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             self.restore_frozen_analysis_statuses()
             return
 
+        # Resultado terminal e espera por nova placa sao estados fisicos do
+        # ciclo, nao um novo H1. Atualizacoes de snapshot podem manter contadores
+        # e cards, mas nao podem sobrescrever o texto terminal antes do rearme.
+        if bool(
+            getattr(self, "_display_terminal_waiting_removal", False)
+            or getattr(self, "_display_waiting_new_board_ui", False)
+        ):
+            self._render_check_cards(incoming_snapshot)
+            return
+
         self._render_check_cards(incoming_snapshot)
 
         checks = list(self._check_snapshot.get("checks", []) or [])
@@ -1346,6 +1378,9 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         snapshot: dict,
         discarded: bool = False,
     ) -> None:
+        self._display_terminal_waiting_removal = True
+        self._display_waiting_new_board_ui = False
+        self._set_segregation_action_enabled(False)
         self._waiting_camera_ui_active = False
         self._check_snapshot = dict(snapshot or {})
         self._set_counters(

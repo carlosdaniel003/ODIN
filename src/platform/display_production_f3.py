@@ -624,6 +624,16 @@ class DisplayProductionF3Mixin:
                 release()
             except Exception:
                 pass
+        reset_terminal_ui = getattr(
+            janela_existente,
+            "reset_terminal_rearm_ui",
+            None,
+        )
+        if callable(reset_terminal_ui):
+            try:
+                reset_terminal_ui()
+            except Exception:
+                pass
         self._atualizar_resumo_projeto_display_f3()
         authority = getattr(self, "_display_f3_state_machine_authority", None)
         if authority is not None:
