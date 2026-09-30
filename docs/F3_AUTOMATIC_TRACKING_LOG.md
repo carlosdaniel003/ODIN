@@ -1673,3 +1673,74 @@ Próximo reteste:
 - confirmar presença/energia e avanço para BLUE;
 - depois retirar a placa e confirmar que EMPTY continua vencendo.
 
+---
+
+## 30/09/2026 — D-042 PASS / D-043: BLUE 28/28 bloqueado fora do tracking
+
+Modo:
+- tracking OFF.
+
+Validação anterior:
+- D-042 PASS no equipamento real;
+- H1 correto passou e a sequência avançou para BLUE.
+
+Novo cenário:
+- CHECK atual: BLUE / CHECK_002;
+- H1 já concluído;
+- 18 ON + 10 OFF esperados de BLUE estavam conformes;
+- analyzer semântico: 28/28 aprovado;
+- presença e energia confirmadas;
+- gate produtivo liberado;
+- UI dizia `DISPLAY EM BLUE` e `BLUE DETECTADO • 28/28 CONFORMES`;
+- porém o resultado era bloqueado em
+  `aguardando mudança física H1 → BLUE`.
+
+Diagnóstico:
+- este defeito não pertence ao object tracking; o snapshot registra tracking
+  desativado;
+- a autoridade `display_f3_physical_transition_authority` ainda usava
+  identificação física independente/comparação de fotografias para confirmar
+  H1 → BLUE;
+- a comparação global das fotos estava ambígua e não consumia a evidência mais
+  específica já disponível: o padrão BLUE completo das 28 máscaras;
+- portanto o analyzer e a UI sabiam que BLUE estava presente, mas o guard final
+  de transição ainda vetava o registro.
+
+Correção D-043:
+- preservar a autoridade física de transição existente;
+- aceitar conformidade canônica 100% do CHECK atual como prova positiva da
+  chegada ao destino somente quando o padrão ON/OFF realmente difere do CHECK
+  anterior;
+- exigir CHECK anterior concluído e análise do contexto atual;
+- preservar o caminho físico independente para análise parcial, padrões iguais e
+  para permitir NG somente depois que a função de destino realmente chegou;
+- não alterar tracking, thresholds globais, scheduler ou geometria.
+
+Resultado:
+- D-042: PASS FÍSICO;
+- D-043: CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+Decisão/ligação:
+- D-024, D-031, D-041, D-042 e D-043.
+
+Lição:
+- com tracking OFF, um padrão ON/OFF integralmente diferente do estado anterior
+  é evidência física da mudança de função mais específica que a similaridade da
+  cena inteira;
+- isso não elimina o gate de transição: redefine uma evidência positiva válida
+  para o caso 100% conforme.
+
+Não repetir:
+- não deixar score global/foto inteira vetar indefinidamente um CHECK 28/28 cujo
+  padrão difere do anterior;
+- não remover o gate físico inteiro para resolver esse caso;
+- não permitir 27/28 ou análise de outro CHECK como prova de transição;
+- não usar a regra de conformidade total para gerar NG antes de confirmar que a
+  função defeituosa realmente chegou.
+
+Próximo reteste:
+- tracking OFF;
+- H1 → BLUE;
+- quando BLUE chegar a 28/28, confirmar avanço imediato para USB;
+- depois validar que uma divergência real em BLUE continua sem receber OK.
+
