@@ -82,6 +82,9 @@ jobs:
             tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_blue_28_de_28_confirma_transicao_mesmo_se_foto_nao_prefere_blue \
             tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_blue_27_de_28_continua_dependendo_da_transicao_fisica \
             tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_28_de_28_nao_prova_transicao_se_checks_sao_semanticamente_iguais \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_blue_ng_27_de_28_confirma_chegada_por_assinatura_das_mascaras \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_blue_ng_nao_confirma_chegada_se_assinatura_ainda_e_h1 \
+            tests.test_display_f3_physical_transition_authority.DisplayF3PhysicalTransitionAuthorityTests.test_result_guard_permite_ng_depois_da_assinatura_confirmar_blue \
             -v
 
       - name: Validate canonical CHECK analyzer ownership
