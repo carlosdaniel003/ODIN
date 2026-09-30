@@ -151,10 +151,21 @@ class DisplayF3SegregateActionTests(unittest.TestCase):
         self.assertIn("_set_terminal_segregation_chrome", wrapper_source)
         self.assertIn('"ng_result"', wrapper_source)
 
-    def test_mascaras_nao_sao_forcadas_para_vermelho_pela_segregacao(self):
-        result_source = inspect.getsource(DisplayProductionF3Window.show_plate_result)
-        self.assertNotIn("live_visual_classifications", result_source)
-        self.assertNotIn("failed_mask_ids", result_source)
+    def test_segregacao_terminal_forca_camera_contorno_e_visor_para_vermelho(self):
+        preview_source = Path(
+            "src/platform/display_f3_preview_clarity_fix.py"
+        ).read_text(encoding="utf-8")
+        window_source = Path(window_module.__file__).read_text(encoding="utf-8")
+
+        self.assertIn('result["terminal_segregated"]', preview_source)
+        self.assertIn('if bool(context.get("terminal_segregated")):', preview_source)
+        self.assertIn("_render_terminal_segregated_preview", preview_source)
+        self.assertIn('F3_PREVIEW_CLEAR_COLORS["alert"]', preview_source)
+        self.assertIn('"terminal_segregated": bool(', window_source)
+        self.assertIn('if terminal_segregated:', window_source)
+        self.assertIn('state = "ng"', window_source)
+        self.assertIn("colon_fill", window_source)
+        self.assertIn("DISPLAY_READOUT_NG", window_source)
 
     def test_desktop_instala_segregar_antes_de_construir_janela_f3(self):
         source = inspect.getsource(DesktopProductionApp.__init__)
