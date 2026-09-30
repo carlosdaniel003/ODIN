@@ -31,14 +31,17 @@ jobs:
           python -m py_compile \
             src/platform/display_f3_live_runtime_fix.py \
             src/platform/display_f3_cycle_rearm_release_fix.py \
+            src/platform/display_f3_final_rearm_guard.py \
             src/platform/display_f3_optical_power_reconciliation.py \
             src/platform/display_manual_transition_guard.py \
             tests/test_display_f3_cycle_rearm_release_fix.py \
+            tests/test_display_f3_final_rearm_guard.py \
             tests/test_display_f3_optical_power_reconciliation.py
 
       - name: Run F3 cycle and optical power tests
         run: |
           python -m unittest \
             tests.test_display_f3_cycle_rearm_release_fix \
+            tests.test_display_f3_final_rearm_guard \
             tests.test_display_f3_optical_power_reconciliation \
             -v
