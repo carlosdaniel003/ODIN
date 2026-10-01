@@ -2626,3 +2626,74 @@ O contrato explícito foi atualizado no proprietário do wrapper:
 
 **Validação física:** pendente.
 
+---
+
+## 01/10/2026 — FAIL físico: viewport de zoom não arrasta e enquadramento volta
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Com **CONFIGURAR** novamente abrindo, o operador testou o novo viewport
+arrastável da seção de zoom.
+
+### Sintoma observado
+
+- o cursor de mão aparece sobre a área de enquadramento;
+- ao tentar pegar e arrastar a janela, ela não acompanha corretamente o mouse;
+- durante a tentativa, o zoom/enquadramento visual parece se desfazer.
+
+Não foi fornecido traceback porque o problema é comportamental/visual e a
+janela permanece aberta.
+
+### Causa identificada no código
+
+O primeiro contrato de drag fazia duas coisas inadequadas para uma interação
+contínua:
+
+1. cada evento `<B1-Motion>` chamava `_rerender_zoom_preview()`;
+2. esse rerender reconstruía o canvas-fonte inteiro com `delete("all")`,
+   recriando imagem, viewport e cruz central enquanto o botão do mouse ainda
+   estava pressionado.
+
+Além disso, o centro do viewport é definido exclusivamente pelo
+`software_zoom`. Em `1×`, o recorte é o frame inteiro e o normalizador fixa
+o centro em 50%/50%; portanto não existe margem física para deslocar a janela.
+O zoom digital da BRIO continua sendo um zoom central controlado pelo driver e
+não equivale ao pan do viewport ODIN.
+
+Por fim, o enquadramento alterado em CONFIGURAR só era persistido após SALVAR;
+o runtime principal do F3 podia continuar exibindo a configuração salva anterior
+durante a edição, dando a impressão de que o zoom havia voltado.
+
+### Correção aplicada
+
+- o gesto agora possui fases explícitas:
+  - `Button-1` inicia o drag e guarda o offset entre a mão e o centro;
+  - `B1-Motion` atualiza somente centro/overlay/saída final;
+  - `ButtonRelease-1` encerra o gesto;
+- durante o drag, o canvas-fonte não é mais destruído e recriado a cada pixel;
+- somente o overlay `zoom_viewport` é redesenhado enquanto a mão se move;
+- o preview final é atualizado separadamente;
+- o Zoom ODIN e o centro em edição são publicados em memória no runtime F3,
+  sem salvar em disco, para a câmera principal acompanhar imediatamente;
+- ao fechar CONFIGURAR sem salvar, o valor persistido continua sendo restaurado;
+- em `1×`, o sistema não tenta mais simular um arraste inexistente e informa
+  que é necessário usar **Zoom ODIN > 1×** para existir margem de enquadramento;
+- nenhum novo timer, worker, scheduler ou autoridade foi criado.
+
+### Próximo reteste esperado
+
+    F3 → CONFIGURAR
+    → colocar Zoom ODIN acima de 1×
+    → pressionar dentro da janela azul
+    → arrastar mantendo o botão pressionado
+    → janela acompanha a mão sem piscar/resetar
+    → SAÍDA FINAL acompanha o movimento
+    → câmera principal do F3 acompanha o enquadramento provisório
+    → soltar mouse
+    → posição permanece
+    → SALVAR fixa o enquadramento no Projeto Display
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
