@@ -1767,3 +1767,103 @@ tracking OFF ou ON
 → rearme continua normal
 ```
 
+---
+
+## 01/10/2026 — Reteste D-045 FAIL: MASK_024 continuou verde após o NG
+
+**Resultado físico:** FAIL de apresentação. A decisão NG permaneceu correta.
+
+### Evidência visual
+
+No estado terminal mostrado na Produção Display F3:
+
+- a tela principal estava em `PLACA NG / RETIRE A PLACA`;
+- H1 permanecia concluído e BLUE era o CHECK que falhou;
+- TOTAL=1, OK=0, NG=1;
+- a câmera estava congelada no padrão BLUE;
+- a máscara/segmento 24 continuava em verde escuro;
+- o segmento 24 do VISOR DO DISPLAY também continuava em verde escuro.
+
+Portanto, a primeira implementação de D-045 funcionava nos testes isolados do
+renderer, mas não atingia a apresentação realmente congelada no fluxo completo.
+
+### Evidência do DEBUG do mesmo caso
+
+O relatório confirmou:
+
+- CHECK lógico BLUE;
+- NG/rearme já aguardando retirada da placa;
+- análise semântica do BLUE em 27/28;
+- `effective_confirmed_failed_mask_ids=['MASK_024']`;
+- `effective_validating_mask_ids=[]`;
+- no contexto reconstruído para o visor, `MASK_024` aparecia classificada como
+  `off`, esperada `on` e listada como falha.
+
+Isso descartou erro de classificação/autoridade. O ID correto existia; o
+problema estava entre a confirmação final do NG e o repaint que ficou preservado
+pelo latch visual.
+
+### Causa de integração confirmada
+
+O freeze ocorria depois de um último `update_camera_preview`, mas esse último
+repaint ainda dependia do contexto live existente naquele instante. Em um CHECK
+intermitente, a confirmação persistente pode ser publicada no fechamento do
+debounce depois que o contexto visual usado pelo último repaint já havia sido
+montado.
+
+Assim, os testes unitários provavam corretamente que o renderer sabe pintar
+`MASK_024` de vermelho quando recebe a lista confirmada, mas o canvas real podia
+ser congelado com a versão imediatamente anterior do contexto.
+
+Foi encontrado ainda um problema de observabilidade: a auditoria manual
+reconstruía `visual_state.readout_context` sobre o frame congelado e substituía o
+snapshot visual capturado da janela. Isso podia fazer o DEBUG mostrar a falha
+corretamente mesmo quando o canvas real não a havia pintado.
+
+### Segunda correção D-045
+
+A apresentação terminal passou a ser determinística:
+
+1. `freeze_ng_evidence(...)` recebe os IDs confirmados da análise exata que
+   fechou o NG;
+2. após levantar o latch, o readout congelado é sincronizado explicitamente e
+   redesenhado;
+3. o frame exato do NG é repintado diretamente após o freeze usando a geometria
+   já congelada e `effective_confirmed_failed_mask_ids` da análise terminal;
+4. esse repaint não captura novo frame e não roda nova análise;
+5. os segmentos do canvas agora possuem tags por máscara/estado para diagnóstico
+   do fill realmente desenhado;
+6. o DEBUG preserva `runtime_visual_state_before_manual_recompute`, mantendo a
+   evidência da janela antes de qualquer reconstrução manual;
+7. nenhuma autoridade, thread, worker, timer ou scheduler novo foi criado.
+
+### Testes adicionados
+
+Foram adicionadas regressões que verificam:
+
+- o freeze reaplica `MASK_024` no conjunto de falha do visor congelado;
+- o repaint pós-freeze do frame terminal pinta `MASK_024` em vermelho e mantém
+  os demais segmentos nas cores ON/OFF;
+- o contexto diagnóstico preserva separadamente falhas brutas, confirmadas e em
+  validação;
+- o DEBUG salva o estado visual runtime antes de recalculá-lo.
+
+### Estado
+
+**SEGUNDA CORREÇÃO D-045 IMPLEMENTADA — PENDENTE DE NOVO RETESTE FÍSICO.**
+
+### Reteste esperado
+
+```text
+reproduzir BLUE com MASK_024 fisicamente OFF
+→ BLUE gera NG
+→ PLACA NG / RETIRE A PLACA
+→ câmera congela
+→ SOMENTE a máscara 24 fica VERMELHA
+→ no VISOR DO DISPLAY, SOMENTE o segmento 24 fica VERMELHO
+→ demais ON permanecem verdes
+→ demais OFF permanecem verde escuro
+→ retirar placa
+→ EMPTY/rearme segue normal
+```
+
