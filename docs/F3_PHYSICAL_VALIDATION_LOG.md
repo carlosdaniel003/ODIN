@@ -2551,3 +2551,78 @@ Com essa mensagem será possível atacar a causa específica sem terceira tentat
 
 **Estado:** DIAGNÓSTICO/INSTRUMENTAÇÃO IMPLEMENTADOS — AGUARDANDO EVIDÊNCIA REAL.
 
+---
+
+## 01/10/2026 — Causa reproduzida do CONFIGURAR: contrato de construtor desatualizado
+
+**Estado:** CAUSA IDENTIFICADA E CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+### Reprodução objetiva
+
+Após o segundo FAIL físico, o smoke de CONFIGURAR foi ampliado para abrir a
+janela final com:
+
+- frame NumPy 1920x1080 real;
+- `source_frame_provider`;
+- callback `on_camera_zoom_preview`;
+- construção dos dois canvases e dos dois `PhotoImage`.
+
+O CI reproduziu o mesmo defeito de abertura com:
+
+    TypeError:
+    presence_init() got an unexpected keyword argument 'source_frame_provider'
+
+### Causa
+
+`display_f3_runtime_contract_fix._install_configuration_constructor_contract()`
+instala wrappers explícitos sobre o construtor de CONFIGURAR.
+
+Esses wrappers ainda descreviam o contrato anterior:
+
+    root
+    repository
+    frame_provider
+    heavy_executor
+    on_change
+    on_close
+
+A nova configuração de zoom acrescentou:
+
+    source_frame_provider
+    on_camera_zoom_preview
+
+O construtor real aceitava os novos argumentos, mas o wrapper final
+`presence_init` os rejeitava antes que a janela fosse criada. Por isso:
+
+    clicar CONFIGURAR
+    → build()
+    → DisplayProjectConfigPresenceWindow(...)
+    → wrapper presence_init antigo
+    → TypeError
+    → exceção capturada
+    → janela não aparece
+
+### Correção aplicada
+
+O contrato explícito foi atualizado no proprietário do wrapper:
+
+- `DisplayProjectConfigWindow.__init__` wrapper agora aceita e encaminha
+  `source_frame_provider` e `on_camera_zoom_preview`;
+- `DisplayProjectConfigPresenceWindow.__init__` wrapper agora aceita e encaminha
+  os mesmos argumentos;
+- o teste permanente do contrato passou a exigir esses dois parâmetros;
+- a instrumentação de erro visível permanece ativa para que futuras falhas de
+  abertura não sejam silenciosas.
+
+### Próximo reteste esperado
+
+    F3
+    → CONFIGURAR
+    → janela abre
+    → preview fonte aparece
+    → saída final aparece
+    → zoom físico/software respondem
+    → viewport aceita clique/arraste
+
+**Validação física:** pendente.
+
