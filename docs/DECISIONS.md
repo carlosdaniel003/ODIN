@@ -2048,6 +2048,69 @@ Isso valida no equipamento real a separação introduzida por D-044 entre
 
 
 ---
+
+## D-045 — NG congelado destaca somente a falha efetivamente confirmada
+
+**Status:** Accepted
+
+### Contexto
+
+Após D-044 ser validada fisicamente, o BLUE defeituoso passou a gerar NG
+corretamente. No estado terminal, porém, a câmera congelada e o VISOR DO DISPLAY
+continuavam mostrando os segmentos apenas pelas cores físicas ON/OFF, sem apontar
+visualmente qual segmento havia fechado o defeito.
+
+O DEBUG do mesmo caso mostrou duas camadas distintas de divergência:
+
+- `effective_failed_mask_ids` bruto podia conter múltiplos IDs transitórios;
+- `effective_confirmed_failed_mask_ids` continha somente a falha persistente que
+  efetivamente sobreviveu ao debounce/intermitência e fechou o NG.
+
+No cenário físico, `MASK_024` era a falha confirmada. Usar a lista bruta para o
+vermelho faria a UI marcar também divergências temporárias como defeitos finais.
+
+### Decisão
+
+1. O **SEGREGAR manual** preserva D-040: câmera, contorno, máscaras e visor podem
+   ficar integralmente vermelhos durante o latch terminal.
+2. O **NG automático/congelado** usa outra regra: somente IDs presentes em
+   `effective_confirmed_failed_mask_ids` recebem vermelho.
+3. A câmera congelada e o VISOR DO DISPLAY consomem a mesma lista confirmada do
+   mesmo contexto/frame que fechou o NG.
+4. `effective_failed_mask_ids` bruto e `effective_validating_mask_ids` não são
+   fonte do vermelho terminal de NG.
+5. Máscaras não confirmadas como falha continuam exibindo a semântica física
+   normal: verde para ON, verde escuro para OFF e amarelo quando aplicável.
+6. No VISOR DO DISPLAY, a falha confirmada tem prioridade visual sobre o caminho
+   `live_luminous_only`; portanto um segmento fisicamente OFF mas confirmado NG
+   aparece vermelho, não verde escuro.
+7. Na câmera, a máscara confirmada recebe preenchimento/contorno vermelho com
+   prioridade sobre o espelho luminoso ON/OFF.
+8. A regra é somente de apresentação. Não altera analyzer, debounce, presença,
+   energia, sequência, rearme, tracking ou classificação óptica.
+9. Nenhum novo timer, worker, scheduler, thread ou autoridade é criado.
+
+### Consequência
+
+O frame congelado passa a explicar visualmente o NG: o operador vê exatamente a
+máscara/segmento que fechou a reprovação, enquanto o restante do display continua
+representando o estado físico real.
+
+Para o caso que originou D-045, o resultado esperado é:
+
+```text
+BLUE terminal NG
+→ MASK_024 confirmada como falha
+→ máscara 24 vermelha na câmera congelada
+→ segmento 24 vermelho no VISOR DO DISPLAY
+→ demais segmentos permanecem ON/OFF normais
+```
+
+**Validação física:** pendente de reteste visual no cenário BLUE NG com
+`MASK_024` apagada.
+
+
+---
 ## Como adicionar uma decisão
 
 Use:
