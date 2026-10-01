@@ -2336,3 +2336,56 @@ F3 Display"**.
 O F3 passa a possuir uma "câmera virtual" configurável sobre a imagem ampliada,
 sem alterar a resolução mestre nem duplicar o pipeline de visão.
 
+---
+
+## D-049 — Mapa único de enquadramento representa o campo de visão efetivo do F3
+
+**Status:** Accepted
+
+### Contexto
+
+A primeira UI de zoom mostrava duas visualizações grandes e aplicava rotação
+visual na prévia final. Isso tornou difícil entender qual imagem era a referência
+espacial e qual região efetivamente seria usada pelo F3.
+
+Também havia um desacoplamento conceitual: o viewport arrastável movia apenas o
+crop do Zoom ODIN, enquanto o zoom digital da câmera permanecia central.
+
+### Decisão
+
+1. A configuração de zoom do F3 possui uma **imagem principal de referência em
+   1× e orientação natural da câmera**.
+2. Sobre essa imagem existe um único **quadro azul**, que representa o campo de
+   visão final usado pelo F3.
+3. O tamanho do quadro azul representa o zoom efetivo combinado:
+
+       zoom efetivo = zoom digital da câmera × Zoom ODIN
+
+4. O mapa principal não aplica a rotação visual configurada do F3. Rotação
+   continua pertencendo ao pipeline de produção, não à navegação espacial do
+   operador.
+5. A prévia secundária passa a ser apenas **RECORTE ATUAL DO F3 • SEM ROTAÇÃO**.
+6. Quando o zoom físico da câmera está acima de 1×, arrastar o quadro azul move
+   o centro do zoom através dos controles UVC/DirectShow `PAN` e `TILT`.
+7. Quando o zoom físico está desativado, o mesmo gesto move
+   `software_zoom_center.x/y`.
+8. O centro do zoom físico é persistido por Projeto Display como
+   `camera_zoom_center.x/y`.
+9. Para permitir navegação enquanto a câmera física já está ampliada, o ODIN
+   preserva em memória um snapshot 1× da sessão imediatamente antes de aplicar
+   o zoom físico. Esse snapshot é somente referência visual; decisões de visão
+   continuam usando frames atuais.
+10. Fechar o F3 restaura zoom/pan/tilt da câmera por meio do mesmo serviço
+    canônico de controles ao vivo; F2 não herda esses ajustes.
+11. Nenhum timer, worker, fila ou scheduler adicional é criado.
+
+### Consequência
+
+O operador passa a trabalhar com uma única metáfora visual:
+
+    imagem completa 1×
+    + quadro azul = área que o F3 usará
+    + arrastar quadro = mover enquadramento
+
+A UI deixa de misturar navegação de enquadramento com rotação visual de produção.
+
