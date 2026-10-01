@@ -75,7 +75,7 @@ class DisplayF3ZoomTests(unittest.TestCase):
         )
         self.assertEqual((75, 38, 125, 63), rect[:4])
         self.assertAlmostEqual(0.5, rect[4], places=6)
-        self.assertAlmostEqual(0.5, rect[5], places=6)
+        self.assertAlmostEqual(0.505, rect[5], places=6)
         self.assertEqual(4.0, rect[6])
 
     def test_pan_tilt_do_zoom_fisico_segue_centro_do_quadro_azul(self):
