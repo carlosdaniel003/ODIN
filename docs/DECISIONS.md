@@ -2288,4 +2288,51 @@ O comportamento físico da BRIO ainda depende do suporte real que o driver
 DirectShow expõe para `CAP_PROP_ZOOM`; quando o driver não confirmar o valor,
 o controle permanece diagnosticável como não aplicado/ignorado.
 
+---
+
+## D-048 — Enquadramento do zoom ODIN é uma janela persistente do Projeto Display
+
+**Status:** Accepted
+
+### Contexto
+
+Depois da validação física do zoom de câmera e do zoom ODIN, surgiu a necessidade
+de não limitar o zoom por software a um crop central fixo.
+
+O operador precisa enxergar a imagem da câmera ao vivo, aproximar a região de
+interesse e decidir visualmente: **"é aqui; é isto que será exibido na câmera do
+F3 Display"**.
+
+### Decisão
+
+1. O zoom ODIN continua sendo uma transformação única do frame F3, mas passa a
+   possuir um centro configurável `x/y` normalizado por Projeto Display.
+2. O Projeto Display persiste:
+   - `software_zoom`;
+   - `software_zoom_center.x`;
+   - `software_zoom_center.y`.
+3. A configuração do F3 apresenta duas visualizações:
+   - **ENQUADRAMENTO • ARRASTE A JANELA**: mostra o frame-fonte e a janela que
+     será recortada;
+   - **VISUALIZAÇÃO AO VIVO • SAÍDA FINAL DO F3**: mostra o resultado efetivo
+     após zoom/enquadramento e rotação visual.
+4. Clique ou arraste sobre a visualização-fonte reposiciona o centro da janela.
+   A janela é limitada geometricamente para nunca sair do frame.
+5. O mesmo recorte salvo é consumido pelo runtime produtivo. Preview, tracking,
+   presença, energia, máscaras, análise OK/NG e freeze terminal continuam
+   observando a mesma visão derivada.
+6. O frame bruto permanece disponível somente como fonte do seletor de
+   enquadramento; ele não vira uma segunda autoridade de decisão.
+7. A atualização ao vivo da configuração reutiliza o `F3RuntimeCoordinator`.
+   Não é criado novo timer, worker, fila ou scheduler.
+8. Durante a configuração, mudanças do zoom físico podem ser aplicadas para
+   preview. Ao fechar sem salvar, o runtime reaplica a configuração persistida
+   do Projeto Display ativo.
+9. Alterar enquadramento invalida visualmente referências anteriores; antes da
+   produção o operador deve revisar/recapturar foto, contorno e máscaras.
+
+### Consequência
+
+O F3 passa a possuir uma "câmera virtual" configurável sobre a imagem ampliada,
+sem alterar a resolução mestre nem duplicar o pipeline de visão.
 
