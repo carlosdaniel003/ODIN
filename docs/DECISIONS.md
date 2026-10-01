@@ -2106,8 +2106,34 @@ BLUE terminal NG
 → demais segmentos permanecem ON/OFF normais
 ```
 
-**Validação física:** pendente de reteste visual no cenário BLUE NG com
-`MASK_024` apagada.
+### Reteste físico visual — 01/10/2026
+
+A primeira implementação de D-045 **não passou** no equipamento. O resultado NG
+foi correto, mas `MASK_024` continuou verde escuro tanto na câmera congelada
+quanto no VISOR DO DISPLAY.
+
+O novo DEBUG confirmou que a decisão semântica estava correta e que
+`effective_confirmed_failed_mask_ids` continha somente `MASK_024`. O problema
+era de lifecycle visual: a lógica de cor estava correta quando chamada
+isoladamente, porém o freeze podia preservar o último repaint live anterior à
+confirmação final do debounce.
+
+A implementação foi então consolidada no próprio caminho de congelamento:
+
+1. o runtime preserva o frame/análise exatos que fecharam o NG;
+2. a janela levanta o latch e sincroniza o readout congelado explicitamente com
+   `effective_confirmed_failed_mask_ids`;
+3. depois do latch, a câmera é repintada diretamente a partir do mesmo frame
+   congelado e do mesmo contexto, sem nova captura e sem nova análise;
+4. segmentos do visor recebem tags de diagnóstico por `MASK_xxx` e estado para
+   permitir verificar a cor que realmente chegou ao canvas;
+5. o snapshot de DEBUG preserva o estado visual runtime anterior a qualquer
+   reconstrução manual, evitando que o diagnóstico recalcule o contexto e
+   esconda uma falha de apresentação;
+6. nenhum timer, worker, scheduler ou classificador adicional foi criado.
+
+**Validação física:** segunda correção implementada; pendente de novo reteste
+visual no cenário BLUE NG com `MASK_024` apagada.
 
 
 ---
