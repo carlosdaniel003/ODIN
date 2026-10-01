@@ -83,7 +83,12 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
 
                 self.assertIsNotNone(created._zoom_source_photo)
                 self.assertIsNotNone(created._zoom_final_photo)
+
+                # Os callbacks dos sliders também dependem do refresh inicial
+                # diferido; exercite-os explicitamente no smoke.
+                created._on_hardware_zoom_changed()
                 self.assertTrue(zoom_preview_calls)
+
                 created.software_zoom_var.set(2.0)
                 created._on_software_zoom_changed()
                 self.assertTrue(software_zoom_preview_calls)
