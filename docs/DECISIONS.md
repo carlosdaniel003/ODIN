@@ -2389,3 +2389,57 @@ O operador passa a trabalhar com uma única metáfora visual:
 
 A UI deixa de misturar navegação de enquadramento com rotação visual de produção.
 
+---
+
+## D-050 — Visualizações de configuração do F3 seguem a rotação visual do desenvolvimento
+
+**Status:** Accepted
+
+### Contexto
+
+A D-049 definiu o mapa de zoom em orientação natural/sem rotação para simplificar
+o enquadramento. No uso físico, isso criou uma inconsistência com a tela principal
+de desenvolvimento: quando o operador define, por exemplo, **180°**, a câmera do
+F3 é visualizada em 180°, mas o mapa do zoom e a janela de captura de máscaras
+continuavam aparecendo na orientação original.
+
+### Decisão
+
+A regra mais recente é:
+
+1. a rotação visual definida na tela de desenvolvimento é a autoridade de
+   apresentação para todas as visualizações operacionais do F3;
+2. o **MAPA DA CÂMERA** do zoom usa essa rotação;
+3. o **RECORTE ATUAL DO F3** usa a mesma rotação;
+4. o quadro azul é desenhado na orientação visual e o gesto de drag é convertido
+   de volta para coordenadas canônicas antes de alterar centro de zoom,
+   `pan/tilt` ou `software_zoom_center`;
+5. **Máscaras → Capturar foto com a câmera** também mostra o frame ao vivo com a
+   mesma rotação visual;
+6. a captura salva o frame mestre na orientação canônica, sem gravar a rotação
+   visual nos pixels; isso evita rotação dupla quando a foto é carregada pelo
+   editor de máscaras;
+7. geometria persistida continua na resolução/orientação mestre e é transformada
+   apenas para apresentação/edição visual;
+8. a rotação continua sendo 0/90/180/270 conforme o contrato existente da tela
+   principal;
+9. nenhum novo timer, worker, scheduler ou autoridade de câmera é criado.
+
+### Relação com D-049
+
+D-050 **substitui especificamente** os itens da D-049 que exigiam mapa e recorte
+"sem rotação". Permanecem válidos os demais contratos da D-049 sobre quadro azul,
+zoom combinado, pan/tilt, persistência por projeto e snapshot 1×.
+
+### Consequência
+
+Se o operador definiu 180° na tela de desenvolvimento, ele deve enxergar 180° em:
+
+    câmera F3
+    mapa de zoom
+    recorte atual do zoom
+    captura ao vivo de referência das máscaras
+    editores/referências que já seguem a rotação visual
+
+A persistência interna permanece canônica.
+
