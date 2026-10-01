@@ -43,6 +43,7 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
                     frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
                     frame[300:780, 520:1400] = (20, 180, 240)
                     zoom_preview_calls = []
+                    software_zoom_preview_calls = []
 
                     created = production_module.DisplayProjectConfigWindow(
                         root=root,
@@ -52,6 +53,11 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
                         on_camera_zoom_preview=lambda enabled, value: (
                             zoom_preview_calls.append(
                                 (bool(enabled), float(value))
+                            )
+                        ),
+                        on_software_zoom_preview=lambda zoom, x, y: (
+                            software_zoom_preview_calls.append(
+                                (float(zoom), float(x), float(y))
                             )
                         ),
                         heavy_executor=executor,
@@ -71,6 +77,10 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
                 self.assertIsNotNone(created._zoom_source_photo)
                 self.assertIsNotNone(created._zoom_final_photo)
                 self.assertTrue(zoom_preview_calls)
+                created.software_zoom_var.set(2.0)
+                created._on_software_zoom_changed()
+                self.assertTrue(software_zoom_preview_calls)
+                self.assertEqual(2.0, software_zoom_preview_calls[-1][0])
         finally:
             if created is not None:
                 try:
