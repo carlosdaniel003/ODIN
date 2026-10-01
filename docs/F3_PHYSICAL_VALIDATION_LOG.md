@@ -2242,3 +2242,93 @@ canônica posterior.
 
 **PASS FÍSICO — CORREÇÃO VALIDADA.**
 
+---
+
+## 01/10/2026 — Zoom de câmera e zoom ODIN no Projeto Display
+
+**Estado:** IMPLEMENTADO — PENDENTE DE RETESTE FÍSICO.
+
+### Requisito
+
+Adicionar dentro de **CONFIGURAR** do F3 dois controles independentes:
+
+- zoom digital da Logitech BRIO/driver;
+- zoom por software do próprio ODIN.
+
+### Implementação
+
+O Projeto Display passou a persistir:
+
+- `camera_zoom.enabled`;
+- `camera_zoom.value` entre 100 e 500;
+- `software_zoom` entre 1.0× e 5.0×.
+
+A janela **Projeto Display** possui agora a seção
+`ZOOM DA CÂMERA / ODIN`, com:
+
+- checkbox para habilitar o zoom da câmera;
+- slider de 1× a 5× para o zoom da câmera;
+- slider de 1× a 5× para o zoom ODIN;
+- ação `Salvar e aplicar zoom`;
+- aviso para revisar referências, contorno e máscaras depois de alterar o
+  enquadramento.
+
+### Zoom da câmera
+
+O serviço canônico de câmera recebeu suporte a `CAP_PROP_ZOOM`.
+
+No perfil BRIO/DirectShow:
+
+    100 → 1×
+    ...
+    500 → 5×
+
+O mesmo mecanismo usado para foco/ganho/exposição confirma o ajuste por
+readback e aceita passos discretos do driver. Ao sair do F3, o controle é
+desabilitado e o baseline anterior é restaurado.
+
+### Zoom ODIN
+
+O zoom por software:
+
+    frame bruto
+    → crop central conforme fator de zoom
+    → resize para a resolução original
+    → frame F3 derivado
+
+O `F3RuntimeCoordinator` publica temporariamente essa mesma visão derivada para
+todo o ciclo F3, de modo que câmera ao vivo, tracking, presença, energia,
+máscaras, CHECKS, análise OK/NG e congelamento terminal trabalhem sobre o mesmo
+frame.
+
+O frame bruto global da câmera permanece preservado para não alterar o F2.
+
+### Performance
+
+O frame ampliado por software é armazenado em cache por:
+
+- frame da câmera;
+- Projeto Display;
+- fator de zoom;
+- resolução.
+
+Repintar o mesmo frame não refaz o `crop + resize`.
+
+Nenhum novo timer, worker, scheduler ou loop foi criado.
+
+### Reteste físico esperado
+
+1. abrir F3 → CONFIGURAR;
+2. habilitar **zoom digital da câmera**;
+3. testar aproximadamente 1×, 2× e 3× e confirmar se a BRIO/DirectShow aceita;
+4. salvar e confirmar que o enquadramento permanece no projeto;
+5. testar **zoom ODIN** em 1×, 1.5×, 2× e 3×;
+6. confirmar que preview e máscaras observam exatamente a mesma imagem ampliada;
+7. fechar e reabrir o F3 e confirmar persistência do Projeto Display;
+8. fechar o F3 e confirmar que o zoom de hardware não permanece contaminando o F2;
+9. após escolher o zoom definitivo, recapturar/revisar referência, contorno e
+   máscaras antes de validar produção.
+
+**Validação física:** pendente.
+
+

@@ -2228,3 +2228,64 @@ Substitui/Substituída por:
 ~~~
 
 Não remova silenciosamente decisões antigas.
+
+---
+
+## D-047 — Zoom do F3 pertence ao Projeto Display e usa uma única visão derivada do frame
+
+**Status:** Accepted
+
+### Contexto
+
+O Display F3 usa atualmente uma Logitech BRIO 4K e precisa permitir aproximação
+da placa sem exigir reposicionamento físico imediato da câmera.
+
+Existem duas formas diferentes de aproximação:
+
+1. o zoom exposto pelo próprio dispositivo/driver através de
+   `CAP_PROP_ZOOM` no DirectShow;
+2. um zoom por software do ODIN, feito sobre o frame já capturado.
+
+Aplicar somente um zoom visual no canvas criaria uma inconsistência grave:
+o operador enxergaria a placa ampliada, mas presença, tracking, máscaras,
+CHECKS e decisão OK/NG continuariam trabalhando sobre outro frame.
+
+### Decisão
+
+1. Os dois zooms são configuração **por Projeto Display**, persistida no
+   repositório exclusivo do F3.
+2. O zoom da câmera é representado por:
+   - `camera_zoom.enabled`;
+   - `camera_zoom.value`, no intervalo 100–500, equivalente a 1×–5× para o
+     perfil BRIO/DirectShow.
+3. O serviço canônico de câmera continua sendo o único proprietário do hardware.
+   O F3 apenas envia `zoom_enabled` e `zoom`; suporte real é confirmado por
+   escrita + readback, como nos demais controles manuais.
+4. Ao fechar o F3, o zoom de hardware é desabilitado pelo mesmo serviço e o
+   baseline capturado antes do ajuste é restaurado, preservando o isolamento F2/F3.
+5. O zoom ODIN é persistido como `software_zoom`, de 1× a 5×.
+6. O zoom ODIN usa crop central e redimensiona de volta para a mesma largura e
+   altura do frame original. Assim a resolução mestre e o sistema de coordenadas
+   do F3 permanecem estáveis.
+7. `F3RuntimeCoordinator` é o ponto único que entrega essa visão derivada aos
+   callbacks do F3. Preview, tracking, presença, energia, analyzer e freeze NG
+   observam o mesmo frame ampliado durante o ciclo.
+8. O frame bruto global da câmera não é substituído permanentemente; ele é
+   restaurado ao terminar cada callback do F3.
+9. O zoom por software possui cache por frame/projeto/fator para evitar repetir
+   crop + resize quando o mesmo frame é apenas repintado.
+10. Alterar qualquer zoom muda o enquadramento físico aparente. Portanto o
+    operador deve revisar ou recapturar foto de referência, contorno e máscaras
+    antes de liberar produção.
+11. Nenhum novo timer, worker, scheduler ou autoridade paralela é criado.
+
+### Consequência
+
+O F3 passa a oferecer dois níveis de aproximação sem misturar estado com F2 e
+sem permitir que UI e decisão produtiva enxerguem imagens diferentes.
+
+O comportamento físico da BRIO ainda depende do suporte real que o driver
+DirectShow expõe para `CAP_PROP_ZOOM`; quando o driver não confirmar o valor,
+o controle permanece diagnosticável como não aplicado/ignorado.
+
+
