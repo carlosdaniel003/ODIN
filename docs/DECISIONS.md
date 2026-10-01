@@ -2140,6 +2140,78 @@ normais. O comportamento terminal permaneceu congelado até a retirada da placa.
 
 
 ---
+
+## D-046 — Resultado APROVADO mantém espelho visual live e same-mask vence falso ON visual
+
+**Status:** Accepted
+
+### Contexto
+
+Após D-045 ser validada, foi observado um novo caso no resultado terminal
+**PLACA APROVADA**. O AUX estava fisicamente correto e havia sido aprovado pelo
+analyzer, porém o VISOR DO DISPLAY mostrava o segmento 10 em verde como se
+estivesse ACESO, embora AUX configure `MASK_010=off`.
+
+O DEBUG confirmou que a decisão produtiva estava correta:
+
+- AUX foi reconhecido por aprendizado same-mask como **28/28 conforme**;
+- `MASK_010` em AUX estava `expected=off`, `classified=off` e
+  `matched=true`;
+- a presença semântica identificava a placa como AUX;
+- portanto o verde da `MASK_010` era apenas erro de apresentação, sem
+  participação no OK.
+
+Ao mesmo tempo, a telemetria do espelho visual mostrava dois problemas:
+
+1. o sampler leve de brilho do preview listava `MASK_010` entre as máscaras
+   luminosas, mesmo com a autoridade física same-mask classificando-a OFF;
+2. o hook visual estava caindo em
+   `fixed_render_exception` porque `_render_check_cards_f3_fixed()` não aceitava
+   o parâmetro `force_terminal_segregated`, fazendo fallback para o render
+   anterior e permitindo que as máscaras ficassem cinzas ao encerrar o ciclo.
+
+### Decisão
+
+1. A decisão produtiva continua integralmente separada do espelho visual.
+2. Quando a autoridade física same-mask e o sampler leve observarem o **mesmo
+   frame**, a classificação física same-mask prevalece para ON/OFF visual.
+3. O sampler latest-frame continua sendo usado para:
+   - máscaras sem classificação física disponível;
+   - substituir classificação física pertencente a frame anterior/stale.
+4. O espelho visual de câmera + VISOR DO DISPLAY continua ativo após
+   **PLACA APROVADA**, enquanto a placa permanecer no suporte aguardando EMPTY.
+5. Resultado OK não congela câmera nem visor. O freeze continua exclusivo do NG
+   conforme D-045; SEGREGAR mantém o override terminal definido por D-040.
+6. Wrappers que substituem `_render_check_cards` precisam preservar a assinatura
+   atual, inclusive `force_terminal_segregated`, para não interromper o pipeline
+   visual.
+7. A telemetria do espelho passa a registrar se o frame físico same-mask é o
+   mesmo frame do preview, permitindo distinguir:
+   - sampler visual usado como fallback;
+   - classificação física same-mask usada como autoridade de apresentação.
+8. Nenhum timer, worker, scheduler ou classificador produtivo adicional é criado.
+
+### Consequência
+
+No caso AUX que originou D-046:
+
+```text
+AUX correto
+→ analyzer same-mask = 28/28
+→ MASK_010 expected OFF / classified OFF
+→ resultado da placa = OK
+→ VISOR mantém MASK_010 verde escuro
+→ demais máscaras continuam reagindo ao estado físico live
+→ câmera e visor permanecem atualizando até a placa sair do suporte
+```
+
+A correção não altera o resultado do CHECK; ela torna a apresentação consistente
+com a mesma evidência física que já estava correta no runtime.
+
+**Validação física:** pendente de reteste no resultado APROVADO com AUX ainda no
+suporte.
+
+---
 ## Como adicionar uma decisão
 
 Use:
