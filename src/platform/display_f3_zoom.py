@@ -119,3 +119,118 @@ def aplicar_zoom_software_frame_display_f3(
         (int(width), int(height)),
         interpolation=cv2.INTER_LINEAR,
     )
+
+
+def calcular_viewport_efetivo_display_f3(
+    frame_shape,
+    camera_zoom: float = 1.0,
+    software_zoom: float = 1.0,
+    camera_center_x: float = 0.5,
+    camera_center_y: float = 0.5,
+    software_center_x: float = 0.5,
+    software_center_y: float = 0.5,
+) -> tuple[int, int, int, int, float, float, float]:
+    """Retorna o campo final do F3 sobre a visão completa 1x.
+
+    O zoom físico acontece primeiro e o crop ODIN acontece dentro do frame
+    entregue pela câmera. O retângulo calculado representa a composição dos
+    dois, sempre na orientação natural da câmera.
+    """
+    camera_zoom = _clamp_float(
+        camera_zoom,
+        F3_SOFTWARE_ZOOM_MIN,
+        F3_SOFTWARE_ZOOM_MAX,
+        F3_SOFTWARE_ZOOM_MIN,
+    )
+    software_zoom = _clamp_float(
+        software_zoom,
+        F3_SOFTWARE_ZOOM_MIN,
+        F3_SOFTWARE_ZOOM_MAX,
+        F3_SOFTWARE_ZOOM_MIN,
+    )
+    camera_center_x, camera_center_y = (
+        normalizar_centro_zoom_software_display_f3(
+            camera_zoom,
+            camera_center_x,
+            camera_center_y,
+        )
+    )
+    software_center_x, software_center_y = (
+        normalizar_centro_zoom_software_display_f3(
+            software_zoom,
+            software_center_x,
+            software_center_y,
+        )
+    )
+
+    effective_zoom = float(camera_zoom) * float(software_zoom)
+    effective_center_x = (
+        float(camera_center_x)
+        + (float(software_center_x) - 0.5) / float(camera_zoom)
+    )
+    effective_center_y = (
+        float(camera_center_y)
+        + (float(software_center_y) - 0.5) / float(camera_zoom)
+    )
+    effective_center_x, effective_center_y = (
+        normalizar_centro_zoom_software_display_f3(
+            effective_zoom,
+            effective_center_x,
+            effective_center_y,
+        )
+    )
+    x0, y0, x1, y1, effective_center_x, effective_center_y = (
+        calcular_recorte_zoom_software_display_f3(
+            frame_shape,
+            effective_zoom,
+            effective_center_x,
+            effective_center_y,
+        )
+    )
+    return (
+        x0,
+        y0,
+        x1,
+        y1,
+        effective_center_x,
+        effective_center_y,
+        effective_zoom,
+    )
+
+
+def centro_camera_para_pan_tilt_display_f3(
+    camera_zoom: float,
+    center_x: float,
+    center_y: float,
+    *,
+    pan_limit: float = 180.0,
+    tilt_limit: float = 180.0,
+) -> tuple[float, float]:
+    """Mapeia o centro visual normalizado para PAN/TILT UVC.
+
+    X cresce para a direita. Y da imagem cresce para baixo, enquanto tilt UVC
+    positivo normalmente aponta para cima, por isso o eixo vertical é invertido.
+    """
+    camera_zoom = _clamp_float(
+        camera_zoom,
+        F3_SOFTWARE_ZOOM_MIN,
+        F3_SOFTWARE_ZOOM_MAX,
+        F3_SOFTWARE_ZOOM_MIN,
+    )
+    center_x, center_y = normalizar_centro_zoom_software_display_f3(
+        camera_zoom,
+        center_x,
+        center_y,
+    )
+    if camera_zoom <= 1.0001:
+        return 0.0, 0.0
+
+    margin = min(0.5, 0.5 / camera_zoom)
+    travel = max(1e-9, 0.5 - margin)
+    nx = min(1.0, max(-1.0, (center_x - 0.5) / travel))
+    ny = min(1.0, max(-1.0, (center_y - 0.5) / travel))
+    return (
+        float(nx) * abs(float(pan_limit)),
+        -float(ny) * abs(float(tilt_limit)),
+    )
+
