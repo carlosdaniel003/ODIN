@@ -47,6 +47,7 @@ class DisplayProjectConfigWindow:
         frame_provider: Callable[[], object | None],
         source_frame_provider: Callable[[], object | None] | None = None,
         on_camera_zoom_preview: Callable[[bool, float], None] | None = None,
+        on_software_zoom_preview: Callable[[float, float, float], None] | None = None,
         heavy_executor=None,
         on_change: Callable[[], None] | None = None,
         on_close: Callable[[], None] | None = None,
@@ -56,6 +57,7 @@ class DisplayProjectConfigWindow:
         self.frame_provider = frame_provider
         self.source_frame_provider = source_frame_provider or frame_provider
         self.on_camera_zoom_preview = on_camera_zoom_preview
+        self.on_software_zoom_preview = on_software_zoom_preview
         self._heavy_executor = heavy_executor
         self._owns_heavy_executor = False
         self.on_change = on_change
@@ -86,6 +88,9 @@ class DisplayProjectConfigWindow:
         self._zoom_source_photo = None
         self._zoom_final_photo = None
         self._zoom_source_mapping = None
+        self._zoom_drag_active = False
+        self._zoom_drag_offset_x = 0.0
+        self._zoom_drag_offset_y = 0.0
         # Estes canvases nascem depois dos sliders. Alguns builds do Tk,
         # especialmente no Windows, podem disparar o callback do Scale durante
         # a construção. Inicializar explicitamente evita acesso prematuro.
@@ -385,8 +390,9 @@ class DisplayProjectConfigWindow:
         tk.Label(
             zoom_box,
             text=(
-                "A área destacada é a câmera virtual do F3. Clique ou arraste "
-                "para escolher exatamente qual parte da imagem ampliada será usada."
+                "A área destacada é a câmera virtual do Zoom ODIN. Arraste "
+                "para escolher exatamente qual parte da imagem será usada. "
+                "Em 1× não existe margem para deslocamento."
             ),
             font=("Segoe UI", 8),
             fg=self.MUTED,
@@ -408,12 +414,17 @@ class DisplayProjectConfigWindow:
         self.zoom_source_canvas.pack(fill=tk.X, padx=12, pady=(0, 4))
         self.zoom_source_canvas.bind(
             "<Button-1>",
-            self._on_zoom_viewport_pointer,
+            self._on_zoom_viewport_press,
             add="+",
         )
         self.zoom_source_canvas.bind(
             "<B1-Motion>",
-            self._on_zoom_viewport_pointer,
+            self._on_zoom_viewport_drag,
+            add="+",
+        )
+        self.zoom_source_canvas.bind(
+            "<ButtonRelease-1>",
+            self._on_zoom_viewport_release,
             add="+",
         )
         self.zoom_center_label = tk.Label(
@@ -818,11 +829,22 @@ class DisplayProjectConfigWindow:
                 pass
         self._rerender_zoom_preview()
 
+    def _publish_software_zoom_preview(self) -> None:
+        callback = self.on_software_zoom_preview
+        if not callable(callback) or not self._selected_name():
+            return
+        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        try:
+            callback(software_zoom, center_x, center_y)
+        except Exception:
+            pass
+
     def _on_software_zoom_changed(self) -> None:
         _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
         self.software_zoom_center_x_var.set(center_x)
         self.software_zoom_center_y_var.set(center_y)
         self._update_zoom_labels()
+        self._publish_software_zoom_preview()
         self._rerender_zoom_preview()
 
     @staticmethod
@@ -898,18 +920,15 @@ class DisplayProjectConfigWindow:
             "source_height": int(source_h),
         }
 
-    def _draw_zoom_source_viewport(self, frame) -> None:
+    def _update_zoom_viewport_overlay(self, frame=None) -> None:
         canvas = getattr(self, "zoom_source_canvas", None)
-        if canvas is None:
+        mapping = self._zoom_source_mapping
+        if canvas is None or not isinstance(mapping, dict):
             return
 
-        mapping = self._render_bgr_zoom_canvas(
-            canvas,
-            frame,
-            "_zoom_source_photo",
-        )
-        self._zoom_source_mapping = mapping
-        if mapping is None:
+        if frame is None:
+            frame = self._zoom_live_source_frame
+        if frame is None or getattr(frame, "size", 0) == 0:
             return
 
         _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
@@ -923,6 +942,7 @@ class DisplayProjectConfigWindow:
         )
         self.software_zoom_center_x_var.set(effective_x)
         self.software_zoom_center_y_var.set(effective_y)
+
         sx = mapping["render_width"] / max(
             1.0,
             float(mapping["source_width"]),
@@ -933,6 +953,7 @@ class DisplayProjectConfigWindow:
         )
         ox = mapping["offset_x"]
         oy = mapping["offset_y"]
+        canvas.delete("zoom_viewport")
         canvas.create_rectangle(
             ox + x0 * sx,
             oy + y0 * sy,
@@ -953,7 +974,7 @@ class DisplayProjectConfigWindow:
             width=1,
             tags=("zoom_viewport",),
         )
-        self.zoom_source_canvas.create_line(
+        canvas.create_line(
             center_canvas_x,
             center_canvas_y - 8,
             center_canvas_x,
@@ -962,6 +983,21 @@ class DisplayProjectConfigWindow:
             width=1,
             tags=("zoom_viewport",),
         )
+
+    def _draw_zoom_source_viewport(self, frame) -> None:
+        canvas = getattr(self, "zoom_source_canvas", None)
+        if canvas is None:
+            return
+
+        mapping = self._render_bgr_zoom_canvas(
+            canvas,
+            frame,
+            "_zoom_source_photo",
+        )
+        self._zoom_source_mapping = mapping
+        if mapping is None:
+            return
+        self._update_zoom_viewport_overlay(frame)
 
     def update_live_zoom_preview(
         self,
@@ -977,7 +1013,10 @@ class DisplayProjectConfigWindow:
             return
         self._zoom_live_source_frame = source_frame
         self._zoom_live_visual_rotation = int(visual_rotation or 0)
-        self._draw_zoom_source_viewport(source_frame)
+        if self._zoom_drag_active:
+            self._update_zoom_viewport_overlay(source_frame)
+        else:
+            self._draw_zoom_source_viewport(source_frame)
 
         _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
         final_frame = aplicar_zoom_software_frame_display_f3(
@@ -1022,11 +1061,10 @@ class DisplayProjectConfigWindow:
             visual_rotation=self._zoom_live_visual_rotation,
         )
 
-    def _on_zoom_viewport_pointer(self, event) -> str:
+    def _zoom_pointer_normalized(self, event) -> tuple[float, float] | None:
         mapping = self._zoom_source_mapping
         if not isinstance(mapping, dict):
-            return "break"
-
+            return None
         width = max(1.0, float(mapping["render_width"]))
         height = max(1.0, float(mapping["render_height"]))
         x = (
@@ -1035,15 +1073,100 @@ class DisplayProjectConfigWindow:
         y = (
             float(getattr(event, "y", 0)) - float(mapping["offset_y"])
         ) / height
+        return (
+            min(1.0, max(0.0, x)),
+            min(1.0, max(0.0, y)),
+        )
+
+    def _render_zoom_final_only(self) -> None:
+        frame = self._zoom_live_source_frame
+        final_canvas = getattr(self, "zoom_final_canvas", None)
+        if (
+            final_canvas is None
+            or frame is None
+            or getattr(frame, "size", 0) == 0
+        ):
+            return
+
+        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        final_frame = aplicar_zoom_software_frame_display_f3(
+            frame,
+            software_zoom,
+            center_x,
+            center_y,
+        )
+        try:
+            from src.platform.display_visual_rotation import (
+                preparar_frame_visual_display,
+            )
+            final_frame = preparar_frame_visual_display(
+                final_frame,
+                self._zoom_live_visual_rotation,
+            )
+        except Exception:
+            pass
+        self._render_bgr_zoom_canvas(
+            final_canvas,
+            final_frame,
+            "_zoom_final_photo",
+        )
+
+    def _on_zoom_viewport_press(self, event) -> str:
+        pointer = self._zoom_pointer_normalized(event)
+        if pointer is None:
+            return "break"
+
+        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        if software_zoom <= 1.0001:
+            self._zoom_drag_active = False
+            try:
+                self.status.configure(
+                    text=(
+                        "Para mover o enquadramento, aumente o Zoom ODIN acima "
+                        "de 1×. O zoom digital da BRIO é central pelo driver."
+                    )
+                )
+            except Exception:
+                pass
+            return "break"
+
+        px, py = pointer
+        margin = min(0.5, 0.5 / software_zoom)
+        inside = (
+            center_x - margin <= px <= center_x + margin
+            and center_y - margin <= py <= center_y + margin
+        )
+        self._zoom_drag_offset_x = center_x - px if inside else 0.0
+        self._zoom_drag_offset_y = center_y - py if inside else 0.0
+        self._zoom_drag_active = True
+        return self._on_zoom_viewport_drag(event)
+
+    def _on_zoom_viewport_drag(self, event) -> str:
+        if not self._zoom_drag_active:
+            return "break"
+        pointer = self._zoom_pointer_normalized(event)
+        if pointer is None:
+            return "break"
+
+        px, py = pointer
         _camera_zoom, software_zoom, _old_x, _old_y = self._zoom_values()
         center_x, center_y = normalizar_centro_zoom_software_display_f3(
             software_zoom,
-            x,
-            y,
+            px + self._zoom_drag_offset_x,
+            py + self._zoom_drag_offset_y,
         )
         self.software_zoom_center_x_var.set(center_x)
         self.software_zoom_center_y_var.set(center_y)
         self._update_zoom_labels()
+        self._publish_software_zoom_preview()
+        self._update_zoom_viewport_overlay()
+        self._render_zoom_final_only()
+        return "break"
+
+    def _on_zoom_viewport_release(self, _event=None) -> str:
+        self._zoom_drag_active = False
+        self._zoom_drag_offset_x = 0.0
+        self._zoom_drag_offset_y = 0.0
         self._rerender_zoom_preview()
         return "break"
 
