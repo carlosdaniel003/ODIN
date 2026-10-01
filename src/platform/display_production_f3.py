@@ -1278,7 +1278,7 @@ class DisplayProductionF3Mixin:
                     configuracao.update_live_zoom_preview(
                         source_frame,
                         overview_frame=overview_frame,
-                        visual_rotation=0,
+                        visual_rotation=visual_rotation,
                     )
             except Exception:
                 pass
