@@ -642,9 +642,35 @@ def _coherent_visual_state_from_runtime(
             }
             failed = tuple(
                 sorted(
+                    str(mask_id)
+                    for mask_id in (
+                        analysis.get("effective_failed_mask_ids") or ()
+                    )
+                    if str(mask_id)
+                )
+            ) if "effective_failed_mask_ids" in analysis else tuple(
+                sorted(
                     str(item.get("mask_id"))
                     for item in mask_results
                     if item.get("matched") is False
+                )
+            )
+            confirmed = tuple(
+                sorted(
+                    str(mask_id)
+                    for mask_id in (
+                        analysis.get("effective_confirmed_failed_mask_ids") or ()
+                    )
+                    if str(mask_id)
+                )
+            ) if "effective_confirmed_failed_mask_ids" in analysis else failed
+            validating = tuple(
+                sorted(
+                    str(mask_id)
+                    for mask_id in (
+                        analysis.get("effective_validating_mask_ids") or ()
+                    )
+                    if str(mask_id)
                 )
             )
             has_any_on = any(
@@ -652,9 +678,13 @@ def _coherent_visual_state_from_runtime(
             )
             for target in (readout, overlay):
                 target["classifications"] = dict(classifications)
+                target["effective_classifications"] = dict(classifications)
                 if expected_states:
                     target["expected_states"] = dict(expected_states)
-                target["failed_mask_ids"] = failed
+                target["failed_mask_ids"] = confirmed
+                target["effective_failed_mask_ids"] = failed
+                target["effective_confirmed_failed_mask_ids"] = confirmed
+                target["effective_validating_mask_ids"] = validating
                 target["has_any_on"] = bool(has_any_on)
 
     authority = runtime.get("power_authority_status")
@@ -1583,6 +1613,12 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
     readout = _frozen_frame_visual_context(snapshot, frozen_analysis)
     visual_state = snapshot.get("visual_state")
     visual_state = deepcopy(visual_state) if isinstance(visual_state, dict) else {}
+    # Preserva a evidência que a própria janela congelou antes de reconstruir o
+    # diagnóstico manual. Isso impede o DEBUG de "corrigir retroativamente" um
+    # renderer que não chegou a pintar o canvas/câmera na operação real.
+    snapshot["runtime_visual_state_before_manual_recompute"] = deepcopy(
+        visual_state
+    )
     visual_state["readout_context"] = deepcopy(readout)
     visual_state["debug_visual_source"] = "frozen_frame_analysis"
     snapshot["visual_state"] = visual_state
@@ -1685,6 +1721,26 @@ def _frozen_frame_visual_context(
             )
         )
     )
+    confirmed_failed_mask_ids = tuple(
+        sorted(
+            str(mask_id)
+            for mask_id in (
+                data.get("effective_confirmed_failed_mask_ids") or ()
+            )
+            if str(mask_id)
+        )
+    )
+    validating_mask_ids = tuple(
+        sorted(
+            str(mask_id)
+            for mask_id in (
+                data.get("effective_validating_mask_ids") or ()
+            )
+            if str(mask_id)
+        )
+    )
+    if "effective_confirmed_failed_mask_ids" not in data:
+        confirmed_failed_mask_ids = failed_mask_ids
     mask_ids = tuple(str(item.get("mask_id")) for item in results)
     on_count = sum(1 for value in classifications.values() if value == "on")
 
@@ -1728,8 +1784,10 @@ def _frozen_frame_visual_context(
         "classifications": classifications,
         "effective_classifications": dict(classifications),
         "expected_states": expected_states,
-        "failed_mask_ids": failed_mask_ids,
+        "failed_mask_ids": confirmed_failed_mask_ids,
         "effective_failed_mask_ids": failed_mask_ids,
+        "effective_confirmed_failed_mask_ids": confirmed_failed_mask_ids,
+        "effective_validating_mask_ids": validating_mask_ids,
         "ui_mask_authority": str(
             data.get("ui_mask_authority") or "frozen_frame_effective"
         ),
