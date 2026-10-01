@@ -86,6 +86,11 @@ class DisplayProjectConfigWindow:
         self._zoom_source_photo = None
         self._zoom_final_photo = None
         self._zoom_source_mapping = None
+        # Estes canvases nascem depois dos sliders. Alguns builds do Tk,
+        # especialmente no Windows, podem disparar o callback do Scale durante
+        # a construção. Inicializar explicitamente evita acesso prematuro.
+        self.zoom_source_canvas = None
+        self.zoom_final_canvas = None
 
         self.window = tk.Toplevel(root)
         self.window.title("ODIN • Projeto Display")
@@ -398,7 +403,7 @@ class DisplayProjectConfigWindow:
             highlightbackground=self.BORDER,
             highlightthickness=1,
             bd=0,
-            cursor="fleur",
+            cursor="hand2",
         )
         self.zoom_source_canvas.pack(fill=tk.X, padx=12, pady=(0, 4))
         self.zoom_source_canvas.bind(
@@ -894,8 +899,12 @@ class DisplayProjectConfigWindow:
         }
 
     def _draw_zoom_source_viewport(self, frame) -> None:
+        canvas = getattr(self, "zoom_source_canvas", None)
+        if canvas is None:
+            return
+
         mapping = self._render_bgr_zoom_canvas(
-            self.zoom_source_canvas,
+            canvas,
             frame,
             "_zoom_source_photo",
         )
@@ -924,7 +933,7 @@ class DisplayProjectConfigWindow:
         )
         ox = mapping["offset_x"]
         oy = mapping["offset_y"]
-        self.zoom_source_canvas.create_rectangle(
+        canvas.create_rectangle(
             ox + x0 * sx,
             oy + y0 * sy,
             ox + x1 * sx,
@@ -935,7 +944,7 @@ class DisplayProjectConfigWindow:
         )
         center_canvas_x = ox + effective_x * mapping["source_width"] * sx
         center_canvas_y = oy + effective_y * mapping["source_height"] * sy
-        self.zoom_source_canvas.create_line(
+        canvas.create_line(
             center_canvas_x - 8,
             center_canvas_y,
             center_canvas_x + 8,
@@ -962,6 +971,10 @@ class DisplayProjectConfigWindow:
     ) -> None:
         if not self.visible:
             return
+        source_canvas = getattr(self, "zoom_source_canvas", None)
+        final_canvas = getattr(self, "zoom_final_canvas", None)
+        if source_canvas is None or final_canvas is None:
+            return
         self._zoom_live_source_frame = source_frame
         self._zoom_live_visual_rotation = int(visual_rotation or 0)
         self._draw_zoom_source_viewport(source_frame)
@@ -985,13 +998,19 @@ class DisplayProjectConfigWindow:
         except Exception:
             pass
         self._render_bgr_zoom_canvas(
-            self.zoom_final_canvas,
+            final_canvas,
             final_frame,
             "_zoom_final_photo",
         )
         self._update_zoom_labels()
 
     def _rerender_zoom_preview(self) -> None:
+        if (
+            getattr(self, "zoom_source_canvas", None) is None
+            or getattr(self, "zoom_final_canvas", None) is None
+        ):
+            return
+
         frame = self._zoom_live_source_frame
         if frame is None or getattr(frame, "size", 0) == 0:
             try:
