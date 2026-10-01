@@ -1984,3 +1984,75 @@ AUX correto com MASK_010 fisicamente OFF
 → retirar placa
 → EMPTY/rearme normal
 ```
+
+---
+
+## 01/10/2026 — FAIL: NG permaneceu congelado após retirada da placa do suporte
+
+**Resultado físico:** FAIL de rearme/apresentação após retirada da placa.
+
+### Cenário observado
+
+- Display F3 em ciclo produtivo normal;
+- uma placa concluiu o ciclo com resultado **NG**;
+- durante o estado terminal, a apresentação ficou corretamente congelada em NG;
+- o operador retirou fisicamente a placa do suporte;
+- após a retirada, a tela permaneceu congelada no NG em vez de retornar ao estado normal de espera/rearme.
+
+### Comportamento esperado
+
+A retirada física da placa deve encerrar imediatamente a apresentação terminal da
+placa anterior e liberar o F3 para o estado normal de espera/rearme.
+
+O resultado anterior deve continuar identificável visualmente, porém em sua
+variante escura/inativa:
+
+- após **OK**, o verde terminal deve voltar para **verde escuro**;
+- após **NG**, o vermelho terminal deve voltar para **vermelho escuro**;
+- câmera/visor não podem permanecer congelados no frame terminal depois que a
+  placa já saiu do suporte;
+- a retirada da placa deve encerrar qualquer latch/freeze pertencente ao ciclo
+  anterior e preparar a interface para a próxima placa.
+
+### Sintoma observado
+
+    placa gera NG
+    → F3 congela corretamente no resultado NG
+    → operador retira a placa do suporte
+    → apresentação continua congelada no NG
+    → F3 não volta ao estado visual normal de rearme/espera
+
+### Evidência objetiva disponível
+
+Neste relato não foi anexado DEBUG técnico. A evidência disponível é a observação
+física direta do equipamento: a placa foi retirada do suporte, mas o estado visual
+terminal de NG permaneceu congelado.
+
+### Causa
+
+**Ainda não diagnosticada.**
+
+O próximo diagnóstico deve verificar o caminho que transforma a confirmação de
+EMPTY/retirada física em limpeza do freeze/latch terminal e atualização da
+apresentação pós-ciclo, sem alterar as regras já validadas de congelamento do NG
+enquanto a placa ainda permanece no suporte.
+
+### Alteração aplicada
+
+Nenhuma. Este registro documenta somente o FAIL físico relatado.
+
+### Próximo reteste esperado
+
+    placa conclui OK ou NG
+    → resultado terminal é mostrado normalmente enquanto a placa permanece no suporte
+    → retirar fisicamente a placa
+    → EMPTY/rearme é reconhecido
+    → qualquer freeze/latch da placa anterior é encerrado
+    → OK anterior passa para verde escuro
+    → NG anterior passa para vermelho escuro
+    → câmera/visor deixam de permanecer congelados no frame da placa retirada
+    → F3 fica pronto para receber a próxima placa
+
+### Estado
+
+**FAIL REGISTRADO — PENDENTE DE DIAGNÓSTICO E CORREÇÃO.**
