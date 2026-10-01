@@ -348,6 +348,142 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             fills.count(DisplayProductionF3Window.DISPLAY_READOUT_WARNING),
         )
 
+    def test_ng_confirmado_pinta_somente_mascara_defeituosa_vermelha_no_preview_classico(self):
+        frame = np.zeros((80, 180, 3), dtype=np.uint8)
+        context = {
+            "resolution": (180, 80),
+            "masks": (
+                {"id": "MASK_001", "type": "circle", "cx": 30, "cy": 40, "radius": 12},
+                {"id": "MASK_024", "type": "circle", "cx": 90, "cy": 40, "radius": 12},
+                {"id": "MASK_028", "type": "circle", "cx": 150, "cy": 40, "radius": 12},
+            ),
+            "live_luminous_only": True,
+            "live_visual_sample_ready": True,
+            "live_visual_mask_ids": ("MASK_001",),
+            "live_visual_classifications": {
+                "MASK_001": "on",
+                "MASK_024": "off",
+                "MASK_028": "off",
+            },
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+            "board_points": (),
+        }
+
+        rendered = preview_clarity.renderizar_preview_claro_display_f3(
+            frame,
+            context,
+        )
+
+        on_pixel = rendered[40, 30]
+        ng_pixel = rendered[40, 90]
+        off_pixel = rendered[40, 150]
+
+        self.assertGreater(int(on_pixel[1]), int(on_pixel[2]))
+        self.assertGreater(int(on_pixel[1]), int(on_pixel[0]))
+        self.assertGreater(int(ng_pixel[2]), int(ng_pixel[1]))
+        self.assertGreater(int(ng_pixel[2]), int(ng_pixel[0]))
+        self.assertGreater(int(off_pixel[1]), int(off_pixel[2]))
+        self.assertGreater(int(off_pixel[1]), int(off_pixel[0]))
+        self.assertNotEqual(tuple(ng_pixel), tuple(off_pixel))
+
+    def test_visor_live_prioriza_falha_confirmada_em_vermelho(self):
+        class _Canvas:
+            def __init__(self):
+                self.polygons = []
+
+            def create_polygon(self, *args, **kwargs):
+                self.polygons.append(dict(kwargs))
+
+            def create_text(self, *args, **kwargs):
+                return None
+
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window.display_readout_canvas = _Canvas()
+        window._draw_fixed_segment_number = lambda *args, **kwargs: None
+        mask_ids = [f"MASK_{index:03d}" for index in range(1, 8)]
+        context = {
+            "classifications": {},
+            "expected_states": {},
+            "failed_mask_ids": {"MASK_004"},
+            "validating_mask_ids": set(),
+            "ui_mask_authority": "effective_mask_results_v1",
+            "live_luminous_only": True,
+            "luminous_mask_ids": set(mask_ids),
+            "live_visual_sample_ready": True,
+            "live_visual_mask_ids": set(mask_ids),
+            "live_visual_classifications": {
+                mask_id: "on" for mask_id in mask_ids
+            },
+            "power_confirmed": True,
+            "power_off_confirmed": False,
+            "energy_state": "powered",
+        }
+
+        window._draw_fixed_semantic_digit(
+            0.0,
+            0.0,
+            80.0,
+            140.0,
+            mask_ids,
+            context,
+            ready=True,
+        )
+
+        segment_polygons = [
+            item
+            for item in window.display_readout_canvas.polygons
+            if item.get("tags") == ("display-readout-segment",)
+        ]
+        fills = [item.get("fill") for item in segment_polygons]
+        self.assertEqual(
+            1,
+            fills.count(DisplayProductionF3Window.DISPLAY_READOUT_NG),
+        )
+        self.assertEqual(
+            6,
+            fills.count(DisplayProductionF3Window.DISPLAY_READOUT_ACTIVE),
+        )
+
+    def test_contexto_do_visor_prefere_falha_confirmada_ao_failed_bruto(self):
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window._display_readout_frozen = False
+        window._redraw_display_readout = lambda: None
+
+        window.set_display_readout_context(
+            {
+                "readout_mask_ids": ("MASK_004", "MASK_007", "MASK_024"),
+                "effective_classifications": {
+                    "MASK_004": "off",
+                    "MASK_007": "off",
+                    "MASK_024": "off",
+                },
+                "effective_failed_mask_ids": (
+                    "MASK_004",
+                    "MASK_007",
+                    "MASK_024",
+                ),
+                "effective_confirmed_failed_mask_ids": ("MASK_024",),
+                "effective_validating_mask_ids": (
+                    "MASK_004",
+                    "MASK_007",
+                ),
+                "live_luminous_only": True,
+            }
+        )
+
+        self.assertEqual(
+            {"MASK_024"},
+            window._display_readout_context["failed_mask_ids"],
+        )
+        self.assertEqual(
+            {"MASK_004", "MASK_007"},
+            window._display_readout_context["validating_mask_ids"],
+        )
+
     def test_visor_live_usa_verde_escuro_para_segmento_apagado(self):
         self.assertEqual(
             "#22C55E",
