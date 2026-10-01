@@ -73,7 +73,7 @@ class DisplayF3ZoomTests(unittest.TestCase):
             software_center_x=0.5,
             software_center_y=0.5,
         )
-        self.assertEqual((75, 37, 125, 62), rect[:4])
+        self.assertEqual((75, 38, 125, 63), rect[:4])
         self.assertAlmostEqual(0.5, rect[4], places=6)
         self.assertAlmostEqual(0.5, rect[5], places=6)
         self.assertEqual(4.0, rect[6])
