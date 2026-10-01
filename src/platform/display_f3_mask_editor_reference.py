@@ -173,6 +173,7 @@ class F3MaskReferenceCaptureWindow:
         store: DisplayMaskEditorReferenceStore,
         project_name: str,
         master_resolution,
+        visual_rotation: int = 0,
         on_captured=None,
     ) -> None:
         self.parent = parent
@@ -180,6 +181,13 @@ class F3MaskReferenceCaptureWindow:
         self.store = store
         self.project_name = normalizar_nome_projeto_display(project_name)
         self.resolution = normalizar_resolucao_display(master_resolution)
+        try:
+            from src.ui.main_window_parts.image.rotacao_visual_principal import (
+                normalizar_rotacao_visual,
+            )
+            self.visual_rotation = normalizar_rotacao_visual(visual_rotation)
+        except Exception:
+            self.visual_rotation = 0
         self.on_captured = on_captured
         self._latest_frame = None
         self._photo = None
@@ -214,8 +222,8 @@ class F3MaskReferenceCaptureWindow:
             header,
             text=(
                 "Posicione a placa exatamente como deseja calibrar. A imagem abaixo "
-                "é a câmera ao vivo; CAPTURAR congela esse frame e ele passa a ser "
-                "o fundo fixo de todas as próximas edições."
+                "usa a mesma rotação visual definida na tela de desenvolvimento; "
+                "CAPTURAR congela esse frame como referência canônica do projeto."
             ),
             font=("Segoe UI", 8),
             fg="#94A3B8",
@@ -325,11 +333,15 @@ class F3MaskReferenceCaptureWindow:
         self.capture_button.configure(state=tk.NORMAL)
 
         if (camera_w, camera_h) == (project_w, project_h):
-            detail = f"CÂMERA {camera_w}x{camera_h} • pressione CAPTURAR"
+            detail = (
+                f"CÂMERA {camera_w}x{camera_h} • "
+                f"VISUAL {self.visual_rotation}° • pressione CAPTURAR"
+            )
             color = "#86EFAC"
         else:
             detail = (
                 f"CÂMERA {camera_w}x{camera_h} • projeto {project_w}x{project_h} • "
+                f"VISUAL {self.visual_rotation}° • "
                 "a foto será normalizada para a resolução mestre ao capturar"
             )
             color = "#FBBF24"
@@ -343,6 +355,16 @@ class F3MaskReferenceCaptureWindow:
         canvas_w = max(120, int(self.canvas.winfo_width()))
         canvas_h = max(120, int(self.canvas.winfo_height()))
         image = self._latest_frame
+        try:
+            from src.platform.display_visual_rotation import (
+                preparar_frame_visual_display,
+            )
+            image = preparar_frame_visual_display(
+                image,
+                self.visual_rotation,
+            )
+        except Exception:
+            pass
         h, w = image.shape[:2]
         scale = min(
             canvas_w / max(1.0, float(w)),
