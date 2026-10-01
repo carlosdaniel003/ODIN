@@ -286,8 +286,8 @@ class DisplayProjectConfigWindow:
             zoom_box,
             text=(
                 "O zoom da câmera usa CAP_PROP_ZOOM (BRIO/DirectShow). "
-                "O zoom ODIN faz crop central por software mantendo a resolução "
-                "do frame F3."
+                "O zoom ODIN usa uma janela arrastável por software mantendo a "
+                "resolução do frame F3."
             ),
             font=("Segoe UI", 8),
             fg=self.MUTED,
@@ -308,6 +308,7 @@ class DisplayProjectConfigWindow:
             activebackground="#0F1B2C",
             activeforeground=self.TEXT,
             selectcolor="#020617",
+            command=self._on_hardware_zoom_changed,
         ).pack(side=tk.LEFT)
         self.camera_zoom_value_label = tk.Label(
             hardware_header,
@@ -326,7 +327,7 @@ class DisplayProjectConfigWindow:
             orient=tk.HORIZONTAL,
             variable=self.camera_zoom_var,
             showvalue=False,
-            command=lambda _value: self._update_zoom_labels(),
+            command=lambda _value: self._on_hardware_zoom_changed(),
             bg="#0F1B2C",
             fg=self.TEXT,
             troughcolor="#1E293B",
@@ -361,7 +362,7 @@ class DisplayProjectConfigWindow:
             orient=tk.HORIZONTAL,
             variable=self.software_zoom_var,
             showvalue=False,
-            command=lambda _value: self._update_zoom_labels(),
+            command=lambda _value: self._on_software_zoom_changed(),
             bg="#0F1B2C",
             fg=self.TEXT,
             troughcolor="#1E293B",
@@ -372,8 +373,77 @@ class DisplayProjectConfigWindow:
 
         tk.Label(
             zoom_box,
+            text="ENQUADRAMENTO • ARRASTE A JANELA",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.TEXT,
+            bg="#0F1B2C",
+        ).pack(anchor="w", padx=12, pady=(3, 3))
+        tk.Label(
+            zoom_box,
             text=(
-                "Depois de alterar o zoom, revise a foto de referência, o contorno "
+                "A área destacada é a câmera virtual do F3. Clique ou arraste "
+                "para escolher exatamente qual parte da imagem ampliada será usada."
+            ),
+            font=("Segoe UI", 8),
+            fg=self.MUTED,
+            bg="#0F1B2C",
+            justify=tk.LEFT,
+            wraplength=390,
+        ).pack(fill=tk.X, padx=12, pady=(0, 5))
+
+        self.zoom_source_canvas = tk.Canvas(
+            zoom_box,
+            width=360,
+            height=190,
+            bg="#020617",
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+            bd=0,
+            cursor="fleur",
+        )
+        self.zoom_source_canvas.pack(fill=tk.X, padx=12, pady=(0, 4))
+        self.zoom_source_canvas.bind(
+            "<Button-1>",
+            self._on_zoom_viewport_pointer,
+            add="+",
+        )
+        self.zoom_source_canvas.bind(
+            "<B1-Motion>",
+            self._on_zoom_viewport_pointer,
+            add="+",
+        )
+        self.zoom_center_label = tk.Label(
+            zoom_box,
+            text="Centro X 50.0% • Y 50.0%",
+            font=("Segoe UI", 8, "bold"),
+            fg="#67E8F9",
+            bg="#0F1B2C",
+            anchor="w",
+        )
+        self.zoom_center_label.pack(fill=tk.X, padx=12, pady=(0, 7))
+
+        tk.Label(
+            zoom_box,
+            text="VISUALIZAÇÃO AO VIVO • SAÍDA FINAL DO F3",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.TEXT,
+            bg="#0F1B2C",
+        ).pack(anchor="w", padx=12, pady=(0, 3))
+        self.zoom_final_canvas = tk.Canvas(
+            zoom_box,
+            width=360,
+            height=190,
+            bg="#020617",
+            highlightbackground=self.BORDER,
+            highlightthickness=1,
+            bd=0,
+        )
+        self.zoom_final_canvas.pack(fill=tk.X, padx=12, pady=(0, 7))
+
+        tk.Label(
+            zoom_box,
+            text=(
+                "Depois de alterar zoom ou enquadramento, revise a foto de referência, o contorno "
                 "e as máscaras do projeto antes da produção."
             ),
             font=("Segoe UI", 8),
