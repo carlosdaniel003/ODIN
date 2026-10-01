@@ -349,22 +349,26 @@ class F3MaskReferenceCaptureWindow:
         self._render_latest()
         self._schedule()
 
+    def _visual_frame(self, frame):
+        if not _valid_frame(frame):
+            return frame
+        try:
+            from src.platform.display_visual_rotation import (
+                preparar_frame_visual_display,
+            )
+            return preparar_frame_visual_display(
+                frame,
+                self.visual_rotation,
+            )
+        except Exception:
+            return frame
+
     def _render_latest(self) -> None:
         if not _valid_frame(self._latest_frame):
             return
         canvas_w = max(120, int(self.canvas.winfo_width()))
         canvas_h = max(120, int(self.canvas.winfo_height()))
-        image = self._latest_frame
-        try:
-            from src.platform.display_visual_rotation import (
-                preparar_frame_visual_display,
-            )
-            image = preparar_frame_visual_display(
-                image,
-                self.visual_rotation,
-            )
-        except Exception:
-            pass
+        image = self._visual_frame(self._latest_frame)
         h, w = image.shape[:2]
         scale = min(
             canvas_w / max(1.0, float(w)),
