@@ -56,6 +56,8 @@ class DisplayProductionF3Mixin:
         self._display_f3_software_zoom_cache_key = None
         self._display_f3_software_zoom_cache_frame = None
         self._display_f3_camera_zoom_signature = None
+        self._display_f3_zoom_project_name = ""
+        self._display_f3_zoom_runtime_config = normalizar_zoom_projeto_display(None)
         super().__init__(*args, **kwargs)
         self.display_project_repository = DisplayProjectRepository()
         try:
@@ -185,11 +187,13 @@ class DisplayProductionF3Mixin:
         if frame is None or getattr(frame, "size", 0) == 0:
             return frame
 
-        repository = self.display_project_repository
-        project_name = repository.obter_projeto_ativo() if repository is not None else ""
-        project = repository.carregar_projeto(project_name) if project_name else None
-        zoom = normalizar_zoom_projeto_display(project)
-        software_zoom = float(zoom["software_zoom"])
+        zoom = getattr(self, "_display_f3_zoom_runtime_config", None)
+        if not isinstance(zoom, dict):
+            zoom = normalizar_zoom_projeto_display(None)
+        project_name = str(
+            getattr(self, "_display_f3_zoom_project_name", "") or ""
+        )
+        software_zoom = float(zoom.get("software_zoom", 1.0))
         if software_zoom <= 1.0001:
             return frame
 
@@ -367,6 +371,8 @@ class DisplayProductionF3Mixin:
         nome = repository.obter_projeto_ativo()
         projeto = repository.carregar_projeto(nome) if nome else None
         if projeto is None:
+            self._display_f3_zoom_project_name = ""
+            self._display_f3_zoom_runtime_config = normalizar_zoom_projeto_display(None)
             self._aplicar_zoom_camera_projeto_display_f3(None)
             authority = getattr(self, "_display_f3_state_machine_authority", None)
             if authority is not None:
@@ -382,6 +388,8 @@ class DisplayProductionF3Mixin:
 
         self._display_f3_software_zoom_cache_key = None
         self._display_f3_software_zoom_cache_frame = None
+        self._display_f3_zoom_project_name = str(projeto.get("name") or nome or "")
+        self._display_f3_zoom_runtime_config = normalizar_zoom_projeto_display(projeto)
         self._aplicar_zoom_camera_projeto_display_f3(projeto)
         resolucao = normalizar_resolucao_display(
             projeto.get("master_resolution")
@@ -1013,6 +1021,8 @@ class DisplayProductionF3Mixin:
         self._restaurar_zoom_camera_apos_f3()
         self._display_f3_software_zoom_cache_key = None
         self._display_f3_software_zoom_cache_frame = None
+        self._display_f3_zoom_project_name = ""
+        self._display_f3_zoom_runtime_config = normalizar_zoom_projeto_display(None)
         authorities = getattr(self, "_display_f3_runtime_authorities", None)
         if authorities is not None:
             authorities.reset_cycle_state()

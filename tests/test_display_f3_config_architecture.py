@@ -90,6 +90,14 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertEqual(frame.shape, zoomed.shape)
         self.assertGreater(float(zoomed.mean()), float(frame.mean()))
 
+    def test_zoom_software_nao_le_repositorio_no_hot_path(self):
+        source = inspect.getsource(
+            DisplayProductionF3Mixin._obter_frame_runtime_display_f3
+        )
+        self.assertIn("_display_f3_zoom_runtime_config", source)
+        self.assertNotIn("carregar_projeto(", source)
+        self.assertNotIn("obter_projeto_ativo(", source)
+
     def test_preview_service_uses_canonical_heavy_executor_and_no_tk(self):
         source = inspect.getsource(config_service)
         self.assertIn("self._executor.submit(", source)
