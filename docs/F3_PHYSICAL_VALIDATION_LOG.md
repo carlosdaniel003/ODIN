@@ -2331,4 +2331,32 @@ Nenhum novo timer, worker, scheduler ou loop foi criado.
 
 **Validação física:** pendente.
 
+---
+
+## 01/10/2026 — PASS físico: zoom de câmera e zoom ODIN
+
+**Resultado físico:** PASS.
+
+### Cenário validado
+
+Após a implementação da D-047, o operador testou no F3 os controles de zoom
+adicionados ao Projeto Display e confirmou que o comportamento funcionou no
+equipamento real.
+
+Foram validados no fluxo real de configuração:
+
+- controle de zoom digital da câmera exposto ao F3;
+- controle de zoom por software do ODIN;
+- aplicação do zoom no fluxo do Display F3.
+
+Não foi fornecido novo DEBUG textual neste reteste; a validação reportada foi
+visual/operacional.
+
+### Estado
+
+**PASS FÍSICO — CONTROLES DE ZOOM VALIDADOS.**
+
+A próxima evolução solicitada é tornar o enquadramento configurável visualmente:
+preview ao vivo + janela de captura arrastável para escolher qual região da
+imagem ampliada será efetivamente entregue à câmera do Display F3.
 
