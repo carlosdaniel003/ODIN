@@ -386,7 +386,7 @@ class DisplayProjectConfigWindow:
 
         tk.Label(
             zoom_box,
-            text="ENQUADRAMENTO • ARRASTE A JANELA",
+            text="MAPA DA CÂMERA • ARRASTE O QUADRO AZUL",
             font=("Segoe UI", 8, "bold"),
             fg=self.TEXT,
             bg="#0F1B2C",
@@ -394,9 +394,9 @@ class DisplayProjectConfigWindow:
         tk.Label(
             zoom_box,
             text=(
-                "A área destacada é a câmera virtual do Zoom ODIN. Arraste "
-                "para escolher exatamente qual parte da imagem será usada. "
-                "Em 1× não existe margem para deslocamento."
+                "A imagem abaixo é a visão completa de referência em 1×, sem "
+                "rotação. O quadro azul mostra exatamente a área efetiva que o "
+                "F3 usará. Arraste o quadro para reposicionar o enquadramento."
             ),
             font=("Segoe UI", 8),
             fg=self.MUTED,
@@ -407,8 +407,8 @@ class DisplayProjectConfigWindow:
 
         self.zoom_source_canvas = tk.Canvas(
             zoom_box,
-            width=360,
-            height=190,
+            width=420,
+            height=236,
             bg="#020617",
             highlightbackground=self.BORDER,
             highlightthickness=1,
@@ -433,7 +433,7 @@ class DisplayProjectConfigWindow:
         )
         self.zoom_center_label = tk.Label(
             zoom_box,
-            text="Centro X 50.0% • Y 50.0%",
+            text="ÁREA F3 • centro X 50.0% • Y 50.0%",
             font=("Segoe UI", 8, "bold"),
             fg="#67E8F9",
             bg="#0F1B2C",
@@ -443,15 +443,15 @@ class DisplayProjectConfigWindow:
 
         tk.Label(
             zoom_box,
-            text="VISUALIZAÇÃO AO VIVO • SAÍDA FINAL DO F3",
+            text="RECORTE ATUAL DO F3 • SEM ROTAÇÃO",
             font=("Segoe UI", 8, "bold"),
             fg=self.TEXT,
             bg="#0F1B2C",
         ).pack(anchor="w", padx=12, pady=(0, 3))
         self.zoom_final_canvas = tk.Canvas(
             zoom_box,
-            width=360,
-            height=190,
+            width=300,
+            height=169,
             bg="#020617",
             highlightbackground=self.BORDER,
             highlightthickness=1,
