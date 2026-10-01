@@ -183,6 +183,7 @@ jobs:
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_repaint_pos_freeze_pinta_mask_024_vermelha_no_frame_terminal \
             tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_contexto_visual_congelado_preserva_falha_confirmada_separada_da_bruta \
             tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_debug_preserva_estado_visual_runtime_antes_de_recalculo_manual \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_resultado_ok_terminal_nao_congela_espelho_visual_live \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_tracking_off_tambem_amostra_emissao_do_frame_atual \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_tracking_off_atualiza_visor_depois_da_amostra_visual \
             tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_camera_e_visor_consumem_a_mesma_amostra_do_latest_frame \
