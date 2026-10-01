@@ -635,6 +635,30 @@ def _latest_physical_visual_classifications(
     return physical
 
 
+def _latest_physical_visual_frame_token(
+    window,
+    *,
+    project_name: str,
+):
+    """Token do frame usado pela autoridade física live, quando disponível."""
+    app = overlay_module._app_from_window(window)
+    if app is None:
+        return None
+    power_status = getattr(app, "_display_f3_power_authority_status", None)
+    energy = power_status.get("energy") if isinstance(power_status, dict) else None
+    if not isinstance(energy, dict):
+        return None
+    energy_project = str(energy.get("project_name") or "")
+    if (
+        energy_project
+        and project_name
+        and energy_project != str(project_name)
+    ):
+        return None
+    token = energy.get("frame_token")
+    return tuple(token) if isinstance(token, list) else token
+
+
 def _mask_snapshot_for_current_check(
     window,
     *,
@@ -811,10 +835,17 @@ def _contexto_preview_claro(original):
 
         result["classifications"] = classifications
         result["effective_classifications"] = dict(classifications)
+        project_name = str(project_context.get("project_name") or "")
         result["visual_physical_classifications"] = (
             _latest_physical_visual_classifications(
                 window,
-                project_name=str(project_context.get("project_name") or ""),
+                project_name=project_name,
+            )
+        )
+        result["visual_physical_frame_token"] = (
+            _latest_physical_visual_frame_token(
+                window,
+                project_name=project_name,
             )
         )
         result["failed_mask_ids"] = tuple(sorted(failed_mask_ids))
@@ -1121,10 +1152,17 @@ def preparar_contexto_espelho_visual_f3(
         return None
 
     context = dict(context)
+    project_name = str(context.get("project_name") or "")
     context["visual_physical_classifications"] = (
         _latest_physical_visual_classifications(
             window,
-            project_name=str(context.get("project_name") or ""),
+            project_name=project_name,
+        )
+    )
+    context["visual_physical_frame_token"] = (
+        _latest_physical_visual_frame_token(
+            window,
+            project_name=project_name,
         )
     )
     return aplicar_emissao_visual_ao_vivo_f3(
@@ -1202,12 +1240,22 @@ def aplicar_emissao_visual_ao_vivo_f3(
         }
     }
 
-    # D-035: quando a amostra do MESMO frame está pronta, ela manda no espelho
-    # visual. Cada ROI amostrada vira ON ou OFF naquele repaint. Isso permite
-    # tanto acender quanto apagar imediatamente, sem herdar ON stale de análise
-    # assíncrona anterior.
+    # D-046: quando a autoridade física same-mask já classificou o MESMO frame
+    # da câmera, essa leitura é mais específica que o sampler visual de brilho e
+    # deve prevalecer. O sampler continua latest-frame e preenche máscaras sem
+    # classificação física; se a classificação disponível pertence a frame
+    # anterior, mantém-se D-035 e o sampler pode substituí-la para evitar estado
+    # visual stale.
+    physical_frame_token = result.get("visual_physical_frame_token")
+    same_physical_frame = bool(
+        physical_frame_token is not None
+        and frame_token is not None
+        and repr(physical_frame_token) == repr(frame_token)
+    )
     if ready:
         for mask_id in sampled_mask_ids:
+            if same_physical_frame and mask_id in visual_states:
+                continue
             visual_states[mask_id] = (
                 DISPLAY_CHECK_STATE_ON
                 if mask_id in sampled_on_ids
@@ -1226,6 +1274,8 @@ def aplicar_emissao_visual_ao_vivo_f3(
     result["live_visual_classifications"] = dict(visual_states)
     result["live_visual_frame_token"] = frame_token
     result["live_visual_sample_source"] = "latest_preview_frame_core_v"
+    result["live_visual_physical_frame_token"] = physical_frame_token
+    result["live_visual_same_physical_frame"] = bool(same_physical_frame)
     result["live_visual_sample_reason"] = str(sample.get("reason") or "")
     result["live_visual_sample_threshold"] = sample.get("threshold")
     result["live_visual_sample_baseline"] = sample.get("baseline")
