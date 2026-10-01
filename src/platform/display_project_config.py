@@ -1172,16 +1172,6 @@ class DisplayProjectConfigWindow:
             center_x,
             center_y,
         )
-        try:
-            from src.platform.display_visual_rotation import (
-                preparar_frame_visual_display,
-            )
-            final_frame = preparar_frame_visual_display(
-                final_frame,
-                self._zoom_live_visual_rotation,
-            )
-        except Exception:
-            pass
         self._render_bgr_zoom_canvas(
             final_canvas,
             final_frame,
@@ -1193,6 +1183,7 @@ class DisplayProjectConfigWindow:
         if pointer is None:
             return "break"
 
+        _camera_zoom, software_zoom, _sx, _sy = self._zoom_values()
         effective_zoom, center_x, center_y, _rect = (
             self._effective_zoom_view()
         )
