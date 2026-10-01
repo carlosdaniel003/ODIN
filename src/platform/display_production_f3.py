@@ -286,6 +286,30 @@ class DisplayProductionF3Mixin:
             }
         )
 
+    def _preview_zoom_software_projeto_display_f3(
+        self,
+        zoom: float,
+        center_x: float,
+        center_y: float,
+    ) -> None:
+        """Publica somente em memória o enquadramento editado em CONFIGURAR.
+
+        O repositório continua sendo alterado exclusivamente por SALVAR.
+        Ao fechar CONFIGURAR, _atualizar_resumo_projeto_display_f3() restaura
+        a configuração persistida caso o operador tenha apenas experimentado.
+        """
+        atual = getattr(self, "_display_f3_zoom_runtime_config", None)
+        atual = deepcopy(atual) if isinstance(atual, dict) else {}
+        atual["software_zoom"] = float(zoom)
+        atual["software_zoom_center"] = {
+            "x": float(center_x),
+            "y": float(center_y),
+        }
+        normalizado = normalizar_zoom_projeto_display(atual)
+        self._display_f3_zoom_runtime_config = normalizado
+        self._display_f3_software_zoom_cache_key = None
+        self._display_f3_software_zoom_cache_frame = None
+
     def _restaurar_zoom_camera_apos_f3(self) -> None:
         signature = self._display_f3_camera_zoom_signature
         self._display_f3_camera_zoom_signature = None
@@ -360,6 +384,7 @@ class DisplayProductionF3Mixin:
                     frame_provider=owner._obter_frame_para_configuracao_display,
                     source_frame_provider=owner._obter_frame_fonte_configuracao_display,
                     on_camera_zoom_preview=owner._preview_zoom_camera_projeto_display_f3,
+                    on_software_zoom_preview=owner._preview_zoom_software_projeto_display_f3,
                     heavy_executor=owner._ensure_f3_heavy_executor(),
                     on_change=owner._atualizar_resumo_projeto_display_f3,
                     on_close=owner._ao_fechar_configuracao_projeto_display,
