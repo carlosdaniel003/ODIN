@@ -2120,3 +2120,80 @@ Teste complementar:
     → tela entra em espera com identidade VERDE ESCURO
     → nova placa confirmada libera H1
 
+---
+
+## 01/10/2026 — Reteste pós-correção: NG continuou congelado após retirada
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+- placa entrou em NG normalmente;
+- congelamento terminal do NG funcionou como esperado enquanto a placa permaneceu no suporte;
+- a placa foi retirada fisicamente;
+- visualmente, a câmera/visor continuaram presos no NG anterior;
+- comportamento esperado: ao confirmar suporte vazio, o freeze deve ser encerrado e a interface deve voltar ao estado de espera normal da próxima placa.
+
+### Evidência disponível
+
+Neste reteste foi reportada evidência visual do equipamento. Não foi fornecido novo DEBUG textual.
+
+A primeira correção havia passado nos testes unitários de `final_rearm_guard`, porém isso não representava a composição final do produto.
+
+### Causa encontrada no caminho real
+
+`DesktopProductionApp.__init__()` instala o rearme dedicado e o guard terminal,
+mas, no final do bootstrap de `main_desktop.py`,
+`instalar_autoridades_runtime_display_f3(app)` substitui
+`operational_module._build_operational_state` pelo `canonical_builder`.
+
+O builder canônico chamava apenas `aplicar_gate_rearme_ciclo_f3()`.
+Esse gate libera o ciclo somente quando o classificador geral já devolve
+`kind="empty"`.
+
+O detector dedicado de rearme — criado justamente para o caso em que a cena
+vazia ainda pode ser confundida com H1/um CHECK antigo e para usar a comparação
+relativa EMPTY x placa — ficava fora do caminho final. Assim:
+
+    placa NG retirada
+    → builder canônico continua vendo estado geral não-EMPTY
+    → waiting_empty_rearm permanece ativo
+    → _liberar_evidencia_ng_display_f3() não é alcançado
+    → câmera/visor continuam congelados corretamente pelo latch NG
+
+### Correção aplicada
+
+A responsabilidade foi consolidada dentro de `F3RuntimeAuthorities`, que é a
+autoridade final do runtime:
+
+- quando não existe rearme pendente, o fluxo normal permanece inalterado;
+- quando `waiting_empty_rearm` ou `waiting_new_board_after_empty` está ativo,
+  o builder canônico chama `aplicar_rearme_fisico_dedicado_f3()`;
+- o detector dedicado mantém debounce de EMPTY, comparação específica de suporte
+  vazio e a fase explícita de nova placa;
+- ao confirmar EMPTY, o caminho existente chama
+  `_liberar_evidencia_ng_display_f3()`, desmontando os latches de runtime e
+  janela;
+- nenhuma nova thread, timer, fila, scheduler ou segunda autoridade foi criada.
+
+### Regressão adicionada
+
+O teste do próprio `F3RuntimeAuthorities.build_operational_state()` agora exige
+que, durante `waiting_empty_rearm`, o builder canônico use o rearme dedicado e
+não o gate simples.
+
+### Próximo reteste esperado
+
+    gerar NG
+    → manter placa no suporte
+    → confirmar que NG continua congelado
+    → retirar a placa
+    → EMPTY dedicado confirma a retirada
+    → freeze NG é liberado
+    → câmera volta ao live mostrando o suporte vazio
+    → tela entra em espera vermelho-escuro por ter vindo de NG
+    → inserir nova placa
+    → após confirmação física, H1 volta a ficar ativo
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE NOVO RETESTE FÍSICO.
+

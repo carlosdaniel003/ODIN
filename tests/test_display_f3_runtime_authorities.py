@@ -997,6 +997,139 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
             first["runtime_authority_owner"],
         )
 
+    def test_canonical_builder_uses_dedicated_rearm_while_waiting_empty(self):
+        app = _App()
+        app._display_f3_waiting_empty_rearm = True
+        matcher = SimpleNamespace(
+            check_store=SimpleNamespace(get=Mock(return_value={})),
+        )
+        tracking_owner = SimpleNamespace(
+            stats=lambda: {"owner": "tracking"},
+            presence_evidence=Mock(
+                return_value={
+                    "locked": False,
+                    "evidence_current": False,
+                    "reference": "",
+                    "reason": "object_not_locked",
+                }
+            ),
+        )
+        analyzer_owner = SimpleNamespace(
+            analyzer=object(),
+            rebuild=Mock(return_value=object()),
+        )
+        with (
+            patch.object(
+                authorities,
+                "F3TrackingAuthority",
+                return_value=tracking_owner,
+            ),
+            patch.object(
+                authorities,
+                "F3CheckAnalyzerAuthority",
+                return_value=analyzer_owner,
+            ),
+            patch.object(
+                authorities.operational_module,
+                "DisplayVisualReferenceMatcher",
+                return_value=matcher,
+            ),
+        ):
+            owner = authorities.F3RuntimeAuthorities(app)
+
+        owner.presence = SimpleNamespace(
+            evaluate=Mock(
+                return_value={
+                    "available": True,
+                    "board_present": True,
+                    "presence_confirmed": True,
+                    "empty_confirmed": False,
+                }
+            ),
+            reset=Mock(),
+        )
+        owner.power = SimpleNamespace(
+            evaluate=Mock(
+                return_value={
+                    "powered_confirmed": True,
+                    "off_confirmed": False,
+                    "energy_state": "powered",
+                }
+            ),
+            apply=Mock(
+                side_effect=lambda state, presence, energy, **kwargs: {
+                    **state,
+                    "kind": "powered",
+                    "allow_auto": True,
+                    "power_evidence": energy,
+                }
+            ),
+            reset=Mock(),
+        )
+        owner.reset_cycle_state = Mock()
+
+        raw = {
+            "kind": "check",
+            "check_id": "CHECK_001",
+            "check_name": "H1",
+            "allow_auto": True,
+            "reference_scores": {"empty": 0.59, "check:CHECK_001": 0.40},
+        }
+        frame = _Frame()
+        context = {"check_id": "CHECK_001", "check_name": "H1"}
+
+        def dedicated_rearm(app_arg, matcher_arg, frame_arg, project_name, state):
+            self.assertIs(app, app_arg)
+            self.assertIs(matcher, matcher_arg)
+            self.assertIs(frame, frame_arg)
+            self.assertEqual("P", project_name)
+            self.assertEqual("powered", state["kind"])
+            app_arg._display_f3_waiting_empty_rearm = False
+            app_arg._display_f3_waiting_new_board_after_empty = True
+            return {
+                **state,
+                "kind": "empty",
+                "allow_auto": False,
+                "cycle_rearmed": True,
+                "cycle_rearmed_waiting_new_board": True,
+            }
+
+        with (
+            patch.object(
+                authorities.transition_module,
+                "classificar_estado_fisico_referencias_f3",
+                return_value=raw,
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "corrigir_falso_check_ligado_pelas_mascaras_f3",
+                side_effect=lambda **kwargs: kwargs["state"],
+            ),
+            patch.object(
+                authorities.physical_policy_module,
+                "aplicar_contexto_ao_estado_fisico_f3",
+                side_effect=lambda state, **kwargs: state,
+            ),
+            patch.object(
+                authorities.cycle_rearm_module,
+                "aplicar_rearme_fisico_dedicado_f3",
+                side_effect=dedicated_rearm,
+            ) as dedicated,
+            patch.object(
+                authorities.live_runtime_module,
+                "aplicar_gate_rearme_ciclo_f3",
+                side_effect=lambda app, state: state,
+            ) as simple_gate,
+        ):
+            result = owner.build_operational_state(frame, "P", context)
+
+        self.assertEqual("empty", result["kind"])
+        self.assertTrue(result["cycle_rearmed"])
+        self.assertTrue(app._display_f3_waiting_new_board_after_empty)
+        dedicated.assert_called_once()
+        simple_gate.assert_not_called()
+        owner.reset_cycle_state.assert_called_once_with()
+
     def test_same_frame_rebuilds_when_current_tracking_lock_confirms_presence(self):
         app = _App()
         matcher = SimpleNamespace(

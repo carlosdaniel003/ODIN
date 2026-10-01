@@ -32,12 +32,14 @@ jobs:
             src/platform/display_f3_live_runtime_fix.py \
             src/platform/display_f3_cycle_rearm_release_fix.py \
             src/platform/display_f3_final_rearm_guard.py \
+            src/platform/display_f3_runtime_authorities.py \
             src/platform/display_production_f3_window.py \
             src/platform/display_result_feedback.py \
             src/platform/display_f3_optical_power_reconciliation.py \
             src/platform/display_manual_transition_guard.py \
             tests/test_display_f3_cycle_rearm_release_fix.py \
             tests/test_display_f3_final_rearm_guard.py \
+            tests/test_display_f3_runtime_authorities.py \
             tests/test_display_f3_result_feedback.py \
             tests/test_display_f3_optical_power_reconciliation.py
 
@@ -46,6 +48,7 @@ jobs:
           python -m unittest \
             tests.test_display_f3_cycle_rearm_release_fix \
             tests.test_display_f3_final_rearm_guard \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_canonical_builder_uses_dedicated_rearm_while_waiting_empty \
             tests.test_display_f3_result_feedback \
             tests.test_display_f3_optical_power_reconciliation \
             -v

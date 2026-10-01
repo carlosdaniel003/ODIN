@@ -11,6 +11,7 @@ from copy import deepcopy
 from types import MethodType
 import time
 
+import src.platform.display_f3_cycle_rearm_release_fix as cycle_rearm_module
 import src.platform.display_f3_live_runtime_fix as live_runtime_module
 import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_f3_physical_learning_policy as physical_policy_module
@@ -900,10 +901,33 @@ class F3RuntimeAuthorities:
             context=context,
             tracking=tracking_evidence,
         )
-        state = live_runtime_module.aplicar_gate_rearme_ciclo_f3(
-            self.app,
-            state,
+        rearm_pending = bool(
+            getattr(self.app, "_display_f3_waiting_empty_rearm", False)
+            or getattr(
+                self.app,
+                "_display_f3_waiting_new_board_after_empty",
+                False,
+            )
         )
+        if rearm_pending:
+            # A autoridade canônica é instalada por último e substitui o builder
+            # histórico. Portanto o handoff físico também precisa viver aqui:
+            # durante rearme, use o detector dedicado EMPTY x placa, com debounce
+            # próprio e fase explícita de nova placa. O gate simples sozinho
+            # depende do classificador geral chamar a cena de "empty" e pode ficar
+            # preso em um CHECK antigo mesmo com o suporte fisicamente vazio.
+            state = cycle_rearm_module.aplicar_rearme_fisico_dedicado_f3(
+                self.app,
+                self._matcher,
+                frame,
+                project_name,
+                state,
+            )
+        else:
+            state = live_runtime_module.aplicar_gate_rearme_ciclo_f3(
+                self.app,
+                state,
+            )
         state.setdefault("source", F3_RUNTIME_AUTHORITIES_SOURCE)
         state["runtime_authority_owner"] = F3_RUNTIME_AUTHORITIES_SOURCE
         cycle_rearmed = bool(state.get("cycle_rearmed"))
