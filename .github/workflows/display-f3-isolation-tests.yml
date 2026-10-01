@@ -62,6 +62,7 @@ jobs:
             src/platform/display_f3_object_tracking.py \
             src/platform/display_f3_h1_registration.py \
             src/platform/display_f3_tracking_orientation_ui.py \
+            src/platform/display_f3_status_layout_fix.py \
             src/platform/display_f3_reference_geometry_editor.py \
             src/platform/display_f3_mask_editor_reference.py \
             src/platform/display_f3_preview_clarity_fix.py \
@@ -98,6 +99,7 @@ jobs:
             tests/test_display_f3_runtime_authorities.py \
             tests/test_display_f3_object_tracking_isolation.py \
             tests/test_display_f3_h1_registration.py \
+            tests/test_display_f3_status_layout_fix.py \
             tests/test_display_f3_tracking_ui_contract.py \
             tests/test_display_f3_geometry_adjustments.py
 
@@ -161,7 +163,9 @@ jobs:
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_detecta_todos_acesos_por_evidencia_absoluta \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_latest_frame_apaga_visor_na_fase_escura \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_e_calculada_uma_vez_por_frame_e_reutilizada \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_mesmo_frame_fisico_semantico_prevalece_sobre_falso_on_do_sampler \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_latest_frame_rebaixa_on_stale_para_off_no_mesmo_repaint \
+            tests.test_display_f3_status_layout_fix.DisplayF3StatusLayoutFixTests.test_renderer_fixo_aceita_estado_terminal_segregado_sem_quebrar_overlay \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_paleta_live_on_verde_e_off_verde_escuro \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_luminoso_pinta_verde_mesmo_com_gate_off \
             tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_preview_classico_usa_amostra_do_mesmo_frame_mesmo_antes_do_gate \
