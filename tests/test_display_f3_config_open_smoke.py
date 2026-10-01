@@ -6,6 +6,8 @@ import traceback
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 from src.platform.display_f3_heavy_executor import F3HeavyVisionExecutor
 from src.platform.display_f3_tracking_orientation_ui import (
     instalar_ui_rastreamento_objetos_display_f3,
@@ -38,10 +40,20 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
                 repository.definir_projeto_ativo("CM_500_L")
                 executor = F3HeavyVisionExecutor()
                 try:
+                    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+                    frame[300:780, 520:1400] = (20, 180, 240)
+                    zoom_preview_calls = []
+
                     created = production_module.DisplayProjectConfigWindow(
                         root=root,
                         repository=repository,
-                        frame_provider=lambda: None,
+                        frame_provider=lambda: frame,
+                        source_frame_provider=lambda: frame,
+                        on_camera_zoom_preview=lambda enabled, value: (
+                            zoom_preview_calls.append(
+                                (bool(enabled), float(value))
+                            )
+                        ),
                         heavy_executor=executor,
                         on_change=lambda: None,
                         on_close=lambda: None,
@@ -54,6 +66,11 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
 
                 self.assertTrue(created.visible)
                 self.assertIs(created.repository, repository)
+                self.assertIsNotNone(created.zoom_source_canvas)
+                self.assertIsNotNone(created.zoom_final_canvas)
+                self.assertIsNotNone(created._zoom_source_photo)
+                self.assertIsNotNone(created._zoom_final_photo)
+                self.assertTrue(zoom_preview_calls)
         finally:
             if created is not None:
                 try:
