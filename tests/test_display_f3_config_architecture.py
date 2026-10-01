@@ -101,6 +101,24 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertIn("update_live_zoom_preview", production)
         self.assertIn("_display_f3_runtime_raw_frame", production)
 
+    def test_zoom_config_e_seguro_antes_dos_canvases_existirem(self):
+        window = DisplayProjectConfigWindow.__new__(
+            DisplayProjectConfigWindow
+        )
+        window.zoom_source_canvas = None
+        window.zoom_final_canvas = None
+        window._zoom_live_source_frame = None
+        window._zoom_live_visual_rotation = 0
+        window.source_frame_provider = lambda: None
+
+        # Alguns builds do Tk podem disparar callback de Scale durante a
+        # construção da janela. Isso não pode derrubar CONFIGURAR.
+        window._rerender_zoom_preview()
+
+        source = inspect.getsource(config_module.DisplayProjectConfigWindow)
+        self.assertNotIn('cursor="fleur"', source)
+        self.assertIn('cursor="hand2"', source)
+
     def test_zoom_software_mantem_resolucao_e_amplia_crop_central(self):
         frame = np.zeros((12, 20, 3), dtype=np.uint8)
         frame[3:9, 5:15] = 200
