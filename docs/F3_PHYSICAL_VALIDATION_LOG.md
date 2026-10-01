@@ -2901,3 +2901,34 @@ Ela não entra na análise, decisão, tracking, presença ou OK/NG.
 
 **Validação física:** pendente.
 
+---
+
+## 01/10/2026 — PASS físico do mapa 1× + quadro azul do zoom
+
+**Resultado físico:** PASS.
+
+### Cenário validado
+
+O operador retestou a nova visualização de enquadramento do F3 após o redesign
+registrado na D-049.
+
+Foi confirmado fisicamente que a nova interação ficou correta para o uso
+esperado:
+
+- a visualização principal funciona como mapa da câmera;
+- o quadro azul representa de forma compreensível a região usada pelo F3;
+- o quadro azul pode ser arrastado para reposicionar o enquadramento;
+- o fluxo de zoom/enquadramento deixou de apresentar a confusão relatada na
+  visualização anterior;
+- a interação implementada foi aceita pelo operador no teste real.
+
+O operador não informou valores numéricos específicos de zoom neste reteste;
+portanto nenhum fator de zoom foi inferido ou registrado.
+
+### Histórico preservado
+
+Os FAILs anteriores de abertura, drag e reset do Zoom ODIN permanecem neste
+arquivo como histórico da sequência real de diagnóstico e correção.
+
+**Estado:** PASS FÍSICO — REDESIGN DE ENQUADRAMENTO VALIDADO.
+
