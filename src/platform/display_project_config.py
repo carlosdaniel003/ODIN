@@ -11,7 +11,7 @@ from src.platform.display_check_editor import DisplayCheckManagerWindow
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_f3_zoom import (
     aplicar_zoom_software_frame_display_f3,
-    calcular_recorte_zoom_software_display_f3,
+    calcular_viewport_efetivo_display_f3,
     normalizar_centro_zoom_software_display_f3,
 )
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
@@ -46,7 +46,7 @@ class DisplayProjectConfigWindow:
         repository: DisplayProjectRepository,
         frame_provider: Callable[[], object | None],
         source_frame_provider: Callable[[], object | None] | None = None,
-        on_camera_zoom_preview: Callable[[bool, float], None] | None = None,
+        on_camera_zoom_preview: Callable[[bool, float, float, float], None] | None = None,
         on_software_zoom_preview: Callable[[float, float, float], None] | None = None,
         heavy_executor=None,
         on_change: Callable[[], None] | None = None,
@@ -80,10 +80,13 @@ class DisplayProjectConfigWindow:
         self._current_project_snapshot = None
         self.camera_zoom_enabled_var = tk.BooleanVar(value=False)
         self.camera_zoom_var = tk.DoubleVar(value=float(CAMERA_ZOOM_MIN))
+        self.camera_zoom_center_x_var = tk.DoubleVar(value=0.5)
+        self.camera_zoom_center_y_var = tk.DoubleVar(value=0.5)
         self.software_zoom_var = tk.DoubleVar(value=1.0)
         self.software_zoom_center_x_var = tk.DoubleVar(value=0.5)
         self.software_zoom_center_y_var = tk.DoubleVar(value=0.5)
         self._zoom_live_source_frame = None
+        self._zoom_live_overview_frame = None
         self._zoom_live_visual_rotation = 0
         self._zoom_source_photo = None
         self._zoom_final_photo = None
