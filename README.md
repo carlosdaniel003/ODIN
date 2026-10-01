@@ -592,6 +592,18 @@ VISOR DO DISPLAY são apresentados em vermelho. Isso é somente um override de
 apresentação: a classificação e a telemetria internas continuam preservando o
 ON/OFF físico real e não alteram a lógica de decisão.
 
+No **NG automático/congelado**, a regra visual é diferente do SEGREGAR. O frame
+que confirmou o NG permanece congelado, mas somente as máscaras presentes em
+`effective_confirmed_failed_mask_ids` ficam vermelhas tanto sobre a câmera
+quanto no VISOR DO DISPLAY. As demais continuam usando verde/verde escuro de
+acordo com o ON/OFF físico observado. Divergências ainda em validação ou presentes
+apenas em `effective_failed_mask_ids` bruto não recebem vermelho terminal.
+
+Isso garante que, por exemplo, um BLUE com `MASK_024` persistentemente apagada
+mostre somente o segmento 24 em vermelho, sem transformar `MASK_004` ou
+`MASK_007` transitórias em defeitos visuais finais. Câmera e visor consomem a
+mesma lista confirmada do mesmo frame que fechou o NG.
+
 Depois de EMPTY, a tela passa explicitamente a **COLOQUE OUTRA PLACA** e mantém
 SEGREGAR bloqueado. Somente a confirmação física da nova placa libera H1 e
 reativa o botão/atalho para o próximo ciclo.
