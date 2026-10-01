@@ -10,7 +10,7 @@ from config import CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN
 
 
 DISPLAY_PROJECT_CONFIG_FILE = Path("data/config/odin_display_projects.json")
-DISPLAY_PROJECT_SCHEMA_VERSION = 4
+DISPLAY_PROJECT_SCHEMA_VERSION = 5
 DISPLAY_CAMERA_ZOOM_DEFAULT = 100.0
 DISPLAY_SOFTWARE_ZOOM_MIN = 1.0
 DISPLAY_SOFTWARE_ZOOM_MAX = 5.0
@@ -90,18 +90,47 @@ def normalizar_zoom_projeto_display(projeto: dict | None) -> dict:
             DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
         )
 
+    camera_enabled = normalizar_booleano_display(
+        camera.get("enabled"),
+        False,
+    )
+    camera_value = _limitar_float_display(
+        camera.get("value", DISPLAY_CAMERA_ZOOM_DEFAULT),
+        CAMERA_ZOOM_MIN,
+        CAMERA_ZOOM_MAX,
+        DISPLAY_CAMERA_ZOOM_DEFAULT,
+    )
+    camera_factor = camera_value / 100.0 if camera_enabled else 1.0
+    camera_center = (
+        origem.get("camera_zoom_center")
+        if isinstance(origem.get("camera_zoom_center"), dict)
+        else {}
+    )
+    if camera_factor <= 1.0001:
+        camera_center_x = camera_center_y = DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT
+    else:
+        camera_margin = min(0.5, 0.5 / camera_factor)
+        camera_center_x = _limitar_float_display(
+            camera_center.get("x", DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT),
+            camera_margin,
+            1.0 - camera_margin,
+            DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
+        )
+        camera_center_y = _limitar_float_display(
+            camera_center.get("y", DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT),
+            camera_margin,
+            1.0 - camera_margin,
+            DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
+        )
+
     return {
         "camera_zoom": {
-            "enabled": normalizar_booleano_display(
-                camera.get("enabled"),
-                False,
-            ),
-            "value": _limitar_float_display(
-                camera.get("value", DISPLAY_CAMERA_ZOOM_DEFAULT),
-                CAMERA_ZOOM_MIN,
-                CAMERA_ZOOM_MAX,
-                DISPLAY_CAMERA_ZOOM_DEFAULT,
-            ),
+            "enabled": camera_enabled,
+            "value": camera_value,
+        },
+        "camera_zoom_center": {
+            "x": float(camera_center_x),
+            "y": float(camera_center_y),
         },
         "software_zoom": software_zoom,
         "software_zoom_center": {
@@ -509,6 +538,7 @@ class DisplayProjectRepository:
                     "masks": mascaras,
                     "checks": checks,
                     "camera_zoom": zoom["camera_zoom"],
+                    "camera_zoom_center": zoom["camera_zoom_center"],
                     "software_zoom": zoom["software_zoom"],
                     "software_zoom_center": zoom["software_zoom_center"],
                     "updated_at": projeto.get("updated_at"),
@@ -584,6 +614,10 @@ class DisplayProjectRepository:
             "camera_zoom": {
                 "enabled": False,
                 "value": DISPLAY_CAMERA_ZOOM_DEFAULT,
+            },
+            "camera_zoom_center": {
+                "x": DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
+                "y": DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
             },
             "software_zoom": DISPLAY_SOFTWARE_ZOOM_DEFAULT,
             "software_zoom_center": {
@@ -693,6 +727,7 @@ class DisplayProjectRepository:
             "masks": mascaras_normalizadas,
             "checks": checks,
             "camera_zoom": zoom["camera_zoom"],
+            "camera_zoom_center": zoom["camera_zoom_center"],
             "software_zoom": zoom["software_zoom"],
             "software_zoom_center": zoom["software_zoom_center"],
             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -708,6 +743,8 @@ class DisplayProjectRepository:
         camera_enabled: bool,
         camera_zoom: float,
         software_zoom: float,
+        camera_center_x: float = DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
+        camera_center_y: float = DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
         center_x: float = DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
         center_y: float = DISPLAY_SOFTWARE_ZOOM_CENTER_DEFAULT,
     ) -> bool:
@@ -723,6 +760,10 @@ class DisplayProjectRepository:
                     "enabled": bool(camera_enabled),
                     "value": camera_zoom,
                 },
+                "camera_zoom_center": {
+                    "x": camera_center_x,
+                    "y": camera_center_y,
+                },
                 "software_zoom": software_zoom,
                 "software_zoom_center": {
                     "x": center_x,
@@ -731,6 +772,7 @@ class DisplayProjectRepository:
             }
         )
         projeto["camera_zoom"] = zoom["camera_zoom"]
+        projeto["camera_zoom_center"] = zoom["camera_zoom_center"]
         projeto["software_zoom"] = zoom["software_zoom"]
         projeto["software_zoom_center"] = zoom["software_zoom_center"]
         self._atualizar_timestamp(projeto)
