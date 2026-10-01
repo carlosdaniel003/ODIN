@@ -169,6 +169,68 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
             0.5,
         )
 
+    def test_drag_trava_zoom_mesmo_se_doublevar_for_resetada_no_meio(self):
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        window = DisplayProjectConfigWindow.__new__(
+            DisplayProjectConfigWindow
+        )
+        window.camera_zoom_var = Var(100.0)
+        window.software_zoom_var = Var(2.0)
+        window.software_zoom_center_x_var = Var(0.5)
+        window.software_zoom_center_y_var = Var(0.5)
+        window._zoom_source_mapping = {
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "render_width": 200.0,
+            "render_height": 100.0,
+            "source_width": 200,
+            "source_height": 100,
+        }
+        window._zoom_drag_active = False
+        window._zoom_drag_offset_x = 0.0
+        window._zoom_drag_offset_y = 0.0
+        window._zoom_drag_software_zoom = None
+        window._update_zoom_labels = lambda: None
+        window._publish_software_zoom_preview = lambda: None
+        window._update_zoom_viewport_overlay = lambda *args, **kwargs: None
+        window._render_zoom_final_only = lambda: None
+        window._rerender_zoom_preview = lambda: None
+
+        window._on_zoom_viewport_press(
+            SimpleNamespace(x=100, y=50)
+        )
+        self.assertEqual(2.0, window._zoom_drag_software_zoom)
+
+        # Simula exatamente a condição suspeita do Windows: algum callback
+        # externo atualiza a DoubleVar para o valor persistido 1x no meio do
+        # gesto. O drag deve continuar pertencendo ao zoom capturado no press.
+        window.software_zoom_var.set(1.0)
+
+        window._on_zoom_viewport_drag(
+            SimpleNamespace(x=140, y=50)
+        )
+        self.assertEqual(2.0, window.software_zoom_var.get())
+        self.assertGreater(
+            window.software_zoom_center_x_var.get(),
+            0.5,
+        )
+
+        window._on_zoom_viewport_release(
+            SimpleNamespace(x=140, y=50)
+        )
+        self.assertEqual(2.0, window.software_zoom_var.get())
+        self.assertIsNone(window._zoom_drag_software_zoom)
+        self.assertFalse(window._zoom_drag_active)
+
     def test_drag_em_zoom_um_nao_reseta_nem_finge_movimento(self):
         class Var:
             def __init__(self, value):
