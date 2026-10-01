@@ -155,6 +155,16 @@ def obter_feedback_espera_display_f3(snapshot: dict | None):
     return None
 
 
+def obter_tema_espera_pos_resultado_display_f3(
+    snapshot: dict | None,
+) -> str:
+    """Escolhe a identidade escura do último resultado durante o rearme."""
+    feedback = obter_feedback_espera_display_f3(snapshot)
+    if feedback is not None and feedback[0] == "OK":
+        return "ok_waiting"
+    return "ng_waiting"
+
+
 def _configure(widget, **kwargs) -> None:
     if widget is None:
         return
@@ -391,6 +401,7 @@ def instalar_feedback_resultado_display_f3() -> None:
 
     original_set_check_sequence = cls.set_check_sequence
     original_show_plate_result = cls.show_plate_result
+    original_show_waiting_new_plate = cls.show_waiting_new_plate
 
     def set_check_sequence(self, snapshot) -> None:
         original_set_check_sequence(self, snapshot)
@@ -433,7 +444,7 @@ def instalar_feedback_resultado_display_f3() -> None:
         if bool(getattr(self, "_display_waiting_new_board_ui", False)):
             aplicar_tema_visual_display_f3(
                 self,
-                "ng_waiting",
+                obter_tema_espera_pos_resultado_display_f3(data),
                 snapshot=data,
             )
             return
@@ -480,6 +491,15 @@ def instalar_feedback_resultado_display_f3() -> None:
             snapshot=data,
         )
 
+    def show_waiting_new_plate(self, snapshot: dict | None = None) -> None:
+        original_show_waiting_new_plate(self, snapshot)
+        data = dict(getattr(self, "_check_snapshot", {}) or {})
+        aplicar_tema_visual_display_f3(
+            self,
+            obter_tema_espera_pos_resultado_display_f3(data),
+            snapshot=data,
+        )
+
     def show_plate_result(
         self,
         is_ok: bool,
@@ -509,6 +529,7 @@ def instalar_feedback_resultado_display_f3() -> None:
 
     cls.set_check_sequence = set_check_sequence
     cls.show_plate_result = show_plate_result
+    cls.show_waiting_new_plate = show_waiting_new_plate
     cls._odin_display_result_feedback = True
     cls._odin_display_full_result_theme = True
 

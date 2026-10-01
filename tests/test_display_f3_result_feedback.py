@@ -8,6 +8,7 @@ from src.platform.display_result_feedback import (
     DISPLAY_F3_RESULT_HOLD_MS,
     DISPLAY_F3_VISUAL_THEMES,
     obter_feedback_espera_display_f3,
+    obter_tema_espera_pos_resultado_display_f3,
     obter_tema_visual_display_f3,
 )
 
@@ -54,6 +55,24 @@ class DisplayF3ResultFeedbackTests(unittest.TestCase):
         self.assertEqual(
             "#7F1D1D",
             obter_tema_visual_display_f3("ng_waiting")["panel_bg"],
+        )
+
+    def test_tema_pos_empty_preserva_cor_escura_do_resultado_anterior(self):
+        base = {
+            "current_index": 0,
+            "completed_ids": (),
+        }
+        self.assertEqual(
+            "ok_waiting",
+            obter_tema_espera_pos_resultado_display_f3(
+                {**base, "last_result": "OK"}
+            ),
+        )
+        self.assertEqual(
+            "ng_waiting",
+            obter_tema_espera_pos_resultado_display_f3(
+                {**base, "last_result": "NG"}
+            ),
         )
 
     def test_previous_result_feedback_stops_after_h1_is_completed(self):
@@ -134,6 +153,8 @@ class DisplayF3ResultFeedbackTests(unittest.TestCase):
         self.assertIn("_display_terminal_waiting_removal", source)
         self.assertIn("_display_terminal_result_kind", source)
         self.assertIn("_display_waiting_new_board_ui", source)
+        self.assertIn("show_waiting_new_plate", source)
+        self.assertIn("obter_tema_espera_pos_resultado_display_f3", source)
         self.assertIn("_set_terminal_segregation_chrome", source)
         self.assertIn('"ng_result"', source)
         self.assertIn('"ng_waiting"', source)

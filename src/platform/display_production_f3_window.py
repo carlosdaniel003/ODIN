@@ -1287,8 +1287,16 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             int(self._check_snapshot.get("ng", 0) or 0),
         )
         self._render_check_cards(self._check_snapshot)
+        last_result = str(
+            self._check_snapshot.get("last_result") or ""
+        ).strip().upper()
+        waiting_background = (
+            self.COLOR_WAITING_AFTER_OK
+            if last_result == "OK"
+            else self.COLOR_WAITING_AFTER_NG
+        )
         self._set_state(
-            background=self.COLOR_WAITING_AFTER_NG,
+            background=waiting_background,
             foreground="#FFFFFF",
             status="COLOQUE OUTRA PLACA",
             detail=(

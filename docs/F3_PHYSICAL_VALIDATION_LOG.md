@@ -2056,3 +2056,67 @@ Nenhuma. Este registro documenta somente o FAIL físico relatado.
 ### Estado
 
 **FAIL REGISTRADO — PENDENTE DE DIAGNÓSTICO E CORREÇÃO.**
+
+---
+
+## 01/10/2026 — Correção do freeze NG após EMPTY confirmado
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+### Causa confirmada no código
+
+O rearme físico já reconhecia corretamente a transição
+`RESULTADO TERMINAL → EMPTY → AGUARDANDO NOVA PLACA`, porém o guard final
+publicava a tela de espera chamando diretamente `show_waiting_new_plate()`.
+
+No NG automático existem dois latches visuais coordenados:
+
+- `_display_f3_ng_evidence_frozen` no runtime, que impede o repaint live;
+- `_display_ng_evidence_frozen` na janela, que preserva câmera/visor congelados.
+
+O método canônico `_liberar_evidencia_ng_display_f3()` já desmontava os dois
+latches e só deveria ser executado depois que EMPTY estivesse confirmado, mas o
+handoff final não o chamava. Assim, o estado físico avançava para suporte vazio
+enquanto o preview continuava bloqueado pelo flag da placa NG anterior.
+
+### Alteração aplicada
+
+- o guard terminal passa pelo `_liberar_evidencia_ng_display_f3()` quando a
+  transição de `waiting_empty` para `waiting_new_board` ocorre com evidência
+  NG congelada;
+- o caminho existente continua sendo usado para OK/SEGREGAR, sem criar timer,
+  worker, scheduler ou autoridade paralela;
+- `show_waiting_new_plate()` passa a escolher a cor escura pela memória
+  `last_result`: OK usa verde escuro e NG usa vermelho escuro;
+- o tema completo da janela recebe a mesma escolha imediatamente após EMPTY,
+  em vez de assumir `ng_waiting` para qualquer resultado;
+- D-045 permanece intacta: enquanto a placa NG ainda estiver no suporte, câmera
+  e visor continuam congelados no frame exato que fechou o NG.
+
+### Regressões adicionadas
+
+- transição NG congelado → EMPTY confirma que o liberador canônico é chamado,
+  o flag de freeze do runtime é removido e a UI entra uma única vez na espera
+  por nova placa;
+- seleção do tema pós-EMPTY confirma `ok_waiting` para último resultado OK e
+  `ng_waiting` para último resultado NG.
+
+### Reteste físico esperado
+
+    placa gera NG
+    → NG permanece congelado enquanto a placa está no suporte
+    → retirar a placa
+    → EMPTY é confirmado pelo rearme físico
+    → freeze do runtime e da janela é liberado
+    → câmera deixa imediatamente o frame congelado
+    → tela entra em espera com identidade VERMELHO ESCURO
+    → nova placa confirmada libera H1
+
+Teste complementar:
+
+    placa gera OK
+    → retirar a placa
+    → EMPTY confirmado
+    → tela entra em espera com identidade VERDE ESCURO
+    → nova placa confirmada libera H1
+

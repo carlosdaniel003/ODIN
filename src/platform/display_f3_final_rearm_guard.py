@@ -131,12 +131,39 @@ def _atualizar_rearme_terminal_f3(self) -> str:
             and phase_before != F3_REARM_PHASE_WAIT_NEW_BOARD
             and window is not None
         ):
-            show_waiting = getattr(window, "show_waiting_new_plate", None)
-            if callable(show_waiting):
-                try:
-                    show_waiting(sequence_snapshot)
-                except Exception:
-                    pass
+            waiting_ui_published = False
+
+            # NG possui dois latches coordenados: um no runtime, que bloqueia o
+            # repaint live, e outro na janela, que preserva câmera/visor. EMPTY
+            # confirmado deve passar pelo liberador canônico para desmontar ambos
+            # no mesmo handoff físico. Chamar apenas show_waiting_new_plate()
+            # atualiza o texto, mas deixa o runtime recusando novos repaints.
+            if bool(getattr(self, "_display_f3_ng_evidence_frozen", False)):
+                release_ng = getattr(
+                    self,
+                    "_liberar_evidencia_ng_display_f3",
+                    None,
+                )
+                if callable(release_ng):
+                    try:
+                        release_ng()
+                        waiting_ui_published = not bool(
+                            getattr(
+                                self,
+                                "_display_f3_ng_evidence_frozen",
+                                False,
+                            )
+                        )
+                    except Exception:
+                        waiting_ui_published = False
+
+            if not waiting_ui_published:
+                show_waiting = getattr(window, "show_waiting_new_plate", None)
+                if callable(show_waiting):
+                    try:
+                        show_waiting(sequence_snapshot)
+                    except Exception:
+                        pass
 
         state = estado_visivel_rearme_terminal_f3(
             state,
