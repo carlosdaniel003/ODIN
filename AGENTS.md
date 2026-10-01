@@ -357,8 +357,13 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
   ser usados como fonte final do vermelho de NG, principalmente em CHECK
   intermitente; a UI deve destacar somente falha persistente confirmada;
 - câmera e visor devem consumir a mesma lista confirmada do mesmo frame que
-  fechou o NG, antes de congelar a evidência, para não sinalizar segmentos
-  diferentes entre os dois painéis;
+  fechou o NG; após levantar o latch de freeze, a apresentação terminal precisa
+  ser reafirmada explicitamente com esse snapshot exato, pois o último repaint
+  live pode ter ocorrido antes da confirmação final do debounce;
+- o DEBUG de NG deve preservar o estado visual efetivamente congelado pela janela
+  antes de qualquer reconstrução diagnóstica; recalcular o contexto para o
+  relatório não pode apagar a evidência de que o canvas real deixou de pintar
+  uma falha confirmada;
 - nenhuma correção desses contratos pode criar novo timer, worker, scheduler ou
   autoridade paralela.
 
