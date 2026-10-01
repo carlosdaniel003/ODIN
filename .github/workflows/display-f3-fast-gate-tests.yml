@@ -122,6 +122,7 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_f3_zoom \
+            tests.test_display_f3_visual_rotation \
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_configuracao_zoom_tem_preview_final_e_viewport_arrastavel \
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_preview_de_zoom_reutiliza_scheduler_sem_criar_timer_proprio \
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_drag_move_viewport_sem_desfazer_zoom_software \
