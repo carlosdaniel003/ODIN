@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -118,6 +119,136 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         source = inspect.getsource(config_module.DisplayProjectConfigWindow)
         self.assertNotIn('cursor="fleur"', source)
         self.assertIn('cursor="hand2"', source)
+
+    def test_drag_move_viewport_sem_desfazer_zoom_software(self):
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        window = DisplayProjectConfigWindow.__new__(
+            DisplayProjectConfigWindow
+        )
+        window.camera_zoom_var = Var(100.0)
+        window.software_zoom_var = Var(2.0)
+        window.software_zoom_center_x_var = Var(0.5)
+        window.software_zoom_center_y_var = Var(0.5)
+        window._zoom_source_mapping = {
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "render_width": 200.0,
+            "render_height": 100.0,
+            "source_width": 200,
+            "source_height": 100,
+        }
+        window._zoom_drag_active = False
+        window._zoom_drag_offset_x = 0.0
+        window._zoom_drag_offset_y = 0.0
+        window._update_zoom_labels = lambda: None
+        window._publish_software_zoom_preview = lambda: None
+        window._update_zoom_viewport_overlay = lambda *args, **kwargs: None
+        window._render_zoom_final_only = lambda: None
+        window._rerender_zoom_preview = lambda: None
+
+        window._on_zoom_viewport_press(
+            SimpleNamespace(x=100, y=50)
+        )
+        window._on_zoom_viewport_drag(
+            SimpleNamespace(x=140, y=50)
+        )
+
+        self.assertTrue(window._zoom_drag_active)
+        self.assertEqual(2.0, window.software_zoom_var.get())
+        self.assertGreater(
+            window.software_zoom_center_x_var.get(),
+            0.5,
+        )
+
+    def test_drag_em_zoom_um_nao_reseta_nem_finge_movimento(self):
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        class Status:
+            def __init__(self):
+                self.text = ""
+
+            def configure(self, **kwargs):
+                self.text = str(kwargs.get("text") or "")
+
+        window = DisplayProjectConfigWindow.__new__(
+            DisplayProjectConfigWindow
+        )
+        window.camera_zoom_var = Var(300.0)
+        window.software_zoom_var = Var(1.0)
+        window.software_zoom_center_x_var = Var(0.5)
+        window.software_zoom_center_y_var = Var(0.5)
+        window._zoom_source_mapping = {
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "render_width": 200.0,
+            "render_height": 100.0,
+            "source_width": 200,
+            "source_height": 100,
+        }
+        window._zoom_drag_active = False
+        window._zoom_drag_offset_x = 0.0
+        window._zoom_drag_offset_y = 0.0
+        window.status = Status()
+
+        window._on_zoom_viewport_press(
+            SimpleNamespace(x=150, y=50)
+        )
+
+        self.assertFalse(window._zoom_drag_active)
+        self.assertEqual(1.0, window.software_zoom_var.get())
+        self.assertIn("Zoom ODIN", window.status.text)
+
+    def test_preview_software_atualiza_runtime_sem_persistir(self):
+        owner = DisplayProductionF3Mixin.__new__(
+            DisplayProductionF3Mixin
+        )
+        owner._display_f3_zoom_runtime_config = {
+            "camera_zoom": {"enabled": True, "value": 250.0},
+            "software_zoom": 1.0,
+            "software_zoom_center": {"x": 0.5, "y": 0.5},
+        }
+        owner._display_f3_software_zoom_cache_key = ("old",)
+        owner._display_f3_software_zoom_cache_frame = object()
+
+        owner._preview_zoom_software_projeto_display_f3(
+            2.4,
+            0.65,
+            0.40,
+        )
+
+        current = owner._display_f3_zoom_runtime_config
+        self.assertEqual(2.4, current["software_zoom"])
+        self.assertAlmostEqual(
+            0.65,
+            current["software_zoom_center"]["x"],
+            places=6,
+        )
+        self.assertAlmostEqual(
+            0.40,
+            current["software_zoom_center"]["y"],
+            places=6,
+        )
+        self.assertTrue(current["camera_zoom"]["enabled"])
+        self.assertEqual(250.0, current["camera_zoom"]["value"])
+        self.assertIsNone(owner._display_f3_software_zoom_cache_key)
+        self.assertIsNone(owner._display_f3_software_zoom_cache_frame)
 
     def test_zoom_software_mantem_resolucao_e_amplia_crop_central(self):
         frame = np.zeros((12, 20, 3), dtype=np.uint8)
