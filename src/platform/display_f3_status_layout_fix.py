@@ -102,6 +102,7 @@ def _render_check_cards_f3_fixed(
     self,
     snapshot: dict,
     force_all_completed: bool = False,
+    force_terminal_segregated: bool = False,
 ) -> None:
     checks = list(snapshot.get("checks", []) or [])
     structure_key = display_check_cards_structure_key(snapshot)
@@ -166,7 +167,12 @@ def _render_check_cards_f3_fixed(
 
     for index, check in enumerate(checks):
         state = "completed" if force_all_completed else str(check.get("state", "pending"))
-        if state == "completed":
+        if force_terminal_segregated:
+            bg = self.COLOR_NG
+            border = self.DISPLAY_READOUT_NG_OUTLINE
+            status_text = "SEGREGADO"
+            fg = "#FFFFFF"
+        elif state == "completed":
             bg = self.CHECK_COMPLETED
             border = "#22C55E"
             status_text = "CONCLUÍDO"
