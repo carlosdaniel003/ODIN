@@ -76,6 +76,11 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
                 self.assertIsNotNone(created.zoom_final_canvas)
 
                 # O refresh inicial é intencionalmente diferido por after().
+                # Selecione o projeto explicitamente para validar os callbacks
+                # sem depender do relógio do runner/Xvfb.
+                created.refresh("CM_500_L")
+                root.update_idletasks()
+
                 # O smoke deve validar a renderização sem depender do relógio
                 # do runner/Xvfb, então publica explicitamente o frame real.
                 created.update_live_zoom_preview(frame)
