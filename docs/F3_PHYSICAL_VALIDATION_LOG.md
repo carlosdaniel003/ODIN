@@ -2932,3 +2932,78 @@ arquivo como histórico da sequência real de diagnóstico e correção.
 
 **Estado:** PASS FÍSICO — REDESIGN DE ENQUADRAMENTO VALIDADO.
 
+---
+
+## 01/10/2026 — FAIL físico: zoom e captura de máscaras ignoravam rotação visual
+
+**Resultado físico:** FAIL.
+
+### Cenário observado
+
+Na tela de desenvolvimento do ODIN, o operador configurou a rotação visual para
+**180°**.
+
+Ao abrir o F3:
+
+- a visualização de zoom não seguia os 180° configurados;
+- em **Máscaras → Capturar foto com a câmera**, a janela de captura mostrava a
+  imagem na orientação original em vez de 180°.
+
+### Causa
+
+O redesign D-049 havia definido deliberadamente o mapa/recorte do zoom como
+"sem rotação". Esse contrato ficou incompatível com o uso físico real.
+
+A janela `F3MaskReferenceCaptureWindow` também renderizava diretamente o frame
+canônico, embora o editor posterior já possuísse infraestrutura para trabalhar
+com a rotação visual.
+
+### Correção aplicada
+
+- o runtime passa `visual_rotation` real da tela principal para o preview de
+  zoom;
+- mapa da câmera e recorte atual são renderizados com
+  `preparar_frame_visual_display`;
+- o quadro azul é projetado da geometria canônica para a orientação visual;
+- clique/drag no mapa rotacionado usa conversão visual → original antes de
+  alterar o enquadramento;
+- a janela **Capturar foto com a câmera** recebe a rotação visual atual e mostra
+  o frame nessa orientação;
+- o frame salvo pela captura permanece canônico, evitando rotação dupla no
+  editor e nas referências persistidas;
+- o status da captura informa explicitamente `VISUAL 0/90/180/270°`;
+- D-050 formaliza que a rotação da tela de desenvolvimento é a autoridade de
+  apresentação do F3.
+
+### Regressões automáticas
+
+Foram adicionados testes que confirmam:
+
+- um ponto arrastado na visualização 180° é convertido de volta ao referencial
+  original corretamente;
+- a captura de máscaras mostra 180°;
+- a captura ainda salva o frame mestre sem rotação;
+- o preview de zoom recebe a rotação visual atual do F3;
+- o fluxo de captura recebe a mesma rotação do frame provider.
+
+No HEAD da correção passaram:
+
+- **Display F3 fast H1 BLUE tests**;
+- **Display F3 cycle rearm tests**;
+- **Camera manual controls tests**.
+
+### Reteste físico esperado
+
+    tela de desenvolvimento → rotação 180°
+    → abrir F3 → CONFIGURAR
+    → MAPA DA CÂMERA aparece em 180°
+    → quadro azul acompanha corretamente a orientação 180°
+    → arrastar para um lado move o enquadramento para o mesmo lado visual
+    → RECORTE ATUAL também aparece em 180°
+    → Máscaras → Capturar foto com a câmera
+    → preview ao vivo aparece em 180°
+    → CAPTURAR
+    → editor/preview salvo continua em 180° sem rotação dupla
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
