@@ -66,6 +66,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._display_frozen_check_snapshot = None
         self._display_last_overlay_context = None
         self._display_frozen_overlay_context = None
+        self._display_frozen_ng_visual_debug = {}
         self._check_snapshot: dict = {
             "checks": [],
             "current_check": None,
@@ -818,7 +819,11 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 fill=fill,
                 outline=outline,
                 width=2 if state == "ng" else 1,
-                tags=("display-readout-segment",),
+                tags=(
+                    "display-readout-segment",
+                    f"display-readout-mask:{mask_id}",
+                    f"display-readout-state:{state}",
+                ),
             )
             self._draw_fixed_segment_number(
                 x,
@@ -1047,6 +1052,9 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             "readout_context": readout,
             "check_snapshot": check_snapshot,
             "overlay_context": overlay_context,
+            "frozen_ng_visual_debug": deepcopy(
+                getattr(self, "_display_frozen_ng_visual_debug", {}) or {}
+            ),
             "readout_palette": {
                 "on": self.DISPLAY_READOUT_ACTIVE,
                 "off": self.DISPLAY_READOUT_OFF,
@@ -1135,7 +1143,88 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         if snapshot is not None:
             self.set_check_sequence(snapshot)
 
-    def freeze_ng_evidence(self) -> None:
+    def _apply_frozen_ng_failure_highlight(
+        self,
+        confirmed_failed_mask_ids=(),
+    ) -> dict:
+        """Sincroniza o vermelho terminal do NG com a falha confirmada exata.
+
+        O latch de freeze bloqueia setters normais por projeto. Por isso o estado
+        terminal precisa reafirmar explicitamente os IDs que fecharam o NG depois
+        de congelar, sem depender do último repaint live que pode ter acontecido
+        um frame antes da confirmação final.
+        """
+        confirmed = tuple(
+            sorted(
+                {
+                    str(mask_id)
+                    for mask_id in (confirmed_failed_mask_ids or ())
+                    if str(mask_id)
+                }
+            )
+        )
+        confirmed_set = set(confirmed)
+
+        for attr in (
+            "_display_readout_context",
+            "_display_frozen_readout_context",
+        ):
+            context = getattr(self, attr, None)
+            if not isinstance(context, dict):
+                continue
+            context["failed_mask_ids"] = set(confirmed_set)
+            context["effective_confirmed_failed_mask_ids"] = confirmed
+
+        for attr in (
+            "_display_last_overlay_context",
+            "_display_frozen_overlay_context",
+        ):
+            context = getattr(self, attr, None)
+            if not isinstance(context, dict):
+                continue
+            context["effective_confirmed_failed_mask_ids"] = confirmed
+
+        self._redraw_display_readout()
+
+        rendered_fills = {}
+        canvas = getattr(self, "display_readout_canvas", None)
+        if canvas is not None:
+            for mask_id in confirmed:
+                try:
+                    items = tuple(
+                        canvas.find_withtag(
+                            f"display-readout-mask:{mask_id}"
+                        )
+                    )
+                except Exception:
+                    items = ()
+                fill = ""
+                for item in items:
+                    try:
+                        candidate = str(canvas.itemcget(item, "fill") or "")
+                    except Exception:
+                        candidate = ""
+                    if candidate:
+                        fill = candidate
+                if fill:
+                    rendered_fills[mask_id] = fill
+
+        debug = dict(
+            getattr(self, "_display_frozen_ng_visual_debug", {}) or {}
+        )
+        debug.update(
+            {
+                "source": "exact_pending_ng_analysis_after_freeze",
+                "confirmed_failed_mask_ids": confirmed,
+                "readout_repainted": True,
+                "readout_rendered_fills": rendered_fills,
+                "readout_expected_ng_fill": self.DISPLAY_READOUT_NG,
+            }
+        )
+        self._display_frozen_ng_visual_debug = debug
+        return debug
+
+    def freeze_ng_evidence(self, confirmed_failed_mask_ids=()) -> None:
         """Mantém câmera, visor, CHECK e status no frame que fechou o NG."""
         # Capture ANTES de levantar o latch. A partir daqui qualquer setter
         # diagnóstico vira no-op até EMPTY ser confirmado.
@@ -1155,8 +1244,10 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             self._display_readout_context = deepcopy(
                 self._display_frozen_readout_context
             )
-            self._redraw_display_readout()
 
+        self._apply_frozen_ng_failure_highlight(
+            confirmed_failed_mask_ids
+        )
         self._set_segregation_action_enabled(False)
 
         # Não substitui o preview_status por "retire a placa": ele precisa
@@ -1171,6 +1262,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._display_frozen_analysis_statuses = {}
         self._display_frozen_check_snapshot = None
         self._display_frozen_overlay_context = None
+        self._display_frozen_ng_visual_debug = {}
         self._display_readout_context = None
         self._redraw_display_readout()
 
