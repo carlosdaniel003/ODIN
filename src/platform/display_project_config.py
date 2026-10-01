@@ -1035,8 +1035,7 @@ class DisplayProjectConfigWindow:
             )
             return False
         try:
-            camera_zoom = float(self.camera_zoom_var.get())
-            software_zoom = float(self.software_zoom_var.get())
+            camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
         except (TypeError, ValueError, tk.TclError):
             return False
         saved = self.repository.salvar_zoom_projeto(
@@ -1044,6 +1043,8 @@ class DisplayProjectConfigWindow:
             camera_enabled=bool(self.camera_zoom_enabled_var.get()),
             camera_zoom=camera_zoom,
             software_zoom=software_zoom,
+            center_x=center_x,
+            center_y=center_y,
         )
         if not saved:
             messagebox.showerror(
@@ -1058,7 +1059,8 @@ class DisplayProjectConfigWindow:
             text=(
                 f"Zoom salvo em {name}: câmera {camera_zoom / 100.0:.2f}× "
                 f"({'ativo' if self.camera_zoom_enabled_var.get() else 'desativado'}) "
-                f"• ODIN {software_zoom:.2f}×."
+                f"• ODIN {software_zoom:.2f}× • "
+                f"centro {center_x * 100.0:.1f}%/{center_y * 100.0:.1f}%."
             )
         )
         return True
@@ -1519,7 +1521,10 @@ class DisplayProjectConfigWindow:
         self.camera_zoom_enabled_var.set(False)
         self.camera_zoom_var.set(float(CAMERA_ZOOM_MIN))
         self.software_zoom_var.set(1.0)
+        self.software_zoom_center_x_var.set(0.5)
+        self.software_zoom_center_y_var.set(0.5)
         self._update_zoom_labels()
+        self.update_live_zoom_preview(None)
         self.mask_summary.configure(text="0 máscaras salvas")
         self._clear_mask_reference_preview("Selecione um Projeto Display.")
         if getattr(self, "mask_reference_status", None) is not None:
@@ -1548,7 +1553,17 @@ class DisplayProjectConfigWindow:
         self.camera_zoom_enabled_var.set(bool(camera_zoom["enabled"]))
         self.camera_zoom_var.set(float(camera_zoom["value"]))
         self.software_zoom_var.set(float(zoom["software_zoom"]))
+        center = zoom["software_zoom_center"]
+        self.software_zoom_center_x_var.set(float(center["x"]))
+        self.software_zoom_center_y_var.set(float(center["y"]))
         self._update_zoom_labels()
+        self._on_hardware_zoom_changed()
+        try:
+            source_frame = self.source_frame_provider()
+        except Exception:
+            source_frame = None
+        if source_frame is not None and getattr(source_frame, "size", 0) > 0:
+            self.update_live_zoom_preview(source_frame)
         masks = project.get("masks", [])
         checks = project.get("checks", [])
         active = self.repository.obter_projeto_ativo()
@@ -1772,6 +1787,10 @@ class DisplayProjectConfigWindow:
             except Exception:
                 pass
         self.mask_capture_window = None
+        self._zoom_live_source_frame = None
+        self._zoom_source_photo = None
+        self._zoom_final_photo = None
+        self._zoom_source_mapping = None
         try:
             self.window.destroy()
         except Exception:
