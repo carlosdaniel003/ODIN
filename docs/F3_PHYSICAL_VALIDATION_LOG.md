@@ -1867,3 +1867,45 @@ reproduzir BLUE com MASK_024 fisicamente OFF
 → EMPTY/rearme segue normal
 ```
 
+---
+
+## 01/10/2026 — Reteste D-045 PASS: MASK_024 vermelha na câmera e no visor
+
+**Resultado físico:** PASS.
+
+### Cenário validado
+
+- Rastreamento Automático: desativado;
+- H1 concluído corretamente;
+- CHECK atual: BLUE / CHECK_002;
+- `MASK_024` configurada como ON em BLUE e mantida fisicamente OFF;
+- o ODIN confirmou o BLUE como NG e congelou a evidência terminal.
+
+### Resultado observado
+
+O operador confirmou no equipamento real que a segunda correção D-045 passou:
+
+```text
+BLUE com MASK_024 apagada
+→ NG confirmado
+→ PLACA NG / RETIRE A PLACA
+→ câmera congela a evidência
+→ máscara 24 fica VERMELHA na câmera
+→ segmento 24 fica VERMELHO no VISOR DO DISPLAY
+→ demais segmentos continuam com cores ON/OFF normais
+```
+
+### Conclusão
+
+A falha visual de integração entre confirmação final do debounce e freeze foi
+resolvida. O repaint terminal agora usa o mesmo frame/análise que fechou o NG e
+reafirma `effective_confirmed_failed_mask_ids` depois do latch visual.
+
+Com isso, D-045 está **VALIDADA FISICAMENTE** para o caso que originou a
+correção: `MASK_024` apagada em BLUE é destacada em vermelho tanto na máscara da
+câmera congelada quanto no VISOR DO DISPLAY.
+
+### Estado
+
+**PASS — D-045 VALIDADA FISICAMENTE.**
+
