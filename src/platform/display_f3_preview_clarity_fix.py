@@ -1103,15 +1103,27 @@ def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
             and row["p_high"] >= minimum_high
         )
 
-    # Caso todos (ou quase todos) os segmentos estejam realmente acesos, pode
-    # não existir grupo escuro suficiente para formar contraste global. Emissão
-    # forte cobrindo o núcleo da própria ROI continua sendo evidência VISUAL.
-    # Esta regra nunca entra em energia, OK/NG ou avanço de CHECK.
-    luminous.update(
-        row["mask_id"]
+    # A evidência absoluta existe somente como fallback para cenas em que NÃO
+    # há separação relativa utilizável (por exemplo, todos os segmentos acesos).
+    #
+    # Antes esta regra era aplicada incondicionalmente e podia recolocar no grupo
+    # ON regiões intermediárias que o threshold relativo já havia rejeitado.
+    # Reflexos especulares dentro de uma ROI são exatamente esse caso: ficam
+    # fortes em V, mas abaixo do grupo de emissão real do display.
+    strong_candidates = {
+        str(row["mask_id"])
         for row in rows
         if row["score"] >= F3_LIVE_VISUAL_STRONG_SCORE
         and row["p_high"] >= F3_LIVE_VISUAL_STRONG_PEAK
+    }
+    absolute_fallback_used = not relative_evidence_ready
+    if absolute_fallback_used:
+        luminous.update(strong_candidates)
+
+    reflection_rejected = (
+        strong_candidates.difference(luminous)
+        if relative_evidence_ready
+        else set()
     )
     luminous_ids = tuple(sorted(str(mask_id) for mask_id in luminous))
 
@@ -1128,6 +1140,10 @@ def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
         "dynamic_range": round(dynamic_range, 2),
         "threshold": round(float(threshold), 2),
         "cluster_gap": round(cluster_gap, 2),
+        "relative_evidence_ready": bool(relative_evidence_ready),
+        "absolute_fallback_used": bool(absolute_fallback_used),
+        "strong_candidate_mask_ids": tuple(sorted(strong_candidates)),
+        "reflection_rejected_mask_ids": tuple(sorted(reflection_rejected)),
     }
 
 
@@ -1280,6 +1296,24 @@ def aplicar_emissao_visual_ao_vivo_f3(
     result["live_visual_sample_threshold"] = sample.get("threshold")
     result["live_visual_sample_baseline"] = sample.get("baseline")
     result["live_visual_sample_peak"] = sample.get("peak")
+    result["live_visual_sample_dynamic_range"] = sample.get("dynamic_range")
+    result["live_visual_sample_cluster_gap"] = sample.get("cluster_gap")
+    result["live_visual_relative_evidence_ready"] = bool(
+        sample.get("relative_evidence_ready")
+    )
+    result["live_visual_absolute_fallback_used"] = bool(
+        sample.get("absolute_fallback_used")
+    )
+    result["live_visual_strong_candidate_mask_ids"] = tuple(
+        str(mask_id)
+        for mask_id in (sample.get("strong_candidate_mask_ids") or ())
+        if str(mask_id)
+    )
+    result["live_visual_reflection_rejected_mask_ids"] = tuple(
+        str(mask_id)
+        for mask_id in (sample.get("reflection_rejected_mask_ids") or ())
+        if str(mask_id)
+    )
     result["live_visual_sampled_mask_count"] = int(
         sample.get("sampled_mask_count", 0) or 0
     )
