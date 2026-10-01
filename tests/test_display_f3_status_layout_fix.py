@@ -80,6 +80,18 @@ class DisplayF3StatusLayoutFixTests(unittest.TestCase):
         self.assertIn("STATUS DO DISPLAY: IDENTIFICANDO", source)
         self.assertNotIn("self.project_frame", source)
 
+    def test_renderer_fixo_aceita_estado_terminal_segregado_sem_quebrar_overlay(self):
+        signature = inspect.signature(
+            fix_module._render_check_cards_f3_fixed
+        )
+        self.assertIn("force_terminal_segregated", signature.parameters)
+
+        source = inspect.getsource(
+            fix_module._render_check_cards_f3_fixed
+        )
+        self.assertIn("if force_terminal_segregated:", source)
+        self.assertIn('status_text = "SEGREGADO"', source)
+
     def test_cards_mantem_altura_e_borda_constantes_entre_resultados(self):
         source = inspect.getsource(fix_module._render_check_cards_f3_fixed)
         self.assertIn("height=F3_CHECK_CARD_HEIGHT", source)
