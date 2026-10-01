@@ -111,6 +111,7 @@ class _App:
         self._display_f3_heavy_executor = None
         self.runtime_frame = None
         self.frames_seen = []
+        self.raw_frames_seen = []
 
     def _obter_frame_runtime_display_f3(self):
         return self.runtime_frame if self.runtime_frame is not None else self.camera_frame_atual
@@ -124,6 +125,9 @@ class _App:
     def _render_preview_display_f3_once(self):
         self.renders += 1
         self.frames_seen.append(self.camera_frame_atual)
+        self.raw_frames_seen.append(
+            getattr(self, "_display_f3_runtime_raw_frame", None)
+        )
 
     def _agendar_preview_display_f3(self, delay=None):
         coordinator = self._display_f3_runtime_coordinator
@@ -174,7 +178,11 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
         app.root.run_next()
 
         self.assertIs(transformed, app.frames_seen[-1])
+        self.assertIs(raw, app.raw_frames_seen[-1])
         self.assertIs(raw, app.camera_frame_atual)
+        self.assertIsNone(
+            getattr(app, "_display_f3_runtime_raw_frame", None)
+        )
         self.assertEqual(1, app.full_cycles)
 
     def test_repeated_frame_never_runs_full_pipeline_again(self):
