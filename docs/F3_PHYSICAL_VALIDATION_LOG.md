@@ -2360,3 +2360,65 @@ A próxima evolução solicitada é tornar o enquadramento configurável visualm
 preview ao vivo + janela de captura arrastável para escolher qual região da
 imagem ampliada será efetivamente entregue à câmera do Display F3.
 
+---
+
+## 01/10/2026 — Enquadramento arrastável e preview ao vivo do zoom
+
+**Estado:** IMPLEMENTADO — PENDENTE DE RETESTE FÍSICO.
+
+### Requisito
+
+Após o PASS físico dos controles de zoom, foi solicitado:
+
+- uma visualização ao vivo da câmera dentro das configurações do F3;
+- uma segunda visualização que funcione como a "câmera virtual" do ODIN;
+- possibilidade de clicar/arrastar a janela de enquadramento para escolher
+  exatamente qual região ampliada será exibida e analisada pelo F3 Display.
+
+### Implementação
+
+A seção de zoom da configuração passou a exibir:
+
+1. **ENQUADRAMENTO • ARRASTE A JANELA**
+   - mostra o frame-fonte ao vivo;
+   - desenha um retângulo sobre a região que o zoom ODIN recortará;
+   - clique ou arraste reposiciona o centro do recorte;
+   - o retângulo é limitado para não sair da imagem.
+
+2. **VISUALIZAÇÃO AO VIVO • SAÍDA FINAL DO F3**
+   - mostra o frame após zoom ODIN;
+   - usa o mesmo centro X/Y;
+   - mantém a resolução de saída;
+   - aplica também a rotação visual usada pela câmera do F3.
+
+O centro do recorte é persistido por Projeto Display como coordenadas
+normalizadas `software_zoom_center.x/y`.
+
+### Runtime e performance
+
+- o `F3RuntimeCoordinator` continua sendo o único scheduler periódico;
+- durante cada callback ele mantém disponível o frame bruto apenas para o
+  seletor visual e entrega a visão transformada ao runtime F3;
+- não foi criado novo `after()`, worker, fila ou thread para o preview;
+- durante CONFIGURAR a cadência de repaint foi ajustada para aproximadamente
+  10 FPS, sem executar o pipeline pesado de análise;
+- o frame global bruto é restaurado ao final do callback.
+
+### Reteste físico esperado
+
+    abrir F3 → CONFIGURAR
+    → ajustar zoom da câmera e/ou zoom ODIN
+    → confirmar imagem ao vivo no quadro de enquadramento
+    → arrastar a janela para a região desejada
+    → confirmar que SAÍDA FINAL DO F3 acompanha imediatamente
+    → Salvar e aplicar zoom
+    → fechar CONFIGURAR
+    → confirmar que a câmera produtiva do F3 mostra exatamente o enquadramento salvo
+    → fechar/reabrir F3
+    → confirmar persistência do mesmo enquadramento
+
+Depois de definir o enquadramento definitivo, revisar/recapturar referências,
+contorno e máscaras antes de validar inspeção produtiva.
+
+**Validação física:** pendente.
+
