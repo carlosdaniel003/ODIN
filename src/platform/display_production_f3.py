@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 import tkinter as tk
+import traceback
+from tkinter import messagebox
 
 import cv2
 
@@ -367,10 +369,28 @@ class DisplayProductionF3Mixin:
                 owner._display_f3_last_config_error = (
                     f"{type(exc).__name__}: {exc}"
                 )
+                owner._display_f3_last_config_traceback = traceback.format_exc()
+                try:
+                    print(owner._display_f3_last_config_traceback)
+                except Exception:
+                    pass
                 try:
                     owner._display_auto_set_preview_status(
                         f"CONFIGURAÇÃO • falha ao abrir • {type(exc).__name__}",
                         "#FCA5A5",
+                    )
+                except Exception:
+                    pass
+                try:
+                    messagebox.showerror(
+                        "F3 • Erro ao abrir CONFIGURAR",
+                        (
+                            "Não foi possível abrir CONFIGURAR.\n\n"
+                            f"{owner._display_f3_last_config_error}\n\n"
+                            "O traceback completo foi registrado no console "
+                            "e no estado técnico _display_f3_last_config_traceback."
+                        ),
+                        parent=owner.root,
                     )
                 except Exception:
                     pass
