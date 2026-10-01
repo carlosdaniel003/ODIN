@@ -74,6 +74,13 @@ class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
                 self.assertIs(created.repository, repository)
                 self.assertIsNotNone(created.zoom_source_canvas)
                 self.assertIsNotNone(created.zoom_final_canvas)
+
+                # O refresh inicial é intencionalmente diferido por after().
+                # O smoke deve validar a renderização sem depender do relógio
+                # do runner/Xvfb, então publica explicitamente o frame real.
+                created.update_live_zoom_preview(frame)
+                root.update_idletasks()
+
                 self.assertIsNotNone(created._zoom_source_photo)
                 self.assertIsNotNone(created._zoom_final_photo)
                 self.assertTrue(zoom_preview_calls)
