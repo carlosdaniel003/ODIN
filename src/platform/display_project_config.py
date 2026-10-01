@@ -91,6 +91,7 @@ class DisplayProjectConfigWindow:
         self._zoom_drag_active = False
         self._zoom_drag_offset_x = 0.0
         self._zoom_drag_offset_y = 0.0
+        self._zoom_drag_software_zoom = None
         # Estes canvases nascem depois dos sliders. Alguns builds do Tk,
         # especialmente no Windows, podem disparar o callback do Scale durante
         # a construção. Inicializar explicitamente evita acesso prematuro.
@@ -785,6 +786,12 @@ class DisplayProjectConfigWindow:
             software_zoom = float(self.software_zoom_var.get())
         except (TypeError, ValueError, tk.TclError):
             software_zoom = 1.0
+        drag_zoom = getattr(self, "_zoom_drag_software_zoom", None)
+        if bool(getattr(self, "_zoom_drag_active", False)) and drag_zoom is not None:
+            try:
+                software_zoom = float(drag_zoom)
+            except (TypeError, ValueError):
+                pass
         try:
             center_x = float(self.software_zoom_center_x_var.get())
             center_y = float(self.software_zoom_center_y_var.get())
@@ -1138,7 +1145,15 @@ class DisplayProjectConfigWindow:
         )
         self._zoom_drag_offset_x = center_x - px if inside else 0.0
         self._zoom_drag_offset_y = center_y - py if inside else 0.0
+        # O fator de zoom é parte do gesto iniciado no Button-1. Ele não pode
+        # mudar até o release, mesmo que outro callback/refresh do Tk atualize
+        # a DoubleVar durante o drag no Windows.
+        self._zoom_drag_software_zoom = float(software_zoom)
         self._zoom_drag_active = True
+        try:
+            self.software_zoom_var.set(float(software_zoom))
+        except Exception:
+            pass
         return self._on_zoom_viewport_drag(event)
 
     def _on_zoom_viewport_drag(self, event) -> str:
@@ -1150,6 +1165,10 @@ class DisplayProjectConfigWindow:
 
         px, py = pointer
         _camera_zoom, software_zoom, _old_x, _old_y = self._zoom_values()
+        try:
+            self.software_zoom_var.set(float(software_zoom))
+        except Exception:
+            pass
         center_x, center_y = normalizar_centro_zoom_software_display_f3(
             software_zoom,
             px + self._zoom_drag_offset_x,
@@ -1164,9 +1183,17 @@ class DisplayProjectConfigWindow:
         return "break"
 
     def _on_zoom_viewport_release(self, _event=None) -> str:
+        locked_zoom = getattr(self, "_zoom_drag_software_zoom", None)
+        if locked_zoom is not None:
+            try:
+                self.software_zoom_var.set(float(locked_zoom))
+            except Exception:
+                pass
+        self._publish_software_zoom_preview()
         self._zoom_drag_active = False
         self._zoom_drag_offset_x = 0.0
         self._zoom_drag_offset_y = 0.0
+        self._zoom_drag_software_zoom = None
         self._rerender_zoom_preview()
         return "break"
 
@@ -1936,6 +1963,8 @@ class DisplayProjectConfigWindow:
         self._zoom_source_photo = None
         self._zoom_final_photo = None
         self._zoom_source_mapping = None
+        self._zoom_drag_active = False
+        self._zoom_drag_software_zoom = None
         try:
             self.window.destroy()
         except Exception:
