@@ -200,6 +200,8 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
                     camera_enabled=True,
                     camera_zoom=320,
                     software_zoom=1.8,
+                    center_x=0.68,
+                    center_y=0.36,
                 )
             )
             self.assertTrue(
@@ -220,9 +222,23 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
             self.assertTrue(project_a["camera_zoom"]["enabled"])
             self.assertEqual(320.0, project_a["camera_zoom"]["value"])
             self.assertEqual(1.8, project_a["software_zoom"])
+            self.assertAlmostEqual(
+                0.68,
+                project_a["software_zoom_center"]["x"],
+                places=6,
+            )
+            self.assertAlmostEqual(
+                0.36,
+                project_a["software_zoom_center"]["y"],
+                places=6,
+            )
             self.assertFalse(project_b["camera_zoom"]["enabled"])
             self.assertEqual(100.0, project_b["camera_zoom"]["value"])
             self.assertEqual(1.0, project_b["software_zoom"])
+            self.assertEqual(
+                {"x": 0.5, "y": 0.5},
+                project_b["software_zoom_center"],
+            )
 
             reopened = DisplayProjectRepository(Path(temp_dir) / "display.json")
             self.assertEqual(project_a, reopened.carregar_projeto("DISPLAY A"))
@@ -240,6 +256,10 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
             project = repository.carregar_projeto("DISPLAY A")
             self.assertEqual(500.0, project["camera_zoom"]["value"])
             self.assertEqual(5.0, project["software_zoom"])
+            self.assertEqual(
+                {"x": 0.5, "y": 0.5},
+                project["software_zoom_center"],
+            )
 
     def test_normalizacao_preserva_ordem_e_geometria_das_mascaras_validas(self):
         masks = [
