@@ -393,6 +393,62 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertEqual(frame.shape, zoomed.shape)
         self.assertGreater(float(zoomed.mean()), float(frame.mean()))
 
+    def test_zoom_fisico_publica_pan_tilt_do_quadro_azul(self):
+        class Service:
+            def __init__(self):
+                self.updated = None
+
+            def obter_configuracoes_camera(self):
+                return {
+                    "zoom_enabled": False,
+                    "zoom": 100.0,
+                    "pan_enabled": False,
+                    "pan": 0.0,
+                    "tilt_enabled": False,
+                    "tilt": 0.0,
+                }
+
+            def atualizar_configuracoes_camera_ao_vivo(self, config, keys):
+                self.updated = (dict(config), tuple(keys))
+
+        owner = DisplayProductionF3Mixin.__new__(
+            DisplayProductionF3Mixin
+        )
+        owner.display_f3_ativo = True
+        owner._display_f3_camera_zoom_signature = None
+        owner._display_f3_camera_overview_frame = None
+        owner.camera_frame_atual = np.zeros((100, 200, 3), dtype=np.uint8)
+        owner.camera_service = Service()
+
+        owner._aplicar_zoom_camera_projeto_display_f3(
+            {
+                "camera_zoom": {
+                    "enabled": True,
+                    "value": 200.0,
+                },
+                "camera_zoom_center": {
+                    "x": 0.75,
+                    "y": 0.25,
+                },
+                "software_zoom": 1.0,
+                "software_zoom_center": {
+                    "x": 0.5,
+                    "y": 0.5,
+                },
+            }
+        )
+
+        config, keys = owner.camera_service.updated
+        self.assertTrue(config["zoom_enabled"])
+        self.assertEqual(200.0, config["zoom"])
+        self.assertTrue(config["pan_enabled"])
+        self.assertTrue(config["tilt_enabled"])
+        self.assertGreater(config["pan"], 0.0)
+        self.assertGreater(config["tilt"], 0.0)
+        self.assertIn("pan", keys)
+        self.assertIn("tilt", keys)
+        self.assertIsNotNone(owner._display_f3_camera_overview_frame)
+
     def test_zoom_de_hardware_so_e_aplicado_com_f3_ativo(self):
         source = inspect.getsource(
             DisplayProductionF3Mixin._aplicar_zoom_camera_projeto_display_f3
