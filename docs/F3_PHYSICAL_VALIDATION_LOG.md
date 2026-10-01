@@ -2697,3 +2697,58 @@ durante a edição, dando a impressão de que o zoom havia voltado.
 
 **Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
 
+---
+
+## 01/10/2026 — Segundo FAIL físico do drag: Zoom ODIN volta ao iniciar movimento
+
+**Resultado físico:** FAIL.
+
+### Esclarecimento do operador
+
+O defeito é especificamente no **Zoom ODIN (software)**:
+
+    ajustar Zoom ODIN acima de 1×
+    → imagem aproxima corretamente
+    → iniciar o arraste do enquadramento
+    → o próprio zoom software volta/diminui
+    → o operador perde o enquadramento ampliado
+
+Não se trata do zoom digital da Logitech BRIO.
+
+### Regra das duas tentativas
+
+Como o comportamento continuou após a primeira correção do gesto, não foi feita
+nova alteração no algoritmo sem reprodução objetiva.
+
+### Diagnóstico adicionado
+
+Foi criado um smoke com **Tkinter real via Xvfb** que:
+
+1. abre a janela CONFIGURAR final;
+2. seleciona um Projeto Display;
+3. publica frame 1920x1080 real;
+4. ajusta `software_zoom_var` explicitamente para 2.0×;
+5. executa o mesmo caminho real:
+   - `<Button-1>`;
+   - `<B1-Motion>`;
+   - `<ButtonRelease-1>`;
+6. captura o valor do Zoom ODIN após cada fase;
+7. exige que continue exatamente em 2.0×;
+8. verifica que o centro X realmente se deslocou;
+9. registra todos os valores publicados por
+   `on_software_zoom_preview` e exige que nenhum callback publique 1.0×.
+
+### Objetivo
+
+Identificar de forma controlada se o reset ocorre:
+
+- no evento Tk de press;
+- no evento de motion;
+- no release;
+- no callback de preview;
+- ou em algum refresh assíncrono da janela.
+
+Nenhuma nova correção funcional foi aplicada nesta etapa.
+
+**Estado:** DIAGNÓSTICO EM EXECUÇÃO — AGUARDANDO RESULTADO DO SMOKE REAL.
+
