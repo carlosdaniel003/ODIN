@@ -2036,7 +2036,15 @@ D-044 refina D-042 e D-043 sem enfraquecer D-031:
 - D-044 cobre especificamente **presença energizada com CHECK divergente** e
   **chegada semântica forte de um CHECK defeituoso**.
 
-**Validação física:** pendente de reteste no cenário BLUE com MASK_024 apagada.
+### Validação física — 01/10/2026
+
+**PASS.** Com Rastreamento Automático desativado, o cenário BLUE defeituoso foi
+reproduzido com `MASK_024` esperada ON permanecendo fisicamente OFF. O runtime
+manteve presença e energia válidas, confirmou a chegada à função BLUE sem exigir
+um BLUE perfeito e o analyzer registrou corretamente o defeito como NG.
+
+Isso valida no equipamento real a separação introduzida por D-044 entre
+**presença**, **chegada ao CHECK** e **conformidade/NG**.
 
 
 ---
