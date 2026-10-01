@@ -24,7 +24,6 @@ from src.platform.display_project_repository import (
     normalizar_zoom_projeto_display,
 )
 from config import CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN
-from src.platform.display_visual_rotation import preparar_frame_visual_display
 
 
 F3_CONFIG_INITIAL_LOAD_DELAY_MS = 20
@@ -975,6 +974,10 @@ class DisplayProjectConfigWindow:
             center_y,
         )
         try:
+            from src.platform.display_visual_rotation import (
+                preparar_frame_visual_display,
+            )
+
             final_frame = preparar_frame_visual_display(
                 final_frame,
                 self._zoom_live_visual_rotation,
