@@ -542,6 +542,57 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         self.assertEqual("off", first["live_visual_classifications"]["MASK_003"])
         self.assertEqual("off", first["live_visual_classifications"]["MASK_004"])
 
+    def test_mesmo_frame_fisico_semantico_prevalece_sobre_falso_on_do_sampler(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        window = SimpleNamespace()
+        context = self._live_visual_test_context()
+        context["visual_physical_classifications"] = {
+            "MASK_001": "on",
+            "MASK_002": "off",
+            "MASK_003": "on",
+            "MASK_004": "off",
+        }
+        context["visual_physical_frame_token"] = ("camera", 90)
+
+        with patch.object(
+            clarity,
+            "detectar_emissao_visual_ao_vivo_f3",
+            return_value={
+                "ready": True,
+                # O sampler simples confunde brilho/glare da MASK_002 com ON.
+                "mask_ids": ("MASK_001", "MASK_002", "MASK_003"),
+                "sampled_mask_ids": (
+                    "MASK_001",
+                    "MASK_002",
+                    "MASK_003",
+                    "MASK_004",
+                ),
+                "reason": "ok",
+                "sampled_mask_count": 4,
+            },
+        ):
+            mirrored = clarity.aplicar_emissao_visual_ao_vivo_f3(
+                window,
+                frame,
+                context,
+                frame_token=("camera", 90),
+                geometry_token=("fixed", 0),
+            )
+
+        self.assertTrue(mirrored["live_visual_same_physical_frame"])
+        self.assertEqual(
+            ("MASK_001", "MASK_003"),
+            mirrored["live_visual_mask_ids"],
+        )
+        self.assertEqual(
+            "off",
+            mirrored["live_visual_classifications"]["MASK_002"],
+        )
+        self.assertEqual(
+            "off",
+            mirrored["live_visual_classifications"]["MASK_004"],
+        )
+
     def test_latest_frame_rebaixa_on_stale_para_off_no_mesmo_repaint(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
         window = SimpleNamespace()
