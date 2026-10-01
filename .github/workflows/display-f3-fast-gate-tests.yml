@@ -38,6 +38,9 @@ jobs:
             src/platform/display_f3_probe_visual_sync.py \
             src/platform/display_f3_powered_cycle_latch.py \
             src/platform/display_f3_runtime_contract_fix.py \
+            src/platform/display_f3_preview_clarity_fix.py \
+            src/platform/display_live_roi_overlay.py \
+            src/platform/display_f3_manual_snapshot_debug.py \
             src/platform/display_f3_zoom.py \
             src/platform/display_project_repository.py \
             src/platform/display_project_config.py \
@@ -56,6 +59,7 @@ jobs:
             tests/test_display_f3_power_authority.py \
             tests/test_display_f3_live_runtime_fix.py \
             tests/test_display_f3_runtime_contract_fix.py \
+            tests/test_display_f3_preview_clarity_fix.py \
             tests/test_display_f3_zoom.py \
             tests/test_display_f3_config_architecture.py \
             tests/test_display_f3_runtime_coordinator.py \
@@ -116,6 +120,16 @@ jobs:
             tests.test_display_f3_exact_check_template \
             tests.test_display_f3_h1_single_frame_probe \
             tests.test_display_f3_runtime_contract_fix \
+            -v
+
+      - name: Validate live reflection filter
+        run: |
+          python -m unittest \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_latest_frame_detecta_emissao_sem_worker_semantico \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_detecta_maioria_acesa_com_contraste_moderado \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_rejeita_reflexos_intermediarios_com_emissao_real \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_amostra_visual_detecta_todos_acesos_por_evidencia_absoluta \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_mesmo_frame_fisico_semantico_prevalece_sobre_falso_on_do_sampler \
             -v
 
       - name: Validate zoom framing and live preview contracts
