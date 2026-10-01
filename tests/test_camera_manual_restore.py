@@ -40,6 +40,7 @@ class DirectShowAdvancedCaptureFake:
         cv2.CAP_PROP_WB_TEMPERATURE: 4500.0,
         cv2.CAP_PROP_BRIGHTNESS: 120.0,
         cv2.CAP_PROP_GAMMA: 100.0,
+        cv2.CAP_PROP_ZOOM: 100.0,
     }
 
     AUTO_PROPS = {
@@ -60,6 +61,7 @@ class DirectShowAdvancedCaptureFake:
         cv2.CAP_PROP_PAN: 5,
         cv2.CAP_PROP_TILT: 5,
         cv2.CAP_PROP_EXPOSURE: 1,
+        cv2.CAP_PROP_ZOOM: 10,
     }
 
     def __init__(self):
@@ -273,6 +275,7 @@ class CameraManualRestoreTests(unittest.TestCase):
             "white_balance": 4370.0,
             "brightness": 137.0,
             "gamma": 137.0,
+            "zoom": 337.0,
         }
 
         for nome, valor in solicitados.items():
@@ -294,6 +297,7 @@ class CameraManualRestoreTests(unittest.TestCase):
         self.assertEqual(135.0, service._capture.props[cv2.CAP_PROP_FOCUS])
         self.assertEqual(35.0, service._capture.props[cv2.CAP_PROP_GAIN])
         self.assertEqual(4400.0, service._capture.props[cv2.CAP_PROP_WB_TEMPERATURE])
+        self.assertEqual(340.0, service._capture.props[cv2.CAP_PROP_ZOOM])
 
     def test_automaticos_nao_sao_falsamente_marcados_sem_suporte_quando_set_retorna_false(self):
         service = ServiceFake()

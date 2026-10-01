@@ -157,6 +157,8 @@ class CameraLiveSettingsTests(unittest.TestCase):
                 "brightness": -100,
                 "gamma_enabled": True,
                 "gamma": 105,
+                "zoom_enabled": True,
+                "zoom": 340,
             },
         )
 
@@ -171,6 +173,8 @@ class CameraLiveSettingsTests(unittest.TestCase):
         self.assertEqual(4400.0, resultado["white_balance"])
         self.assertGreaterEqual(resultado["brightness"], 0.0)
         self.assertEqual(105.0, resultado["gamma"])
+        self.assertTrue(resultado["zoom_enabled"])
+        self.assertEqual(340.0, resultado["zoom"])
 
     def test_foco_manual_e_montado_imediatamente(self):
         base = {"focus_auto": True, "focus_enabled": False, "focus": 0.0}

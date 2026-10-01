@@ -196,6 +196,39 @@ class F3RuntimeCoordinator:
             return ("camera", int(camera_id))
         return ("object", id(frame))
 
+    def _run_with_f3_runtime_frame(self, callback):
+        """Executa preview/análise usando o frame F3 já transformado.
+
+        O frame bruto continua sendo a propriedade global da câmera. Durante o
+        callback síncrono do coordenador, somente o F3 enxerga a visão derivada
+        (por exemplo, zoom ODIN), e ao final o frame bruto é restaurado.
+        """
+        raw_frame = getattr(self.app, "camera_frame_atual", None)
+        provider = getattr(self.app, "_obter_frame_runtime_display_f3", None)
+        if not callable(provider):
+            return callback()
+
+        try:
+            runtime_frame = provider()
+        except Exception:
+            runtime_frame = raw_frame
+
+        if (
+            runtime_frame is None
+            or getattr(runtime_frame, "size", 0) == 0
+            or runtime_frame is raw_frame
+        ):
+            return callback()
+
+        self.app.camera_frame_atual = runtime_frame
+        try:
+            return callback()
+        finally:
+            # Não sobrescreva uma eventual troca explícita de frame feita pelo
+            # callback. No fluxo normal Tk, este objeto ainda é o mesmo.
+            if getattr(self.app, "camera_frame_atual", None) is runtime_frame:
+                self.app.camera_frame_atual = raw_frame
+
     def _analysis_due(self) -> bool:
         due_fn = getattr(
             self.app,
@@ -369,10 +402,10 @@ class F3RuntimeCoordinator:
             if path == "full_cycle":
                 self._full_cycle_count += 1
                 self._last_full_cycle_frame_token = frame_token
-                self._full_cycle()
+                self._run_with_f3_runtime_frame(self._full_cycle)
             else:
                 self._render_only_count += 1
-                self._render_once()
+                self._run_with_f3_runtime_frame(self._render_once)
         finally:
             elapsed_ms = max(
                 0.0,

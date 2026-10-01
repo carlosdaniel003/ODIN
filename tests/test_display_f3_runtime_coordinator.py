@@ -109,6 +109,11 @@ class _App:
         self.renders = 0
         self._display_f3_runtime_coordinator = None
         self._display_f3_heavy_executor = None
+        self.runtime_frame = None
+        self.frames_seen = []
+
+    def _obter_frame_runtime_display_f3(self):
+        return self.runtime_frame if self.runtime_frame is not None else self.camera_frame_atual
 
     def _display_auto_frame_token(self, _frame):
         return ("camera", self.camera_ultimo_frame_id)
@@ -118,6 +123,7 @@ class _App:
 
     def _render_preview_display_f3_once(self):
         self.renders += 1
+        self.frames_seen.append(self.camera_frame_atual)
 
     def _agendar_preview_display_f3(self, delay=None):
         coordinator = self._display_f3_runtime_coordinator
@@ -158,6 +164,18 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
         stats = coordinator.stats()
         self.assertEqual("full_cycle", stats["last_path"])
         self.assertEqual("analysis_due_new_frame", stats["last_reason"])
+
+    def test_runtime_frame_transformado_e_usado_e_frame_bruto_e_restaurado(self):
+        app, coordinator = self._install()
+        raw = app.camera_frame_atual
+        transformed = _Frame()
+        app.runtime_frame = transformed
+
+        app.root.run_next()
+
+        self.assertIs(transformed, app.frames_seen[-1])
+        self.assertIs(raw, app.camera_frame_atual)
+        self.assertEqual(1, app.full_cycles)
 
     def test_repeated_frame_never_runs_full_pipeline_again(self):
         app, coordinator = self._install()

@@ -3,6 +3,8 @@ from __future__ import annotations
 import inspect
 import unittest
 
+import numpy as np
+
 import src.platform.display_f3_config_service as config_service
 import src.platform.display_project_config as config_module
 from src.platform.display_project_config import DisplayProjectConfigWindow
@@ -70,6 +72,23 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertNotIn("cv2.imread", source)
         self.assertNotIn("_photo_from_image", source)
         self.assertNotIn("PhotoImage", source)
+
+    def test_configuracao_f3_expoe_os_dois_zooms_no_projeto(self):
+        source = inspect.getsource(config_module.DisplayProjectConfigWindow)
+        self.assertIn("ZOOM DA CÂMERA / ODIN", source)
+        self.assertIn("Usar zoom digital da câmera", source)
+        self.assertIn("Zoom ODIN (software)", source)
+        self.assertIn("salvar_zoom_projeto", source)
+
+    def test_zoom_software_mantem_resolucao_e_amplia_crop_central(self):
+        frame = np.zeros((12, 20, 3), dtype=np.uint8)
+        frame[3:9, 5:15] = 200
+        zoomed = DisplayProductionF3Mixin._aplicar_zoom_software_frame_display_f3(
+            frame,
+            2.0,
+        )
+        self.assertEqual(frame.shape, zoomed.shape)
+        self.assertGreater(float(zoomed.mean()), float(frame.mean()))
 
     def test_preview_service_uses_canonical_heavy_executor_and_no_tk(self):
         source = inspect.getsource(config_service)

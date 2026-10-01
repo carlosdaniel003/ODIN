@@ -188,6 +188,59 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
             self.assertEqual(masks_a, project_a["masks"])
             self.assertEqual(masks_b, project_b["masks"])
 
+    def test_zoom_f3_e_persistido_por_projeto_e_preservado_ao_salvar_mascaras(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = DisplayProjectRepository(Path(temp_dir) / "display.json")
+            repository.adicionar_projeto("DISPLAY A", (1920, 1080))
+            repository.adicionar_projeto("DISPLAY B", (1920, 1080))
+
+            self.assertTrue(
+                repository.salvar_zoom_projeto(
+                    "DISPLAY A",
+                    camera_enabled=True,
+                    camera_zoom=320,
+                    software_zoom=1.8,
+                )
+            )
+            self.assertTrue(
+                repository.salvar_mascaras(
+                    "DISPLAY A",
+                    [{
+                        "id": "MASK_001",
+                        "type": "circle",
+                        "cx": 300,
+                        "cy": 200,
+                        "radius": 20,
+                    }],
+                )
+            )
+
+            project_a = repository.carregar_projeto("DISPLAY A")
+            project_b = repository.carregar_projeto("DISPLAY B")
+            self.assertTrue(project_a["camera_zoom"]["enabled"])
+            self.assertEqual(320.0, project_a["camera_zoom"]["value"])
+            self.assertEqual(1.8, project_a["software_zoom"])
+            self.assertFalse(project_b["camera_zoom"]["enabled"])
+            self.assertEqual(100.0, project_b["camera_zoom"]["value"])
+            self.assertEqual(1.0, project_b["software_zoom"])
+
+            reopened = DisplayProjectRepository(Path(temp_dir) / "display.json")
+            self.assertEqual(project_a, reopened.carregar_projeto("DISPLAY A"))
+
+    def test_zoom_f3_e_limitado_a_faixa_suportada(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = DisplayProjectRepository(Path(temp_dir) / "display.json")
+            repository.adicionar_projeto("DISPLAY A", (1920, 1080))
+            repository.salvar_zoom_projeto(
+                "DISPLAY A",
+                camera_enabled=True,
+                camera_zoom=9999,
+                software_zoom=99,
+            )
+            project = repository.carregar_projeto("DISPLAY A")
+            self.assertEqual(500.0, project["camera_zoom"]["value"])
+            self.assertEqual(5.0, project["software_zoom"])
+
     def test_normalizacao_preserva_ordem_e_geometria_das_mascaras_validas(self):
         masks = [
             {"id": "A", "type": "rectangle", "x": 1, "y": 2, "width": 3, "height": 4},
