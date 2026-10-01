@@ -1909,3 +1909,78 @@ câmera congelada quanto no VISOR DO DISPLAY.
 
 **PASS — D-045 VALIDADA FISICAMENTE.**
 
+---
+
+## 01/10/2026 — D-046: AUX aprovado correto, mas espelho visual mostrou falso ON e perdeu cores ao encerrar
+
+**Resultado físico antes da correção:** PASS de decisão / FAIL de apresentação.
+
+### Cenário
+
+- sequência completa concluída com PLACA APROVADA;
+- último estado físico da placa: AUX;
+- AUX estava correto no equipamento;
+- `MASK_010` em AUX deveria permanecer OFF;
+- o VISOR DO DISPLAY mostrou o segmento 10 verde como se estivesse ON;
+- após encerrar as análises, as máscaras da câmera também podiam voltar a cinza
+  em vez de continuar reagindo ao estado luminoso enquanto a placa permanecia
+  no suporte.
+
+### Evidência do DEBUG
+
+O relatório confirmou que o resultado produtivo não estava errado:
+
+- aprendizado same-mask de AUX: `approved=True`, `matched=28/28`;
+- `MASK_010` de AUX: `expected=off`, `classified=off`, `matched=true`;
+- presença semântica: CHECK_003 / AUX;
+- portanto o verde da MASK_010 no visor era somente erro do espelho visual.
+
+A telemetria visual mostrou ao mesmo tempo:
+
+- `live_visual_mask_ids` incluía `MASK_010`, gerado pelo sampler leve de brilho;
+- o hook caiu em `fixed_render_exception`;
+- erro: `_render_check_cards_f3_fixed() got an unexpected keyword argument
+  'force_terminal_segregated'`;
+- caminho de render virou `previous_window_update`.
+
+### Causa
+
+Foram confirmadas duas causas de apresentação:
+
+1. o sampler visual latest-frame tinha prioridade absoluta e podia transformar
+   brilho/glare dentro da ROI em falso ON mesmo quando a autoridade física
+   same-mask do mesmo frame dizia OFF;
+2. o wrapper de cards do layout fixo estava com assinatura antiga, quebrando o
+   hook visual quando o estado terminal tentava usar `force_terminal_segregated`.
+
+### Correção D-046
+
+- se a autoridade física same-mask e o sampler observam o mesmo frame, a leitura
+  same-mask prevalece visualmente;
+- o sampler continua preenchendo máscaras sem classificação física e substituindo
+  estado stale de frame anterior;
+- o renderer fixo de cards passou a aceitar `force_terminal_segregated` e
+  preservar o comportamento terminal;
+- PLACA APROVADA não congela câmera/visor: o espelho visual continua live até
+  EMPTY/rearme;
+- NG congelado continua seguindo D-045 e SEGREGAR continua seguindo D-040;
+- telemetria agora publica `live_visual_same_physical_frame` e os dois tokens de
+  frame para diagnóstico.
+
+### Estado
+
+**D-046 IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+
+### Reteste esperado
+
+```text
+AUX correto com MASK_010 fisicamente OFF
+→ AUX conclui 28/28
+→ PLACA APROVADA
+→ segmento 10 permanece verde escuro no VISOR
+→ máscaras da câmera continuam verdes/verde-escuro conforme o estado físico
+→ alterar visualmente algum segmento ainda no suporte atualiza câmera + visor
+→ nenhuma máscara volta a cinza apenas porque o ciclo terminou
+→ retirar placa
+→ EMPTY/rearme normal
+```
