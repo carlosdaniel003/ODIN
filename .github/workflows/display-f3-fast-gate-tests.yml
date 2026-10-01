@@ -126,6 +126,7 @@ jobs:
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_preview_de_zoom_reutiliza_scheduler_sem_criar_timer_proprio \
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_drag_move_viewport_sem_desfazer_zoom_software \
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_drag_trava_zoom_mesmo_se_doublevar_for_resetada_no_meio \
+            tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_drag_com_zoom_fisico_move_centro_da_camera \
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_drag_em_zoom_um_nao_reseta_nem_finge_movimento \
             tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_preview_software_atualiza_runtime_sem_persistir \
             tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_runtime_frame_transformado_e_usado_e_frame_bruto_e_restaurado \
