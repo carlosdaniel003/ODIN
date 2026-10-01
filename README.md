@@ -604,6 +604,13 @@ mostre somente o segmento 24 em vermelho, sem transformar `MASK_004` ou
 `MASK_007` transitórias em defeitos visuais finais. Câmera e visor consomem a
 mesma lista confirmada do mesmo frame que fechou o NG.
 
+O repaint terminal não depende apenas do último frame live já desenhado. Depois
+que o latch de NG é levantado, o F3 reafirma câmera e visor usando o **frame exato
+que fechou o debounce** e os IDs confirmados daquela mesma análise. Isso evita que
+o freeze preserve uma imagem imediatamente anterior à confirmação e deixe a
+falha em verde escuro. O DEBUG mantém também o estado visual realmente congelado
+antes de qualquer reconstrução diagnóstica.
+
 Depois de EMPTY, a tela passa explicitamente a **COLOQUE OUTRA PLACA** e mantém
 SEGREGAR bloqueado. Somente a confirmação física da nova placa libera H1 e
 reativa o botão/atalho para o próximo ciclo.
