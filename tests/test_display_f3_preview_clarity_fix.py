@@ -341,6 +341,54 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         )
         self.assertGreaterEqual(result["cluster_gap"], 70.0)
 
+    def test_amostra_visual_rejeita_reflexos_intermediarios_com_emissao_real(self):
+        masks = []
+        frame = np.zeros((80, 320, 3), dtype=np.uint8)
+        values = (100, 110, 120, 130, 180, 190, 250, 250)
+        for index, value in enumerate(values, start=1):
+            x1 = 8 + ((index - 1) * 40)
+            x2 = x1 + 24
+            masks.append(
+                {
+                    "id": f"MASK_{index:03d}",
+                    "type": "polygon",
+                    "points": [
+                        [x1, 28],
+                        [x2, 28],
+                        [x2, 52],
+                        [x1, 52],
+                    ],
+                }
+            )
+            frame[30:51, x1 + 2 : x2 - 1] = int(value)
+
+        result = clarity.detectar_emissao_visual_ao_vivo_f3(
+            frame,
+            {
+                "project_name": "P1",
+                "check_id": "CHECK_001",
+                "resolution": (320, 80),
+                "masks": tuple(masks),
+                "live_luminous_only": True,
+            },
+        )
+
+        self.assertTrue(result["ready"])
+        self.assertTrue(result["relative_evidence_ready"])
+        self.assertFalse(result["absolute_fallback_used"])
+        self.assertEqual(
+            {"MASK_007", "MASK_008"},
+            set(result["mask_ids"]),
+        )
+        self.assertEqual(
+            {"MASK_005", "MASK_006"},
+            set(result["reflection_rejected_mask_ids"]),
+        )
+        self.assertTrue(
+            {"MASK_005", "MASK_006", "MASK_007", "MASK_008"}
+            .issubset(set(result["strong_candidate_mask_ids"]))
+        )
+
     def test_amostra_visual_detecta_todos_acesos_por_evidencia_absoluta(self):
         frame = np.full((80, 160, 3), 40, dtype=np.uint8)
         frame[30:51, 10:31] = 185
@@ -358,6 +406,8 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             {"MASK_001", "MASK_002", "MASK_003", "MASK_004"},
             set(result["mask_ids"]),
         )
+        self.assertTrue(result["absolute_fallback_used"])
+        self.assertFalse(result["relative_evidence_ready"])
 
     def test_classificacao_fisica_visual_nao_depende_do_check_logico(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
@@ -538,6 +588,11 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             first["live_visual_sample_source"],
         )
         self.assertEqual("on", first["live_visual_classifications"]["MASK_002"])
+        self.assertFalse(first["live_visual_absolute_fallback_used"])
+        self.assertEqual(
+            (),
+            first["live_visual_reflection_rejected_mask_ids"],
+        )
         self.assertEqual("off", first["live_visual_classifications"]["MASK_001"])
         self.assertEqual("off", first["live_visual_classifications"]["MASK_003"])
         self.assertEqual("off", first["live_visual_classifications"]["MASK_004"])
