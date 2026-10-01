@@ -9,6 +9,9 @@ import numpy as np
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 from src.platform.display_project_config import DisplayProjectConfigWindow
+from src.platform.display_f3_mask_editor_reference import (
+    F3MaskReferenceCaptureWindow,
+)
 from src.platform.display_visual_rotation import (
     obter_rotacao_visual_display,
     preparar_frame_visual_display,
@@ -74,6 +77,78 @@ class DisplayF3VisualRotationTests(unittest.TestCase):
         self.assertIn("masks_visual", source)
         self.assertIn("restaurar_mascara_original_display", source)
 
+    def test_zoom_pointer_em_180_converte_visual_para_referencial_original(self):
+        window = DisplayProjectConfigWindow.__new__(
+            DisplayProjectConfigWindow
+        )
+        window._zoom_live_visual_rotation = 180
+        window._zoom_live_overview_frame = np.zeros(
+            (100, 200, 3),
+            dtype=np.uint8,
+        )
+        window._zoom_source_mapping = {
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "render_width": 200.0,
+            "render_height": 100.0,
+            "source_width": 200,
+            "source_height": 100,
+        }
+
+        point = window._zoom_pointer_normalized(
+            SimpleNamespace(x=150, y=50)
+        )
+
+        self.assertIsNotNone(point)
+        x, y = point
+        self.assertAlmostEqual(0.25, x, delta=0.02)
+        self.assertAlmostEqual(0.5, y, delta=0.02)
+
+    def test_captura_mascaras_mostra_180_sem_rotacionar_frame_mestre_salvo(self):
+        raw = np.zeros((2, 3, 3), dtype=np.uint8)
+        raw[0, 0] = (10, 20, 30)
+        raw[1, 2] = (200, 210, 220)
+
+        capture = F3MaskReferenceCaptureWindow.__new__(
+            F3MaskReferenceCaptureWindow
+        )
+        capture.visual_rotation = 180
+        rotated = capture._visual_frame(raw)
+
+        expected = preparar_frame_visual_display(raw, 180)
+        np.testing.assert_array_equal(expected, rotated)
+        np.testing.assert_array_equal(raw, raw.copy())
+
+        class Store:
+            def __init__(self):
+                self.saved = None
+
+            def save_frame(self, project_name, frame, master_resolution):
+                self.saved = (
+                    project_name,
+                    frame.copy(),
+                    master_resolution,
+                )
+                return {"image_path": "fake.png"}
+
+        class Status:
+            def configure(self, **_kwargs):
+                pass
+
+        store = Store()
+        capture.store = store
+        capture.project_name = "DISPLAY TESTE"
+        capture.resolution = (3, 2)
+        capture._latest_frame = raw.copy()
+        capture.status = Status()
+        capture.on_captured = None
+        capture.close = lambda: None
+
+        capture.capture()
+
+        self.assertIsNotNone(store.saved)
+        np.testing.assert_array_equal(raw, store.saved[1])
+
     def test_runtime_f3_encaminha_rotacao_da_tela_principal(self):
         class FakeWindow:
             def __init__(self):
@@ -97,6 +172,28 @@ class DisplayF3VisualRotationTests(unittest.TestCase):
         frame_recebido, rotacao = app.display_f3_window.calls[0]
         self.assertIs(frame_recebido, app.camera_frame_atual)
         self.assertEqual(270, rotacao)
+
+    def test_configuracao_zoom_recebe_rotacao_visual_do_f3(self):
+        source = inspect.getsource(
+            DisplayProductionF3Mixin._render_preview_display_f3_once
+        )
+        self.assertIn(
+            "visual_rotation=visual_rotation",
+            source,
+        )
+
+    def test_captura_de_mascaras_recebe_rotacao_visual_da_tela_principal(self):
+        source = inspect.getsource(
+            DisplayProjectConfigWindow.capture_masks_reference_photo
+        )
+        self.assertIn(
+            "obter_rotacao_visual_do_frame_provider",
+            source,
+        )
+        self.assertIn(
+            "visual_rotation=visual_rotation",
+            source,
+        )
 
     def test_janela_f3_aplica_rotacao_somente_antes_do_preview(self):
         source = inspect.getsource(DisplayProductionF3Window.update_camera_preview)
