@@ -9,7 +9,10 @@ import cv2
 
 from src.platform.display_check_sequence_runtime import DisplayCheckSequenceRuntime
 from src.platform.display_f3_heavy_executor import F3HeavyVisionExecutor
-from src.platform.display_f3_zoom import aplicar_zoom_software_frame_display_f3
+from src.platform.display_f3_zoom import (
+    aplicar_zoom_software_frame_display_f3,
+    centro_camera_para_pan_tilt_display_f3,
+)
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 from src.platform.display_project_config import DisplayProjectConfigWindow
 from src.platform.display_project_repository import (
@@ -21,6 +24,7 @@ from src.platform.display_visual_rotation import (
     obter_rotacao_visual_display,
     preparar_frame_visual_display,
 )
+from config import CAMERA_PAN_MAX, CAMERA_TILT_MAX
 from src.platform.desktop_settings import (
     OPERATION_PREVIEW_HEIGHT,
     OPERATION_PREVIEW_WIDTH,
@@ -59,6 +63,7 @@ class DisplayProductionF3Mixin:
         self._display_f3_software_zoom_cache_key = None
         self._display_f3_software_zoom_cache_frame = None
         self._display_f3_camera_zoom_signature = None
+        self._display_f3_camera_overview_frame = None
         self._display_f3_zoom_project_name = ""
         self._display_f3_zoom_runtime_config = normalizar_zoom_projeto_display(None)
         super().__init__(*args, **kwargs)
@@ -249,7 +254,23 @@ class DisplayProductionF3Mixin:
         camera_zoom = zoom["camera_zoom"]
         enabled = bool(camera_zoom["enabled"])
         value = float(camera_zoom["value"])
-        signature = (enabled, round(value, 4))
+        center = zoom["camera_zoom_center"]
+        center_x = float(center["x"])
+        center_y = float(center["y"])
+        camera_factor = value / 100.0 if enabled else 1.0
+        pan, tilt = centro_camera_para_pan_tilt_display_f3(
+            camera_factor,
+            center_x,
+            center_y,
+            pan_limit=float(CAMERA_PAN_MAX),
+            tilt_limit=float(CAMERA_TILT_MAX),
+        )
+        signature = (
+            enabled,
+            round(value, 4),
+            round(center_x, 6),
+            round(center_y, 6),
+        )
         if signature == self._display_f3_camera_zoom_signature:
             return
 
@@ -262,9 +283,34 @@ class DisplayProductionF3Mixin:
         except Exception:
             current = {}
         current = dict(current or {})
-        current["zoom_enabled"] = enabled
-        current["zoom"] = value
-        keys = ["zoom_enabled", "zoom"] if enabled else ["zoom_enabled"]
+        if enabled and camera_factor > 1.0001:
+            if self._display_f3_camera_overview_frame is None:
+                frame = getattr(self, "camera_frame_atual", None)
+                if frame is not None and getattr(frame, "size", 0) > 0:
+                    try:
+                        self._display_f3_camera_overview_frame = frame.copy()
+                    except Exception:
+                        self._display_f3_camera_overview_frame = frame
+            current["zoom_enabled"] = True
+            current["zoom"] = value
+            current["pan_enabled"] = True
+            current["pan"] = pan
+            current["tilt_enabled"] = True
+            current["tilt"] = tilt
+            keys = [
+                "zoom_enabled",
+                "zoom",
+                "pan_enabled",
+                "pan",
+                "tilt_enabled",
+                "tilt",
+            ]
+        else:
+            current["zoom_enabled"] = False
+            current["pan_enabled"] = False
+            current["tilt_enabled"] = False
+            keys = ["zoom_enabled", "pan_enabled", "tilt_enabled"]
+            self._display_f3_camera_overview_frame = None
         try:
             updater(current, keys)
         except Exception:
@@ -275,12 +321,18 @@ class DisplayProductionF3Mixin:
         self,
         enabled: bool,
         value: float,
+        center_x: float = 0.5,
+        center_y: float = 0.5,
     ) -> None:
         self._aplicar_zoom_camera_projeto_display_f3(
             {
                 "camera_zoom": {
                     "enabled": bool(enabled),
                     "value": float(value),
+                },
+                "camera_zoom_center": {
+                    "x": float(center_x),
+                    "y": float(center_y),
                 },
                 "software_zoom": 1.0,
             }
@@ -324,10 +376,16 @@ class DisplayProductionF3Mixin:
         except Exception:
             current = {}
         current["zoom_enabled"] = False
+        current["pan_enabled"] = False
+        current["tilt_enabled"] = False
         try:
-            updater(current, ["zoom_enabled"])
+            updater(
+                current,
+                ["zoom_enabled", "pan_enabled", "tilt_enabled"],
+            )
         except Exception:
             pass
+        self._display_f3_camera_overview_frame = None
 
     def _ao_fechar_configuracao_projeto_display(self) -> None:
         self._display_project_config_window = None
