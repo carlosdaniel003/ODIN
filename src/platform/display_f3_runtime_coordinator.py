@@ -18,7 +18,7 @@ consolidadas separadamente na Etapa 5.
 import time
 
 
-F3_COORDINATOR_CONFIG_INTERVAL_MS = 280
+F3_COORDINATOR_CONFIG_INTERVAL_MS = 100
 F3_COORDINATOR_HEAVY_CYCLE_MS = 40.0
 F3_COORDINATOR_VERY_HEAVY_CYCLE_MS = 85.0
 F3_COORDINATOR_EXTREME_CYCLE_MS = 160.0
@@ -204,30 +204,37 @@ class F3RuntimeCoordinator:
         (por exemplo, zoom ODIN), e ao final o frame bruto é restaurado.
         """
         raw_frame = getattr(self.app, "camera_frame_atual", None)
+        previous_raw = getattr(
+            self.app,
+            "_display_f3_runtime_raw_frame",
+            None,
+        )
+        self.app._display_f3_runtime_raw_frame = raw_frame
         provider = getattr(self.app, "_obter_frame_runtime_display_f3", None)
-        if not callable(provider):
-            return callback()
-
         try:
-            runtime_frame = provider()
-        except Exception:
-            runtime_frame = raw_frame
+            if not callable(provider):
+                return callback()
 
-        if (
-            runtime_frame is None
-            or getattr(runtime_frame, "size", 0) == 0
-            or runtime_frame is raw_frame
-        ):
-            return callback()
+            try:
+                runtime_frame = provider()
+            except Exception:
+                runtime_frame = raw_frame
 
-        self.app.camera_frame_atual = runtime_frame
-        try:
-            return callback()
+            if (
+                runtime_frame is None
+                or getattr(runtime_frame, "size", 0) == 0
+                or runtime_frame is raw_frame
+            ):
+                return callback()
+
+            self.app.camera_frame_atual = runtime_frame
+            try:
+                return callback()
+            finally:
+                if getattr(self.app, "camera_frame_atual", None) is runtime_frame:
+                    self.app.camera_frame_atual = raw_frame
         finally:
-            # Não sobrescreva uma eventual troca explícita de frame feita pelo
-            # callback. No fluxo normal Tk, este objeto ainda é o mesmo.
-            if getattr(self.app, "camera_frame_atual", None) is runtime_frame:
-                self.app.camera_frame_atual = raw_frame
+            self.app._display_f3_runtime_raw_frame = previous_raw
 
     def _analysis_due(self) -> bool:
         due_fn = getattr(
