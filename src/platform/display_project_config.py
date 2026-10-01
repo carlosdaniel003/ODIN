@@ -1081,6 +1081,7 @@ class DisplayProjectConfigWindow:
         self,
         source_frame,
         *,
+        overview_frame=None,
         visual_rotation: int = 0,
     ) -> None:
         if not self.visible:
@@ -1091,6 +1092,10 @@ class DisplayProjectConfigWindow:
             return
         self._zoom_live_source_frame = source_frame
         self._zoom_live_visual_rotation = int(visual_rotation or 0)
+        if overview_frame is not None and getattr(overview_frame, "size", 0) > 0:
+            self._zoom_live_overview_frame = overview_frame
+        elif self._zoom_live_overview_frame is None:
+            self._zoom_live_overview_frame = source_frame
         overview_frame = (
             self._zoom_live_overview_frame
             if self._zoom_live_overview_frame is not None
@@ -1783,6 +1788,8 @@ class DisplayProjectConfigWindow:
         self.height_var.set("")
         self.camera_zoom_enabled_var.set(False)
         self.camera_zoom_var.set(float(CAMERA_ZOOM_MIN))
+        self.camera_zoom_center_x_var.set(0.5)
+        self.camera_zoom_center_y_var.set(0.5)
         self.software_zoom_var.set(1.0)
         self.software_zoom_center_x_var.set(0.5)
         self.software_zoom_center_y_var.set(0.5)
@@ -1815,6 +1822,9 @@ class DisplayProjectConfigWindow:
         camera_zoom = zoom["camera_zoom"]
         self.camera_zoom_enabled_var.set(bool(camera_zoom["enabled"]))
         self.camera_zoom_var.set(float(camera_zoom["value"]))
+        camera_center = zoom["camera_zoom_center"]
+        self.camera_zoom_center_x_var.set(float(camera_center["x"]))
+        self.camera_zoom_center_y_var.set(float(camera_center["y"]))
         self.software_zoom_var.set(float(zoom["software_zoom"]))
         center = zoom["software_zoom_center"]
         self.software_zoom_center_x_var.set(float(center["x"]))
@@ -2051,6 +2061,7 @@ class DisplayProjectConfigWindow:
                 pass
         self.mask_capture_window = None
         self._zoom_live_source_frame = None
+        self._zoom_live_overview_frame = None
         self._zoom_source_photo = None
         self._zoom_final_photo = None
         self._zoom_source_mapping = None
