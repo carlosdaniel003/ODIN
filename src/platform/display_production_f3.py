@@ -7,6 +7,7 @@ import cv2
 
 from src.platform.display_check_sequence_runtime import DisplayCheckSequenceRuntime
 from src.platform.display_f3_heavy_executor import F3HeavyVisionExecutor
+from src.platform.display_f3_zoom import aplicar_zoom_software_frame_display_f3
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 from src.platform.display_project_config import DisplayProjectConfigWindow
 from src.platform.display_project_repository import (
@@ -158,28 +159,17 @@ class DisplayProductionF3Mixin:
         return obter_rotacao_visual_display(getattr(self, "view", None))
 
     @staticmethod
-    def _aplicar_zoom_software_frame_display_f3(frame, zoom: float):
-        if frame is None or getattr(frame, "size", 0) == 0:
-            return frame
-        try:
-            zoom = max(1.0, min(5.0, float(zoom)))
-        except (TypeError, ValueError):
-            zoom = 1.0
-        if zoom <= 1.0001:
-            return frame
-
-        altura, largura = frame.shape[:2]
-        crop_largura = max(2, min(largura, int(round(largura / zoom))))
-        crop_altura = max(2, min(altura, int(round(altura / zoom))))
-        x0 = max(0, (largura - crop_largura) // 2)
-        y0 = max(0, (altura - crop_altura) // 2)
-        crop = frame[y0:y0 + crop_altura, x0:x0 + crop_largura]
-        if crop is None or getattr(crop, "size", 0) == 0:
-            return frame
-        return cv2.resize(
-            crop,
-            (int(largura), int(altura)),
-            interpolation=cv2.INTER_LINEAR,
+    def _aplicar_zoom_software_frame_display_f3(
+        frame,
+        zoom: float,
+        center_x: float = 0.5,
+        center_y: float = 0.5,
+    ):
+        return aplicar_zoom_software_frame_display_f3(
+            frame,
+            zoom,
+            center_x,
+            center_y,
         )
 
     def _obter_frame_runtime_display_f3(self):
@@ -194,6 +184,13 @@ class DisplayProductionF3Mixin:
             getattr(self, "_display_f3_zoom_project_name", "") or ""
         )
         software_zoom = float(zoom.get("software_zoom", 1.0))
+        center = (
+            zoom.get("software_zoom_center")
+            if isinstance(zoom.get("software_zoom_center"), dict)
+            else {}
+        )
+        center_x = float(center.get("x", 0.5))
+        center_y = float(center.get("y", 0.5))
         if software_zoom <= 1.0001:
             return frame
 
@@ -202,6 +199,8 @@ class DisplayProductionF3Mixin:
             int(camera_id) if isinstance(camera_id, int) else id(frame),
             str(project_name or ""),
             round(software_zoom, 4),
+            round(center_x, 6),
+            round(center_y, 6),
             tuple(int(value) for value in frame.shape[:2]),
         )
         if (
@@ -213,10 +212,21 @@ class DisplayProductionF3Mixin:
         transformed = self._aplicar_zoom_software_frame_display_f3(
             frame,
             software_zoom,
+            center_x,
+            center_y,
         )
         self._display_f3_software_zoom_cache_key = key
         self._display_f3_software_zoom_cache_frame = transformed
         return transformed
+
+    def _obter_frame_fonte_configuracao_display(self):
+        frame = getattr(self, "camera_frame_atual", None)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return None
+        try:
+            return frame.copy()
+        except Exception:
+            return frame
 
     def _obter_frame_para_configuracao_display(self):
         frame = self._obter_frame_runtime_display_f3()
@@ -259,6 +269,21 @@ class DisplayProductionF3Mixin:
             return
         self._display_f3_camera_zoom_signature = signature
 
+    def _preview_zoom_camera_projeto_display_f3(
+        self,
+        enabled: bool,
+        value: float,
+    ) -> None:
+        self._aplicar_zoom_camera_projeto_display_f3(
+            {
+                "camera_zoom": {
+                    "enabled": bool(enabled),
+                    "value": float(value),
+                },
+                "software_zoom": 1.0,
+            }
+        )
+
     def _restaurar_zoom_camera_apos_f3(self) -> None:
         signature = self._display_f3_camera_zoom_signature
         self._display_f3_camera_zoom_signature = None
@@ -280,6 +305,7 @@ class DisplayProductionF3Mixin:
 
     def _ao_fechar_configuracao_projeto_display(self) -> None:
         self._display_project_config_window = None
+        self._atualizar_resumo_projeto_display_f3()
         janela = self.display_f3_window
         if janela is not None and self.display_f3_ativo:
             try:
@@ -330,6 +356,8 @@ class DisplayProductionF3Mixin:
                     root=owner.root,
                     repository=repository,
                     frame_provider=owner._obter_frame_para_configuracao_display,
+                    source_frame_provider=owner._obter_frame_fonte_configuracao_display,
+                    on_camera_zoom_preview=owner._preview_zoom_camera_projeto_display_f3,
                     heavy_executor=owner._ensure_f3_heavy_executor(),
                     on_change=owner._atualizar_resumo_projeto_display_f3,
                     on_close=owner._ao_fechar_configuracao_projeto_display,
@@ -1114,11 +1142,30 @@ class DisplayProductionF3Mixin:
         freeze_visual = bool(
             getattr(self, "_display_f3_ng_evidence_frozen", False)
         )
+        visual_rotation = self._obter_rotacao_visual_display_f3()
+        configuracao = self._display_project_config_window
+        if configuracao is not None:
+            try:
+                if configuracao.visible:
+                    source_frame = getattr(
+                        self,
+                        "_display_f3_runtime_raw_frame",
+                        None,
+                    )
+                    if source_frame is None:
+                        source_frame = frame
+                    configuracao.update_live_zoom_preview(
+                        source_frame,
+                        visual_rotation=visual_rotation,
+                    )
+            except Exception:
+                pass
+
         if janela is not None and not freeze_visual:
             try:
                 janela.update_camera_preview(
                     frame,
-                    visual_rotation=self._obter_rotacao_visual_display_f3(),
+                    visual_rotation=visual_rotation,
                 )
             except TypeError:
                 try:
