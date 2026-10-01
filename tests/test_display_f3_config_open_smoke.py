@@ -20,6 +20,143 @@ import src.platform.display_production_f3 as production_module
 
 
 class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
+    def test_drag_real_tk_preserva_zoom_odin_em_dois_x(self):
+        root = tk.Tk()
+        root.withdraw()
+        created = None
+        executor = F3HeavyVisionExecutor()
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                repository = DisplayProjectRepository(
+                    Path(temp_dir) / "display_projects.json"
+                )
+                repository.adicionar_projeto(
+                    "CM_500_L",
+                    (1920, 1080),
+                )
+                repository.definir_projeto_ativo("CM_500_L")
+
+                frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+                frame[:, :960] = (20, 20, 20)
+                frame[:, 960:] = (220, 220, 220)
+                software_calls = []
+
+                created = production_module.DisplayProjectConfigWindow(
+                    root=root,
+                    repository=repository,
+                    frame_provider=lambda: frame,
+                    source_frame_provider=lambda: frame,
+                    on_camera_zoom_preview=lambda *_args: None,
+                    on_software_zoom_preview=lambda zoom, x, y: (
+                        software_calls.append(
+                            (float(zoom), float(x), float(y))
+                        )
+                    ),
+                    heavy_executor=executor,
+                    on_change=lambda: None,
+                    on_close=lambda: None,
+                )
+                created.refresh("CM_500_L")
+                root.update_idletasks()
+                root.update()
+
+                created.software_zoom_var.set(2.0)
+                created._on_software_zoom_changed()
+                created.update_live_zoom_preview(frame)
+                root.update_idletasks()
+                root.update()
+
+                self.assertAlmostEqual(
+                    2.0,
+                    float(created.software_zoom_var.get()),
+                    places=6,
+                )
+
+                canvas = created.zoom_source_canvas
+                canvas.update_idletasks()
+                mapping = created._zoom_source_mapping
+                self.assertIsInstance(mapping, dict)
+
+                center_x = int(
+                    round(
+                        float(mapping["offset_x"])
+                        + float(mapping["render_width"]) * 0.50
+                    )
+                )
+                center_y = int(
+                    round(
+                        float(mapping["offset_y"])
+                        + float(mapping["render_height"]) * 0.50
+                    )
+                )
+                target_x = int(
+                    round(
+                        float(mapping["offset_x"])
+                        + float(mapping["render_width"]) * 0.65
+                    )
+                )
+
+                canvas.event_generate(
+                    "<Button-1>",
+                    x=center_x,
+                    y=center_y,
+                )
+                root.update_idletasks()
+                root.update()
+                zoom_after_press = float(created.software_zoom_var.get())
+
+                canvas.event_generate(
+                    "<B1-Motion>",
+                    x=target_x,
+                    y=center_y,
+                )
+                root.update_idletasks()
+                root.update()
+                zoom_after_motion = float(created.software_zoom_var.get())
+
+                canvas.event_generate(
+                    "<ButtonRelease-1>",
+                    x=target_x,
+                    y=center_y,
+                )
+                root.update_idletasks()
+                root.update()
+                zoom_after_release = float(created.software_zoom_var.get())
+
+                self.assertAlmostEqual(2.0, zoom_after_press, places=6)
+                self.assertAlmostEqual(2.0, zoom_after_motion, places=6)
+                self.assertAlmostEqual(2.0, zoom_after_release, places=6)
+                self.assertGreater(
+                    float(created.software_zoom_center_x_var.get()),
+                    0.5,
+                )
+                self.assertTrue(software_calls)
+                self.assertTrue(
+                    all(
+                        abs(float(call[0]) - 2.0) < 1e-6
+                        for call in software_calls
+                    ),
+                    msg=f"software zoom callbacks: {software_calls!r}",
+                )
+        finally:
+            if created is not None:
+                try:
+                    created.close()
+                except Exception:
+                    pass
+            try:
+                executor.shutdown(wait=False, cancel_pending=True)
+            except Exception:
+                pass
+            try:
+                root.update_idletasks()
+            except Exception:
+                pass
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
     def test_final_config_window_opens_with_real_tk(self):
         root = tk.Tk()
         root.withdraw()
