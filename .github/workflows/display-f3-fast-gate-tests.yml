@@ -38,6 +38,11 @@ jobs:
             src/platform/display_f3_probe_visual_sync.py \
             src/platform/display_f3_powered_cycle_latch.py \
             src/platform/display_f3_runtime_contract_fix.py \
+            src/platform/display_f3_zoom.py \
+            src/platform/display_project_repository.py \
+            src/platform/display_project_config.py \
+            src/platform/display_production_f3.py \
+            src/platform/display_f3_runtime_coordinator.py \
             src/platform/desktop_production_app.py \
             tests/test_display_f3_fast_expected_gate.py \
             tests/test_display_f3_h1_single_frame_probe.py \
@@ -51,6 +56,10 @@ jobs:
             tests/test_display_f3_power_authority.py \
             tests/test_display_f3_live_runtime_fix.py \
             tests/test_display_f3_runtime_contract_fix.py \
+            tests/test_display_f3_zoom.py \
+            tests/test_display_f3_config_architecture.py \
+            tests/test_display_f3_runtime_coordinator.py \
+            tests/test_display_project_repository.py \
             tests/test_display_f3_config_open_smoke.py
 
       - name: Validate first-ON judgment gate
@@ -107,6 +116,16 @@ jobs:
             tests.test_display_f3_exact_check_template \
             tests.test_display_f3_h1_single_frame_probe \
             tests.test_display_f3_runtime_contract_fix \
+            -v
+
+      - name: Validate zoom framing and live preview contracts
+        run: |
+          python -m unittest \
+            tests.test_display_f3_zoom \
+            tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_configuracao_zoom_tem_preview_final_e_viewport_arrastavel \
+            tests.test_display_f3_config_architecture.DisplayF3ConfigArchitectureTests.test_preview_de_zoom_reutiliza_scheduler_sem_criar_timer_proprio \
+            tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_runtime_frame_transformado_e_usado_e_frame_bruto_e_restaurado \
+            tests.test_display_project_repository.DisplayProjectRepositoryTests.test_zoom_f3_e_persistido_por_projeto_e_preservado_ao_salvar_mascaras \
             -v
 
       - name: Smoke test real Configurar F3
