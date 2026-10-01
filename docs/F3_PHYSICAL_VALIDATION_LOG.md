@@ -3041,3 +3041,129 @@ validação.
 
 **Estado:** PASS FÍSICO — D-050 VALIDADA.
 
+---
+
+## 01/10/2026 — FAIL físico: reflexos marcados como segmentos acesos no espelho visual H1
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Projeto `CM_500_L`, CHECK lógico **H1**, rotação visual 180°, rastreamento
+automático desativado.
+
+O operador confirmou que a placa estava fisicamente correta no H1 e informou
+como segmentos realmente acesos somente:
+
+    MASK_008
+    MASK_013
+    MASK_009
+    MASK_012
+    MASK_011
+    MASK_017
+    MASK_020
+
+Porém, câmera/visor do espelho visual também apresentavam como acesos, por
+reflexo/ruído óptico:
+
+    MASK_010
+    MASK_014
+    MASK_018
+    MASK_021
+
+### Evidência do DEBUG
+
+O gabarito configurado do H1 possui exatamente 7 máscaras ON e 21 OFF.
+
+A análise semântica/produtiva do mesmo caso já classificava
+`MASK_010`, `MASK_014`, `MASK_018` e `MASK_021` como OFF. Portanto a origem
+dos quatro falsos ON não estava na regra produtiva de CHECK.
+
+O bloco **ESPELHO VISUAL LIVE D-032** registrou:
+
+    tracking_enabled=NÃO
+    sample_ready=SIM
+    sampled_masks=28
+    same_physical_frame=NÃO
+    physical_frame_token=--
+    visual_ids=11
+
+e publicou:
+
+    MASK_008, MASK_009, MASK_010, MASK_011, MASK_012,
+    MASK_013, MASK_014, MASK_017, MASK_018, MASK_020, MASK_021
+
+Assim, os quatro falsos positivos foram isolados no sampler leve
+`latest_preview_frame_core_v`.
+
+### Causa no proprietário responsável
+
+`detectar_emissao_visual_ao_vivo_f3()` possui duas formas de aceitar ON:
+
+1. separação relativa entre grupo escuro e grupo luminoso;
+2. evidência absoluta forte, criada como fallback para cenas sem contraste
+   interno, como todos/quase todos os segmentos acesos.
+
+A segunda regra era aplicada **sempre**, inclusive quando a separação relativa já
+estava disponível. Com isso, uma ROI de reflexo suficientemente brilhante podia
+ser rejeitada pelo threshold relativo e depois ser recolocada como ON pela regra
+absoluta (`score >= 150` e `p_high >= 175`).
+
+### Correção aplicada
+
+- a evidência absoluta forte passou a funcionar somente como **fallback real**,
+  quando a evidência relativa não está disponível;
+- quando existe separação relativa utilizável, o resultado relativo é preservado
+  e candidatos fortes intermediários não são recolocados como ON;
+- nenhum threshold produtivo, gabarito, energia, OK/NG, sequência, máscara ou
+  geometria foi alterado;
+- a correção afeta somente o espelho visual live de câmera + máscaras + visor;
+- a proteção D-046 continua válida: classificação física same-mask do mesmo frame
+  continua prevalecendo quando estiver disponível;
+- não foi criado timer, worker, scheduler ou segundo classificador produtivo.
+
+### Telemetria adicionada
+
+O DEBUG passa a registrar:
+
+    threshold
+    baseline
+    peak
+    dynamic
+    cluster_gap
+    relative_ready
+    absolute_fallback
+    strong_candidate_mask_ids
+    reflection_rejected_mask_ids
+
+No próximo teste físico, `reflection_rejected_mask_ids` permitirá confirmar se
+as ROIs brilhantes descartadas correspondem aos reflexos observados.
+
+### Regressões adicionadas
+
+Foi criado cenário sintético com três níveis:
+
+    fundo/segmentos OFF
+    → reflexos intermediários fortes
+    → emissão real do display
+
+O contrato exige:
+
+- somente o grupo superior de emissão real fica ON;
+- reflexos intermediários são listados como rejeitados;
+- o fallback absoluto fica desativado quando há separação relativa;
+- o caso legítimo de todos os segmentos acesos continua usando o fallback
+  absoluto.
+
+### Reteste físico esperado
+
+    H1 correto
+    → câmera/visor devem mostrar ON somente:
+      8, 13, 9, 12, 11, 17, 20
+    → 10, 14, 18 e 21 devem permanecer OFF
+    → copiar DEBUG
+    → verificar reflection_rejected_mask_ids
+    → confirmar que nenhum segmento realmente ON foi eliminado
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
