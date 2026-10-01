@@ -1633,3 +1633,55 @@ tracking OFF
 → aguardar retirada/rearme conforme contrato terminal
 ```
 
+---
+
+## 01/10/2026 — D-044 validada fisicamente: BLUE com MASK_024 apagada gerou NG
+
+**Resultado físico:** PASS.
+
+### Cenário validado
+
+- Rastreamento Automático: DESATIVADO;
+- H1 concluído corretamente;
+- CHECK atual: BLUE / CHECK_002;
+- BLUE com defeito real reproduzido;
+- segmento 24 / `MASK_024`, configurado como ON em BLUE, permaneceu fisicamente
+  APAGADO enquanto os demais segmentos esperados acenderam.
+
+### Resultado observado
+
+O operador confirmou no equipamento real que, após a correção D-044, o ODIN
+passou a capturar corretamente esse caso como **NG**.
+
+Fluxo físico validado:
+
+```text
+H1 correto
+→ H1 CONCLUÍDO
+→ BLUE chega fisicamente
+→ energia permanece confirmada apesar da MASK_024 OFF
+→ presença permanece confirmada
+→ assinatura H1 → BLUE confirma a chegada da função
+→ analyzer mantém MASK_024 como divergente
+→ BLUE não recebe OK
+→ defeito é confirmado como NG
+```
+
+### Conclusão
+
+D-044 está **VALIDADA FISICAMENTE** no cenário que originou a correção.
+
+A validação confirma que:
+
+- uma placa energizada com defeito não precisa formar um CHECK 100% conforme
+  para continuar sendo reconhecida como presente;
+- a chegada a BLUE pode ser provada pela assinatura das máscaras que mudaram em
+  relação a H1, sem transformar conformidade parcial em OK;
+- a `MASK_024` apagada permanece disponível para a autoridade semântica de NG;
+- o produto defeituoso não avança como BLUE aprovado;
+- a correção não depende de Rastreamento Automático.
+
+### Estado
+
+**PASS — D-044 VALIDADA FISICAMENTE.**
+
