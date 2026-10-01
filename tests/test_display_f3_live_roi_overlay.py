@@ -10,6 +10,7 @@ from src.platform.display_live_roi_overlay import (
     DISPLAY_ROI_OVERLAY_ALPHA,
     renderizar_overlay_rois_display_f3,
 )
+from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
 
@@ -482,6 +483,135 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertEqual(
             {"MASK_004", "MASK_007"},
             window._display_readout_context["validating_mask_ids"],
+        )
+
+    def test_freeze_ng_reafirma_falha_confirmada_no_contexto_do_visor(self):
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window._display_readout_context = {
+            "failed_mask_ids": set(),
+            "classifications": {"MASK_024": "off"},
+        }
+        window._display_last_overlay_context = {
+            "effective_confirmed_failed_mask_ids": (),
+        }
+        window._check_snapshot = {}
+        window._display_frozen_ng_visual_debug = {}
+        window.display_readout_canvas = None
+        window._capture_analysis_statuses = lambda: {}
+        window._set_segregation_action_enabled = lambda _enabled: None
+        window.restore_frozen_analysis_statuses = lambda: None
+        redraws = []
+        window._redraw_display_readout = lambda: redraws.append(
+            set(window._display_readout_context["failed_mask_ids"])
+        )
+
+        window.freeze_ng_evidence(
+            confirmed_failed_mask_ids=("MASK_024",)
+        )
+
+        self.assertEqual(
+            {"MASK_024"},
+            window._display_readout_context["failed_mask_ids"],
+        )
+        self.assertEqual(
+            {"MASK_024"},
+            window._display_frozen_readout_context["failed_mask_ids"],
+        )
+        self.assertEqual(
+            ("MASK_024",),
+            window._display_frozen_overlay_context[
+                "effective_confirmed_failed_mask_ids"
+            ],
+        )
+        self.assertEqual([{"MASK_024"}], redraws)
+        self.assertTrue(
+            window._display_frozen_ng_visual_debug["readout_repainted"]
+        )
+
+    def test_repaint_pos_freeze_pinta_mask_024_vermelha_no_frame_terminal(self):
+        frame = np.zeros((80, 180, 3), dtype=np.uint8)
+
+        class _Window:
+            def __init__(self):
+                self._display_frozen_overlay_context = {
+                    "resolution": (180, 80),
+                    "masks": (
+                        {
+                            "id": "MASK_001",
+                            "type": "circle",
+                            "cx": 30,
+                            "cy": 40,
+                            "radius": 12,
+                        },
+                        {
+                            "id": "MASK_024",
+                            "type": "circle",
+                            "cx": 90,
+                            "cy": 40,
+                            "radius": 12,
+                        },
+                        {
+                            "id": "MASK_028",
+                            "type": "circle",
+                            "cx": 150,
+                            "cy": 40,
+                            "radius": 12,
+                        },
+                    ),
+                    "live_luminous_only": True,
+                    "live_visual_sample_ready": True,
+                    "live_visual_mask_ids": ("MASK_001",),
+                    "live_visual_classifications": {
+                        "MASK_001": "on",
+                        "MASK_024": "off",
+                        "MASK_028": "off",
+                    },
+                    "board_points": (),
+                    "check_id": "CHECK_002",
+                }
+                self._display_frozen_ng_visual_debug = {}
+                self.rendered = None
+
+            def update_preview(self, rendered, leds=()):
+                self.rendered = rendered.copy()
+                return True
+
+        window = _Window()
+        owner = DisplayProductionF3Mixin.__new__(
+            DisplayProductionF3Mixin
+        )
+        analysis = {
+            "project_name": "DISPLAY",
+            "check_id": "CHECK_002",
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+        }
+
+        rendered = owner._repaint_frozen_ng_evidence_display_f3(
+            window,
+            frame,
+            0,
+            analysis,
+        )
+
+        self.assertTrue(rendered)
+        self.assertIsNotNone(window.rendered)
+        on_pixel = window.rendered[40, 30]
+        ng_pixel = window.rendered[40, 90]
+        off_pixel = window.rendered[40, 150]
+        self.assertGreater(int(on_pixel[1]), int(on_pixel[2]))
+        self.assertGreater(int(ng_pixel[2]), int(ng_pixel[1]))
+        self.assertGreater(int(ng_pixel[2]), int(ng_pixel[0]))
+        self.assertGreater(int(off_pixel[1]), int(off_pixel[2]))
+        self.assertEqual(
+            ("MASK_024",),
+            window._display_frozen_ng_visual_debug[
+                "confirmed_failed_mask_ids"
+            ],
+        )
+        self.assertTrue(
+            window._display_frozen_ng_visual_debug["camera_repainted"]
         )
 
     def test_visor_live_usa_verde_escuro_para_segmento_apagado(self):
