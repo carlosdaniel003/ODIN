@@ -808,8 +808,52 @@ class DisplayProjectConfigWindow:
         )
         return camera_zoom, software_zoom, center_x, center_y
 
+    def _camera_center_values(self) -> tuple[float, float]:
+        camera_zoom, _software_zoom, _sx, _sy = self._zoom_values()
+        enabled = bool(self.camera_zoom_enabled_var.get())
+        factor = camera_zoom / 100.0 if enabled else 1.0
+        try:
+            center_x = float(self.camera_zoom_center_x_var.get())
+            center_y = float(self.camera_zoom_center_y_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            center_x = center_y = 0.5
+        return normalizar_centro_zoom_software_display_f3(
+            factor,
+            center_x,
+            center_y,
+        )
+
+    def _effective_zoom_view(self, frame_shape=None):
+        camera_zoom, software_zoom, software_x, software_y = self._zoom_values()
+        camera_enabled = bool(self.camera_zoom_enabled_var.get())
+        camera_factor = camera_zoom / 100.0 if camera_enabled else 1.0
+        camera_x, camera_y = self._camera_center_values()
+        if frame_shape is None:
+            frame = self._zoom_live_overview_frame
+            frame_shape = getattr(frame, "shape", None)
+        if frame_shape is None:
+            return (
+                camera_factor * software_zoom,
+                0.5,
+                0.5,
+                None,
+            )
+        rect = calcular_viewport_efetivo_display_f3(
+            frame_shape,
+            camera_factor,
+            software_zoom,
+            camera_x,
+            camera_y,
+            software_x,
+            software_y,
+        )
+        return rect[6], rect[4], rect[5], rect[:4]
+
     def _update_zoom_labels(self) -> None:
-        camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        camera_zoom, software_zoom, _center_x, _center_y = self._zoom_values()
+        effective_zoom, effective_x, effective_y, _rect = (
+            self._effective_zoom_view()
+        )
         try:
             self.camera_zoom_value_label.configure(
                 text=f"{camera_zoom / 100.0:.2f}×"
@@ -819,17 +863,27 @@ class DisplayProjectConfigWindow:
             )
             self.zoom_center_label.configure(
                 text=(
-                    f"Centro X {center_x * 100.0:.1f}% • "
-                    f"Y {center_y * 100.0:.1f}%"
+                    f"ÁREA F3 • {effective_zoom:.2f}× • "
+                    f"centro X {effective_x * 100.0:.1f}% • "
+                    f"Y {effective_y * 100.0:.1f}%"
                 )
             )
         except Exception:
             pass
 
-    def _on_hardware_zoom_changed(self) -> None:
-        self._update_zoom_labels()
+    def _publish_hardware_zoom_preview(self) -> None:
         callback = self.on_camera_zoom_preview
-        if callable(callback) and self._selected_name():
+        if not callable(callback) or not self._selected_name():
+            return
+        center_x, center_y = self._camera_center_values()
+        try:
+            callback(
+                bool(self.camera_zoom_enabled_var.get()),
+                float(self.camera_zoom_var.get()),
+                center_x,
+                center_y,
+            )
+        except TypeError:
             try:
                 callback(
                     bool(self.camera_zoom_enabled_var.get()),
@@ -837,6 +891,25 @@ class DisplayProjectConfigWindow:
                 )
             except Exception:
                 pass
+        except Exception:
+            pass
+
+    def _on_hardware_zoom_changed(self) -> None:
+        camera_zoom = float(self.camera_zoom_var.get())
+        factor = (
+            camera_zoom / 100.0
+            if bool(self.camera_zoom_enabled_var.get())
+            else 1.0
+        )
+        center_x, center_y = normalizar_centro_zoom_software_display_f3(
+            factor,
+            float(self.camera_zoom_center_x_var.get()),
+            float(self.camera_zoom_center_y_var.get()),
+        )
+        self.camera_zoom_center_x_var.set(center_x)
+        self.camera_zoom_center_y_var.set(center_y)
+        self._update_zoom_labels()
+        self._publish_hardware_zoom_preview()
         self._rerender_zoom_preview()
 
     def _publish_software_zoom_preview(self) -> None:
@@ -937,21 +1010,16 @@ class DisplayProjectConfigWindow:
             return
 
         if frame is None:
-            frame = self._zoom_live_source_frame
+            frame = self._zoom_live_overview_frame
         if frame is None or getattr(frame, "size", 0) == 0:
             return
 
-        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
-        x0, y0, x1, y1, effective_x, effective_y = (
-            calcular_recorte_zoom_software_display_f3(
-                frame.shape,
-                software_zoom,
-                center_x,
-                center_y,
-            )
+        effective_zoom, effective_x, effective_y, rect = (
+            self._effective_zoom_view(frame.shape)
         )
-        self.software_zoom_center_x_var.set(effective_x)
-        self.software_zoom_center_y_var.set(effective_y)
+        if rect is None:
+            return
+        x0, y0, x1, y1 = rect
 
         sx = mapping["render_width"] / max(
             1.0,
@@ -1023,10 +1091,15 @@ class DisplayProjectConfigWindow:
             return
         self._zoom_live_source_frame = source_frame
         self._zoom_live_visual_rotation = int(visual_rotation or 0)
+        overview_frame = (
+            self._zoom_live_overview_frame
+            if self._zoom_live_overview_frame is not None
+            else source_frame
+        )
         if self._zoom_drag_active:
-            self._update_zoom_viewport_overlay(source_frame)
+            self._update_zoom_viewport_overlay(overview_frame)
         else:
-            self._draw_zoom_source_viewport(source_frame)
+            self._draw_zoom_source_viewport(overview_frame)
 
         _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
         final_frame = aplicar_zoom_software_frame_display_f3(
@@ -1035,17 +1108,6 @@ class DisplayProjectConfigWindow:
             center_x,
             center_y,
         )
-        try:
-            from src.platform.display_visual_rotation import (
-                preparar_frame_visual_display,
-            )
-
-            final_frame = preparar_frame_visual_display(
-                final_frame,
-                self._zoom_live_visual_rotation,
-            )
-        except Exception:
-            pass
         self._render_bgr_zoom_canvas(
             final_canvas,
             final_frame,
@@ -1068,7 +1130,7 @@ class DisplayProjectConfigWindow:
                 frame = None
         self.update_live_zoom_preview(
             frame,
-            visual_rotation=self._zoom_live_visual_rotation,
+            visual_rotation=0,
         )
 
     def _zoom_pointer_normalized(self, event) -> tuple[float, float] | None:
@@ -1126,22 +1188,21 @@ class DisplayProjectConfigWindow:
         if pointer is None:
             return "break"
 
-        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
-        if software_zoom <= 1.0001:
+        effective_zoom, center_x, center_y, _rect = (
+            self._effective_zoom_view()
+        )
+        if effective_zoom <= 1.0001:
             self._zoom_drag_active = False
             try:
                 self.status.configure(
-                    text=(
-                        "Para mover o enquadramento, aumente o Zoom ODIN acima "
-                        "de 1×. O zoom digital da BRIO é central pelo driver."
-                    )
+                    text="Aumente o zoom da câmera ou o Zoom ODIN acima de 1× para mover o quadro azul."
                 )
             except Exception:
                 pass
             return "break"
 
         px, py = pointer
-        margin = min(0.5, 0.5 / software_zoom)
+        margin = min(0.5, 0.5 / effective_zoom)
         inside = (
             center_x - margin <= px <= center_x + margin
             and center_y - margin <= py <= center_y + margin
@@ -1167,18 +1228,42 @@ class DisplayProjectConfigWindow:
             return "break"
 
         px, py = pointer
-        _camera_zoom, software_zoom, _old_x, _old_y = self._zoom_values()
+        camera_zoom, software_zoom, _old_x, _old_y = self._zoom_values()
         try:
             self.software_zoom_var.set(float(software_zoom))
         except Exception:
             pass
-        center_x, center_y = normalizar_centro_zoom_software_display_f3(
-            software_zoom,
+        effective_zoom, _effective_x, _effective_y, _rect = (
+            self._effective_zoom_view()
+        )
+        desired_x, desired_y = normalizar_centro_zoom_software_display_f3(
+            effective_zoom,
             px + self._zoom_drag_offset_x,
             py + self._zoom_drag_offset_y,
         )
-        self.software_zoom_center_x_var.set(center_x)
-        self.software_zoom_center_y_var.set(center_y)
+
+        camera_enabled = bool(self.camera_zoom_enabled_var.get())
+        camera_factor = camera_zoom / 100.0 if camera_enabled else 1.0
+        if camera_factor > 1.0001:
+            camera_x, camera_y = normalizar_centro_zoom_software_display_f3(
+                camera_factor,
+                desired_x,
+                desired_y,
+            )
+            self.camera_zoom_center_x_var.set(camera_x)
+            self.camera_zoom_center_y_var.set(camera_y)
+            self.software_zoom_center_x_var.set(0.5)
+            self.software_zoom_center_y_var.set(0.5)
+            self._publish_hardware_zoom_preview()
+        else:
+            center_x, center_y = normalizar_centro_zoom_software_display_f3(
+                software_zoom,
+                desired_x,
+                desired_y,
+            )
+            self.software_zoom_center_x_var.set(center_x)
+            self.software_zoom_center_y_var.set(center_y)
+
         self._update_zoom_labels()
         self._publish_software_zoom_preview()
         self._update_zoom_viewport_overlay()
@@ -1211,6 +1296,7 @@ class DisplayProjectConfigWindow:
             return False
         try:
             camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+            camera_center_x, camera_center_y = self._camera_center_values()
         except (TypeError, ValueError, tk.TclError):
             return False
         saved = self.repository.salvar_zoom_projeto(
@@ -1218,6 +1304,8 @@ class DisplayProjectConfigWindow:
             camera_enabled=bool(self.camera_zoom_enabled_var.get()),
             camera_zoom=camera_zoom,
             software_zoom=software_zoom,
+            camera_center_x=camera_center_x,
+            camera_center_y=camera_center_y,
             center_x=center_x,
             center_y=center_y,
         )
