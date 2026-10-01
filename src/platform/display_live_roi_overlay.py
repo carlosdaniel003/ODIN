@@ -181,6 +181,12 @@ def _prepare_live_visual_mirror_context(
                     "live_visual_frame_token": repr(
                         result.get("live_visual_frame_token")
                     ),
+                    "live_visual_physical_frame_token": repr(
+                        result.get("live_visual_physical_frame_token")
+                    ),
+                    "live_visual_same_physical_frame": bool(
+                        result.get("live_visual_same_physical_frame")
+                    ),
                 }
             )
             if app is not None:
