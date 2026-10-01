@@ -1841,3 +1841,43 @@ Próximo reteste:
 - confirmar NG terminal sem avanço para USB;
 - confirmar que H1 ainda presente não gera falso NG de BLUE.
 
+---
+
+## 01/10/2026 — D-044 PASS físico com tracking OFF
+
+Modo:
+- tracking OFF.
+
+Cenário:
+- H1 concluído;
+- BLUE atual;
+- MASK_024 esperada ON permaneceu fisicamente OFF;
+- correção D-044 ativa.
+
+Resultado:
+- PASS FÍSICO;
+- a placa permaneceu reconhecida como presente e energizada mesmo com o CHECK
+  divergente;
+- a assinatura semântica H1 → BLUE permitiu confirmar a chegada da função sem
+  exigir BLUE perfeito;
+- MASK_024 continuou divergente e o ODIN registrou NG corretamente;
+- o defeito não depende do object tracking e foi validado com tracking desligado.
+
+Decisão/ligação:
+- D-031, D-041, D-042, D-043 e D-044.
+
+Lição:
+- presença, chegada ao CHECK e conformidade são autoridades distintas;
+- um produto NG precisa poder entrar no fluxo de julgamento sem antes parecer
+  um produto BOM;
+- a assinatura de transição pode provar chegada, mas não substitui o analyzer
+  que decide a divergência.
+
+Não repetir:
+- não exigir padrão 100% conforme para confirmar presença de placa energizada;
+- não transformar 27/28 em OK;
+- não atribuir ao tracking uma falha reproduzida e corrigida com tracking OFF.
+
+Estado:
+- D-044 VALIDADA FISICAMENTE NO CENÁRIO BLUE COM MASK_024 APAGADA.
+
