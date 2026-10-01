@@ -364,6 +364,18 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
   antes de qualquer reconstrução diagnóstica; recalcular o contexto para o
   relatório não pode apagar a evidência de que o canvas real deixou de pintar
   uma falha confirmada;
+- D-046: o espelho visual pós-CHECK deve permanecer LIVE durante resultado
+  APROVADO enquanto a placa ainda estiver no suporte; somente NG congelado e
+  SEGREGAR terminal possuem comportamento especial de freeze/override visual;
+- quando a autoridade física same-mask e o sampler leve do preview observarem o
+  mesmo frame, a classificação física same-mask prevalece sobre o sampler de
+  brilho para evitar falso ON apenas visual (ex.: MASK_010 em AUX);
+- o sampler latest-frame continua autorizado a preencher máscaras sem leitura
+  física e a substituir estado físico pertencente a frame anterior, preservando
+  resposta visual rápida sem criar segunda autoridade de decisão;
+- wrappers visuais que substituem `_render_check_cards` precisam manter a
+  assinatura funcional atual, inclusive `force_terminal_segregated`, para não
+  derrubar o overlay live por TypeError e fazer as máscaras voltarem a cinza;
 - nenhuma correção desses contratos pode criar novo timer, worker, scheduler ou
   autoridade paralela.
 
