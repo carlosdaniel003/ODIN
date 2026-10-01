@@ -3007,3 +3007,37 @@ No HEAD da correção passaram:
 
 **Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
 
+---
+
+## 01/10/2026 — PASS físico da rotação visual no zoom e captura de máscaras
+
+**Resultado físico:** PASS.
+
+### Cenário validado
+
+O operador retestou o comportamento após a correção da D-050.
+
+Foi confirmado fisicamente que a rotação visual definida na tela de
+desenvolvimento passou a ser respeitada também nas configurações do F3.
+
+### Resultado observado
+
+- a visualização de zoom do F3 acompanha a rotação visual configurada;
+- o mapa/quadro azul do enquadramento é apresentado na orientação esperada;
+- o recorte visual do F3 acompanha a mesma orientação;
+- em **Máscaras → Capturar foto com a câmera**, o preview ao vivo também aparece
+  com a rotação configurada;
+- o comportamento corrigido foi aceito pelo operador no teste real.
+
+O reteste confirmou a regra funcional solicitada. Não foram informados novos
+valores de zoom ou outra rotação além do cenário já documentado de 180°;
+portanto nenhum parâmetro adicional foi inferido.
+
+### Histórico preservado
+
+O FAIL anterior — em que zoom e captura de máscaras ignoravam a rotação visual —
+permanece registrado para preservar a sequência real de evidência, correção e
+validação.
+
+**Estado:** PASS FÍSICO — D-050 VALIDADA.
+
