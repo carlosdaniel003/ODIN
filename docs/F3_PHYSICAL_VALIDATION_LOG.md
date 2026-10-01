@@ -2814,3 +2814,90 @@ Nenhum novo timer, worker, scheduler ou persistência foi introduzido.
 
 **Validação física:** pendente.
 
+---
+
+## 01/10/2026 — Redesign do zoom: mapa 1× + quadro azul único
+
+**Estado:** IMPLEMENTADO — PENDENTE DE RETESTE FÍSICO.
+
+### Solicitação
+
+A visualização anterior estava confusa porque:
+
+- havia duas imagens grandes;
+- a saída final podia aparecer rotacionada;
+- não estava claro qual área correspondia ao zoom usado pelo F3;
+- ao usar zoom digital da câmera, o operador também queria deslocar a região.
+
+### Implementação
+
+A seção de zoom passou a usar:
+
+**MAPA DA CÂMERA • ARRASTE O QUADRO AZUL**
+
+- mostra a visão completa de referência em 1×;
+- sempre usa orientação natural da câmera;
+- não aplica rotação visual do F3;
+- mantém um quadro azul sobre a área efetivamente usada;
+- o tamanho do quadro reflete a composição do zoom da câmera com o Zoom ODIN.
+
+Exemplo:
+
+    câmera 1× + ODIN 2× = quadro 2×
+    câmera 2× + ODIN 1× = quadro 2×
+    câmera 2× + ODIN 2× = quadro 4×
+
+A visualização secundária foi reduzida para:
+
+**RECORTE ATUAL DO F3 • SEM ROTAÇÃO**
+
+Ela serve apenas para confirmar o conteúdo atual selecionado.
+
+### Movimento do quadro
+
+- com zoom físico da BRIO acima de 1×:
+  - arrastar o quadro atualiza `camera_zoom_center.x/y`;
+  - o centro é convertido para `CAP_PROP_PAN` e `CAP_PROP_TILT`;
+  - Zoom ODIN é recentrado para evitar duas autoridades de deslocamento;
+- sem zoom físico:
+  - o quadro move `software_zoom_center.x/y`.
+
+O centro físico é salvo por Projeto Display.
+
+### Referência 1×
+
+Antes de aplicar zoom físico, o ODIN preserva em memória uma cópia do frame 1×.
+Essa imagem funciona como mapa de navegação enquanto a BRIO passa a entregar
+frames já ampliados.
+
+Ela não entra na análise, decisão, tracking, presença ou OK/NG.
+
+### Regressões validadas automaticamente
+
+- composição câmera × ODIN gera o viewport efetivo correto;
+- pan/tilt seguem o centro do quadro azul;
+- drag com zoom físico altera o centro da câmera;
+- drag com Zoom ODIN continua funcionando;
+- zoom software não é perdido durante drag;
+- centro físico persiste por Projeto Display;
+- CONFIGURAR abre com Tkinter real;
+- nenhum timer adicional foi criado;
+- rearme F3 e controles manuais da câmera permanecem verdes.
+
+### Reteste físico esperado
+
+    F3 → CONFIGURAR
+    → observar o MAPA DA CÂMERA em orientação natural
+    → ativar zoom digital da câmera em 2×
+    → quadro azul deve reduzir para representar a área 2×
+    → arrastar quadro azul para esquerda/direita/cima/baixo
+    → a BRIO deve mover digitalmente o enquadramento
+    → RECORTE ATUAL deve acompanhar sem rotação/inversão
+    → testar Zoom ODIN adicional
+    → confirmar que o quadro encolhe conforme o zoom combinado
+    → Salvar
+    → fechar/reabrir F3
+    → confirmar persistência do mesmo centro/enquadramento
+
+**Validação física:** pendente.
+
