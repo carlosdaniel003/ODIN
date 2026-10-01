@@ -83,8 +83,8 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
 
     def test_configuracao_zoom_tem_preview_final_e_viewport_arrastavel(self):
         source = inspect.getsource(config_module.DisplayProjectConfigWindow)
-        self.assertIn("MAPA DA CÂMERA • ARRASTE O QUADRO AZUL", source)
-        self.assertIn("RECORTE ATUAL DO F3 • SEM ROTAÇÃO", source)
+        self.assertIn("MAPA DA CÂMERA • ROTAÇÃO DO F3 • ARRASTE O QUADRO AZUL", source)
+        self.assertIn("RECORTE ATUAL DO F3 • ROTAÇÃO VISUAL", source)
         self.assertIn("<B1-Motion>", source)
         self.assertIn("software_zoom_center_x_var", source)
         self.assertIn("software_zoom_center_y_var", source)
