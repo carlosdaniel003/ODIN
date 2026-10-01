@@ -2197,6 +2197,13 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                     f"sample_ready={_yes_no(live_visual_mirror.get('live_visual_sample_ready'))}",
                     f"sample_reason={live_visual_mirror.get('live_visual_sample_reason', '--')}",
                     f"sampled_masks={live_visual_mirror.get('live_visual_sampled_mask_count', '--')}",
+                    f"threshold={live_visual_mirror.get('live_visual_sample_threshold', '--')}",
+                    f"baseline={live_visual_mirror.get('live_visual_sample_baseline', '--')}",
+                    f"peak={live_visual_mirror.get('live_visual_sample_peak', '--')}",
+                    f"dynamic={live_visual_mirror.get('live_visual_sample_dynamic_range', '--')}",
+                    f"cluster_gap={live_visual_mirror.get('live_visual_sample_cluster_gap', '--')}",
+                    f"relative_ready={_yes_no(live_visual_mirror.get('live_visual_relative_evidence_ready'))}",
+                    f"absolute_fallback={_yes_no(live_visual_mirror.get('live_visual_absolute_fallback_used'))}",
                     f"same_physical_frame={_yes_no(live_visual_mirror.get('live_visual_same_physical_frame'))}",
                     f"visual_frame_token={live_visual_mirror.get('live_visual_frame_token', '--')}",
                     f"physical_frame_token={live_visual_mirror.get('live_visual_physical_frame_token', '--')}",
@@ -2227,6 +2234,30 @@ def montar_relatorio_snapshot_display_f3(snapshot: dict) -> str:
                 str(mask_id)
                 for mask_id in (
                     live_visual_mirror.get("readout_live_visual_mask_ids") or ()
+                )
+            )
+        )
+        lines.append(
+            "strong_candidate_mask_ids="
+            + ",".join(
+                str(mask_id)
+                for mask_id in (
+                    live_visual_mirror.get(
+                        "live_visual_strong_candidate_mask_ids"
+                    )
+                    or ()
+                )
+            )
+        )
+        lines.append(
+            "reflection_rejected_mask_ids="
+            + ",".join(
+                str(mask_id)
+                for mask_id in (
+                    live_visual_mirror.get(
+                        "live_visual_reflection_rejected_mask_ids"
+                    )
+                    or ()
                 )
             )
         )
