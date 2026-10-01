@@ -413,6 +413,80 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertTrue(context["power_confirmed"])
         self.assertEqual("abc123", context["debug_frame_sha256_24"])
 
+    def test_contexto_visual_congelado_preserva_falha_confirmada_separada_da_bruta(self):
+        snapshot = {
+            "frame": {"sha256_24": "ng24"},
+            "logical_context": {"intermittent": True},
+            "runtime_at_click": {
+                "power_authority_status": {
+                    "energy": {"minimum_discriminative_on_count": 7}
+                }
+            },
+        }
+        analysis = {
+            "mask_results": [
+                {
+                    "mask_id": "MASK_004",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                },
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                },
+                {
+                    "mask_id": "MASK_025",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                },
+            ],
+            "effective_failed_mask_ids": (
+                "MASK_004",
+                "MASK_024",
+            ),
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+            "effective_validating_mask_ids": ("MASK_004",),
+            "ui_mask_authority": "effective_mask_results_v1",
+        }
+
+        context = snapshot_module._frozen_frame_visual_context(
+            snapshot,
+            analysis,
+        )
+
+        self.assertEqual(
+            ("MASK_004", "MASK_024"),
+            context["effective_failed_mask_ids"],
+        )
+        self.assertEqual(
+            ("MASK_024",),
+            context["effective_confirmed_failed_mask_ids"],
+        )
+        self.assertEqual(
+            ("MASK_004",),
+            context["effective_validating_mask_ids"],
+        )
+        self.assertEqual(
+            ("MASK_024",),
+            context["failed_mask_ids"],
+        )
+
+    def test_debug_preserva_estado_visual_runtime_antes_de_recalculo_manual(self):
+        source = inspect.getsource(
+            snapshot_module.capturar_snapshot_debug_display_f3
+        )
+        preserve = source.index(
+            'snapshot["runtime_visual_state_before_manual_recompute"]'
+        )
+        recompute = source.index(
+            'visual_state["readout_context"] = deepcopy(readout)'
+        )
+        self.assertLess(preserve, recompute)
+
     def test_relatorio_identifica_frame_por_hash_e_declara_snapshot_estatico(self):
         frame = np.arange(60, dtype=np.uint8).reshape(4, 5, 3)
         stats = snapshot_module._frame_statistics(frame)
