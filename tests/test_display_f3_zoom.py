@@ -7,6 +7,8 @@ import numpy as np
 from src.platform.display_f3_zoom import (
     aplicar_zoom_software_frame_display_f3,
     calcular_recorte_zoom_software_display_f3,
+    calcular_viewport_efetivo_display_f3,
+    centro_camera_para_pan_tilt_display_f3,
     normalizar_centro_zoom_software_display_f3,
 )
 
@@ -60,6 +62,42 @@ class DisplayF3ZoomTests(unittest.TestCase):
         self.assertEqual(frame.shape, left.shape)
         self.assertEqual(frame.shape, right.shape)
         self.assertLess(float(left.mean()), float(right.mean()))
+
+    def test_viewport_combina_zoom_camera_e_odin_no_mapa_um_x(self):
+        rect = calcular_viewport_efetivo_display_f3(
+            (100, 200, 3),
+            camera_zoom=2.0,
+            software_zoom=2.0,
+            camera_center_x=0.5,
+            camera_center_y=0.5,
+            software_center_x=0.5,
+            software_center_y=0.5,
+        )
+        self.assertEqual((75, 37, 125, 62), rect[:4])
+        self.assertAlmostEqual(0.5, rect[4], places=6)
+        self.assertAlmostEqual(0.5, rect[5], places=6)
+        self.assertEqual(4.0, rect[6])
+
+    def test_pan_tilt_do_zoom_fisico_segue_centro_do_quadro_azul(self):
+        pan, tilt = centro_camera_para_pan_tilt_display_f3(
+            2.0,
+            0.75,
+            0.25,
+            pan_limit=180.0,
+            tilt_limit=180.0,
+        )
+        self.assertAlmostEqual(180.0, pan, places=6)
+        self.assertAlmostEqual(180.0, tilt, places=6)
+
+        pan, tilt = centro_camera_para_pan_tilt_display_f3(
+            2.0,
+            0.25,
+            0.75,
+            pan_limit=180.0,
+            tilt_limit=180.0,
+        )
+        self.assertAlmostEqual(-180.0, pan, places=6)
+        self.assertAlmostEqual(-180.0, tilt, places=6)
 
     def test_zoom_cinco_no_canto_permanece_dentro_do_frame(self):
         x0, y0, x1, y1, center_x, center_y = (
