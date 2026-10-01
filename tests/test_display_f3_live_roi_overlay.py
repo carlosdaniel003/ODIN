@@ -435,7 +435,8 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         segment_polygons = [
             item
             for item in window.display_readout_canvas.polygons
-            if item.get("tags") == ("display-readout-segment",)
+            if "display-readout-segment"
+            in tuple(item.get("tags") or ())
         ]
         fills = [item.get("fill") for item in segment_polygons]
         self.assertEqual(
