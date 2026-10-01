@@ -11,7 +11,10 @@ from src.platform.display_project_repository import (
     DisplayProjectRepository,
     normalizar_resolucao_display,
 )
-from src.platform.display_visual_rotation import obter_rotacao_visual_display
+from src.platform.display_visual_rotation import (
+    obter_rotacao_visual_display,
+    preparar_frame_visual_display,
+)
 from src.platform.desktop_settings import (
     OPERATION_PREVIEW_HEIGHT,
     OPERATION_PREVIEW_WIDTH,
@@ -288,6 +291,159 @@ class DisplayProductionF3Mixin:
         except Exception:
             pass
 
+    def _repaint_frozen_ng_evidence_display_f3(
+        self,
+        window,
+        evidence_frame,
+        visual_rotation: int,
+        analysis: dict | None,
+    ) -> bool:
+        """Reafirma a apresentação terminal usando o snapshot exato do NG.
+
+        Não executa nova análise. Apenas combina o frame que fechou o debounce,
+        a geometria já congelada e os IDs efetivamente confirmados pela análise
+        produtiva para repintar câmera + telemetria visual depois do latch.
+        """
+        if (
+            window is None
+            or evidence_frame is None
+            or getattr(evidence_frame, "size", 0) == 0
+            or not isinstance(analysis, dict)
+        ):
+            return False
+
+        confirmed = tuple(
+            sorted(
+                {
+                    str(mask_id)
+                    for mask_id in (
+                        analysis.get("effective_confirmed_failed_mask_ids") or ()
+                    )
+                    if str(mask_id)
+                }
+            )
+        )
+        context = deepcopy(
+            getattr(window, "_display_frozen_overlay_context", None)
+        )
+        if not isinstance(context, dict):
+            context = deepcopy(
+                getattr(window, "_display_last_overlay_context", None)
+            )
+
+        if not isinstance(context, dict):
+            try:
+                from src.platform.display_live_roi_overlay import (
+                    montar_contexto_overlay_snapshot_display_f3,
+                )
+
+                context = montar_contexto_overlay_snapshot_display_f3(
+                    self.display_project_repository,
+                    str(analysis.get("project_name") or ""),
+                    str(analysis.get("check_id") or ""),
+                    analysis,
+                    int(visual_rotation or 0),
+                )
+            except Exception:
+                context = None
+
+        if not isinstance(context, dict):
+            return False
+
+        # A geometria/espelho físico vêm do contexto que já pertence ao frame
+        # final. A lista de falha terminal, porém, vem diretamente da análise que
+        # fechou o NG e não do último repaint assíncrono.
+        context = dict(context)
+        context["effective_confirmed_failed_mask_ids"] = confirmed
+
+        if not bool(context.get("live_luminous_only")):
+            classifications = {
+                str(mask_id): str(state or "").strip().lower()
+                for mask_id, state in dict(
+                    analysis.get("effective_classifications") or {}
+                ).items()
+                if str(mask_id)
+            }
+            if not classifications:
+                classifications = {
+                    str(item.get("mask_id")): str(
+                        item.get("classified") or ""
+                    ).strip().lower()
+                    for item in (analysis.get("mask_results") or ())
+                    if isinstance(item, dict)
+                    and str(item.get("mask_id") or "")
+                    and str(item.get("classified") or "").strip()
+                }
+            context["live_luminous_only"] = True
+            context["live_visual_sample_ready"] = True
+            context["live_visual_classifications"] = dict(classifications)
+            context["live_visual_mask_ids"] = tuple(
+                sorted(
+                    mask_id
+                    for mask_id, state in classifications.items()
+                    if state == "on"
+                )
+            )
+            context["luminous_mask_ids"] = tuple(
+                context["live_visual_mask_ids"]
+            )
+
+        try:
+            visual_frame = preparar_frame_visual_display(
+                evidence_frame,
+                int(visual_rotation or 0),
+            )
+        except Exception:
+            visual_frame = None
+        if visual_frame is None or getattr(visual_frame, "size", 0) == 0:
+            return False
+
+        try:
+            from src.platform.display_f3_preview_clarity_fix import (
+                renderizar_preview_claro_display_f3,
+            )
+
+            decorated = renderizar_preview_claro_display_f3(
+                visual_frame,
+                context,
+            )
+            rendered = bool(window.update_preview(decorated, leds=()))
+        except Exception as exc:
+            debug = dict(
+                getattr(window, "_display_frozen_ng_visual_debug", {}) or {}
+            )
+            debug.update(
+                {
+                    "camera_repainted": False,
+                    "camera_repaint_error_type": type(exc).__name__,
+                    "camera_repaint_error": str(exc)[:240],
+                }
+            )
+            window._display_frozen_ng_visual_debug = debug
+            return False
+
+        try:
+            window._display_frozen_overlay_context = deepcopy(context)
+        except Exception:
+            window._display_frozen_overlay_context = context
+
+        debug = dict(
+            getattr(window, "_display_frozen_ng_visual_debug", {}) or {}
+        )
+        debug.update(
+            {
+                "source": "exact_pending_ng_analysis_after_freeze",
+                "confirmed_failed_mask_ids": confirmed,
+                "camera_repainted": bool(rendered),
+                "camera_visual_rotation": int(visual_rotation or 0) % 360,
+                "camera_context_check_id": str(
+                    context.get("check_id") or analysis.get("check_id") or ""
+                ),
+            }
+        )
+        window._display_frozen_ng_visual_debug = debug
+        return bool(rendered)
+
     def _congelar_evidencia_ng_display_f3(self) -> None:
         """Congela a evidência visual do NG sem parar a aquisição da câmera."""
         if bool(getattr(self, "_display_f3_ng_evidence_frozen", False)):
@@ -427,12 +583,49 @@ class DisplayProductionF3Mixin:
         self._display_f3_pending_ng_runtime = None
 
         if janela is not None:
+            confirmed_failed_mask_ids = (
+                tuple(
+                    str(mask_id)
+                    for mask_id in (
+                        analysis.get("effective_confirmed_failed_mask_ids") or ()
+                    )
+                    if str(mask_id)
+                )
+                if isinstance(analysis, dict)
+                else ()
+            )
             freeze = getattr(janela, "freeze_ng_evidence", None)
             if callable(freeze):
                 try:
-                    freeze()
+                    freeze(
+                        confirmed_failed_mask_ids=confirmed_failed_mask_ids
+                    )
+                except TypeError:
+                    # Compatibilidade defensiva com adapters antigos: reafirma a
+                    # falha confirmada imediatamente após o freeze legado.
+                    try:
+                        freeze()
+                        sync = getattr(
+                            janela,
+                            "_apply_frozen_ng_failure_highlight",
+                            None,
+                        )
+                        if callable(sync):
+                            sync(confirmed_failed_mask_ids)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
+
+            # O update_camera_preview normal retorna cedo depois do latch. Então
+            # o último repaint terminal é feito explicitamente a partir do frame
+            # exato que fechou o NG, sem nova captura nem nova análise.
+            self._repaint_frozen_ng_evidence_display_f3(
+                janela,
+                evidence_frame,
+                evidence_rotation,
+                analysis if isinstance(analysis, dict) else None,
+            )
 
             visual_snapshot = getattr(
                 janela,
