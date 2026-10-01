@@ -5,6 +5,8 @@ import sys
 
 import cv2
 
+from config import CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN
+
 
 class CameraLiveControlServiceMixin:
     """Aplica ajustes pontuais sem somar/reaplicar todos os controles.
@@ -29,6 +31,7 @@ class CameraLiveControlServiceMixin:
         "white_balance": "CAP_PROP_WB_TEMPERATURE",
         "brightness": "CAP_PROP_BRIGHTNESS",
         "gamma": "CAP_PROP_GAMMA",
+        "zoom": "CAP_PROP_ZOOM",
     }
 
     _PASSOS_DIRECTSHOW = {
@@ -43,12 +46,14 @@ class CameraLiveControlServiceMixin:
         "white_balance": (10.0, 50.0, 100.0),
         "brightness": (1.0, 5.0, 10.0),
         "gamma": (1.0, 5.0, 10.0),
+        "zoom": (1.0, 10.0, 25.0, 50.0),
     }
 
     _TOLERANCIA_CONTROLE = {
         "white_balance": 25.0,
         "focus": 1.0,
         "exposure": 0.26,
+        "zoom": 1.0,
     }
 
     _CONTROLES_AUTOMATICOS = {
@@ -161,6 +166,11 @@ class CameraLiveControlServiceMixin:
 
         if nome == "focus":
             solicitado = min(255.0, max(0.0, solicitado))
+        elif nome == "zoom":
+            solicitado = min(
+                float(CAMERA_ZOOM_MAX),
+                max(float(CAMERA_ZOOM_MIN), solicitado),
+            )
 
         candidatos = [solicitado]
         arredondado = float(round(solicitado))
@@ -179,6 +189,11 @@ class CameraLiveControlServiceMixin:
             candidato = float(candidato)
             if nome == "focus":
                 candidato = min(255.0, max(0.0, candidato))
+            elif nome == "zoom":
+                candidato = min(
+                    float(CAMERA_ZOOM_MAX),
+                    max(float(CAMERA_ZOOM_MIN), candidato),
+                )
             chave = round(candidato, 6)
             if chave in vistos:
                 continue

@@ -83,6 +83,11 @@ CAMERA_BRIGHTNESS_MIN = 0
 CAMERA_BRIGHTNESS_MAX = 255
 CAMERA_GAMMA_MIN = 1
 CAMERA_GAMMA_MAX = 500
+# Logitech BRIO/DirectShow expõe o zoom UVC como percentual: 100 = 1x,
+# 500 = 5x. Outros backends podem rejeitar a propriedade; o runtime confirma
+# suporte por readback antes de considerar o ajuste aplicado.
+CAMERA_ZOOM_MIN = 100
+CAMERA_ZOOM_MAX = 500
 CAMERA_ROTATIONS = (0, 90, 180, 270)
 
 DEFAULT_CAMERA_SETTINGS = {
@@ -117,6 +122,8 @@ DEFAULT_CAMERA_SETTINGS = {
     "brightness": 128.0,
     "gamma_enabled": False,
     "gamma": 100.0,
+    "zoom_enabled": False,
+    "zoom": 100.0,
     "rotation": 0,
 }
 

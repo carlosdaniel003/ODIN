@@ -6,9 +6,15 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config import CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN
+
 
 DISPLAY_PROJECT_CONFIG_FILE = Path("data/config/odin_display_projects.json")
-DISPLAY_PROJECT_SCHEMA_VERSION = 2
+DISPLAY_PROJECT_SCHEMA_VERSION = 3
+DISPLAY_CAMERA_ZOOM_DEFAULT = 100.0
+DISPLAY_SOFTWARE_ZOOM_MIN = 1.0
+DISPLAY_SOFTWARE_ZOOM_MAX = 5.0
+DISPLAY_SOFTWARE_ZOOM_DEFAULT = 1.0
 
 DISPLAY_CHECK_STATE_ON = "on"
 DISPLAY_CHECK_STATE_OFF = "off"
@@ -33,6 +39,48 @@ def normalizar_booleano_display(valor, padrao: bool = False) -> bool:
     if texto in {"0", "false", "nao", "não", "no", "off", "inativo", "desativado"}:
         return False
     return bool(padrao)
+
+
+def _limitar_float_display(
+    valor,
+    minimo: float,
+    maximo: float,
+    padrao: float,
+) -> float:
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        numero = float(padrao)
+    return min(float(maximo), max(float(minimo), numero))
+
+
+def normalizar_zoom_projeto_display(projeto: dict | None) -> dict:
+    origem = projeto if isinstance(projeto, dict) else {}
+    camera = (
+        origem.get("camera_zoom")
+        if isinstance(origem.get("camera_zoom"), dict)
+        else {}
+    )
+    return {
+        "camera_zoom": {
+            "enabled": normalizar_booleano_display(
+                camera.get("enabled"),
+                False,
+            ),
+            "value": _limitar_float_display(
+                camera.get("value", DISPLAY_CAMERA_ZOOM_DEFAULT),
+                CAMERA_ZOOM_MIN,
+                CAMERA_ZOOM_MAX,
+                DISPLAY_CAMERA_ZOOM_DEFAULT,
+            ),
+        },
+        "software_zoom": _limitar_float_display(
+            origem.get("software_zoom", DISPLAY_SOFTWARE_ZOOM_DEFAULT),
+            DISPLAY_SOFTWARE_ZOOM_MIN,
+            DISPLAY_SOFTWARE_ZOOM_MAX,
+            DISPLAY_SOFTWARE_ZOOM_DEFAULT,
+        ),
+    }
 
 
 def check_display_intermitente(check: dict | None) -> bool:
@@ -426,11 +474,14 @@ class DisplayProjectRepository:
                     mascaras,
                     usar_padrao_se_ausente=not tem_checks,
                 )
+                zoom = normalizar_zoom_projeto_display(projeto)
                 projetos[nome] = {
                     "name": nome,
                     "master_resolution": _resolucao_dict(resolucao),
                     "masks": mascaras,
                     "checks": checks,
+                    "camera_zoom": zoom["camera_zoom"],
+                    "software_zoom": zoom["software_zoom"],
                     "updated_at": projeto.get("updated_at"),
                 }
 
@@ -501,6 +552,11 @@ class DisplayProjectRepository:
             "master_resolution": _resolucao_dict(resolucao),
             "masks": mascaras,
             "checks": _checks_padrao([]),
+            "camera_zoom": {
+                "enabled": False,
+                "value": DISPLAY_CAMERA_ZOOM_DEFAULT,
+            },
+            "software_zoom": DISPLAY_SOFTWARE_ZOOM_DEFAULT,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         dados["project_order"].append(nome_normalizado)
@@ -597,13 +653,46 @@ class DisplayProjectRepository:
             projeto_atual.get("checks", []),
             mascaras_normalizadas,
         )
+        zoom = normalizar_zoom_projeto_display(projeto_atual)
         dados["projects"][nome_normalizado] = {
             "name": nome_normalizado,
             "master_resolution": _resolucao_dict(resolucao),
             "masks": mascaras_normalizadas,
             "checks": checks,
+            "camera_zoom": zoom["camera_zoom"],
+            "software_zoom": zoom["software_zoom"],
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
+        dados["active_project"] = nome_normalizado
+        self._escrever(dados)
+        return True
+
+    def salvar_zoom_projeto(
+        self,
+        nome: str,
+        *,
+        camera_enabled: bool,
+        camera_zoom: float,
+        software_zoom: float,
+    ) -> bool:
+        nome_normalizado = normalizar_nome_projeto_display(nome)
+        dados = self._carregar()
+        projeto = dados["projects"].get(nome_normalizado)
+        if projeto is None:
+            return False
+
+        zoom = normalizar_zoom_projeto_display(
+            {
+                "camera_zoom": {
+                    "enabled": bool(camera_enabled),
+                    "value": camera_zoom,
+                },
+                "software_zoom": software_zoom,
+            }
+        )
+        projeto["camera_zoom"] = zoom["camera_zoom"]
+        projeto["software_zoom"] = zoom["software_zoom"]
+        self._atualizar_timestamp(projeto)
         dados["active_project"] = nome_normalizado
         self._escrever(dados)
         return True

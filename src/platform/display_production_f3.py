@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 import tkinter as tk
 
+import cv2
+
 from src.platform.display_check_sequence_runtime import DisplayCheckSequenceRuntime
 from src.platform.display_f3_heavy_executor import F3HeavyVisionExecutor
 from src.platform.display_production_f3_window import DisplayProductionF3Window
@@ -10,6 +12,7 @@ from src.platform.display_project_config import DisplayProjectConfigWindow
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
     normalizar_resolucao_display,
+    normalizar_zoom_projeto_display,
 )
 from src.platform.display_visual_rotation import (
     obter_rotacao_visual_display,
@@ -50,6 +53,9 @@ class DisplayProductionF3Mixin:
         self._display_project_config_window: DisplayProjectConfigWindow | None = None
         self._display_f3_heavy_executor: F3HeavyVisionExecutor | None = None
         self._display_f3_runtime_coordinator = None
+        self._display_f3_software_zoom_cache_key = None
+        self._display_f3_software_zoom_cache_frame = None
+        self._display_f3_camera_zoom_signature = None
         super().__init__(*args, **kwargs)
         self.display_project_repository = DisplayProjectRepository()
         try:
@@ -149,14 +155,119 @@ class DisplayProductionF3Mixin:
     def _obter_rotacao_visual_display_f3(self) -> int:
         return obter_rotacao_visual_display(getattr(self, "view", None))
 
-    def _obter_frame_para_configuracao_display(self):
+    @staticmethod
+    def _aplicar_zoom_software_frame_display_f3(frame, zoom: float):
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return frame
+        try:
+            zoom = max(1.0, min(5.0, float(zoom)))
+        except (TypeError, ValueError):
+            zoom = 1.0
+        if zoom <= 1.0001:
+            return frame
+
+        altura, largura = frame.shape[:2]
+        crop_largura = max(2, min(largura, int(round(largura / zoom))))
+        crop_altura = max(2, min(altura, int(round(altura / zoom))))
+        x0 = max(0, (largura - crop_largura) // 2)
+        y0 = max(0, (altura - crop_altura) // 2)
+        crop = frame[y0:y0 + crop_altura, x0:x0 + crop_largura]
+        if crop is None or getattr(crop, "size", 0) == 0:
+            return frame
+        return cv2.resize(
+            crop,
+            (int(largura), int(altura)),
+            interpolation=cv2.INTER_LINEAR,
+        )
+
+    def _obter_frame_runtime_display_f3(self):
         frame = getattr(self, "camera_frame_atual", None)
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return frame
+
+        repository = self.display_project_repository
+        project_name = repository.obter_projeto_ativo() if repository is not None else ""
+        project = repository.carregar_projeto(project_name) if project_name else None
+        zoom = normalizar_zoom_projeto_display(project)
+        software_zoom = float(zoom["software_zoom"])
+        if software_zoom <= 1.0001:
+            return frame
+
+        camera_id = getattr(self, "camera_ultimo_frame_id", None)
+        key = (
+            int(camera_id) if isinstance(camera_id, int) else id(frame),
+            str(project_name or ""),
+            round(software_zoom, 4),
+            tuple(int(value) for value in frame.shape[:2]),
+        )
+        if (
+            key == self._display_f3_software_zoom_cache_key
+            and self._display_f3_software_zoom_cache_frame is not None
+        ):
+            return self._display_f3_software_zoom_cache_frame
+
+        transformed = self._aplicar_zoom_software_frame_display_f3(
+            frame,
+            software_zoom,
+        )
+        self._display_f3_software_zoom_cache_key = key
+        self._display_f3_software_zoom_cache_frame = transformed
+        return transformed
+
+    def _obter_frame_para_configuracao_display(self):
+        frame = self._obter_frame_runtime_display_f3()
         if frame is None or getattr(frame, "size", 0) == 0:
             return None
         try:
             return frame.copy()
         except Exception:
             return frame
+
+    def _aplicar_zoom_camera_projeto_display_f3(self, project: dict | None) -> None:
+        zoom = normalizar_zoom_projeto_display(project)
+        camera_zoom = zoom["camera_zoom"]
+        enabled = bool(camera_zoom["enabled"])
+        value = float(camera_zoom["value"])
+        signature = (enabled, round(value, 4))
+        if signature == self._display_f3_camera_zoom_signature:
+            return
+
+        service = getattr(self, "camera_service", None)
+        updater = getattr(service, "atualizar_configuracoes_camera_ao_vivo", None)
+        if not callable(updater):
+            return
+        try:
+            current = service.obter_configuracoes_camera()
+        except Exception:
+            current = {}
+        current = dict(current or {})
+        current["zoom_enabled"] = enabled
+        current["zoom"] = value
+        keys = ["zoom_enabled", "zoom"] if enabled else ["zoom_enabled"]
+        try:
+            updater(current, keys)
+        except Exception:
+            return
+        self._display_f3_camera_zoom_signature = signature
+
+    def _restaurar_zoom_camera_apos_f3(self) -> None:
+        signature = self._display_f3_camera_zoom_signature
+        self._display_f3_camera_zoom_signature = None
+        if not signature or not bool(signature[0]):
+            return
+        service = getattr(self, "camera_service", None)
+        updater = getattr(service, "atualizar_configuracoes_camera_ao_vivo", None)
+        if not callable(updater):
+            return
+        try:
+            current = dict(service.obter_configuracoes_camera() or {})
+        except Exception:
+            current = {}
+        current["zoom_enabled"] = False
+        try:
+            updater(current, ["zoom_enabled"])
+        except Exception:
+            pass
 
     def _ao_fechar_configuracao_projeto_display(self) -> None:
         self._display_project_config_window = None
@@ -256,6 +367,7 @@ class DisplayProductionF3Mixin:
         nome = repository.obter_projeto_ativo()
         projeto = repository.carregar_projeto(nome) if nome else None
         if projeto is None:
+            self._aplicar_zoom_camera_projeto_display_f3(None)
             authority = getattr(self, "_display_f3_state_machine_authority", None)
             if authority is not None:
                 authority.configure([])
@@ -268,6 +380,9 @@ class DisplayProductionF3Mixin:
                 pass
             return
 
+        self._display_f3_software_zoom_cache_key = None
+        self._display_f3_software_zoom_cache_frame = None
+        self._aplicar_zoom_camera_projeto_display_f3(projeto)
         resolucao = normalizar_resolucao_display(
             projeto.get("master_resolution")
         )
@@ -895,6 +1010,9 @@ class DisplayProductionF3Mixin:
 
     def fechar_tela_producao_display_f3(self) -> None:
         self.display_f3_ativo = False
+        self._restaurar_zoom_camera_apos_f3()
+        self._display_f3_software_zoom_cache_key = None
+        self._display_f3_software_zoom_cache_frame = None
         authorities = getattr(self, "_display_f3_runtime_authorities", None)
         if authorities is not None:
             authorities.reset_cycle_state()

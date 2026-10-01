@@ -13,6 +13,8 @@ from config import (
     CAMERA_GAMMA_MIN,
     CAMERA_WHITE_BALANCE_MAX,
     CAMERA_WHITE_BALANCE_MIN,
+    CAMERA_ZOOM_MAX,
+    CAMERA_ZOOM_MIN,
     DEFAULT_CAMERA_SETTINGS,
 )
 from src.infra.config_repository import ConfigRepository
@@ -29,6 +31,7 @@ _CONTROLES_AVANCADOS = (
     ),
     ("brightness", CAMERA_BRIGHTNESS_MIN, CAMERA_BRIGHTNESS_MAX),
     ("gamma", CAMERA_GAMMA_MIN, CAMERA_GAMMA_MAX),
+    ("zoom", CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX),
 )
 
 _PATCH_INSTALADO = False

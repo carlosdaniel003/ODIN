@@ -8,10 +8,14 @@ from src.platform.display_check_editor import DisplayCheckManagerWindow
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
 from src.platform.display_project_repository import (
+    DISPLAY_SOFTWARE_ZOOM_MAX,
+    DISPLAY_SOFTWARE_ZOOM_MIN,
     DisplayProjectRepository,
     normalizar_nome_projeto_display,
     normalizar_resolucao_display,
+    normalizar_zoom_projeto_display,
 )
+from config import CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN
 
 
 F3_CONFIG_INITIAL_LOAD_DELAY_MS = 20
@@ -60,6 +64,9 @@ class DisplayProjectConfigWindow:
         self._mask_preview_requested_size = None
         self._mask_preview_rendered_size = None
         self._current_project_snapshot = None
+        self.camera_zoom_enabled_var = tk.BooleanVar(value=False)
+        self.camera_zoom_var = tk.DoubleVar(value=float(CAMERA_ZOOM_MIN))
+        self.software_zoom_var = tk.DoubleVar(value=1.0)
 
         self.window = tk.Toplevel(root)
         self.window.title("ODIN • Projeto Display")
@@ -245,6 +252,123 @@ class DisplayProjectConfigWindow:
             primary=True,
         )
         self.save_resolution_button.pack(side=tk.LEFT, padx=(12, 0), pady=(16, 0))
+
+        zoom_box = tk.Frame(right, bg="#0F1B2C")
+        zoom_box.pack(fill=tk.X, padx=16, pady=(0, 9))
+        tk.Label(
+            zoom_box,
+            text="ZOOM DA CÂMERA / ODIN",
+            font=("Segoe UI", 9, "bold"),
+            fg=self.MUTED,
+            bg="#0F1B2C",
+        ).pack(anchor="w", padx=12, pady=(9, 3))
+        tk.Label(
+            zoom_box,
+            text=(
+                "O zoom da câmera usa CAP_PROP_ZOOM (BRIO/DirectShow). "
+                "O zoom ODIN faz crop central por software mantendo a resolução "
+                "do frame F3."
+            ),
+            font=("Segoe UI", 8),
+            fg=self.MUTED,
+            bg="#0F1B2C",
+            justify=tk.LEFT,
+            wraplength=390,
+        ).pack(fill=tk.X, padx=12, pady=(0, 7))
+
+        hardware_header = tk.Frame(zoom_box, bg="#0F1B2C")
+        hardware_header.pack(fill=tk.X, padx=12)
+        tk.Checkbutton(
+            hardware_header,
+            text="Usar zoom digital da câmera",
+            variable=self.camera_zoom_enabled_var,
+            font=("Segoe UI", 8, "bold"),
+            fg=self.TEXT,
+            bg="#0F1B2C",
+            activebackground="#0F1B2C",
+            activeforeground=self.TEXT,
+            selectcolor="#020617",
+        ).pack(side=tk.LEFT)
+        self.camera_zoom_value_label = tk.Label(
+            hardware_header,
+            text="1.00×",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.TEXT,
+            bg="#0F1B2C",
+        )
+        self.camera_zoom_value_label.pack(side=tk.RIGHT)
+
+        tk.Scale(
+            zoom_box,
+            from_=float(CAMERA_ZOOM_MIN),
+            to=float(CAMERA_ZOOM_MAX),
+            resolution=10.0,
+            orient=tk.HORIZONTAL,
+            variable=self.camera_zoom_var,
+            showvalue=False,
+            command=lambda _value: self._update_zoom_labels(),
+            bg="#0F1B2C",
+            fg=self.TEXT,
+            troughcolor="#1E293B",
+            highlightthickness=0,
+            bd=0,
+            length=360,
+        ).pack(fill=tk.X, padx=12, pady=(0, 6))
+
+        software_header = tk.Frame(zoom_box, bg="#0F1B2C")
+        software_header.pack(fill=tk.X, padx=12)
+        tk.Label(
+            software_header,
+            text="Zoom ODIN (software)",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.TEXT,
+            bg="#0F1B2C",
+        ).pack(side=tk.LEFT)
+        self.software_zoom_value_label = tk.Label(
+            software_header,
+            text="1.00×",
+            font=("Segoe UI", 8, "bold"),
+            fg=self.TEXT,
+            bg="#0F1B2C",
+        )
+        self.software_zoom_value_label.pack(side=tk.RIGHT)
+
+        tk.Scale(
+            zoom_box,
+            from_=DISPLAY_SOFTWARE_ZOOM_MIN,
+            to=DISPLAY_SOFTWARE_ZOOM_MAX,
+            resolution=0.1,
+            orient=tk.HORIZONTAL,
+            variable=self.software_zoom_var,
+            showvalue=False,
+            command=lambda _value: self._update_zoom_labels(),
+            bg="#0F1B2C",
+            fg=self.TEXT,
+            troughcolor="#1E293B",
+            highlightthickness=0,
+            bd=0,
+            length=360,
+        ).pack(fill=tk.X, padx=12, pady=(0, 5))
+
+        tk.Label(
+            zoom_box,
+            text=(
+                "Depois de alterar o zoom, revise a foto de referência, o contorno "
+                "e as máscaras do projeto antes da produção."
+            ),
+            font=("Segoe UI", 8),
+            fg="#FDE68A",
+            bg="#0F1B2C",
+            justify=tk.LEFT,
+            wraplength=390,
+        ).pack(fill=tk.X, padx=12, pady=(0, 6))
+        self.save_zoom_button = self._button(
+            zoom_box,
+            "Salvar e aplicar zoom",
+            self.save_zoom,
+            primary=True,
+        )
+        self.save_zoom_button.pack(anchor="w", padx=12, pady=(0, 9))
 
         masks_box = tk.Frame(right, bg="#0F1B2C")
         masks_box.pack(fill=tk.X, padx=16, pady=(0, 9))
@@ -546,6 +670,59 @@ class DisplayProjectConfigWindow:
             return "break"
         except Exception:
             return None
+
+    def _update_zoom_labels(self) -> None:
+        try:
+            camera_zoom = float(self.camera_zoom_var.get()) / 100.0
+        except (TypeError, ValueError, tk.TclError):
+            camera_zoom = 1.0
+        try:
+            software_zoom = float(self.software_zoom_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            software_zoom = 1.0
+        try:
+            self.camera_zoom_value_label.configure(text=f"{camera_zoom:.2f}×")
+            self.software_zoom_value_label.configure(text=f"{software_zoom:.2f}×")
+        except Exception:
+            pass
+
+    def save_zoom(self) -> bool:
+        name = self._selected_name()
+        if not name:
+            messagebox.showwarning(
+                "Sem Projeto Display",
+                "Selecione ou crie um projeto primeiro.",
+                parent=self.window,
+            )
+            return False
+        try:
+            camera_zoom = float(self.camera_zoom_var.get())
+            software_zoom = float(self.software_zoom_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            return False
+        saved = self.repository.salvar_zoom_projeto(
+            name,
+            camera_enabled=bool(self.camera_zoom_enabled_var.get()),
+            camera_zoom=camera_zoom,
+            software_zoom=software_zoom,
+        )
+        if not saved:
+            messagebox.showerror(
+                "Falha ao salvar",
+                "Não foi possível salvar o zoom do Projeto Display.",
+                parent=self.window,
+            )
+            return False
+        self.refresh(name)
+        self._notify_change()
+        self.status.configure(
+            text=(
+                f"Zoom salvo em {name}: câmera {camera_zoom / 100.0:.2f}× "
+                f"({'ativo' if self.camera_zoom_enabled_var.get() else 'desativado'}) "
+                f"• ODIN {software_zoom:.2f}×."
+            )
+        )
+        return True
 
     def _button(self, parent, text, command, primary: bool = False, danger: bool = False):
         bg = "#0E7490" if primary else "#1E293B"
@@ -1000,6 +1177,10 @@ class DisplayProjectConfigWindow:
         )
         self.width_var.set("")
         self.height_var.set("")
+        self.camera_zoom_enabled_var.set(False)
+        self.camera_zoom_var.set(float(CAMERA_ZOOM_MIN))
+        self.software_zoom_var.set(1.0)
+        self._update_zoom_labels()
         self.mask_summary.configure(text="0 máscaras salvas")
         self._clear_mask_reference_preview("Selecione um Projeto Display.")
         if getattr(self, "mask_reference_status", None) is not None:
@@ -1023,6 +1204,12 @@ class DisplayProjectConfigWindow:
             self.width_var.set(str(resolution[0]))
             self.height_var.set(str(resolution[1]))
             resolution_text = f"{resolution[0]}x{resolution[1]}"
+        zoom = normalizar_zoom_projeto_display(project)
+        camera_zoom = zoom["camera_zoom"]
+        self.camera_zoom_enabled_var.set(bool(camera_zoom["enabled"]))
+        self.camera_zoom_var.set(float(camera_zoom["value"]))
+        self.software_zoom_var.set(float(zoom["software_zoom"]))
+        self._update_zoom_labels()
         masks = project.get("masks", [])
         checks = project.get("checks", [])
         active = self.repository.obter_projeto_ativo()
