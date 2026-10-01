@@ -162,6 +162,7 @@ class DisplayF3VisualRotationTests(unittest.TestCase):
         app.display_f3_after_id = None
         app.display_f3_ativo = True
         app.display_f3_window = FakeWindow()
+        app._display_project_config_window = None
         app.camera_frame_atual = np.zeros((4, 6, 3), dtype=np.uint8)
         app.view = SimpleNamespace(rotacao_visual_principal=270)
         app._agendar_preview_display_f3 = lambda *args, **kwargs: None
@@ -198,7 +199,8 @@ class DisplayF3VisualRotationTests(unittest.TestCase):
     def test_janela_f3_aplica_rotacao_somente_antes_do_preview(self):
         source = inspect.getsource(DisplayProductionF3Window.update_camera_preview)
         self.assertIn("preparar_frame_visual_display", source)
-        self.assertIn("self.update_preview(visual_frame, leds=())", source)
+        self.assertIn("preparar_frame_visual_display", source)
+        self.assertIn("self.update_preview(decorated, leds=())", source)
         self.assertNotIn("camera_service", source)
         self.assertNotIn("operacao_engine", source)
 
