@@ -761,20 +761,269 @@ class DisplayProjectConfigWindow:
         except Exception:
             return None
 
-    def _update_zoom_labels(self) -> None:
+    def _zoom_values(self) -> tuple[float, float, float, float]:
         try:
-            camera_zoom = float(self.camera_zoom_var.get()) / 100.0
+            camera_zoom = float(self.camera_zoom_var.get())
         except (TypeError, ValueError, tk.TclError):
-            camera_zoom = 1.0
+            camera_zoom = float(CAMERA_ZOOM_MIN)
         try:
             software_zoom = float(self.software_zoom_var.get())
         except (TypeError, ValueError, tk.TclError):
             software_zoom = 1.0
         try:
-            self.camera_zoom_value_label.configure(text=f"{camera_zoom:.2f}×")
-            self.software_zoom_value_label.configure(text=f"{software_zoom:.2f}×")
+            center_x = float(self.software_zoom_center_x_var.get())
+            center_y = float(self.software_zoom_center_y_var.get())
+        except (TypeError, ValueError, tk.TclError):
+            center_x = center_y = 0.5
+
+        center_x, center_y = normalizar_centro_zoom_software_display_f3(
+            software_zoom,
+            center_x,
+            center_y,
+        )
+        return camera_zoom, software_zoom, center_x, center_y
+
+    def _update_zoom_labels(self) -> None:
+        camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        try:
+            self.camera_zoom_value_label.configure(
+                text=f"{camera_zoom / 100.0:.2f}×"
+            )
+            self.software_zoom_value_label.configure(
+                text=f"{software_zoom:.2f}×"
+            )
+            self.zoom_center_label.configure(
+                text=(
+                    f"Centro X {center_x * 100.0:.1f}% • "
+                    f"Y {center_y * 100.0:.1f}%"
+                )
+            )
         except Exception:
             pass
+
+    def _on_hardware_zoom_changed(self) -> None:
+        self._update_zoom_labels()
+        callback = self.on_camera_zoom_preview
+        if callable(callback) and self._selected_name():
+            try:
+                callback(
+                    bool(self.camera_zoom_enabled_var.get()),
+                    float(self.camera_zoom_var.get()),
+                )
+            except Exception:
+                pass
+        self._rerender_zoom_preview()
+
+    def _on_software_zoom_changed(self) -> None:
+        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        self.software_zoom_center_x_var.set(center_x)
+        self.software_zoom_center_y_var.set(center_y)
+        self._update_zoom_labels()
+        self._rerender_zoom_preview()
+
+    @staticmethod
+    def _canvas_size(canvas) -> tuple[int, int]:
+        try:
+            width = int(canvas.winfo_width())
+            height = int(canvas.winfo_height())
+        except Exception:
+            width = height = 1
+        if width <= 1:
+            try:
+                width = int(canvas.cget("width"))
+            except Exception:
+                width = 360
+        if height <= 1:
+            try:
+                height = int(canvas.cget("height"))
+            except Exception:
+                height = 190
+        return max(40, width), max(40, height)
+
+    def _render_bgr_zoom_canvas(self, canvas, frame, photo_attr: str):
+        if canvas is None:
+            return None
+        if frame is None or getattr(frame, "size", 0) == 0:
+            canvas.delete("all")
+            width, height = self._canvas_size(canvas)
+            canvas.create_text(
+                width / 2,
+                height / 2,
+                text="Aguardando câmera...",
+                fill=self.MUTED,
+                font=("Segoe UI", 9, "bold"),
+            )
+            setattr(self, photo_attr, None)
+            return None
+
+        source_h, source_w = frame.shape[:2]
+        canvas_w, canvas_h = self._canvas_size(canvas)
+        scale = min(
+            float(canvas_w) / max(1.0, float(source_w)),
+            float(canvas_h) / max(1.0, float(source_h)),
+        )
+        render_w = max(1, int(round(source_w * scale)))
+        render_h = max(1, int(round(source_h * scale)))
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        rendered = cv2.resize(
+            frame,
+            (render_w, render_h),
+            interpolation=interpolation,
+        )
+        success, buffer = cv2.imencode(".png", rendered)
+        if not success:
+            return None
+        photo = tk.PhotoImage(data=base64.b64encode(buffer).decode("ascii"))
+        setattr(self, photo_attr, photo)
+        offset_x = (canvas_w - render_w) / 2.0
+        offset_y = (canvas_h - render_h) / 2.0
+        canvas.delete("all")
+        canvas.create_image(
+            offset_x,
+            offset_y,
+            image=photo,
+            anchor=tk.NW,
+            tags=("zoom_image",),
+        )
+        return {
+            "offset_x": float(offset_x),
+            "offset_y": float(offset_y),
+            "render_width": float(render_w),
+            "render_height": float(render_h),
+            "source_width": int(source_w),
+            "source_height": int(source_h),
+        }
+
+    def _draw_zoom_source_viewport(self, frame) -> None:
+        mapping = self._render_bgr_zoom_canvas(
+            self.zoom_source_canvas,
+            frame,
+            "_zoom_source_photo",
+        )
+        self._zoom_source_mapping = mapping
+        if mapping is None:
+            return
+
+        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        x0, y0, x1, y1, effective_x, effective_y = (
+            calcular_recorte_zoom_software_display_f3(
+                frame.shape,
+                software_zoom,
+                center_x,
+                center_y,
+            )
+        )
+        self.software_zoom_center_x_var.set(effective_x)
+        self.software_zoom_center_y_var.set(effective_y)
+        sx = mapping["render_width"] / max(
+            1.0,
+            float(mapping["source_width"]),
+        )
+        sy = mapping["render_height"] / max(
+            1.0,
+            float(mapping["source_height"]),
+        )
+        ox = mapping["offset_x"]
+        oy = mapping["offset_y"]
+        self.zoom_source_canvas.create_rectangle(
+            ox + x0 * sx,
+            oy + y0 * sy,
+            ox + x1 * sx,
+            oy + y1 * sy,
+            outline="#22D3EE",
+            width=3,
+            tags=("zoom_viewport",),
+        )
+        center_canvas_x = ox + effective_x * mapping["source_width"] * sx
+        center_canvas_y = oy + effective_y * mapping["source_height"] * sy
+        self.zoom_source_canvas.create_line(
+            center_canvas_x - 8,
+            center_canvas_y,
+            center_canvas_x + 8,
+            center_canvas_y,
+            fill="#FFFFFF",
+            width=1,
+            tags=("zoom_viewport",),
+        )
+        self.zoom_source_canvas.create_line(
+            center_canvas_x,
+            center_canvas_y - 8,
+            center_canvas_x,
+            center_canvas_y + 8,
+            fill="#FFFFFF",
+            width=1,
+            tags=("zoom_viewport",),
+        )
+
+    def update_live_zoom_preview(
+        self,
+        source_frame,
+        *,
+        visual_rotation: int = 0,
+    ) -> None:
+        if not self.visible:
+            return
+        self._zoom_live_source_frame = source_frame
+        self._zoom_live_visual_rotation = int(visual_rotation or 0)
+        self._draw_zoom_source_viewport(source_frame)
+
+        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
+        final_frame = aplicar_zoom_software_frame_display_f3(
+            source_frame,
+            software_zoom,
+            center_x,
+            center_y,
+        )
+        try:
+            final_frame = preparar_frame_visual_display(
+                final_frame,
+                self._zoom_live_visual_rotation,
+            )
+        except Exception:
+            pass
+        self._render_bgr_zoom_canvas(
+            self.zoom_final_canvas,
+            final_frame,
+            "_zoom_final_photo",
+        )
+        self._update_zoom_labels()
+
+    def _rerender_zoom_preview(self) -> None:
+        frame = self._zoom_live_source_frame
+        if frame is None or getattr(frame, "size", 0) == 0:
+            try:
+                frame = self.source_frame_provider()
+            except Exception:
+                frame = None
+        self.update_live_zoom_preview(
+            frame,
+            visual_rotation=self._zoom_live_visual_rotation,
+        )
+
+    def _on_zoom_viewport_pointer(self, event) -> str:
+        mapping = self._zoom_source_mapping
+        if not isinstance(mapping, dict):
+            return "break"
+
+        width = max(1.0, float(mapping["render_width"]))
+        height = max(1.0, float(mapping["render_height"]))
+        x = (
+            float(getattr(event, "x", 0)) - float(mapping["offset_x"])
+        ) / width
+        y = (
+            float(getattr(event, "y", 0)) - float(mapping["offset_y"])
+        ) / height
+        _camera_zoom, software_zoom, _old_x, _old_y = self._zoom_values()
+        center_x, center_y = normalizar_centro_zoom_software_display_f3(
+            software_zoom,
+            x,
+            y,
+        )
+        self.software_zoom_center_x_var.set(center_x)
+        self.software_zoom_center_y_var.set(center_y)
+        self._update_zoom_labels()
+        self._rerender_zoom_preview()
+        return "break"
 
     def save_zoom(self) -> bool:
         name = self._selected_name()
