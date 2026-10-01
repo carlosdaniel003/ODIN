@@ -1732,12 +1732,23 @@ class DisplayProjectConfigWindow:
                 text=f"Foto estática das máscaras capturada para {name}."
             )
 
+        try:
+            from src.platform.display_visual_rotation import (
+                obter_rotacao_visual_do_frame_provider,
+            )
+            visual_rotation = obter_rotacao_visual_do_frame_provider(
+                self.frame_provider
+            )
+        except Exception:
+            visual_rotation = 0
+
         self.mask_capture_window = F3MaskReferenceCaptureWindow(
             parent=self.window,
             frame_provider=self.frame_provider,
             store=self._mask_reference_store(),
             project_name=name,
             master_resolution=resolution,
+            visual_rotation=visual_rotation,
             on_captured=captured,
         )
 
