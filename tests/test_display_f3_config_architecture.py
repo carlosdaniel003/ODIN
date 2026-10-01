@@ -80,6 +80,27 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertIn("Zoom ODIN (software)", source)
         self.assertIn("salvar_zoom_projeto", source)
 
+    def test_configuracao_zoom_tem_preview_final_e_viewport_arrastavel(self):
+        source = inspect.getsource(config_module.DisplayProjectConfigWindow)
+        self.assertIn("ENQUADRAMENTO • ARRASTE A JANELA", source)
+        self.assertIn("VISUALIZAÇÃO AO VIVO • SAÍDA FINAL DO F3", source)
+        self.assertIn("<B1-Motion>", source)
+        self.assertIn("software_zoom_center_x_var", source)
+        self.assertIn("software_zoom_center_y_var", source)
+
+    def test_preview_de_zoom_reutiliza_scheduler_sem_criar_timer_proprio(self):
+        source = inspect.getsource(
+            DisplayProjectConfigWindow.update_live_zoom_preview
+        )
+        self.assertNotIn(".after(", source)
+        self.assertIn("aplicar_zoom_software_frame_display_f3", source)
+
+        production = inspect.getsource(
+            DisplayProductionF3Mixin._render_preview_display_f3_once
+        )
+        self.assertIn("update_live_zoom_preview", production)
+        self.assertIn("_display_f3_runtime_raw_frame", production)
+
     def test_zoom_software_mantem_resolucao_e_amplia_crop_central(self):
         frame = np.zeros((12, 20, 3), dtype=np.uint8)
         frame[3:9, 5:15] = 200
