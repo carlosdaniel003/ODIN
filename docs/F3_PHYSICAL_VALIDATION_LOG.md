@@ -2482,3 +2482,72 @@ retorno do cursor `"fleur"` nessa janela.
 
 **Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
 
+---
+
+## 01/10/2026 — Segundo FAIL físico: CONFIGURAR continua sem abrir
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Após a primeira correção defensiva para a nova UI de zoom, o operador repetiu:
+
+    F3
+    → CONFIGURAR
+
+### Sintoma observado
+
+- a janela ainda não abriu;
+- ao clicar, aparentemente nada acontece;
+- não foi exibido traceback ou mensagem útil ao operador.
+
+### Regra das duas tentativas
+
+Este é o segundo FAIL consecutivo do mesmo defeito de abertura de CONFIGURAR.
+Conforme AGENTS.md, a etapa seguinte não altera novamente o algoritmo da UI sem
+evidência. O trabalho passa para **diagnóstico/instrumentação**.
+
+### Diagnóstico encontrado no caminho de abertura
+
+O método `abrir_configuracao_projeto_display()` captura qualquer exceção do
+construtor e grava apenas:
+
+- `_display_f3_last_config_error`.
+
+A exceção era escondida do operador. O status visual também pode não ser
+percebido porque a própria janela CONFIGURAR não chegou a existir.
+
+Além disso, o smoke anterior construía a janela com
+`frame_provider=lambda: None`, portanto não exercitava a parte nova que:
+
+- recebe frame real;
+- renderiza os dois canvases de zoom;
+- cria `PhotoImage`;
+- aplica callback de preview do zoom físico.
+
+### Instrumentação aplicada
+
+Sem alterar novamente a regra de zoom/enquadramento:
+
+- o traceback completo agora é salvo em
+  `_display_f3_last_config_traceback`;
+- o traceback também é enviado ao console;
+- a falha de abertura agora exibe uma caixa
+  **F3 • Erro ao abrir CONFIGURAR** com tipo e mensagem reais da exceção;
+- o smoke de CONFIGURAR foi ampliado para usar um frame NumPy 1920x1080 real,
+  `source_frame_provider` e callback de zoom físico;
+- o teste exige que os canvases e os dois `PhotoImage` de preview tenham sido
+  realmente construídos.
+
+### Próximo reteste esperado
+
+    clicar CONFIGURAR
+    → se abrir: registrar PASS
+    → se ainda falhar: copiar exatamente a mensagem exibida
+      em "F3 • Erro ao abrir CONFIGURAR"
+
+Com essa mensagem será possível atacar a causa específica sem terceira tentativa
+às cegas.
+
+**Estado:** DIAGNÓSTICO/INSTRUMENTAÇÃO IMPLEMENTADOS — AGUARDANDO EVIDÊNCIA REAL.
+
