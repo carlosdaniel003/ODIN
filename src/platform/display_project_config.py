@@ -386,7 +386,7 @@ class DisplayProjectConfigWindow:
 
         tk.Label(
             zoom_box,
-            text="MAPA DA CÂMERA • ARRASTE O QUADRO AZUL",
+            text="MAPA DA CÂMERA • ROTAÇÃO DO F3 • ARRASTE O QUADRO AZUL",
             font=("Segoe UI", 8, "bold"),
             fg=self.TEXT,
             bg="#0F1B2C",
@@ -394,9 +394,10 @@ class DisplayProjectConfigWindow:
         tk.Label(
             zoom_box,
             text=(
-                "A imagem abaixo é a visão completa de referência em 1×, sem "
-                "rotação. O quadro azul mostra exatamente a área efetiva que o "
-                "F3 usará. Arraste o quadro para reposicionar o enquadramento."
+                "A imagem abaixo usa a mesma rotação visual definida na tela "
+                "de desenvolvimento do ODIN. O quadro azul mostra exatamente "
+                "a área efetiva que o F3 usará. Arraste o quadro para "
+                "reposicionar o enquadramento."
             ),
             font=("Segoe UI", 8),
             fg=self.MUTED,
@@ -443,7 +444,7 @@ class DisplayProjectConfigWindow:
 
         tk.Label(
             zoom_box,
-            text="RECORTE ATUAL DO F3 • SEM ROTAÇÃO",
+            text="RECORTE ATUAL DO F3 • ROTAÇÃO VISUAL",
             font=("Segoe UI", 8, "bold"),
             fg=self.TEXT,
             bg="#0F1B2C",
@@ -863,7 +864,8 @@ class DisplayProjectConfigWindow:
             )
             self.zoom_center_label.configure(
                 text=(
-                    f"ÁREA F3 • {effective_zoom:.2f}× • "
+                    f"ÁREA F3 • VISUAL {self._zoom_visual_rotation()}° • "
+                    f"{effective_zoom:.2f}× • "
                     f"centro X {effective_x * 100.0:.1f}% • "
                     f"Y {effective_y * 100.0:.1f}%"
                 )
@@ -1003,6 +1005,79 @@ class DisplayProjectConfigWindow:
             "source_height": int(source_h),
         }
 
+    def _zoom_visual_rotation(self) -> int:
+        try:
+            from src.ui.main_window_parts.image.rotacao_visual_principal import (
+                normalizar_rotacao_visual,
+            )
+            return normalizar_rotacao_visual(
+                getattr(self, "_zoom_live_visual_rotation", 0)
+            )
+        except Exception:
+            return 0
+
+    def _zoom_visual_frame(self, frame):
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return frame
+        try:
+            from src.platform.display_visual_rotation import (
+                preparar_frame_visual_display,
+            )
+            return preparar_frame_visual_display(
+                frame,
+                self._zoom_visual_rotation(),
+            )
+        except Exception:
+            return frame
+
+    def _zoom_original_point_to_visual(
+        self,
+        x: float,
+        y: float,
+        frame_shape,
+    ) -> tuple[float, float]:
+        if frame_shape is None or len(frame_shape) < 2:
+            return float(x), float(y)
+        height = max(1, int(frame_shape[0]))
+        width = max(1, int(frame_shape[1]))
+        try:
+            from src.ui.main_window_parts.image.rotacao_visual_principal import (
+                converter_ponto_original_para_visual,
+            )
+            return converter_ponto_original_para_visual(
+                float(x),
+                float(y),
+                width,
+                height,
+                self._zoom_visual_rotation(),
+            )
+        except Exception:
+            return float(x), float(y)
+
+    def _zoom_visual_point_to_original(
+        self,
+        x: float,
+        y: float,
+        frame_shape,
+    ) -> tuple[float, float]:
+        if frame_shape is None or len(frame_shape) < 2:
+            return float(x), float(y)
+        height = max(1, int(frame_shape[0]))
+        width = max(1, int(frame_shape[1]))
+        try:
+            from src.ui.main_window_parts.image.rotacao_visual_principal import (
+                converter_ponto_visual_para_original,
+            )
+            return converter_ponto_visual_para_original(
+                float(x),
+                float(y),
+                width,
+                height,
+                self._zoom_visual_rotation(),
+            )
+        except Exception:
+            return float(x), float(y)
+
     def _update_zoom_viewport_overlay(self, frame=None) -> None:
         canvas = getattr(self, "zoom_source_canvas", None)
         mapping = self._zoom_source_mapping
@@ -1020,6 +1095,41 @@ class DisplayProjectConfigWindow:
         if rect is None:
             return
         x0, y0, x1, y1 = rect
+        source_h, source_w = frame.shape[:2]
+        corners = (
+            self._zoom_original_point_to_visual(x0, y0, frame.shape),
+            self._zoom_original_point_to_visual(
+                max(x0, x1 - 1),
+                y0,
+                frame.shape,
+            ),
+            self._zoom_original_point_to_visual(
+                max(x0, x1 - 1),
+                max(y0, y1 - 1),
+                frame.shape,
+            ),
+            self._zoom_original_point_to_visual(
+                x0,
+                max(y0, y1 - 1),
+                frame.shape,
+            ),
+        )
+        visual_xs = [point[0] for point in corners]
+        visual_ys = [point[1] for point in corners]
+        visual_x0 = min(visual_xs)
+        visual_x1 = max(visual_xs)
+        visual_y0 = min(visual_ys)
+        visual_y1 = max(visual_ys)
+
+        center_original_x = effective_x * max(0, source_w - 1)
+        center_original_y = effective_y * max(0, source_h - 1)
+        center_visual_x, center_visual_y = (
+            self._zoom_original_point_to_visual(
+                center_original_x,
+                center_original_y,
+                frame.shape,
+            )
+        )
 
         sx = mapping["render_width"] / max(
             1.0,
@@ -1033,16 +1143,16 @@ class DisplayProjectConfigWindow:
         oy = mapping["offset_y"]
         canvas.delete("zoom_viewport")
         canvas.create_rectangle(
-            ox + x0 * sx,
-            oy + y0 * sy,
-            ox + x1 * sx,
-            oy + y1 * sy,
+            ox + visual_x0 * sx,
+            oy + visual_y0 * sy,
+            ox + visual_x1 * sx,
+            oy + visual_y1 * sy,
             outline="#22D3EE",
             width=3,
             tags=("zoom_viewport",),
         )
-        center_canvas_x = ox + effective_x * mapping["source_width"] * sx
-        center_canvas_y = oy + effective_y * mapping["source_height"] * sy
+        center_canvas_x = ox + center_visual_x * sx
+        center_canvas_y = oy + center_visual_y * sy
         canvas.create_line(
             center_canvas_x - 8,
             center_canvas_y,
@@ -1067,9 +1177,10 @@ class DisplayProjectConfigWindow:
         if canvas is None:
             return
 
+        visual_frame = self._zoom_visual_frame(frame)
         mapping = self._render_bgr_zoom_canvas(
             canvas,
-            frame,
+            visual_frame,
             "_zoom_source_photo",
         )
         self._zoom_source_mapping = mapping
@@ -1113,9 +1224,10 @@ class DisplayProjectConfigWindow:
             center_x,
             center_y,
         )
+        final_visual = self._zoom_visual_frame(final_frame)
         self._render_bgr_zoom_canvas(
             final_canvas,
-            final_frame,
+            final_visual,
             "_zoom_final_photo",
         )
         self._update_zoom_labels()
@@ -1135,7 +1247,7 @@ class DisplayProjectConfigWindow:
                 frame = None
         self.update_live_zoom_preview(
             frame,
-            visual_rotation=0,
+            visual_rotation=self._zoom_live_visual_rotation,
         )
 
     def _zoom_pointer_normalized(self, event) -> tuple[float, float] | None:
@@ -1144,15 +1256,43 @@ class DisplayProjectConfigWindow:
             return None
         width = max(1.0, float(mapping["render_width"]))
         height = max(1.0, float(mapping["render_height"]))
-        x = (
+        visual_x = (
             float(getattr(event, "x", 0)) - float(mapping["offset_x"])
         ) / width
-        y = (
+        visual_y = (
             float(getattr(event, "y", 0)) - float(mapping["offset_y"])
         ) / height
+        visual_x = min(1.0, max(0.0, visual_x))
+        visual_y = min(1.0, max(0.0, visual_y))
+
+        frame = self._zoom_live_overview_frame
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return visual_x, visual_y
+        original_h, original_w = frame.shape[:2]
+        visual_w = max(1, int(mapping["source_width"]))
+        visual_h = max(1, int(mapping["source_height"]))
+        point_x = visual_x * max(0, visual_w - 1)
+        point_y = visual_y * max(0, visual_h - 1)
+        original_x, original_y = self._zoom_visual_point_to_original(
+            point_x,
+            point_y,
+            frame.shape,
+        )
         return (
-            min(1.0, max(0.0, x)),
-            min(1.0, max(0.0, y)),
+            min(
+                1.0,
+                max(
+                    0.0,
+                    original_x / max(1.0, float(original_w - 1)),
+                ),
+            ),
+            min(
+                1.0,
+                max(
+                    0.0,
+                    original_y / max(1.0, float(original_h - 1)),
+                ),
+            ),
         )
 
     def _render_zoom_final_only(self) -> None:
@@ -1172,9 +1312,10 @@ class DisplayProjectConfigWindow:
             center_x,
             center_y,
         )
+        final_visual = self._zoom_visual_frame(final_frame)
         self._render_bgr_zoom_canvas(
             final_canvas,
-            final_frame,
+            final_visual,
             "_zoom_final_photo",
         )
 
