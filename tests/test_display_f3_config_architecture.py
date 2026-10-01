@@ -83,8 +83,8 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
 
     def test_configuracao_zoom_tem_preview_final_e_viewport_arrastavel(self):
         source = inspect.getsource(config_module.DisplayProjectConfigWindow)
-        self.assertIn("ENQUADRAMENTO • ARRASTE A JANELA", source)
-        self.assertIn("VISUALIZAÇÃO AO VIVO • SAÍDA FINAL DO F3", source)
+        self.assertIn("MAPA DA CÂMERA • ARRASTE O QUADRO AZUL", source)
+        self.assertIn("RECORTE ATUAL DO F3 • SEM ROTAÇÃO", source)
         self.assertIn("<B1-Motion>", source)
         self.assertIn("software_zoom_center_x_var", source)
         self.assertIn("software_zoom_center_y_var", source)
@@ -134,7 +134,10 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         window = DisplayProjectConfigWindow.__new__(
             DisplayProjectConfigWindow
         )
+        window.camera_zoom_enabled_var = Var(False)
         window.camera_zoom_var = Var(100.0)
+        window.camera_zoom_center_x_var = Var(0.5)
+        window.camera_zoom_center_y_var = Var(0.5)
         window.software_zoom_var = Var(2.0)
         window.software_zoom_center_x_var = Var(0.5)
         window.software_zoom_center_y_var = Var(0.5)
@@ -146,11 +149,13 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
             "source_width": 200,
             "source_height": 100,
         }
+        window._zoom_live_overview_frame = np.zeros((100, 200, 3), dtype=np.uint8)
         window._zoom_drag_active = False
         window._zoom_drag_offset_x = 0.0
         window._zoom_drag_offset_y = 0.0
         window._update_zoom_labels = lambda: None
         window._publish_software_zoom_preview = lambda: None
+        window._publish_hardware_zoom_preview = lambda: None
         window._update_zoom_viewport_overlay = lambda *args, **kwargs: None
         window._render_zoom_final_only = lambda: None
         window._rerender_zoom_preview = lambda: None
@@ -183,7 +188,10 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         window = DisplayProjectConfigWindow.__new__(
             DisplayProjectConfigWindow
         )
+        window.camera_zoom_enabled_var = Var(False)
         window.camera_zoom_var = Var(100.0)
+        window.camera_zoom_center_x_var = Var(0.5)
+        window.camera_zoom_center_y_var = Var(0.5)
         window.software_zoom_var = Var(2.0)
         window.software_zoom_center_x_var = Var(0.5)
         window.software_zoom_center_y_var = Var(0.5)
@@ -195,12 +203,14 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
             "source_width": 200,
             "source_height": 100,
         }
+        window._zoom_live_overview_frame = np.zeros((100, 200, 3), dtype=np.uint8)
         window._zoom_drag_active = False
         window._zoom_drag_offset_x = 0.0
         window._zoom_drag_offset_y = 0.0
         window._zoom_drag_software_zoom = None
         window._update_zoom_labels = lambda: None
         window._publish_software_zoom_preview = lambda: None
+        window._publish_hardware_zoom_preview = lambda: None
         window._update_zoom_viewport_overlay = lambda *args, **kwargs: None
         window._render_zoom_final_only = lambda: None
         window._rerender_zoom_preview = lambda: None
@@ -231,6 +241,63 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertIsNone(window._zoom_drag_software_zoom)
         self.assertFalse(window._zoom_drag_active)
 
+    def test_drag_com_zoom_fisico_move_centro_da_camera(self):
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        window = DisplayProjectConfigWindow.__new__(
+            DisplayProjectConfigWindow
+        )
+        window.camera_zoom_enabled_var = Var(True)
+        window.camera_zoom_var = Var(200.0)
+        window.camera_zoom_center_x_var = Var(0.5)
+        window.camera_zoom_center_y_var = Var(0.5)
+        window.software_zoom_var = Var(1.0)
+        window.software_zoom_center_x_var = Var(0.5)
+        window.software_zoom_center_y_var = Var(0.5)
+        window._zoom_live_overview_frame = np.zeros(
+            (100, 200, 3),
+            dtype=np.uint8,
+        )
+        window._zoom_source_mapping = {
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "render_width": 200.0,
+            "render_height": 100.0,
+            "source_width": 200,
+            "source_height": 100,
+        }
+        window._zoom_drag_active = False
+        window._zoom_drag_offset_x = 0.0
+        window._zoom_drag_offset_y = 0.0
+        window._zoom_drag_software_zoom = None
+        hardware_calls = []
+        window._update_zoom_labels = lambda: None
+        window._publish_hardware_zoom_preview = lambda: hardware_calls.append(
+            (
+                window.camera_zoom_center_x_var.get(),
+                window.camera_zoom_center_y_var.get(),
+            )
+        )
+        window._publish_software_zoom_preview = lambda: None
+        window._update_zoom_viewport_overlay = lambda *args, **kwargs: None
+        window._render_zoom_final_only = lambda: None
+        window._rerender_zoom_preview = lambda: None
+
+        window._on_zoom_viewport_press(SimpleNamespace(x=100, y=50))
+        window._on_zoom_viewport_drag(SimpleNamespace(x=130, y=50))
+
+        self.assertGreater(window.camera_zoom_center_x_var.get(), 0.5)
+        self.assertEqual(0.5, window.software_zoom_center_x_var.get())
+        self.assertTrue(hardware_calls)
+
     def test_drag_em_zoom_um_nao_reseta_nem_finge_movimento(self):
         class Var:
             def __init__(self, value):
@@ -252,7 +319,10 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         window = DisplayProjectConfigWindow.__new__(
             DisplayProjectConfigWindow
         )
+        window.camera_zoom_enabled_var = Var(False)
         window.camera_zoom_var = Var(300.0)
+        window.camera_zoom_center_x_var = Var(0.5)
+        window.camera_zoom_center_y_var = Var(0.5)
         window.software_zoom_var = Var(1.0)
         window.software_zoom_center_x_var = Var(0.5)
         window.software_zoom_center_y_var = Var(0.5)
@@ -264,6 +334,7 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
             "source_width": 200,
             "source_height": 100,
         }
+        window._zoom_live_overview_frame = np.zeros((100, 200, 3), dtype=np.uint8)
         window._zoom_drag_active = False
         window._zoom_drag_offset_x = 0.0
         window._zoom_drag_offset_y = 0.0
