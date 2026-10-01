@@ -171,6 +171,47 @@ def _prepare_live_visual_mirror_context(
                     "live_visual_sampled_mask_count": int(
                         result.get("live_visual_sampled_mask_count", 0) or 0
                     ),
+                    "live_visual_sample_threshold": result.get(
+                        "live_visual_sample_threshold"
+                    ),
+                    "live_visual_sample_baseline": result.get(
+                        "live_visual_sample_baseline"
+                    ),
+                    "live_visual_sample_peak": result.get(
+                        "live_visual_sample_peak"
+                    ),
+                    "live_visual_sample_dynamic_range": result.get(
+                        "live_visual_sample_dynamic_range"
+                    ),
+                    "live_visual_sample_cluster_gap": result.get(
+                        "live_visual_sample_cluster_gap"
+                    ),
+                    "live_visual_relative_evidence_ready": bool(
+                        result.get("live_visual_relative_evidence_ready")
+                    ),
+                    "live_visual_absolute_fallback_used": bool(
+                        result.get("live_visual_absolute_fallback_used")
+                    ),
+                    "live_visual_strong_candidate_mask_ids": tuple(
+                        str(mask_id)
+                        for mask_id in (
+                            result.get(
+                                "live_visual_strong_candidate_mask_ids"
+                            )
+                            or ()
+                        )
+                        if str(mask_id)
+                    ),
+                    "live_visual_reflection_rejected_mask_ids": tuple(
+                        str(mask_id)
+                        for mask_id in (
+                            result.get(
+                                "live_visual_reflection_rejected_mask_ids"
+                            )
+                            or ()
+                        )
+                        if str(mask_id)
+                    ),
                     "live_visual_mask_ids": tuple(
                         str(mask_id)
                         for mask_id in (
