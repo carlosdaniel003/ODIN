@@ -90,6 +90,16 @@ class DisplayF3ConfigArchitectureTests(unittest.TestCase):
         self.assertEqual(frame.shape, zoomed.shape)
         self.assertGreater(float(zoomed.mean()), float(frame.mean()))
 
+    def test_zoom_de_hardware_so_e_aplicado_com_f3_ativo(self):
+        source = inspect.getsource(
+            DisplayProductionF3Mixin._aplicar_zoom_camera_projeto_display_f3
+        )
+        self.assertIn('"display_f3_ativo"', source)
+        self.assertLess(
+            source.index('"display_f3_ativo"'),
+            source.index("atualizar_configuracoes_camera_ao_vivo"),
+        )
+
     def test_zoom_software_nao_le_repositorio_no_hot_path(self):
         source = inspect.getsource(
             DisplayProductionF3Mixin._obter_frame_runtime_display_f3

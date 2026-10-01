@@ -228,6 +228,11 @@ class DisplayProductionF3Mixin:
             return frame
 
     def _aplicar_zoom_camera_projeto_display_f3(self, project: dict | None) -> None:
+        # O Projeto Display é carregado também no startup, quando F2 pode ser o
+        # único modo operacional. Nunca escreva CAP_PROP_ZOOM fora da sessão F3.
+        if not bool(getattr(self, "display_f3_ativo", False)):
+            return
+
         zoom = normalizar_zoom_projeto_display(project)
         camera_zoom = zoom["camera_zoom"]
         enabled = bool(camera_zoom["enabled"])
