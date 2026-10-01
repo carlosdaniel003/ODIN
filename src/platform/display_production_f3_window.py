@@ -770,6 +770,12 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         for segment_name, mask_id in zip(segment_order, mask_ids):
             if terminal_segregated:
                 state = "ng"
+            elif mask_id in failed:
+                # D-045: falha efetivamente confirmada tem prioridade visual
+                # sobre o espelho ON/OFF. Em NG congelado isso mantém no visor
+                # exatamente o segmento defeituoso em vermelho, sem transformar
+                # divergências transitórias em falha final.
+                state = "ng"
             elif live_luminous_only:
                 # D-034: câmera e visor consomem o MESMO mapa físico.
                 # A cor independe de gate/expected; classified descreve somente
