@@ -197,6 +197,8 @@ class DisplayF3RuntimeContractFixTests(unittest.TestCase):
             "root",
             "repository",
             "frame_provider",
+            "source_frame_provider",
+            "on_camera_zoom_preview",
             "heavy_executor",
             "on_change",
             "on_close",
