@@ -2422,3 +2422,63 @@ contorno e máscaras antes de validar inspeção produtiva.
 
 **Validação física:** pendente.
 
+---
+
+## 01/10/2026 — FAIL físico: CONFIGURAR deixou de abrir após preview/enquadramento de zoom
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Após a implementação do preview ao vivo e do enquadramento arrastável do zoom,
+o operador abriu o F3 e tentou acessar **CONFIGURAR**.
+
+### Sintoma observado
+
+- a janela **CONFIGURAR** não abriu;
+- o sistema apresentou erro durante a tentativa de construção da janela;
+- o problema surgiu após a inclusão dos novos widgets de preview/enquadramento.
+
+Não foi fornecido traceback textual deste teste físico.
+
+### Diagnóstico
+
+O smoke em Linux/Xvfb abria a janela, portanto o problema foi tratado como
+incompatibilidade/ordem de construção do Tk no ambiente Windows real.
+
+Foram identificados dois riscos introduzidos pela nova UI:
+
+1. os `Scale` de zoom possuem callbacks e alguns builds do Tk podem dispará-los
+   durante a construção do widget, antes de `zoom_source_canvas` e
+   `zoom_final_canvas` existirem;
+2. o cursor `"fleur"` usado no canvas de arraste depende do backend Tk e não é
+   necessário para a regra funcional.
+
+### Correção aplicada
+
+- `zoom_source_canvas` e `zoom_final_canvas` agora nascem explicitamente como
+  `None` antes da criação dos sliders;
+- `_rerender_zoom_preview()`, `update_live_zoom_preview()` e o desenho do
+  viewport retornam com segurança enquanto os canvases ainda não existem;
+- o cursor do viewport passou de `"fleur"` para `"hand2"`, já usado no ODIN
+  e mais seguro entre Windows/Linux;
+- nenhum novo timer, worker, scheduler ou autoridade foi criado;
+- o runtime de inspeção e as regras de zoom/enquadramento não foram alterados.
+
+### Regressão
+
+Foi adicionado teste que chama o caminho de rerender antes da existência dos
+canvases e exige que a operação não gere exceção. O contrato também proíbe o
+retorno do cursor `"fleur"` nessa janela.
+
+### Próximo reteste esperado
+
+    abrir F3
+    → clicar CONFIGURAR
+    → janela deve abrir normalmente
+    → seção de zoom deve aparecer
+    → preview ao vivo deve carregar
+    → viewport deve aceitar clique/arraste
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
