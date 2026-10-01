@@ -2752,3 +2752,65 @@ Nenhuma nova correção funcional foi aplicada nesta etapa.
 
 **Estado:** DIAGNÓSTICO EM EXECUÇÃO — AGUARDANDO RESULTADO DO SMOKE REAL.
 
+---
+
+## 01/10/2026 — Diagnóstico do reset do Zoom ODIN durante drag
+
+**Estado:** CAUSA NÃO REPRODUZIDA EM LINUX/XVFB; PROTEÇÃO DEFENSIVA IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+### Resultado do diagnóstico controlado
+
+O smoke com Tkinter real foi ampliado para executar o gesto completo:
+
+    Zoom ODIN = 2.0×
+    → Button-1
+    → B1-Motion
+    → ButtonRelease-1
+
+Primeiro contra a classe base e depois contra a composição final realmente usada
+pelo botão CONFIGURAR, incluindo presença, ROI, tracking e contratos instalados.
+
+Nos dois casos o Zoom ODIN permaneceu em 2.0× durante todo o gesto.
+
+Isso indica que o reset físico observado no Windows não foi reproduzido no
+backend Tk/Xvfb do CI e pode depender da ordem real de callbacks/variáveis do Tk
+no ambiente Windows.
+
+### Proteção aplicada
+
+O drag passou a possuir um snapshot explícito do fator de zoom:
+
+- no `Button-1`, o valor atual de `software_zoom` é capturado em
+  `_zoom_drag_software_zoom`;
+- enquanto `_zoom_drag_active=True`, `_zoom_values()` usa esse valor travado
+  como autoridade do gesto;
+- em cada `B1-Motion`, a `DoubleVar` é reafirmada com o zoom capturado;
+- no `ButtonRelease-1`, o mesmo valor é reafirmado antes de encerrar o gesto;
+- o latch é descartado somente após o release ou fechamento da janela.
+
+Foi incluída uma regressão que simula explicitamente a condição suspeita:
+
+    inicia drag em 2.0×
+    → força software_zoom_var = 1.0 no meio do gesto
+    → executa motion
+    → Zoom ODIN deve voltar imediatamente para 2.0×
+    → release mantém 2.0×
+
+Esse contrato garante que um refresh/evento de backend não possa alterar o fator
+de zoom enquanto o operador estiver arrastando o enquadramento.
+
+Nenhum novo timer, worker, scheduler ou persistência foi introduzido.
+
+### Próximo reteste esperado
+
+    F3 → CONFIGURAR
+    → Zoom ODIN = 2× ou 3×
+    → pressionar dentro da janela de enquadramento
+    → arrastar mantendo o botão pressionado
+    → o fator exibido do Zoom ODIN deve permanecer exatamente no valor escolhido
+    → saída final deve apenas mudar de posição, sem perder aproximação
+    → soltar
+    → zoom continua no mesmo fator
+
+**Validação física:** pendente.
+
