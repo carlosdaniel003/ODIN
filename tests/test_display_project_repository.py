@@ -200,6 +200,8 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
                     camera_enabled=True,
                     camera_zoom=320,
                     software_zoom=1.8,
+                    camera_center_x=0.62,
+                    camera_center_y=0.44,
                     center_x=0.68,
                     center_y=0.36,
                 )
@@ -221,6 +223,16 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
             project_b = repository.carregar_projeto("DISPLAY B")
             self.assertTrue(project_a["camera_zoom"]["enabled"])
             self.assertEqual(320.0, project_a["camera_zoom"]["value"])
+            self.assertAlmostEqual(
+                0.62,
+                project_a["camera_zoom_center"]["x"],
+                places=6,
+            )
+            self.assertAlmostEqual(
+                0.44,
+                project_a["camera_zoom_center"]["y"],
+                places=6,
+            )
             self.assertEqual(1.8, project_a["software_zoom"])
             self.assertAlmostEqual(
                 0.68,
@@ -234,6 +246,10 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
             )
             self.assertFalse(project_b["camera_zoom"]["enabled"])
             self.assertEqual(100.0, project_b["camera_zoom"]["value"])
+            self.assertEqual(
+                {"x": 0.5, "y": 0.5},
+                project_b["camera_zoom_center"],
+            )
             self.assertEqual(1.0, project_b["software_zoom"])
             self.assertEqual(
                 {"x": 0.5, "y": 0.5},
@@ -255,6 +271,10 @@ class DisplayProjectRepositoryTests(unittest.TestCase):
             )
             project = repository.carregar_projeto("DISPLAY A")
             self.assertEqual(500.0, project["camera_zoom"]["value"])
+            self.assertEqual(
+                {"x": 0.5, "y": 0.5},
+                project["camera_zoom_center"],
+            )
             self.assertEqual(5.0, project["software_zoom"])
             self.assertEqual(
                 {"x": 0.5, "y": 0.5},
