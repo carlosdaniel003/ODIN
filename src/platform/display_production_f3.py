@@ -1257,9 +1257,28 @@ class DisplayProductionF3Mixin:
                     )
                     if source_frame is None:
                         source_frame = frame
+
+                    signature = self._display_f3_camera_zoom_signature
+                    hardware_zoom_active = bool(
+                        signature
+                        and bool(signature[0])
+                        and float(signature[1]) > 100.0001
+                    )
+                    if not hardware_zoom_active:
+                        try:
+                            self._display_f3_camera_overview_frame = source_frame.copy()
+                        except Exception:
+                            self._display_f3_camera_overview_frame = source_frame
+
+                    overview_frame = (
+                        self._display_f3_camera_overview_frame
+                        if self._display_f3_camera_overview_frame is not None
+                        else source_frame
+                    )
                     configuracao.update_live_zoom_preview(
                         source_frame,
-                        visual_rotation=visual_rotation,
+                        overview_frame=overview_frame,
+                        visual_rotation=0,
                     )
             except Exception:
                 pass
