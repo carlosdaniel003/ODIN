@@ -1685,3 +1685,85 @@ A validação confirma que:
 
 **PASS — D-044 VALIDADA FISICAMENTE.**
 
+---
+
+## 01/10/2026 — D-045: NG correto, mas segmento defeituoso ainda sem destaque vermelho
+
+**Resultado físico antes da correção visual:** FAIL de apresentação / PASS de decisão NG.
+
+### Cenário
+
+- CHECK lógico: BLUE / CHECK_002;
+- placa já havia sido corretamente classificada como NG por D-044;
+- frame e visor estavam congelados aguardando retirada da placa;
+- `MASK_024` era o segmento defeituoso confirmado: deveria estar ON e permaneceu
+  OFF;
+- requisito do operador: o segmento 24 deve ficar vermelho tanto na máscara da
+  câmera congelada quanto no VISOR DO DISPLAY.
+
+### Evidência do DEBUG
+
+O snapshot congelado mostrou:
+
+- placa presente e energia confirmada;
+- CHECK lógico BLUE;
+- fluxo já em rearme terminal aguardando retirada;
+- análise BLUE bruta com múltiplas divergências visuais no frame congelado;
+- porém a autoridade efetiva publicou uma lista específica de falha persistente
+  confirmada, distinta das divergências ainda transitórias;
+- o visor/overlay continuavam priorizando o caminho luminoso ON/OFF e, por isso,
+  uma máscara confirmada NG podia permanecer verde escuro em vez de vermelho.
+
+### Causa
+
+O contexto já carregava `effective_confirmed_failed_mask_ids`, mas os dois
+renderers finais tinham uma precedência incorreta:
+
+1. a câmera entrava em `live_luminous_only` e retornava pelo renderer clássico
+   antes de aplicar o destaque de falha confirmada;
+2. o VISOR DO DISPLAY também entrava primeiro no ramo `live_luminous_only`,
+   ignorando o conjunto `failed_mask_ids` já filtrado para falhas confirmadas.
+
+A decisão NG estava correta; faltava somente refletir a mesma autoridade na
+apresentação congelada.
+
+### Correção D-045
+
+- câmera: `effective_confirmed_failed_mask_ids` agora tem prioridade sobre
+  verde/verde escuro no renderer clássico;
+- visor: `failed_mask_ids` confirmado recebe estado visual `ng` antes do ramo
+  `live_luminous_only`;
+- a fonte do vermelho final continua sendo somente a lista confirmada;
+- `effective_failed_mask_ids` bruto e `effective_validating_mask_ids` não viram
+  vermelho terminal;
+- SEGREGAR continua com sua regra própria de vermelho total;
+- nenhuma regra de decisão, debounce, energia, tracking ou rearme foi alterada.
+
+### Proteção contra regressão
+
+Foram adicionados testes para confirmar que:
+
+1. câmera live/frozen pinta a máscara confirmada em vermelho enquanto mantém as
+   demais máscaras ON/OFF em verde/verde escuro;
+2. VISOR DO DISPLAY dá prioridade a vermelho para a falha confirmada mesmo no
+   modo `live_luminous_only`;
+3. o contexto do visor prefere `effective_confirmed_failed_mask_ids` à lista
+   bruta de falhas.
+
+### Estado
+
+**D-045 IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO VISUAL.**
+
+### Reteste esperado
+
+```text
+tracking OFF ou ON
+→ reproduzir BLUE NG com MASK_024 apagada
+→ NG terminal congelado
+→ somente MASK_024 fica vermelha na máscara da câmera
+→ somente segmento 24 fica vermelho no VISOR DO DISPLAY
+→ demais segmentos mantêm verde/verde escuro conforme ON/OFF físico
+→ retirar placa
+→ rearme continua normal
+```
+
