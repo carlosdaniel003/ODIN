@@ -1406,8 +1406,11 @@ def _render_classic_luminous_preview(
     """Preview operacional: espelho físico visual independente dos gates.
 
     Tracking ON ou OFF altera somente a geometria das ROIs. A apresentação do
-    mesmo frame usa verde vivo para ON e verde escuro para OFF. Presença,
-    energia, alinhamento produtivo, OK/NG e sequência não controlam essas cores.
+    mesmo frame usa verde vivo para ON e verde escuro para OFF. Uma falha
+    efetivamente confirmada pelo analyzer recebe vermelho com prioridade sobre o
+    espelho luminoso, para que o frame que fechou o NG preserve visualmente o
+    segmento defeituoso. Presença, energia, alinhamento produtivo e sequência não
+    recriam a classificação.
     """
 
     result = frame.copy()
@@ -1429,6 +1432,13 @@ def _render_classic_luminous_preview(
         for mask_id, state in dict(
             context.get("live_visual_classifications") or {}
         ).items()
+        if str(mask_id)
+    }
+    confirmed_failed_mask_ids = {
+        str(mask_id)
+        for mask_id in (
+            context.get("effective_confirmed_failed_mask_ids") or ()
+        )
         if str(mask_id)
     }
 
@@ -1470,8 +1480,10 @@ def _render_classic_luminous_preview(
 
     green_tint = result.copy()
     off_tint = result.copy()
+    alert_tint = result.copy()
     green_geometries = []
     off_geometries = []
+    alert_geometries = []
     for mask in masks:
         if not isinstance(mask, dict):
             continue
@@ -1480,6 +1492,17 @@ def _render_classic_luminous_preview(
         if geometry is None:
             continue
         visual_state = str(visual_states.get(mask_id) or "").strip().lower()
+        if mask_id in confirmed_failed_mask_ids:
+            geometry = _draw_mask(
+                alert_tint,
+                mask,
+                sx,
+                sy,
+                F3_PREVIEW_CLEAR_COLORS["alert"],
+            )
+            if geometry is not None:
+                alert_geometries.append(geometry)
+            continue
         if mask_id in luminous_ids or visual_state == DISPLAY_CHECK_STATE_ON:
             geometry = _draw_mask(
                 green_tint,
@@ -1547,6 +1570,27 @@ def _render_classic_luminous_preview(
                 geometry,
                 F3_PREVIEW_CLASSIC_LIGHT_BGR,
                 2,
+            )
+
+    if alert_geometries:
+        # D-045: o NG congelado deve apontar o componente que realmente falhou.
+        # A fonte é effective_confirmed_failed_mask_ids da mesma análise
+        # produtiva; não usamos failed_mask_ids bruto para evitar destacar
+        # divergências transitórias de CHECK intermitente.
+        cv2.addWeighted(
+            alert_tint,
+            F3_PREVIEW_ALERT_ALPHA,
+            result,
+            1.0 - F3_PREVIEW_ALERT_ALPHA,
+            0.0,
+            dst=result,
+        )
+        for geometry in alert_geometries:
+            _draw_contour(
+                result,
+                geometry,
+                F3_PREVIEW_CLEAR_COLORS["alert"],
+                F3_PREVIEW_ALERT_CONTOUR_THICKNESS,
             )
 
     return result
