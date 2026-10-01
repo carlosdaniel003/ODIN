@@ -2132,8 +2132,11 @@ A implementação foi então consolidada no próprio caminho de congelamento:
    esconda uma falha de apresentação;
 6. nenhum timer, worker, scheduler ou classificador adicional foi criado.
 
-**Validação física:** segunda correção implementada; pendente de novo reteste
-visual no cenário BLUE NG com `MASK_024` apagada.
+**Validação física — 01/10/2026: PASS.** O reteste no equipamento confirmou
+a segunda correção de D-045. No BLUE NG com `MASK_024` fisicamente apagada, a
+máscara 24 ficou vermelha na câmera congelada e o segmento 24 ficou vermelho no
+VISOR DO DISPLAY, enquanto os demais segmentos mantiveram suas cores físicas
+normais. O comportamento terminal permaneceu congelado até a retirada da placa.
 
 
 ---
