@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import base64
 import tkinter as tk
+
+import cv2
 from collections.abc import Callable
 from tkinter import messagebox, simpledialog
 
 from src.platform.display_check_editor import DisplayCheckManagerWindow
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
+from src.platform.display_f3_zoom import (
+    aplicar_zoom_software_frame_display_f3,
+    calcular_recorte_zoom_software_display_f3,
+    normalizar_centro_zoom_software_display_f3,
+)
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
 from src.platform.display_project_repository import (
     DISPLAY_SOFTWARE_ZOOM_MAX,
@@ -16,6 +24,7 @@ from src.platform.display_project_repository import (
     normalizar_zoom_projeto_display,
 )
 from config import CAMERA_ZOOM_MAX, CAMERA_ZOOM_MIN
+from src.platform.display_visual_rotation import preparar_frame_visual_display
 
 
 F3_CONFIG_INITIAL_LOAD_DELAY_MS = 20
@@ -37,6 +46,8 @@ class DisplayProjectConfigWindow:
         root,
         repository: DisplayProjectRepository,
         frame_provider: Callable[[], object | None],
+        source_frame_provider: Callable[[], object | None] | None = None,
+        on_camera_zoom_preview: Callable[[bool, float], None] | None = None,
         heavy_executor=None,
         on_change: Callable[[], None] | None = None,
         on_close: Callable[[], None] | None = None,
@@ -44,6 +55,8 @@ class DisplayProjectConfigWindow:
         self.root = root
         self.repository = repository
         self.frame_provider = frame_provider
+        self.source_frame_provider = source_frame_provider or frame_provider
+        self.on_camera_zoom_preview = on_camera_zoom_preview
         self._heavy_executor = heavy_executor
         self._owns_heavy_executor = False
         self.on_change = on_change
@@ -67,6 +80,13 @@ class DisplayProjectConfigWindow:
         self.camera_zoom_enabled_var = tk.BooleanVar(value=False)
         self.camera_zoom_var = tk.DoubleVar(value=float(CAMERA_ZOOM_MIN))
         self.software_zoom_var = tk.DoubleVar(value=1.0)
+        self.software_zoom_center_x_var = tk.DoubleVar(value=0.5)
+        self.software_zoom_center_y_var = tk.DoubleVar(value=0.5)
+        self._zoom_live_source_frame = None
+        self._zoom_live_visual_rotation = 0
+        self._zoom_source_photo = None
+        self._zoom_final_photo = None
+        self._zoom_source_mapping = None
 
         self.window = tk.Toplevel(root)
         self.window.title("ODIN • Projeto Display")
