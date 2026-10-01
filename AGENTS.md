@@ -349,6 +349,16 @@ As seguintes regras são obrigatórias em qualquer alteração futura do Display
 - durante SEGREGAR terminal, câmera ao vivo, contorno da placa, máscaras e
   VISOR DO DISPLAY recebem override visual vermelho; a classificação/telemetria
   óptica interna continua preservando o ON/OFF físico real;
+- D-045: NG automático/congelado NÃO usa o vermelho total de SEGREGAR. A
+  câmera congelada e o VISOR DO DISPLAY devem pintar de vermelho somente os IDs
+  presentes em `effective_confirmed_failed_mask_ids`; as demais máscaras
+  continuam exibindo a semântica física normal ON/OFF;
+- `effective_failed_mask_ids` bruto e `effective_validating_mask_ids` não podem
+  ser usados como fonte final do vermelho de NG, principalmente em CHECK
+  intermitente; a UI deve destacar somente falha persistente confirmada;
+- câmera e visor devem consumir a mesma lista confirmada do mesmo frame que
+  fechou o NG, antes de congelar a evidência, para não sinalizar segmentos
+  diferentes entre os dois painéis;
 - nenhuma correção desses contratos pode criar novo timer, worker, scheduler ou
   autoridade paralela.
 
