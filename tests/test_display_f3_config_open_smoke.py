@@ -21,6 +21,11 @@ import src.platform.display_production_f3 as production_module
 
 class DisplayF3ConfigOpenSmokeTests(unittest.TestCase):
     def test_drag_real_tk_preserva_zoom_odin_em_dois_x(self):
+        instalar_status_referencias_visuais_display()
+        instalar_roi_referencias_display_f3()
+        instalar_gate_rapido_check_esperado_display_f3()
+        instalar_ui_rastreamento_objetos_display_f3()
+
         root = tk.Tk()
         root.withdraw()
         created = None
