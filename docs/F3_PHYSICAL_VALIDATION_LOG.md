@@ -2197,3 +2197,48 @@ não o gate simples.
 
 **Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE NOVO RETESTE FÍSICO.
 
+---
+
+## 01/10/2026 — PASS físico: NG libera freeze após retirada da placa
+
+**Resultado físico:** PASS.
+
+### Cenário validado
+
+- o F3 concluiu uma placa em NG;
+- enquanto a placa permaneceu fisicamente no suporte, câmera e VISOR DO DISPLAY permaneceram congelados no frame terminal do NG conforme D-045;
+- o operador retirou a placa do suporte;
+- o rearme dedicado confirmou o suporte vazio;
+- o freeze terminal foi encerrado;
+- câmera/visor voltaram ao estado normal de espera;
+- a interface deixou de permanecer presa visualmente no NG anterior.
+
+### Resultado observado
+
+O comportamento esperado foi confirmado no equipamento real:
+
+    placa gera NG
+    → NG permanece congelado enquanto a placa está no suporte
+    → operador retira a placa
+    → EMPTY é confirmado
+    → freeze NG é liberado
+    → câmera/visor deixam o frame congelado
+    → F3 volta ao estado normal de espera/rearme
+
+### Correção validada
+
+Commit validado fisicamente:
+
+`a4966084efca890490291192d343ee017c0d6c02`
+— `fix(f3): integrar rearme dedicado na autoridade canônica`.
+
+A validação confirma que o rearme dedicado precisa permanecer integrado em
+`F3RuntimeAuthorities`, pois essa é a autoridade final instalada no runtime.
+Não é suficiente depender apenas de wrappers anteriores de
+`_build_operational_state`, porque eles podem ser substituídos pela composição
+canônica posterior.
+
+### Estado
+
+**PASS FÍSICO — CORREÇÃO VALIDADA.**
+
