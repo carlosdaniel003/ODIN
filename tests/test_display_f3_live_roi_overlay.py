@@ -208,6 +208,14 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             fills.count(DisplayProductionF3Window.DISPLAY_READOUT_INACTIVE),
         )
 
+    def test_resultado_ok_terminal_nao_congela_espelho_visual_live(self):
+        source = inspect.getsource(
+            DisplayProductionF3Window.update_camera_preview
+        )
+        self.assertIn("_display_ng_evidence_frozen", source)
+        self.assertNotIn("_display_terminal_waiting_removal", source)
+        self.assertNotIn('_display_terminal_result_kind == "ok"', source)
+
     def test_tracking_off_tambem_amostra_emissao_do_frame_atual(self):
         frame = np.full((80, 160, 3), 35, dtype=np.uint8)
         frame[30:51, 10:31] = 210
