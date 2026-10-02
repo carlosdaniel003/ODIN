@@ -740,7 +740,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                 evaluate_current_check_relative=lambda *_args, **_kwargs: {
                     "available": True,
                     "source": "f3_same_mask_relative_power_authority",
-            "same_mask_comparison": True,
+                    "same_mask_comparison": True,
                     "details": [
                         {
                             "mask_id": "MASK_013",
