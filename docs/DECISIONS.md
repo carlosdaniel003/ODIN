@@ -2729,3 +2729,78 @@ As regressões cobrem:
 **Validação física:** pendente de reteste.
 
 ---
+
+## D-054 — Zoom físico do F3 valida readback real e se recupera de reset do driver
+
+**Status:** Accepted
+
+### Contexto
+
+Em 02/10/2026, após as correções de enquadramento/rotação já validadas,
+o operador relatou que o zoom físico da câmera do F3 **se desfez durante o uso**.
+
+A configuração lógica do Projeto Display continuava indicando zoom aplicado,
+mas a câmera podia retornar fisicamente a outro valor — por exemplo, voltar
+para 1× após renegociação/reinicialização do backend UVC/DirectShow.
+
+O runtime mantinha uma assinatura em memória com o último comando enviado:
+
+```text
+(enabled, zoom_value, center_x, center_y)
+```
+
+Se essa assinatura não mudasse, o F3 concluía que o zoom ainda estava aplicado
+e evitava reenviar o comando. Esse cache lógico não detectava quando o hardware
+perdia o zoom sem alterar a configuração persistida.
+
+### Decisão
+
+O cache lógico do zoom deixa de ser suficiente para considerar o zoom físico
+válido.
+
+Quando existe zoom físico configurado acima de 1×:
+
+1. o F3 consulta, quando disponível, o último **readback real** publicado pelo
+   serviço canônico de controles da câmera;
+2. se o readback ainda coincide com o zoom configurado, a assinatura lógica
+   continua válida e nenhum comando redundante é enviado;
+3. se o readback mostra que a câmera voltou a outro valor, a assinatura em
+   memória deixa de impedir a reaplicação;
+4. o zoom salvo do Projeto Display é reaplicado pelo mesmo caminho canônico de
+   controles de câmera;
+5. se existe alteração de câmera ainda pendente, o runtime não dispara uma
+   segunda aplicação concorrente;
+6. enquanto **CONFIGURAR** está aberto, a recuperação automática não sobrescreve
+   um valor que o operador ainda está testando e não salvou;
+7. backends que não expõem readback continuam compatíveis: ausência de leitura
+   não é tratada automaticamente como reset;
+8. a recuperação reutiliza o scheduler/repaint canônico do F3; nenhum novo
+   `after()`, timer, worker, thread ou serviço de câmera é criado.
+
+### Consequência
+
+A verdade do zoom físico passa a ser:
+
+```text
+configuração persistida
++ assinatura do último comando
++ readback real do hardware quando disponível
+```
+
+Assim, uma reinicialização silenciosa do zoom pelo driver não deixa o F3 preso
+na falsa condição "zoom já aplicado".
+
+### Regressões automatizadas
+
+Foram adicionados testes para:
+
+- readback igual ao zoom solicitado → não reaplicar;
+- hardware resetado de 2.5× para 1× → invalidar assinatura e reaplicar;
+- comando ainda pendente → não duplicar aplicação;
+- preservar contratos existentes de zoom/enquadramento e preview ao vivo.
+
+Os workflows específicos de câmera/zoom utilizados na correção passaram.
+
+**Validação física:** pendente de reteste explícito após esta correção.
+
+---
