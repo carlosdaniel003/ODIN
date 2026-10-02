@@ -12,6 +12,7 @@ treino e produção.
 
 from copy import deepcopy
 from pathlib import Path
+import re
 
 import cv2
 import numpy as np
@@ -42,6 +43,43 @@ F3_NEURAL_LABELS = {
     DISPLAY_CHECK_STATE_OFF: 0,
     DISPLAY_CHECK_STATE_ON: 1,
 }
+
+
+def _slug_model_name(value: str) -> str:
+    text = re.sub(
+        r"[^A-Za-z0-9_-]+",
+        "_",
+        str(value or "").strip(),
+    )
+    return text.strip("_").lower() or "display"
+
+
+def f3_neural_model_path_for_repository(
+    repository: DisplayProjectRepository,
+    project_name: str,
+) -> Path:
+    """Destino local canônico do ONNX por Projeto Display.
+
+    No layout do repositório (data/config/*.json), modelos ficam em data/models.
+    No JIG, onde o repository aponta para ~/.config/odin/*.json, ficam ao lado
+    da configuração em ~/.config/odin/models. Assim o runtime nunca depende do
+    diretório atual do processo.
+    """
+    config_file = Path(
+        getattr(
+            repository,
+            "config_file",
+            "data/config/odin_display_projects.json",
+        )
+    )
+    parent = config_file.parent
+    if parent.name == "config" and parent.parent.name == "data":
+        model_root = parent.parent / "models" / "f3_neural"
+    else:
+        model_root = parent / "models" / "f3_neural"
+    return model_root / (
+        f"{_slug_model_name(project_name)}_segments.onnx"
+    )
 
 
 def _valid_image(image) -> bool:
