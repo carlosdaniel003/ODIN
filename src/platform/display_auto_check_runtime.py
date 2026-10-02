@@ -70,6 +70,9 @@ class DisplayAutomaticCheckF3Mixin:
     DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO = 0.55
     DISPLAY_AUTO_INTERMITTENT_OFF_PHASE_RATIO = 0.15
     DISPLAY_AUTO_INTERMITTENT_EXACT_TEMPLATE_VETO_MARGIN = 0.04
+    DISPLAY_AUTO_CURRENT_CHECK_RELATIVE_POWER_SOURCE = (
+        "f3_same_mask_relative_power_authority"
+    )
     # H1 não usa um corte de confiança semântica para decidir se uma divergência
     # expected=ON/classified=OFF merece verificação física. A confiança mede a
     # distância no pool aprendido; a reconciliação usa outra evidência, mais
@@ -494,12 +497,12 @@ class DisplayAutomaticCheckF3Mixin:
             for item in (analysis.get("mask_results") or ())
         )
 
-    def _display_auto_reference_gate_relative_power_evidence(
+    def _display_auto_current_check_relative_power_evidence(
         self,
         frame,
         context: dict | None,
     ) -> dict:
-        """Obtém a prova física pela autoridade canônica sem criar classificador paralelo."""
+        """Obtém BOARD_OFF/LIVE/ON da mesma máscara pela F3PowerAuthority."""
         owner = getattr(self, "_display_f3_runtime_authorities", None)
         power = getattr(owner, "power", None)
         evaluator = getattr(power, "evaluate_current_check_relative", None)
@@ -514,6 +517,110 @@ class DisplayAutomaticCheckF3Mixin:
         except Exception:
             return {}
         return value if isinstance(value, dict) else {}
+
+    def _display_auto_reference_gate_relative_power_evidence(
+        self,
+        frame,
+        context: dict | None,
+    ) -> dict:
+        """Compatibilidade nominal do H1; usa a mesma autoridade física estável."""
+        return self._display_auto_current_check_relative_power_evidence(
+            frame,
+            context,
+        )
+
+    @classmethod
+    def _display_auto_apply_intermittent_physical_authority(
+        cls,
+        analysis: dict,
+        physical_evidence: dict | None,
+    ) -> dict:
+        """Torna a F3PowerAuthority a única fonte física do veto intermitente.
+
+        O analyzer estrito pode manter sua estimativa local como diagnóstico,
+        mas ela não decide mais o suporte físico do debounce. Para evitar repetir
+        o erro de D-055, somente a fonte estável BOARD_OFF/LIVE/ON da mesma
+        máscara possui autoridade para confirmar um falso OFF como fisicamente ON.
+        """
+        result = deepcopy(analysis)
+        evidence = (
+            physical_evidence
+            if isinstance(physical_evidence, dict)
+            else {}
+        )
+        source = str(evidence.get("source") or "")
+        authoritative = bool(
+            evidence.get("available")
+            and evidence.get("same_mask_comparison") is True
+            and source == cls.DISPLAY_AUTO_CURRENT_CHECK_RELATIVE_POWER_SOURCE
+        )
+        details_by_mask = {
+            str(item.get("mask_id") or ""): item
+            for item in (evidence.get("details") or ())
+            if isinstance(item, dict) and str(item.get("mask_id") or "")
+        }
+
+        confirmed_ids = []
+        candidate_ids = []
+        for item in result.get("mask_results") or ():
+            if not isinstance(item, dict):
+                continue
+            if (
+                str(item.get("expected") or "") != DISPLAY_CHECK_STATE_ON
+                or str(item.get("classified") or "") != DISPLAY_CHECK_STATE_OFF
+            ):
+                continue
+
+            mask_id = str(item.get("mask_id") or "")
+            if not mask_id:
+                continue
+            candidate_ids.append(mask_id)
+
+            # Preserva a antiga inferência do analyzer apenas para DEBUG. Ela
+            # deixa de ser autoridade de decisão a partir de D-057.
+            if "intermittent_power_confirmation" in item:
+                item["intermittent_learning_support_confirmation"] = bool(
+                    item.get("intermittent_power_confirmation")
+                )
+            if isinstance(item.get("intermittent_power_support"), dict):
+                item["intermittent_learning_support"] = deepcopy(
+                    item.get("intermittent_power_support")
+                )
+
+            item["intermittent_power_confirmation"] = False
+            item["intermittent_power_support"] = {
+                "source": source,
+                "authority": "F3PowerAuthority.evaluate_current_check_relative",
+                "available": bool(authoritative),
+            }
+
+            physical = details_by_mask.get(mask_id)
+            if not authoritative or not isinstance(physical, dict):
+                continue
+
+            item["intermittent_power_support"].update(deepcopy(physical))
+            confirmed = bool(
+                str(physical.get("winner") or "") == "powered"
+                and physical.get("reference_discriminative") is True
+            )
+            item["intermittent_power_confirmation"] = confirmed
+            if confirmed:
+                confirmed_ids.append(mask_id)
+
+        result["intermittent_power_support_candidate_mask_ids"] = tuple(
+            sorted(set(candidate_ids))
+        )
+        result["intermittent_power_support_confirmed_mask_ids"] = tuple(
+            sorted(set(confirmed_ids))
+        )
+        result["intermittent_power_support_source"] = source
+        result["intermittent_power_support_authority"] = (
+            "f3_power_authority_current_check_relative"
+        )
+        result["intermittent_power_support_authoritative"] = bool(
+            authoritative
+        )
+        return result
 
     @classmethod
     def _display_auto_apply_reference_gate_physical_tie_breaker(
@@ -1305,6 +1412,18 @@ class DisplayAutomaticCheckF3Mixin:
                     analysis,
                     physical_evidence,
                 )
+            )
+
+        if bool(context.get("intermittent", False)):
+            intermittent_physical_evidence = (
+                self._display_auto_current_check_relative_power_evidence(
+                    frame,
+                    context,
+                )
+            )
+            analysis = self._display_auto_apply_intermittent_physical_authority(
+                analysis,
+                intermittent_physical_evidence,
             )
 
         intermittent_phase = self._display_auto_observe_intermittent_phase(
