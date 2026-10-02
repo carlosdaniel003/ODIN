@@ -662,6 +662,63 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         )
         self.assertEqual("presence:unknown", result["physical_state_key"])
 
+    def test_current_check_relative_uses_stable_comparator_not_v2_monkey_patch(self):
+        app = _App()
+        owner = authorities.F3PowerAuthority(app)
+        direct = {
+            "available": True,
+            "source": "f3_same_mask_relative_power_authority",
+            "same_mask_comparison": True,
+            "details": [
+                {
+                    "mask_id": "MASK_013",
+                    "winner": "powered",
+                    "reference_discriminative": True,
+                }
+            ],
+        }
+        unified = {
+            "available": True,
+            "source": "f3_unified_live_mask_power_authority",
+            "same_mask_comparison": True,
+            "details": [
+                {
+                    "mask_id": "MASK_013",
+                    "winner": "off",
+                    "reference_discriminative": True,
+                }
+            ],
+        }
+
+        with (
+            patch.object(
+                authorities.power_module,
+                "avaliar_evidencia_energia_check_relativa_display_f3",
+                return_value=direct,
+            ) as stable,
+            patch.object(
+                authorities.power_module,
+                "avaliar_evidencia_energia_relativa_display_f3",
+                return_value=unified,
+            ) as legacy_patched,
+        ):
+            result = owner.evaluate_current_check_relative(
+                _Frame(),
+                "CM_500_L",
+                {"check_id": "CHECK_001", "check_name": "H1"},
+            )
+
+        self.assertEqual(
+            "f3_same_mask_relative_power_authority",
+            result["source"],
+        )
+        self.assertEqual(
+            "powered",
+            result["details"][0]["winner"],
+        )
+        stable.assert_called_once()
+        legacy_patched.assert_not_called()
+
     def test_energia_confirmada_sem_alinhamento_nao_libera_ok_ng(self):
         app = _App()
         owner = authorities.F3PowerAuthority(app)
