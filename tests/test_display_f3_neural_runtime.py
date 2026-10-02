@@ -188,7 +188,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             model_path.with_suffix(".json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "model_type": "f3_segment_on_off_cnn",
                         "project_name": "DISPLAY A",
                         "input_size": 48,
