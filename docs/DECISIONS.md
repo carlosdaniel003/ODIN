@@ -3193,3 +3193,172 @@ o consumidor que produzia somente dois vetos.
 **Validação física:** pendente de reteste do BLUE correto.
 
 ---
+## D-059 — Display F3 migra a autoridade visual para Edge AI neural por segmentos
+
+**Status:** Accepted
+
+### Contexto
+
+Após a D-058, o caminho convencional do Display F3 chegou a um estado em que
+um CHECK fisicamente correto podia publicar simultaneamente:
+
+```text
+last_auto_analysis.ready=true
+last_auto_analysis.approved=true
+effective_matched_mask_count=28
+gate produtivo liberado
+```
+
+e ainda assim permanecer sem avanço. Em outras situações já observadas, a
+cadeia convencional também apresentou falsos ON por reflexo, falsos OK com
+segmento apagado, falha em transformar segmento apagado em NG, sensibilidade a
+pequenos deslocamentos da placa e perda de robustez com variação de iluminação.
+
+A continuidade por novos thresholds, vetos, probes, debounces e wrappers deixa
+de ser a direção do produto para a **decisão visual do F3**.
+
+### Decisão
+
+A autoridade visual do Display F3 será migrada, por etapas, para uma solução
+**Edge AI local**, CPU-first e sem dependência de nuvem/API paga.
+
+A unidade semântica da rede não será "foto inteira = OK/NG". O contrato alvo é:
+
+```text
+frame da câmera
+  ↓
+contorno/geometria configurados
+  ↓
+normalização/alinhamento do display
+  ↓
+detector neural de segmentos
+  ↓
+28 estados observados ON/OFF + confiança
+  ↓
+comparação determinística com mask_states do CHECK atual
+  ↓
+OK / NG / INCERTO
+  ↓
+F3StateMachineAuthority / DisplayCheckSequenceRuntime
+```
+
+A rede responde **o estado visual dos segmentos**. A sequência produtiva continua
+determinística.
+
+### Fonte de verdade já existente na configuração F3
+
+A migração deve reaproveitar o que o usuário já configura no Projeto Display:
+
+- imagem de referência de cada CHECK;
+- contorno local da placa/display;
+- geometria local das 28 máscaras/segmentos;
+- IDs estáveis `MASK_xxx`;
+- estado esperado `on/off/ignore` de cada máscara;
+- geometria live canônica de **Placa + Máscaras**;
+- ordem dos CHECKS, por exemplo H1 → BLUE → USB → AUX.
+
+Esses dados são a anotação inicial do problema. Não será introduzida exigência
+de o operador classificar produção manualmente para alimentar a IA.
+
+### Primeira etapa obrigatória
+
+A migração começa **somente pelo H1**.
+
+Critério funcional da primeira etapa:
+
+```text
+H1 esperado
++ frame live normalizado
+→ modelo publica os 28 estados observados
+
+observado == esperado
+→ H1 OK
+→ registra uma única vez
+→ avança para o próximo CHECK
+
+qualquer segmento ativo divergente
+→ H1 NG
+
+confiança insuficiente
+→ INCERTO
+→ não aprova nem reprova até obter evidência suficiente
+```
+
+BLUE, USB e AUX não serão migrados na mesma etapa. O próximo CHECK só recebe a
+autoridade neural depois de o estágio anterior ser validado fisicamente e o
+usuário autorizar a progressão.
+
+### Regra de autoridade durante a migração
+
+Quando um CHECK estiver marcado como **neural**:
+
+1. a conformidade visual produtiva pertence a uma única cadeia:
+   `NeuralSegmentDetector → F3CheckEvaluator`;
+2. o classificador visual convencional não pode aprovar, reprovar ou vetar esse
+   CHECK em paralelo;
+3. presença, captura, configuração, sequência, resultado terminal, rearme e UI
+   continuam com seus proprietários canônicos;
+4. tracking/alinhamento geométrico pode continuar como infraestrutura de pose,
+   mas não é autoridade de ON/OFF nem de OK/NG;
+5. o caminho convencional pode permanecer temporariamente apenas para CHECKS
+   ainda não migrados, sem receber novas correções algorítmicas como direção de
+   produto;
+6. após a migração física dos CHECKS, o código convencional substituído deve ser
+   auditado e removido quando ficar sem consumidores.
+
+### Treinamento e inferência
+
+Direção técnica inicial:
+
+- treinamento local/offline com ferramenta gratuita;
+- exportação do modelo para ONNX;
+- inferência produtiva com ONNX Runtime;
+- CPU-first;
+- sem LLM;
+- sem serviço cloud;
+- sem custo por inferência;
+- sem conexão obrigatória com internet;
+- modelo pequeno, com prioridade para baixa latência;
+- augmentation a partir das referências configuradas para brilho, contraste,
+  pequenos deslocamentos, rotação, escala, blur e outras variações realistas.
+
+A seleção exata da arquitetura neural será validada na etapa de protótipo. A
+documentação não fixa antecipadamente um backbone específico sem benchmark no
+hardware real.
+
+### Objetivos de robustez
+
+A nova autoridade deve ser validada contra, no mínimo:
+
+1. H1 correto com todos os segmentos esperados;
+2. H1 com um único segmento esperado ON fisicamente apagado;
+3. reflexo em região de segmento esperado OFF;
+4. pequeno deslocamento da placa/display;
+5. pequena rotação/variação de escala dentro da tolerância definida;
+6. mudança moderada de iluminação externa;
+7. repetição da mesma condição em frames consecutivos;
+8. latência compatível com o ciclo produtivo, sem travar o Tkinter.
+
+### Não fazer
+
+- não criar CNN como mais um voto dentro da cadeia convencional atual;
+- não deixar convencional + neural decidirem simultaneamente o mesmo CHECK;
+- não treinar um simples classificador "H1 foto = OK" que esconda qual segmento
+  falhou;
+- não usar foto inteira/fundo como autoridade semântica do CHECK;
+- não adicionar API paga ou inferência remota;
+- não migrar todos os CHECKS de uma vez;
+- não continuar investindo em novos thresholds/probes/vetos convencionais para
+  o H1 enquanto a etapa neural estiver em andamento.
+
+### Relação com decisões anteriores
+
+D-031 a D-058 permanecem como histórico válido do caminho convencional e como
+fonte de requisitos de segurança/regressão. Elas não obrigam a nova autoridade
+neural a reproduzir a implementação convencional.
+
+A partir desta decisão, a direção canônica para **novas correções da percepção
+visual do Display F3** é a migração neural por segmentos.
+
+**Validação física:** ainda não iniciada; próxima etapa é o protótipo neural H1.
+
