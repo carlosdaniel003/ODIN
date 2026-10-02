@@ -3167,3 +3167,124 @@ O contrato exige:
 
 **Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
 
+## 02/10/2026 — FAIL fisico: BLUE correto ficou preso em 25/28 por falso OFF ambiguo
+
+**Resultado fisico:** FAIL.
+
+### Cenario
+
+Projeto `CM_500_L`, sequencia F3 apos H1 concluido, CHECK logico
+`CHECK_002 / BLUE`, configurado como intermitente.
+
+A placa estava no suporte, energizada e visualmente no BLUE correto. Mesmo assim
+o CHECK nao foi aprovado e permaneceu em busca.
+
+### Sintoma observado
+
+A tela mostrou:
+
+    PLACA NO SUPORTE • LIGADA • ANALISANDO BLUE
+    MASCARAS • BLUE NAO CONFIRMADO • 25/28 CONFORMES
+    AUTO • BLUE • leitura incerta • continuando busca
+
+A autoridade efetiva publicou como divergentes:
+
+    MASK_021
+    MASK_023
+    MASK_024
+
+As tres eram esperadas ON, mas o classificador estrito as publicou OFF com
+confiancas proximas do limite:
+
+    MASK_021  confidence=0.5044  ON=129.7533  OFF=127.4452
+    MASK_023  confidence=0.5406  ON=5.1261    OFF=4.3409
+    MASK_024  confidence=0.5004  ON=99.2755   OFF=99.1093
+
+As regioes permaneciam muito luminosas no mesmo snapshot.
+
+### Evidencias independentes do mesmo caso
+
+O diagnostico pelo gabarito do BLUE identificou as tres como ON:
+
+    MASK_021  template_similarity=0.9164
+    MASK_023  template_similarity=0.9717
+    MASK_024  template_similarity=0.9078
+    threshold=0.8200
+
+A evidencia fisica CHECK x PLACA DESLIGADA publicou:
+
+    expected_on=18
+    powered_votes=18
+    off_votes=0
+    tie_votes=0
+
+incluindo `MASK_021`, `MASK_023` e `MASK_024` como energizadas.
+
+O runtime ja havia observado 22 amostras de fase ON, mas ainda registrava:
+
+    exact_template_veto_ids=[]
+    candidate_failed_ids=[]
+    persistent_failed_ids=[]
+
+Portanto o caso nao era um NG confirmado. O sistema ficava entre a classificacao
+estrita ambigua e a ausencia de uma evidencia auxiliar consumivel pelo runtime.
+
+### Causa identificada
+
+O veto historico de falso OFF de CHECK intermitente dependia de
+`template_similarity/template_threshold` presentes na propria linha semantica.
+A autoridade final `F3StrictMaskConformityAnalyzer` propositalmente nao usa a
+foto do CHECK atual como autoridade semantica, conforme D-038. Assim, a evidencia
+fisica positiva existia no DEBUG, mas nao chegava ao contrato de reconciliacao
+do BLUE.
+
+### Correcao aplicada
+
+Foi implementada a D-051:
+
+- a autoridade estrita continua sendo a unica classificadora semantica;
+- somente um falso OFF **ambiguo** de mascara esperada ON pode receber suporte;
+- o suporte reutiliza features ja extraidas/cached da mesma mascara:
+  LIVE + ON do CHECK atual + OFF de PLACA DESLIGADA;
+- a decisao fisica reutiliza o classificador relativo de energia ja existente;
+- ON e OFF precisam ser discriminantes;
+- o analyzer apenas anota a evidencia e preserva a classificacao bruta;
+- o runtime intermitente consome a anotacao somente durante fase ON valida;
+- um frame continua precisando fechar a fase ON completa; segmentos de frames
+  diferentes nao sao somados;
+- nenhuma aprovacao parcial 25/28 foi criada;
+- nenhum threshold global foi reduzido;
+- nenhum timer, worker, scheduler ou nova autoridade produtiva foi criado.
+
+### Protecao do defeito real
+
+O caso anteriormente validado de `MASK_024` fisicamente apagada continua
+protegido:
+
+    LIVE proximo de OFF
+    → suporte fisico nao confirma ON
+    → divergencia permanece
+    → contador de falha intermitente continua
+    → persistencia leva ao NG
+
+Tambem foi adicionada regressao em que a propria referencia ON esta escura e
+quase igual a OFF; nesse caso a comparacao fica sem poder discriminante e nao
+pode autoaprovar a mascara.
+
+### Proximo reteste fisico esperado
+
+    H1 correto
+    → avancar para BLUE
+    → BLUE correto deve fechar 28/28 e avancar
+
+Depois, regressao de seguranca:
+
+    H1 correto
+    → avancar para BLUE
+    → manter MASK_024 realmente apagada
+    → MASK_024 nao pode receber suporte ON
+    → apos persistencia deve registrar NG
+
+**Estado:** CORRECAO IMPLEMENTADA — PENDENTE DE RETESTE FISICO.
+
+---
