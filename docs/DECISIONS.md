@@ -2629,3 +2629,103 @@ Regressões automatizadas cobrem:
 **Reteste físico:** pendente.
 
 ---
+
+## D-053 — H1 reconcilia falso OFF pela prova física, sem corte de confiança semântica
+
+**Status:** Accepted
+
+### Contexto
+
+O reteste físico posterior à D-052 manteve o H1 correto preso em **27/28**.
+A única divergência foi `MASK_013`, configurada ON e fisicamente acesa, mas
+classificada OFF pelo aprendizado semântico com `confidence=0.5944`.
+
+No mesmo frame:
+
+- o gabarito exato da foto H1 reconheceu `MASK_013` como ON e fechou 28/28;
+- a comparação física direta `BOARD_OFF ↔ LIVE ↔ H1` classificou
+  `MASK_013` como `powered`;
+- a votação direta do CHECK publicou 7/7 máscaras ON como `powered`;
+- a autoridade global de energia publicou 6 ON + 1 OFF porque responde outra
+  pergunta: se existe energia física suficiente no display, usando o pool
+  aprendido de todas as máscaras discriminantes.
+
+A D-052 condicionava a consulta/reconciliação física a
+`confidence < 0.58`. Esse corte não representa uma fronteira física. A
+confiança do classificador same-mask é derivada da distância dentro do pool de
+referências aprendidas; ela pode ficar acima de 0.58 e ainda contradizer uma
+comparação física direta, independente e mais específica da mesma ROI.
+
+### Decisão
+
+O primeiro CHECK/reference gate mantém a conformidade estrita, mas o falso OFF
+`expected=ON → classified=OFF` passa a ser reconciliado pela evidência física
+same-mask sem usar um threshold de confiança semântica como gate.
+
+A regra é:
+
+1. somente o primeiro CHECK/reference gate, não intermitente, usa esta
+   reconciliação;
+2. qualquer divergência `expected=ON → classified=OFF` solicita a comparação
+   física direta pela `F3PowerAuthority`;
+3. a evidência precisa declarar explicitamente comparação da **mesma máscara**;
+4. a referência OFF continua sendo a cena independente
+   **PLACA DESLIGADA** e a referência ON é a foto do CHECK atual;
+5. OFF e ON precisam ser fisicamente discriminantes;
+6. somente `winner=powered` reconcilia a máscara para ON;
+7. `winner=off`, `tie`, evidência ausente ou referência não discriminante
+   preservam integralmente a falha semântica;
+8. a confiança semântica anterior continua registrada em telemetria, mas não
+   pode vetar uma prova física direta que cumpra os itens anteriores;
+9. máscaras esperadas OFF continuam fora dessa regra;
+10. depois da reconciliação o H1 ainda exige **100% das máscaras ativas
+    conformes no mesmo frame** para receber OK;
+11. o gabarito exato da foto do CHECK continua diagnóstico e não aprova sozinho;
+12. a autoridade global de energia continua responsável por
+    **PRESENÇA/ENERGIA**, não por arbitrar a conformidade individual do H1;
+13. nenhum timer, worker, scheduler, fila ou segunda autoridade produtiva é
+    criado.
+
+### Segurança do defeito real
+
+A retirada do corte `0.58` não transforma uma classificação semântica
+confiante em OK automaticamente.
+
+O fluxo continua sendo:
+
+```text
+expected ON + semantic OFF
+→ comparar BOARD_OFF x LIVE x ON do mesmo MASK_xxx
+
+LIVE = powered + referências discriminantes
+→ reconciliar falso OFF
+
+LIVE = off/tie OU referências não discriminantes
+→ manter OFF
+→ H1 não avança
+```
+
+Assim, um segmento realmente apagado continua protegido mesmo quando a
+classificação semântica possui confiança alta.
+
+### Relação com D-052
+
+D-053 substitui especificamente os itens da D-052 que usavam
+`confidence < 0.58` como condição para consultar/aplicar o desempate físico.
+Os demais contratos da D-052 permanecem válidos.
+
+### Validação automatizada
+
+As regressões cobrem:
+
+- reprodução de `MASK_013` com `confidence=0.5944` e prova física
+  `powered`, que passa a reconciliar;
+- integração do runtime H1 no mesmo cenário, avançando pelo fluxo oficial;
+- segmento realmente apagado com confiança semântica alta e prova física
+  `off`, que permanece falha;
+- máscaras esperadas OFF continuam impossíveis de promover por essa regra;
+- o gate rápido H1/BLUE permanece verde.
+
+**Validação física:** pendente de reteste.
+
+---
