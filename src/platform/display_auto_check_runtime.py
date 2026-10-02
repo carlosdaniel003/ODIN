@@ -73,6 +73,9 @@ class DisplayAutomaticCheckF3Mixin:
     DISPLAY_AUTO_CURRENT_CHECK_RELATIVE_POWER_SOURCE = (
         "f3_same_mask_relative_power_authority"
     )
+    DISPLAY_AUTO_CURRENT_CHECK_RELATIVE_POWER_AUTHORITY = (
+        "f3_power_authority_current_check_relative"
+    )
     # H1 não usa um corte de confiança semântica para decidir se uma divergência
     # expected=ON/classified=OFF merece verificação física. A confiança mede a
     # distância no pool aprendido; a reconciliação usa outra evidência, mais
@@ -388,13 +391,40 @@ class DisplayAutomaticCheckF3Mixin:
             >= threshold + cls.DISPLAY_AUTO_INTERMITTENT_EXACT_TEMPLATE_VETO_MARGIN
         )
 
-    @staticmethod
-    def _display_auto_physical_support_confirms_expected(item: dict) -> bool:
-        return bool(
-            str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
-            and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_OFF
-            and item.get("intermittent_power_confirmation") is True
-        )
+    @classmethod
+    def _display_auto_canonical_intermittent_physical_support_ids(
+        cls,
+        analysis: dict | None,
+    ) -> set[str]:
+        """Lê somente a lista canônica publicada pela F3PowerAuthority.
+
+        D-057 tornou a comparação BOARD_OFF/LIVE/ON da mesma máscara a única
+        autoridade física do CHECK intermitente. O consumidor não deve
+        reinterpretar campos por máscara nem aplicar confiança semântica sobre
+        essa prova independente.
+        """
+        if not isinstance(analysis, dict):
+            return set()
+        if not bool(analysis.get("intermittent_power_support_authoritative")):
+            return set()
+        if (
+            str(analysis.get("intermittent_power_support_source") or "")
+            != cls.DISPLAY_AUTO_CURRENT_CHECK_RELATIVE_POWER_SOURCE
+        ):
+            return set()
+        if (
+            str(analysis.get("intermittent_power_support_authority") or "")
+            != cls.DISPLAY_AUTO_CURRENT_CHECK_RELATIVE_POWER_AUTHORITY
+        ):
+            return set()
+        return {
+            str(mask_id)
+            for mask_id in (
+                analysis.get("intermittent_power_support_confirmed_mask_ids")
+                or ()
+            )
+            if str(mask_id)
+        }
 
     @staticmethod
     def _display_auto_apply_intermittent_exact_veto(
@@ -615,7 +645,7 @@ class DisplayAutomaticCheckF3Mixin:
         )
         result["intermittent_power_support_source"] = source
         result["intermittent_power_support_authority"] = (
-            "f3_power_authority_current_check_relative"
+            cls.DISPLAY_AUTO_CURRENT_CHECK_RELATIVE_POWER_AUTHORITY
         )
         result["intermittent_power_support_authoritative"] = bool(
             authoritative
@@ -1013,6 +1043,12 @@ class DisplayAutomaticCheckF3Mixin:
         if total <= 0:
             return {"phase": "on", "persistent_failed_ids": ()}
 
+        canonical_physical_support_ids = (
+            self._display_auto_canonical_intermittent_physical_support_ids(
+                analysis
+            )
+        )
+
         current_on_ids = set()
         for item in expected_on:
             try:
@@ -1057,6 +1093,20 @@ class DisplayAutomaticCheckF3Mixin:
                 expected = str(item.get("expected") or "")
                 if expected not in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF):
                     continue
+                classified = str(item.get("classified") or "")
+
+                # D-058: a lista canônica já foi produzida pela única
+                # autoridade física aceita (D-057). Não a rederive de campos
+                # locais nem deixe a confiança semântica vetar essa evidência.
+                if (
+                    expected == DISPLAY_CHECK_STATE_ON
+                    and classified == DISPLAY_CHECK_STATE_OFF
+                    and mask_id in canonical_physical_support_ids
+                ):
+                    counts[mask_id] = 0
+                    physical_support_veto_ids.add(mask_id)
+                    continue
+
                 try:
                     confidence = float(item.get("confidence", 0.0) or 0.0)
                 except (TypeError, ValueError):
@@ -1064,7 +1114,6 @@ class DisplayAutomaticCheckF3Mixin:
                 if confidence < DISPLAY_AUTO_MIN_CONFIDENCE:
                     continue
 
-                classified = str(item.get("classified") or "")
                 if classified == expected:
                     counts[mask_id] = 0
                     continue
@@ -1072,11 +1121,6 @@ class DisplayAutomaticCheckF3Mixin:
                 if self._display_auto_exact_template_confirms_expected(item):
                     counts[mask_id] = 0
                     exact_veto_ids.add(mask_id)
-                    continue
-
-                if self._display_auto_physical_support_confirms_expected(item):
-                    counts[mask_id] = 0
-                    physical_support_veto_ids.add(mask_id)
                     continue
 
                 counts[mask_id] = int(counts.get(mask_id, 0) or 0) + 1
