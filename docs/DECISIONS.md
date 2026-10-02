@@ -2804,3 +2804,104 @@ Os workflows específicos de câmera/zoom utilizados na correção passaram.
 **Validação física:** pendente de reteste explícito após esta correção.
 
 ---
+
+## D-055 — Reconciliação física do H1 usa primitiva estável, fora do monkey patch da energia unificada
+
+**Status:** Accepted
+
+### Contexto
+
+O reteste físico posterior à D-053 ainda deixou o H1 correto em **27/28**, com
+`MASK_013` como único falso OFF.
+
+O DEBUG do runtime mostrou:
+
+```text
+reference_gate_physical_tie_breaker_ids=[]
+reference_gate_physical_tie_breaker_source=f3_unified_live_mask_power_authority
+effective_failed_mask_ids=[MASK_013]
+```
+
+No mesmo frame, o diagnóstico direto `CHECK x PLACA DESLIGADA` publicou:
+
+```text
+expected_on=7
+powered_votes=7
+off_votes=0
+MASK_013=powered
+```
+
+Portanto D-053 estava correta no critério de reconciliação, mas o runtime não
+estava recebendo a evidência física que a decisão pressupunha.
+
+A causa foi a camada histórica de compatibilidade da autoridade de energia v2.
+Na instalação final ela substituía em runtime:
+
+```python
+power_module.avaliar_evidencia_energia_relativa_display_f3
+    = avaliar_evidencia_energia_unificada_display_f3
+```
+
+`F3PowerAuthority.evaluate_current_check_relative()` chamava exatamente esse
+símbolo substituível. Assim, a reconciliação individual do H1 recebia a
+autoridade global de energia — que marcou `MASK_013` OFF — em vez do
+comparador direto BOARD_OFF/LIVE/ON do CHECK atual.
+
+### Decisão
+
+A comparação física individual do CHECK atual passa a possuir uma primitiva
+estável e explicitamente separada da compatibilidade histórica:
+
+```text
+avaliar_evidencia_energia_check_relativa_display_f3
+```
+
+Regras:
+
+1. a primitiva estável continua pertencendo ao mesmo módulo/autoridade física;
+   não é criada uma segunda autoridade;
+2. ela compara exclusivamente a mesma máscara em
+   **BOARD_OFF ↔ LIVE ↔ foto ON do CHECK atual**;
+3. `F3PowerAuthority.evaluate_current_check_relative()` deve chamar essa
+   primitiva estável;
+4. o nome legado `avaliar_evidencia_energia_relativa_display_f3` permanece
+   disponível para os wrappers históricos e pode continuar sendo substituído
+   pela autoridade unificada v2;
+5. a fonte publicada pela primitiva estável também é fixa:
+   `f3_same_mask_relative_power_authority`;
+6. a autoridade unificada continua sendo a única verdade global de
+   presença/energia e não perde nenhum consumidor histórico;
+7. a reconciliação do H1 continua obedecendo D-053 e só altera um falso OFF
+   quando a comparação direta mesma-máscara retorna
+   `reference_discriminative=True` e `winner=powered`;
+8. nenhuma aprovação parcial, threshold novo, timer, worker, scheduler ou fila
+   é criado.
+
+### Consequência
+
+O monkey patch de compatibilidade da energia global não pode mais trocar,
+silenciosamente, a pergunta feita pela reconciliação do H1.
+
+A separação passa a ser explícita:
+
+```text
+energia global do display
+→ f3_unified_live_mask_power_authority
+
+reconciliação física de uma máscara do CHECK atual
+→ f3_same_mask_relative_power_authority
+```
+
+### Regressão obrigatória
+
+Os testes devem simular simultaneamente:
+
+- símbolo legado apontando para a autoridade unificada;
+- primitiva estável retornando `MASK_013=powered`.
+
+`F3PowerAuthority.evaluate_current_check_relative()` deve consumir somente a
+segunda.
+
+**Validação física:** pendente de reteste do H1 correto.
+
+---
