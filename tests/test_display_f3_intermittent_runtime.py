@@ -207,7 +207,7 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             "MASK_008", "MASK_009", "MASK_010", "MASK_011", "MASK_012", "MASK_013", "MASK_014",
             "MASK_015", "MASK_016", "MASK_017", "MASK_018", "MASK_019", "MASK_020", "MASK_021",
             # Quarto dígito: A,B,C,D,E,F,G. Na geometria do caso real, D é MASK_024.
-            "MASK_026", "MASK_024", "MASK_028", "MASK_024", "MASK_023", "MASK_022", "MASK_025",
+            "MASK_026", "MASK_027", "MASK_028", "MASK_024", "MASK_023", "MASK_022", "MASK_025",
         )
         expected_on = {
             # B = C,D,E,F,G
@@ -239,7 +239,7 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
                     "matched": True,
                 },
                 {
-                    "mask_id": "MASK_024",
+                    "mask_id": "MASK_027",
                     "classified": "off",
                     "matched": False,
                 },
@@ -250,16 +250,16 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             ._display_auto_publish_effective_ui_authority(analysis)
         )
         self.assertEqual(
-            {"MASK_010": "on", "MASK_024": "off"},
+            {"MASK_010": "on", "MASK_027": "off"},
             result["effective_classifications"],
         )
         self.assertEqual(
-            ("MASK_024",),
+            ("MASK_027",),
             result["effective_failed_mask_ids"],
         )
         self.assertEqual(1, result["effective_matched_mask_count"])
         self.assertEqual(
-            ("MASK_024",),
+            ("MASK_027",),
             result["effective_confirmed_failed_mask_ids"],
         )
         self.assertEqual((), result["effective_validating_mask_ids"])
