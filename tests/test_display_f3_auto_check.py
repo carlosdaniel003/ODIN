@@ -448,6 +448,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         evidence = {
             "available": True,
             "source": "f3_same_mask_relative_power_authority",
+            "same_mask_comparison": True,
             "details": [
                 {
                     "mask_id": mask_id,
@@ -483,7 +484,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                 by_id[mask_id]["reference_gate_physical_confirmation"]
             )
             self.assertEqual(
-                "reference_gate_same_mask_power_over_ambiguous_semantic",
+                "reference_gate_same_mask_power_over_false_off_semantic",
                 by_id[mask_id]["classification_source"],
             )
 
@@ -499,13 +500,14 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                     "classified": "off",
                     "matched": False,
                     "raw_matched": False,
-                    "confidence": 0.5106,
+                    "confidence": 0.95,
                 }
             ],
         }
         evidence = {
             "available": True,
             "source": "f3_same_mask_relative_power_authority",
+            "same_mask_comparison": True,
             "details": [
                 {
                     "mask_id": "MASK_020",
@@ -530,36 +532,37 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         self.assertEqual("off", result["mask_results"][0]["classified"])
         self.assertFalse(result["mask_results"][0]["matched"])
 
-    def test_h1_off_semantico_confiante_nao_e_relaxado_por_desempate(self):
+    def test_h1_false_off_05944_e_reconciliado_por_prova_fisica(self):
         analysis = {
             "ready": True,
             "approved": False,
             "reason": "check_diverge_mascara_configurada",
             "mask_results": [
                 {
-                    "mask_id": "MASK_020",
+                    "mask_id": "MASK_013",
                     "expected": "on",
                     "classified": "off",
                     "matched": False,
                     "raw_matched": False,
-                    "confidence": 0.95,
+                    "confidence": 0.5944,
                 }
             ],
         }
         evidence = {
             "available": True,
             "source": "f3_same_mask_relative_power_authority",
+            "same_mask_comparison": True,
             "details": [
                 {
-                    "mask_id": "MASK_020",
+                    "mask_id": "MASK_013",
                     "winner": "powered",
                     "reference_discriminative": True,
-                    "power_position": 0.98,
+                    "power_position": 0.99,
                 }
             ],
         }
 
-        self.assertFalse(
+        self.assertTrue(
             DisplayAutomaticCheckF3Mixin
             ._display_auto_reference_gate_needs_physical_tie_breaker(analysis)
         )
@@ -570,8 +573,24 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                 evidence,
             )
         )
-        self.assertFalse(result["approved"])
-        self.assertEqual(["MASK_020"], result["failed_mask_ids"])
+        item = result["mask_results"][0]
+
+        self.assertTrue(result["approved"])
+        self.assertEqual([], result["failed_mask_ids"])
+        self.assertEqual(
+            ("MASK_013",),
+            result["reference_gate_physical_tie_breaker_ids"],
+        )
+        self.assertEqual("on", item["classified"])
+        self.assertTrue(item["matched"])
+        self.assertEqual(
+            0.5944,
+            item["semantic_confidence_before_reference_power_reconciliation"],
+        )
+        self.assertEqual(
+            "reference_gate_same_mask_power_over_false_off_semantic",
+            item["classification_source"],
+        )
 
     def test_h1_mascara_expected_off_nunca_e_corrigida_como_on(self):
         analysis = {
@@ -592,6 +611,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         evidence = {
             "available": True,
             "source": "f3_same_mask_relative_power_authority",
+            "same_mask_comparison": True,
             "details": [
                 {
                     "mask_id": "MASK_014",
@@ -705,12 +725,12 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                         "confidence": 0.99,
                     },
                     {
-                        "mask_id": "MASK_012",
+                        "mask_id": "MASK_013",
                         "expected": "on",
                         "classified": "off",
                         "matched": False,
                         "raw_matched": False,
-                        "confidence": 0.5274,
+                        "confidence": 0.5944,
                     },
                 ],
             },
@@ -720,9 +740,10 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                 evaluate_current_check_relative=lambda *_args, **_kwargs: {
                     "available": True,
                     "source": "f3_same_mask_relative_power_authority",
+            "same_mask_comparison": True,
                     "details": [
                         {
-                            "mask_id": "MASK_012",
+                            "mask_id": "MASK_013",
                             "winner": "powered",
                             "reference_discriminative": True,
                             "power_position": 0.99,
@@ -751,7 +772,7 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         self.assertEqual([True], events)
         self.assertTrue(app._display_auto_last_analysis["approved"])
         self.assertEqual(
-            ("MASK_012",),
+            ("MASK_013",),
             app._display_auto_last_analysis[
                 "reference_gate_physical_tie_breaker_ids"
             ],
