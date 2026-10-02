@@ -206,6 +206,9 @@ class DisplayAutomaticCheckF3Mixin:
             "neural_model_type_unsupported": "Modelo neural incompatível",
             "neural_model_hash_missing": "Integridade do modelo neural não registrada",
             "neural_model_hash_mismatch": "Modelo neural não corresponde aos metadados",
+            "neural_model_not_validated_for_h1": (
+                "Modelo neural ainda não validado de forma independente no H1"
+            ),
             "neural_label_map_unsupported": "Classes do modelo neural incompatíveis",
             "neural_model_load_error": "Falha ao carregar modelo neural H1",
             "neural_inference_error": "Falha na inferência neural H1",
