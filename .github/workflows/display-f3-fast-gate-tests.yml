@@ -74,6 +74,11 @@ jobs:
           python -m unittest \
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_ui_h1_nao_julga_mascaras_antes_do_primeiro_expected_on \
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_ui_h1_libera_ok_ng_apos_primeiro_expected_on_confirmado \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_h1_desempata_falsos_off_ambiguos_com_prova_fisica_same_mask \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_h1_segmento_realmente_apagado_nao_e_resgatado \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_h1_off_semantico_confiante_nao_e_relaxado_por_desempate \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_h1_mascara_expected_off_nunca_e_corrigida_como_on \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_runtime_h1_ambiguo_usa_autoridade_fisica_e_avanca \
             -v
 
       - name: Validate blocked-gate neutral presentation
