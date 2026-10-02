@@ -2443,3 +2443,82 @@ Se o operador definiu 180° na tela de desenvolvimento, ele deve enxergar 180° 
 
 A persistência interna permanece canônica.
 
+## D-051 — CHECK intermitente reconcilia falso OFF ambiguo somente com prova fisica ON da mesma mascara
+
+**Status:** Accepted
+
+### Contexto
+
+No teste fisico de 02/10/2026, H1 foi concluido e a sequencia chegou ao BLUE
+com a placa presente e energizada. O padrao BLUE correto permaneceu, porem, em
+25/28 mascaras conformes. A autoridade estrita classificou
+`MASK_021`, `MASK_023` e `MASK_024` como OFF com confiancas proximas do
+empate, apesar de as tres regioes estarem visualmente luminosas.
+
+O DEBUG do mesmo caso mostrou duas evidencias adicionais:
+
+- o gabarito fotografico do proprio BLUE reconhecia as tres mascaras como ON;
+- a comparacao fisica da mesma mascara entre BLUE, LIVE e PLACA DESLIGADA
+  publicou 18/18 votos de energia para as mascaras esperadas ON.
+
+O runtime de CHECK intermitente ja possuia veto para falso OFF confirmado por
+template exato, mas a autoridade estrita nao publica esse metadado de template
+porque D-038 impede que a foto do proprio CHECK se torne a autoridade semantica
+que o aprova. Assim, o BLUE podia ficar indefinidamente em busca mesmo quando a
+leitura produtiva estava apenas ambigua e a mesma mascara possuia prova fisica
+de emissao.
+
+### Decisao
+
+A autoridade semantica estrita permanece inalterada. A reconciliacao passa a
+usar uma evidencia fisica auxiliar, com as seguintes restricoes:
+
+1. somente divergencias `expected=ON` e `classified=OFF` podem receber esse
+   suporte;
+2. a classificacao estrita precisa estar na faixa ambigua ja existente
+   (`confidence < F3_CHECK_PHOTO_MIN_CONFIDENCE`); uma falha OFF confiante nao
+   pode ser rebaixada por esta regra;
+3. o suporte usa exclusivamente features ja extraidas/cached da **mesma
+   MASK_xxx**:
+   - LIVE do frame em julgamento;
+   - ON da foto do CHECK logico atual;
+   - OFF da referencia PLACA DESLIGADA;
+4. a referencia ON do CHECK atual so pode ajudar quando ON e OFF sao
+   fisicamente discriminantes segundo o classificador relativo de energia ja
+   existente. Referencia ON escura ou praticamente igual ao OFF produz empate e
+   nao possui autoridade;
+5. o analyzer estrito apenas anota a evidencia. Ele nao altera seu
+   `classified`, `matched` ou `approved`;
+6. somente o runtime de CHECK **intermitente**, durante uma fase ON valida, pode
+   consumir a anotacao e reconciliar aquele falso OFF na copia efetiva do mesmo
+   frame;
+7. OFF ou empate na evidencia fisica mantem a divergencia. O contador
+   persistente e o NG continuam funcionando normalmente;
+8. a fase ON completa continua tendo que existir em **um unico frame**. Nao ha
+   soma de segmentos vistos em frames diferentes;
+9. nao foi reduzido threshold global, nao existe aprovacao 25/28 e nenhuma
+   mascara OFF esperada e transformada em ON por esta regra;
+10. nenhum timer, worker, scheduler ou segunda autoridade produtiva foi criado.
+
+### Consequencia
+
+Um BLUE correto deixa de ficar preso porque o classificador aprendido ficou
+praticamente empatado em uma mascara que a evidencia fisica da propria ROI
+confirma como energizada. Ao mesmo tempo, um segmento realmente defeituoso
+continua OFF: se LIVE permanecer proximo de PLACA DESLIGADA, nao existe suporte
+positivo e a divergencia segue para a persistencia/NG ja definida em D-031 e
+D-044.
+
+A regra preserva D-038: a foto do CHECK atual nao se autoaprova. Ela participa
+somente como extremo ON de uma comparacao fisica discriminante contra uma
+referencia OFF independente da mesma mascara.
+
+### Validacao
+
+- regressao automatica cobre falso OFF ambiguo com suporte fisico positivo;
+- regressao automatica cobre segmento realmente apagado sem suporte;
+- regressao automatica cobre referencia ON escura, que permanece sem autoridade;
+- reteste fisico do BLUE correto e do BLUE com `MASK_024` realmente apagada
+  permanece pendente.
+
+---
