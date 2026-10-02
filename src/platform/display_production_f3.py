@@ -244,6 +244,96 @@ class DisplayProductionF3Mixin:
         except Exception:
             return frame
 
+    @staticmethod
+    def _zoom_camera_hardware_ainda_aplicado_display_f3(
+        service,
+        *,
+        enabled: bool,
+        value: float,
+    ) -> bool:
+        """Valida a assinatura lógica contra o último readback real da câmera.
+
+        O driver/capture pode reinicializar CAP_PROP_ZOOM após uma renegociação
+        ou reconexão sem alterar a configuração lógica do F3. Nesse cenário a
+        assinatura antiga não pode impedir a reaplicação do zoom salvo.
+
+        Ausência de readback não é tratada como falha: preserva compatibilidade
+        com backends que não expõem o valor. Quando existe leitura explícita,
+        porém, ela tem precedência sobre a assinatura em memória.
+        """
+        if not bool(enabled) or float(value) <= 100.0001:
+            return True
+        if service is None:
+            return True
+
+        pending = getattr(
+            service,
+            "tem_configuracoes_camera_ao_vivo_pendentes",
+            None,
+        )
+        if callable(pending):
+            try:
+                if bool(pending()):
+                    return True
+            except Exception:
+                pass
+
+        reader = getattr(
+            service,
+            "obter_valores_controles_camera_ao_vivo",
+            None,
+        )
+        if not callable(reader):
+            return True
+        try:
+            values = dict(reader() or {})
+        except Exception:
+            return True
+
+        hardware_zoom = values.get("zoom")
+        if hardware_zoom is None:
+            return True
+        try:
+            hardware_zoom = float(hardware_zoom)
+        except (TypeError, ValueError):
+            return True
+
+        # Mesma tolerância usada pelo serviço de controles ao vivo para zoom.
+        return abs(hardware_zoom - float(value)) <= 1.0
+
+    def _revalidar_zoom_camera_runtime_display_f3(self) -> None:
+        """Recupera zoom físico perdido sem criar outro timer ou owner.
+
+        Só atua fora da janela CONFIGURAR, para não desfazer um ajuste ainda
+        não salvo que o operador esteja testando. Reutiliza o repaint/scheduler
+        canônico já existente do F3.
+        """
+        if not bool(getattr(self, "display_f3_ativo", False)):
+            return
+        configuracao = getattr(self, "_display_project_config_window", None)
+        if configuracao is not None:
+            try:
+                if configuracao.visible:
+                    return
+            except Exception:
+                pass
+
+        zoom = getattr(self, "_display_f3_zoom_runtime_config", None)
+        if not isinstance(zoom, dict):
+            return
+        camera_zoom = (
+            zoom.get("camera_zoom")
+            if isinstance(zoom.get("camera_zoom"), dict)
+            else {}
+        )
+        if (
+            not bool(camera_zoom.get("enabled"))
+            or float(camera_zoom.get("value", 100.0) or 100.0) <= 100.0001
+        ):
+            return
+
+        self._aplicar_zoom_camera_projeto_display_f3(zoom)
+
     def _aplicar_zoom_camera_projeto_display_f3(self, project: dict | None) -> None:
         # O Projeto Display é carregado também no startup, quando F2 pode ser o
         # único modo operacional. Nunca escreva CAP_PROP_ZOOM fora da sessão F3.
@@ -271,10 +361,17 @@ class DisplayProductionF3Mixin:
             round(center_x, 6),
             round(center_y, 6),
         )
-        if signature == self._display_f3_camera_zoom_signature:
-            return
 
         service = getattr(self, "camera_service", None)
+        if (
+            signature == self._display_f3_camera_zoom_signature
+            and self._zoom_camera_hardware_ainda_aplicado_display_f3(
+                service,
+                enabled=enabled,
+                value=value,
+            )
+        ):
+            return
         updater = getattr(service, "atualizar_configuracoes_camera_ao_vivo", None)
         if not callable(updater):
             return
@@ -1247,6 +1344,7 @@ class DisplayProductionF3Mixin:
         )
         visual_rotation = self._obter_rotacao_visual_display_f3()
         configuracao = self._display_project_config_window
+        self._revalidar_zoom_camera_runtime_display_f3()
         if configuracao is not None:
             try:
                 if configuracao.visible:
