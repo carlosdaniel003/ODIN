@@ -200,6 +200,14 @@ class DisplayAutomaticCheckF3Mixin:
             "mascara_visual_nao_encontrada": "Máscara do CHECK não encontrada",
             "mascara_invalida": "Máscara inválida para análise",
             "mascara_fora_do_frame": "Máscara fora da imagem",
+            "neural_model_missing": "Modelo neural H1 ainda não treinado",
+            "neural_model_project_mismatch": "Modelo neural pertence a outro projeto",
+            "neural_model_type_unsupported": "Modelo neural incompatível",
+            "neural_model_load_error": "Falha ao carregar modelo neural H1",
+            "neural_inference_error": "Falha na inferência neural H1",
+            "neural_output_shape_invalid": "Saída neural incompatível",
+            "neural_tensor_shape_invalid": "Entrada neural incompatível",
+            "mascara_neural_fora_do_frame": "Máscara neural fora da imagem",
         }
         return messages.get(str(reason), str(reason).replace("_", " "))
 
@@ -1446,6 +1454,7 @@ class DisplayAutomaticCheckF3Mixin:
         if (
             reference_gate
             and not bool(context.get("intermittent", False))
+            and not bool(analysis.get("neural_visual_authority"))
             and self._display_auto_reference_gate_needs_physical_tie_breaker(
                 analysis
             )
