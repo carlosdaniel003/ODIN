@@ -3085,3 +3085,110 @@ ser autoridade produtiva.
 **Validação física:** pendente de reteste do BLUE correto.
 
 ---
+
+---
+
+## D-058 — CHECK intermitente consome a lista canônica de suporte físico
+
+**Status:** Accepted
+
+### Contexto
+
+No reteste físico posterior à D-057, o BLUE correto permaneceu em 26/28 sem
+fechar NG. A D-057 já havia produzido corretamente:
+
+```text
+intermittent_power_support_confirmed_mask_ids:
+MASK_019
+MASK_021
+MASK_022
+MASK_024
+
+source=f3_same_mask_relative_power_authority
+authority=f3_power_authority_current_check_relative
+authoritative=true
+```
+
+Mesmo assim o observador da fase intermitente publicou somente:
+
+```text
+intermittent_physical_support_veto_ids:
+MASK_021
+MASK_024
+```
+
+e `MASK_019`/`MASK_022` continuaram em
+`effective_failed_mask_ids`.
+
+A autoridade física estava correta; o consumidor voltou a reinterpretar a
+evidência por campos individuais de cada máscara. Isso recriou uma segunda
+leitura da mesma decisão já fechada pela F3PowerAuthority.
+
+### Decisão
+
+A lista:
+
+```text
+intermittent_power_support_confirmed_mask_ids
+```
+
+é o contrato canônico entre o produtor D-057 e o observador da fase
+intermitente, desde que simultaneamente:
+
+```text
+intermittent_power_support_authoritative=True
+intermittent_power_support_source=f3_same_mask_relative_power_authority
+intermittent_power_support_authority=f3_power_authority_current_check_relative
+```
+
+Regras:
+
+1. o observador não rederiva suporte físico a partir de
+   `intermittent_power_confirmation` por máscara;
+2. um ID canonicamente confirmado, `expected=ON` e semanticamente `OFF`,
+   zera seu contador e entra em `physical_support_veto_ids`;
+3. essa aplicação ocorre antes do filtro de confiança semântica, preservando
+   D-056: confiança do classificador aprendido não pode vetar prova física
+   same-mask independente;
+4. campos `intermittent_power_confirmation` e
+   `intermittent_power_support` por máscara continuam disponíveis para DEBUG,
+   mas não são uma segunda autoridade produtiva;
+5. fonte incorreta, autoridade incorreta ou
+   `intermittent_power_support_authoritative=False` não concede veto;
+6. `winner=off/tie` continua fora da lista confirmada e segue o debounce de
+   falha normal;
+7. nenhuma regra de threshold, timer, worker, scheduler, fila ou autoridade é
+   adicionada.
+
+### Regressões obrigatórias
+
+```text
+canonical confirmed=[019,021,022,024]
++ campos locais de 019/022 stale ou confidence baixa
+→ physical_support_veto_ids=[019,021,022,024]
+→ nenhum falso OFF efetivo remanescente
+```
+
+e:
+
+```text
+intermittent_power_confirmation=True apenas no item
++ ausência do contrato canônico autorizado
+→ não pode vetar falha
+→ defeito segue para debounce
+```
+
+O teste integrado do BLUE também deve cobrir falso OFF com confiança semântica
+abaixo de `DISPLAY_AUTO_MIN_CONFIDENCE` e prova same-mask canônica
+`powered`.
+
+### Escopo
+
+A diferença observada entre o frame manual 550 e o snapshot produtivo 533
+permanece registrada para reteste, mas não é alterada por esta decisão. A causa
+objetiva desta etapa é a quebra do contrato entre a lista canônica já correta e
+o consumidor que produzia somente dois vetos.
+
+**Validação física:** pendente de reteste do BLUE correto.
+
+---
