@@ -3334,13 +3334,22 @@ A base neural foi dividida em duas entregas antes da validação física:
   geometrias locais e `mask_states` formam automaticamente amostras ON/OFF por
   `MASK_xxx`. O treinamento é offline e exporta ONNX no caminho associado ao
   próprio `DisplayProjectRepository`.
-- **N1.2 — runtime H1:** implementada e aguardando treinamento/reteste físico.
-  O primeiro CHECK da ordem do projeto usa `F3H1NeuralAnalyzer` +
-  `F3NeuralSegmentDetector`; as máscaras ativas são inferidas em um único
-  batch pelo OpenCV DNN. BLUE/USB/AUX continuam no analisador convencional.
+- **N1.2 — runtime H1:** implementada. O primeiro CHECK da ordem do projeto usa
+  `F3H1NeuralAnalyzer` + `F3NeuralSegmentDetector`; as máscaras ativas são
+  inferidas em um único batch pelo OpenCV DNN. BLUE/USB/AUX continuam no
+  analisador convencional.
+- **N1.3 — treino real controlado:** pipeline implementado e aguardando execução
+  sobre os arquivos locais do projeto real. O primeiro CHECK fica integralmente
+  fora do treino e é usado como validação independente; segmentos recortados da
+  mesma foto não podem aparecer simultaneamente em treino e validação. O ONNX só
+  é promovido ao caminho produtivo quando reproduz 100% das máscaras ON/OFF do
+  primeiro CHECK mantido fora do treino e o resultado OpenCV DNN é equivalente
+  ao modelo PyTorch exportado.
 - O artefato neural é **fail-closed**: modelo/metadados ausentes ou incompatíveis
   deixam o H1 indisponível e não reativam o classificador convencional como
-  fallback.
+  fallback. O runtime também exige schema de metadados N1.3, SHA-256 do ONNX e
+  evidência explícita de validação independente do primeiro CHECK antes de
+  carregar o modelo.
 - Tracking permanece somente como fonte de geometria/pose para o H1 neural. O
   desempate óptico e a reconciliação luminosa convencionais não podem alterar
   ON/OFF publicados pela CNN.
@@ -3352,8 +3361,10 @@ A base neural foi dividida em duas entregas antes da validação física:
   display ligado; uma leitura totalmente escura continua aguardando evidência
   de energia em vez de virar falso NG.
 
-**Validação física N1.2:** pendente. O próximo passo é treinar o ONNX com a
-configuração real do projeto e executar os casos físicos de aceitação do H1.
+**Validação física N1:** pendente. O próximo passo operacional é executar o
+preflight e o treino N1.3 na máquina que contém as fotos/configurações reais do
+Projeto Display. Somente depois de o artefato ser aceito pelo gate offline deve
+ser iniciado o reteste físico do H1.
 
 ### Objetivos de robustez
 
@@ -3389,5 +3400,7 @@ neural a reproduzir a implementação convencional.
 A partir desta decisão, a direção canônica para **novas correções da percepção
 visual do Display F3** é a migração neural por segmentos.
 
-**Validação física:** ainda não iniciada; próxima etapa é o protótipo neural H1.
+**Validação física:** ainda não iniciada; o protótipo neural H1 e o pipeline de
+treino N1.3 estão implementados, mas o ONNX real ainda precisa ser gerado com os
+ativos locais antes do reteste físico.
 
