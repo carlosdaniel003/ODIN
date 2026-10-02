@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import tempfile
@@ -181,6 +182,9 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                 exist_ok=True,
             )
             model_path.write_bytes(b"fake-onnx")
+            model_hash = hashlib.sha256(
+                model_path.read_bytes()
+            ).hexdigest()
             model_path.with_suffix(".json").write_text(
                 json.dumps(
                     {
@@ -188,6 +192,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                         "model_type": "f3_segment_on_off_cnn",
                         "project_name": "DISPLAY A",
                         "input_size": 48,
+                        "onnx_sha256": model_hash,
                         "labels": {
                             "off": 0,
                             "on": 1,
@@ -245,6 +250,52 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertEqual(1, loader.call_count)
             self.assertEqual(1, detector.load_count)
             self.assertEqual(2, detector.inference_count)
+
+    def test_detector_rejects_hash_mismatch_before_opencv_load(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = _repository(
+                Path(temp)
+            )
+            model_path = f3_neural_model_path_for_repository(
+                repository,
+                "DISPLAY A",
+            )
+            model_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            model_path.write_bytes(b"fake-onnx")
+            model_path.with_suffix(".json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "model_type": "f3_segment_on_off_cnn",
+                        "project_name": "DISPLAY A",
+                        "input_size": 48,
+                        "onnx_sha256": "0" * 64,
+                        "labels": {
+                            "off": 0,
+                            "on": 1,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(
+                neural_module.cv2.dnn,
+                "readNetFromONNX",
+            ) as loader:
+                status = F3NeuralSegmentDetector(
+                    repository
+                ).prepare("DISPLAY A")
+
+            self.assertFalse(status["ready"])
+            self.assertEqual(
+                "neural_model_hash_mismatch",
+                status["reason"],
+            )
+            loader.assert_not_called()
 
     def test_detector_fails_closed_when_metadata_is_missing(self):
         with tempfile.TemporaryDirectory() as temp:
