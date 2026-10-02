@@ -70,10 +70,10 @@ class DisplayAutomaticCheckF3Mixin:
     DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO = 0.55
     DISPLAY_AUTO_INTERMITTENT_OFF_PHASE_RATIO = 0.15
     DISPLAY_AUTO_INTERMITTENT_EXACT_TEMPLATE_VETO_MARGIN = 0.04
-    # O classificador same-mask considera abaixo de 0.58 uma decisão ambígua.
-    # O H1 pode desempatar SOMENTE essa faixa usando a autoridade física
-    # LIVE x BOARD_OFF x foto do próprio CHECK, sem relaxar falhas confiantes.
-    DISPLAY_AUTO_REFERENCE_GATE_AMBIGUOUS_MAX_CONFIDENCE = 0.58
+    # H1 não usa um corte de confiança semântica para decidir se uma divergência
+    # expected=ON/classified=OFF merece verificação física. A confiança mede a
+    # distância no pool aprendido; a reconciliação usa outra evidência, mais
+    # específica: LIVE x BOARD_OFF x foto do próprio CHECK na MESMA máscara.
     DISPLAY_AUTO_TRANSIENT_CHECK_NAMES = frozenset(
         {"BLUETOOTH", "BLUE", "BT"}
     )
@@ -474,28 +474,25 @@ class DisplayAutomaticCheckF3Mixin:
         cls,
         analysis: dict | None,
     ) -> bool:
-        """True somente para falso OFF semanticamente ambíguo no primeiro CHECK."""
+        """Solicita prova física para qualquer falso OFF do primeiro CHECK.
+
+        A confiança semântica não é usada como gate aqui. Ela é calculada a
+        partir do pool aprendido e pode divergir da comparação física direta da
+        mesma ROI. A correção só acontece depois, se a F3PowerAuthority provar
+        LIVE no lado ON de um par BOARD_OFF/ON fisicamente discriminante.
+        """
         if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
             return False
         if analysis.get("approved") is True:
             return False
 
-        for item in analysis.get("mask_results") or ():
-            if not isinstance(item, dict):
-                continue
-            if (
-                str(item.get("expected") or "") != DISPLAY_CHECK_STATE_ON
-                or str(item.get("classified") or "") != DISPLAY_CHECK_STATE_OFF
-                or item.get("matched") is not False
-            ):
-                continue
-            try:
-                confidence = float(item.get("confidence", 0.0) or 0.0)
-            except (TypeError, ValueError):
-                confidence = 0.0
-            if confidence < cls.DISPLAY_AUTO_REFERENCE_GATE_AMBIGUOUS_MAX_CONFIDENCE:
-                return True
-        return False
+        return any(
+            isinstance(item, dict)
+            and str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+            and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_OFF
+            and item.get("matched") is False
+            for item in (analysis.get("mask_results") or ())
+        )
 
     def _display_auto_reference_gate_relative_power_evidence(
         self,
@@ -524,11 +521,13 @@ class DisplayAutomaticCheckF3Mixin:
         analysis: dict,
         physical_evidence: dict | None,
     ) -> dict:
-        """Desempata falso OFF ambíguo do H1 com prova física da mesma máscara.
+        """Reconcilia falso OFF do H1 com prova física da mesma máscara.
 
         A foto do próprio CHECK não se autoaprova: ela é apenas o extremo ON.
-        Para haver correção, a referência BOARD_OFF independente precisa ser
-        discriminante e o LIVE atual precisa cair inequivocamente no lado ON.
+        A confiança do classificador semântico é preservada como telemetria, mas
+        não veta uma evidência física independente mais específica. Para corrigir
+        a máscara, BOARD_OFF e ON precisam ser discriminantes e o LIVE atual
+        precisa cair inequivocamente no lado ON.
         """
         result = deepcopy(analysis)
         evidence = (
@@ -536,6 +535,16 @@ class DisplayAutomaticCheckF3Mixin:
             if isinstance(physical_evidence, dict)
             else {}
         )
+        if not (
+            bool(evidence.get("available"))
+            and evidence.get("same_mask_comparison") is True
+        ):
+            result["reference_gate_physical_tie_breaker_ids"] = ()
+            result["reference_gate_physical_tie_breaker_source"] = str(
+                evidence.get("source") or ""
+            )
+            return result
+
         details_by_mask = {
             str(item.get("mask_id") or ""): item
             for item in (evidence.get("details") or ())
@@ -554,11 +563,11 @@ class DisplayAutomaticCheckF3Mixin:
                 continue
 
             try:
-                confidence = float(item.get("confidence", 0.0) or 0.0)
+                semantic_confidence = float(
+                    item.get("confidence", 0.0) or 0.0
+                )
             except (TypeError, ValueError):
-                confidence = 0.0
-            if confidence >= cls.DISPLAY_AUTO_REFERENCE_GATE_AMBIGUOUS_MAX_CONFIDENCE:
-                continue
+                semantic_confidence = 0.0
 
             mask_id = str(item.get("mask_id") or "")
             physical = details_by_mask.get(mask_id)
@@ -578,8 +587,11 @@ class DisplayAutomaticCheckF3Mixin:
             )
             item["reference_gate_physical_confirmation"] = True
             item["reference_gate_physical_evidence"] = deepcopy(physical)
+            item[
+                "semantic_confidence_before_reference_power_reconciliation"
+            ] = round(float(semantic_confidence), 4)
             item["classification_source"] = (
-                "reference_gate_same_mask_power_over_ambiguous_semantic"
+                "reference_gate_same_mask_power_over_false_off_semantic"
             )
             item["classified"] = DISPLAY_CHECK_STATE_ON
             if item.get("expected_label"):
