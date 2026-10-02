@@ -4954,3 +4954,134 @@ permanece registrada. Ela será reavaliada somente se o reteste D-058 ainda
 mostrar evidência stale.
 
 ---
+
+---
+
+## 02/10/2026 — Reteste D-058 FAIL: BLUE 28/28 não avança
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Projeto `CM_500_L`, CHECK `CHECK_002 / BLUE`, intermitente. O H1 concluiu e
+o BLUE correto foi apresentado. Visualmente os 18 segmentos esperados ON e os
+10 esperados OFF estavam corretos.
+
+A própria UI produtiva confirmou:
+
+```text
+MÁSCARAS • BLUE DETECTADO • 28/28 CONFORMES • 18 ACESOS • 10 APAGADOS
+ANÁLISE VISUAL: CHECK BLUE • máscaras 28/28
+```
+
+Mesmo assim o fluxo permaneceu em:
+
+```text
+AGUARDANDO BLUE
+AUTO • BLUE • leitura incerta • continuando busca
+```
+
+e não avançou para USB.
+
+### Evidência objetiva do DEBUG
+
+Frame manual:
+
+```text
+frame_id=708
+frame_id_estavel=SIM
+CHECK LÓGICO=BLUE
+GATE PRODUTIVO=LIBERADO
+ENERGIA DO DISPLAY=CONFIRMADA
+```
+
+O runtime produtivo observado no mesmo clique publicou:
+
+```text
+last_auto_analysis.ready=true
+last_auto_analysis.approved=true
+effective_matched_mask_count=28
+effective_failed_mask_ids=[]
+effective_confirmed_failed_mask_ids=[]
+effective_validating_mask_ids=[]
+```
+
+A D-058 funcionou no ponto que pretendia corrigir: os falsos OFF ainda presentes
+no analyzer foram reconciliados pela autoridade física canônica e o estado
+efetivo chegou a 28/28. Neste frame, `MASK_019` e `MASK_023` entraram em
+`intermittent_physical_support_veto_ids`, sem falha persistente.
+
+Apesar disso, o estado de decisão permaneceu:
+
+```text
+sequence.current_check=BLUE
+last_decision=null
+stable_frames=0
+transition_frames=0
+manual_entry_signature=null
+last_result=null
+```
+
+Também aparece no mesmo snapshot uma inconsistência diagnóstica secundária:
+
+```text
+exact_all_masks_approved=false
+positive_probe_approved=false
+positive_probe_reason=check_completo_nao_conforme
+```
+
+enquanto a análise produtiva efetiva já está 28/28 e `approved=true`. A sonda
+positiva não é autoridade produtiva no runtime canônico, mas essa divergência é
+importante para rastrear qual camada ainda está zerando/bloqueando a decisão.
+
+### Conclusão desta etapa
+
+D-058 **resolveu o bloqueio de conformidade das máscaras**, mas não resolveu o
+avanço do CHECK. O defeito mudou de estágio:
+
+```text
+ANTES:
+BLUE correto
+→ efetivo 26/28
+→ bloqueado por máscaras
+
+AGORA:
+BLUE correto
+→ efetivo 28/28
+→ gate físico liberado
+→ ainda não registra/avança
+```
+
+Portanto não deve ser aplicada uma terceira alteração algorítmica por tentativa.
+Pela regra das duas tentativas, a próxima etapa é diagnóstico do caminho final
+de decisão/registro.
+
+### Diagnóstico exigido no próximo reteste
+
+O runtime já foi instrumentado para expor, no snapshot manual:
+
+```text
+auto_last_frame_token
+auto_decision_trace
+final_stability
+final_stability_last_frame
+physical_transition_authority_status
+```
+
+O próximo DEBUG deve mostrar exatamente qual etapa entre:
+
+```text
+análise 28/28
+→ policy OK
+→ estabilidade final
+→ autoridade de transição física
+→ registrar_resultado_check_display_f3(True)
+→ check_advanced
+```
+
+está interrompendo o avanço.
+
+**Estado:** D-058 RETESTADA FISICAMENTE — FAIL PARCIAL; conformidade 28/28
+confirmada, avanço do BLUE ainda bloqueado.
+
+---
