@@ -6,10 +6,10 @@ from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 
 
 BLUE_ON_IDS = {
-    "MASK_001", "MASK_002", "MASK_005", "MASK_006", "MASK_007",
+    "MASK_001", "MASK_004", "MASK_005", "MASK_006", "MASK_007",
     "MASK_008", "MASK_009", "MASK_010", "MASK_015", "MASK_017",
     "MASK_019", "MASK_020", "MASK_021", "MASK_022", "MASK_023",
-    "MASK_025", "MASK_026", "MASK_027",
+    "MASK_024", "MASK_025", "MASK_026",
 }
 
 
@@ -96,10 +96,10 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
     def test_mask_010_falso_off_e_vetado_por_template_exato_forte(self):
         runtime = self._runtime()
         analysis = _analysis(
-            {"MASK_010", "MASK_027"},
+            {"MASK_010", "MASK_024"},
             exact_similarity={
                 "MASK_010": 0.9875,
-                "MASK_027": 0.7105,
+                "MASK_024": 0.7105,
             },
         )
         state = runtime._display_auto_observe_intermittent_phase(
@@ -110,8 +110,8 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         self.assertIn("MASK_010", state["exact_template_veto_ids"])
         self.assertNotIn("MASK_010", state["candidate_failed_ids"])
         self.assertEqual(0, state["failure_counts"]["MASK_010"])
-        self.assertIn("MASK_027", state["candidate_failed_ids"])
-        self.assertEqual(1, state["failure_counts"]["MASK_027"])
+        self.assertIn("MASK_024", state["candidate_failed_ids"])
+        self.assertEqual(1, state["failure_counts"]["MASK_024"])
 
         effective = runtime._display_auto_apply_intermittent_exact_veto(
             analysis,
@@ -124,8 +124,8 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             "off",
             by_id["MASK_010"]["learned_classified_before_exact_veto"],
         )
-        self.assertEqual("off", by_id["MASK_027"]["classified"])
-        self.assertFalse(by_id["MASK_027"]["matched"])
+        self.assertEqual("off", by_id["MASK_024"]["classified"])
+        self.assertFalse(by_id["MASK_024"]["matched"])
 
     def test_falsos_off_ambiguos_com_suporte_fisico_fecham_blue(self):
         runtime = self._runtime()
@@ -182,23 +182,23 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         self.assertNotIn("MASK_024", state["physical_support_veto_ids"])
         self.assertEqual(3, state["failure_counts"]["MASK_024"])
 
-    def test_mask_027_continua_defeito_apos_tres_fases_on(self):
+    def test_mask_024_continua_defeito_apos_tres_fases_on(self):
         runtime = self._runtime()
         state = None
         for _ in range(3):
             state = runtime._display_auto_observe_intermittent_phase(
                 {"intermittent": True},
                 _analysis(
-                    {"MASK_010", "MASK_027"},
+                    {"MASK_010", "MASK_024"},
                     exact_similarity={
                         "MASK_010": 0.9875,
-                        "MASK_027": 0.7105,
+                        "MASK_024": 0.7105,
                     },
                 ),
             )
-        self.assertEqual(("MASK_027",), state["persistent_failed_ids"])
+        self.assertEqual(("MASK_024",), state["persistent_failed_ids"])
         self.assertEqual(0, state["failure_counts"]["MASK_010"])
-        self.assertEqual(3, state["failure_counts"]["MASK_027"])
+        self.assertEqual(3, state["failure_counts"]["MASK_024"])
 
 
     def test_assinatura_4x7_decodifica_blue_com_mask_024_off_como_bluf(self):
@@ -207,7 +207,7 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             "MASK_008", "MASK_009", "MASK_010", "MASK_011", "MASK_012", "MASK_013", "MASK_014",
             "MASK_015", "MASK_016", "MASK_017", "MASK_018", "MASK_019", "MASK_020", "MASK_021",
             # Quarto dígito: A,B,C,D,E,F,G. Na geometria do caso real, D é MASK_024.
-            "MASK_026", "MASK_027", "MASK_028", "MASK_024", "MASK_023", "MASK_022", "MASK_025",
+            "MASK_026", "MASK_024", "MASK_028", "MASK_024", "MASK_023", "MASK_022", "MASK_025",
         )
         expected_on = {
             # B = C,D,E,F,G
@@ -239,7 +239,7 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
                     "matched": True,
                 },
                 {
-                    "mask_id": "MASK_027",
+                    "mask_id": "MASK_024",
                     "classified": "off",
                     "matched": False,
                 },
@@ -250,16 +250,16 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             ._display_auto_publish_effective_ui_authority(analysis)
         )
         self.assertEqual(
-            {"MASK_010": "on", "MASK_027": "off"},
+            {"MASK_010": "on", "MASK_024": "off"},
             result["effective_classifications"],
         )
         self.assertEqual(
-            ("MASK_027",),
+            ("MASK_024",),
             result["effective_failed_mask_ids"],
         )
         self.assertEqual(1, result["effective_matched_mask_count"])
         self.assertEqual(
-            ("MASK_027",),
+            ("MASK_024",),
             result["effective_confirmed_failed_mask_ids"],
         )
         self.assertEqual((), result["effective_validating_mask_ids"])
