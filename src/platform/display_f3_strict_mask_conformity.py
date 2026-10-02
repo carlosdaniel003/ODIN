@@ -25,8 +25,12 @@ import src.platform.display_f3_live_runtime_fix as live_runtime_module
 import src.platform.display_f3_mask_status as mask_status_module
 import src.platform.display_live_roi_overlay as overlay_module
 from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LOW_LIGHT
+from src.platform.display_f3_power_authority import (
+    classificar_posicao_relativa_energia_f3,
+)
 from src.platform.display_f3_same_mask_reference_fix import (
     F3SameMaskReferenceAnalyzer,
+    F3_CHECK_PHOTO_MIN_CONFIDENCE,
     F3_LOW_LIGHT_MIN_ENERGY_SPAN,
     _optical_energy,
 )
@@ -34,12 +38,18 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
 )
+from src.platform.display_visual_reference_status import (
+    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+)
 
 
 F3_STRICT_MASK_AUTHORITY = "f3_strict_cross_check_mask_states"
 F3_STRICT_FAILED_MASK_BGR = (235, 99, 37)  # #2563EB
 F3_STRICT_LOW_LIGHT_BGR = (21, 204, 250)   # #FACC15
 F3_STRICT_FAILED_FILL_ALPHA = 0.24
+F3_INTERMITTENT_POWER_SUPPORT_SOURCE = (
+    "f3_current_check_vs_board_off_same_mask_support"
+)
 
 
 def _normalized_check_id(value) -> str:
@@ -270,6 +280,151 @@ def reinjetar_on_proprio_validado_f3(
     return result
 
 
+def _feature_value(features, name: str, default=0.0) -> float:
+    if isinstance(features, dict):
+        value = features.get(name, default)
+    else:
+        value = getattr(features, name, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _assinatura_energia_mascara_f3(features) -> dict:
+    """Converte features ja extraidas para a assinatura optica da energia."""
+    return {
+        "v_mean": _feature_value(features, "v_mean"),
+        "v_p95": _feature_value(features, "v_p95"),
+        "v_p99": _feature_value(features, "v_p99"),
+        "hot_235": _feature_value(features, "percent_hot_235"),
+        "hot_245": _feature_value(features, "percent_hot_245"),
+    }
+
+
+def _referencias_suporte_intermitente_f3(
+    learning: dict | None,
+    check_id: str,
+) -> dict[str, dict]:
+    """Seleciona ON do CHECK atual e OFF real da mesma mascara para suporte fisico."""
+    data = learning if isinstance(learning, dict) else {}
+    current_check_id = _normalized_check_id(check_id)
+    by_mask = data.get("by_mask", {})
+    if not current_check_id or not isinstance(by_mask, dict):
+        return {}
+
+    result: dict[str, dict] = {}
+    for mask_id, raw_profile in by_mask.items():
+        profile = raw_profile if isinstance(raw_profile, dict) else {}
+        sources = (
+            profile.get("sources", {})
+            if isinstance(profile.get("sources"), dict)
+            else {}
+        )
+
+        on_sources = list(sources.get(DISPLAY_CHECK_STATE_ON, []) or ())
+        current_on = None
+        for index, feature in enumerate(
+            list(profile.get(DISPLAY_CHECK_STATE_ON, []) or ())
+        ):
+            source = on_sources[index] if index < len(on_sources) else {}
+            source = source if isinstance(source, dict) else {}
+            if _normalized_check_id(source.get("check_id")) == current_check_id:
+                current_on = feature
+                break
+
+        primary_off = None
+        fallback_off = None
+        off_sources = list(sources.get(DISPLAY_CHECK_STATE_OFF, []) or ())
+        for index, feature in enumerate(
+            list(profile.get(DISPLAY_CHECK_STATE_OFF, []) or ())
+        ):
+            source = off_sources[index] if index < len(off_sources) else {}
+            source = source if isinstance(source, dict) else {}
+            if str(source.get("reference_kind") or "") != (
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF
+            ):
+                continue
+            source_check_id = _normalized_check_id(source.get("check_id"))
+            if source_check_id == "BOARD_OFF":
+                primary_off = feature
+                break
+            if fallback_off is None:
+                fallback_off = feature
+
+        board_off = primary_off if primary_off is not None else fallback_off
+        if current_on is None or board_off is None:
+            continue
+        result[str(mask_id)] = {
+            "on": current_on,
+            "off": board_off,
+        }
+    return result
+
+
+def anotar_suporte_fisico_intermitente_f3(
+    analysis: dict | None,
+    references_by_mask: dict | None,
+) -> dict | None:
+    """Anota falso OFF ambiguo quando a mesma mascara prova emissao fisica.
+
+    Esta funcao nao altera classified, matched ou approved. A reconciliacao
+    continua pertencendo ao runtime de CHECK intermitente, que aplica a
+    evidencia somente na fase ON e preserva o debounce de NG.
+    """
+    if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
+        return analysis
+
+    support = references_by_mask if isinstance(references_by_mask, dict) else {}
+    confirmed_ids = []
+    for item in analysis.get("mask_results") or ():
+        if not isinstance(item, dict):
+            continue
+        if (
+            str(item.get("expected") or "") != DISPLAY_CHECK_STATE_ON
+            or str(item.get("classified") or "") != DISPLAY_CHECK_STATE_OFF
+        ):
+            continue
+
+        try:
+            confidence = float(item.get("confidence", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence >= float(F3_CHECK_PHOTO_MIN_CONFIDENCE):
+            continue
+
+        mask_id = str(item.get("mask_id") or "")
+        refs = support.get(mask_id)
+        features = item.get("features")
+        if not mask_id or not isinstance(refs, dict) or features is None:
+            continue
+
+        evidence = classificar_posicao_relativa_energia_f3(
+            _assinatura_energia_mascara_f3(features),
+            _assinatura_energia_mascara_f3(refs.get("off")),
+            _assinatura_energia_mascara_f3(refs.get("on")),
+        )
+        if not isinstance(evidence, dict):
+            continue
+
+        item["intermittent_power_support"] = {
+            "source": F3_INTERMITTENT_POWER_SUPPORT_SOURCE,
+            **evidence,
+        }
+        confirmed = str(evidence.get("winner") or "") == "powered"
+        item["intermittent_power_confirmation"] = bool(confirmed)
+        if confirmed:
+            confirmed_ids.append(mask_id)
+
+    analysis["intermittent_power_support_confirmed_mask_ids"] = tuple(
+        sorted(set(confirmed_ids))
+    )
+    analysis["intermittent_power_support_source"] = (
+        F3_INTERMITTENT_POWER_SUPPORT_SOURCE
+    )
+    return analysis
+
+
 def resumir_falhas_mascaras_f3(analysis: dict | None) -> dict:
     data = analysis if isinstance(analysis, dict) else {}
     results = [
@@ -329,6 +484,7 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
     def __init__(self, repository) -> None:
         self._strict_current_check_id = ""
         self._strict_validated_self_on_mask_ids = ()
+        self._strict_intermittent_support_by_mask = {}
         super().__init__(repository)
 
     def _check_photo_learning(
@@ -343,6 +499,12 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
             project,
             masks,
             visual_rotation,
+        )
+        self._strict_intermittent_support_by_mask = (
+            _referencias_suporte_intermitente_f3(
+                global_learning,
+                self._strict_current_check_id,
+            )
         )
         filtered_learning = filtrar_aprendizado_sem_check_atual_f3(
             global_learning,
@@ -375,9 +537,16 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
             "_strict_validated_self_on_mask_ids",
             (),
         )
+        previous_support = getattr(
+            self,
+            "_strict_intermittent_support_by_mask",
+            {},
+        )
         self._strict_current_check_id = _normalized_check_id(check_id)
         self._strict_validated_self_on_mask_ids = ()
+        self._strict_intermittent_support_by_mask = {}
         validated_self_on_mask_ids = ()
+        intermittent_support_by_mask = {}
         try:
             analysis = super().analyze(
                 frame=frame,
@@ -391,9 +560,13 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
             validated_self_on_mask_ids = tuple(
                 self._strict_validated_self_on_mask_ids or ()
             )
+            intermittent_support_by_mask = dict(
+                self._strict_intermittent_support_by_mask or {}
+            )
         finally:
             self._strict_current_check_id = previous
             self._strict_validated_self_on_mask_ids = previous_validated
+            self._strict_intermittent_support_by_mask = previous_support
 
         if not isinstance(analysis, dict):
             return analysis
@@ -414,6 +587,10 @@ class F3StrictMaskConformityAnalyzer(F3SameMaskReferenceAnalyzer):
         if not bool(analysis.get("ready")):
             return analysis
 
+        analysis = anotar_suporte_fisico_intermitente_f3(
+            analysis,
+            intermittent_support_by_mask,
+        )
         summary = resumir_falhas_mascaras_f3(analysis)
         analysis.update(summary)
 
