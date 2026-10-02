@@ -39,7 +39,21 @@ def _analysis(
                 "intermittent_power_confirmation": mask_id in physical_support,
             }
         )
-    return {"ready": True, "mask_results": rows}
+    analysis = {"ready": True, "mask_results": rows}
+    if physical_support:
+        analysis.update(
+            intermittent_power_support_confirmed_mask_ids=tuple(
+                sorted(physical_support)
+            ),
+            intermittent_power_support_source=(
+                "f3_same_mask_relative_power_authority"
+            ),
+            intermittent_power_support_authority=(
+                "f3_power_authority_current_check_relative"
+            ),
+            intermittent_power_support_authoritative=True,
+        )
+    return analysis
 
 
 class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
@@ -168,6 +182,71 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             tuple(sorted(false_off_ids)),
             effective["intermittent_physical_support_veto_ids"],
         )
+
+    def test_lista_canonica_corrige_todos_os_falsos_off_mesmo_com_item_stale(self):
+        runtime = self._runtime()
+        false_off_ids = {
+            "MASK_019",
+            "MASK_021",
+            "MASK_022",
+            "MASK_024",
+        }
+        analysis = _analysis(
+            false_off_ids,
+            physical_support=false_off_ids,
+        )
+
+        # Reproduz o FAIL físico D-057: o produtor canônico já confirmou os
+        # quatro IDs, mas campos locais podem chegar defasados/inconsistentes.
+        by_id = {
+            item["mask_id"]: item
+            for item in analysis["mask_results"]
+        }
+        by_id["MASK_019"]["intermittent_power_confirmation"] = False
+        by_id["MASK_022"]["intermittent_power_confirmation"] = False
+        by_id["MASK_019"]["confidence"] = 0.49
+        by_id["MASK_022"]["confidence"] = 0.49
+
+        state = runtime._display_auto_observe_intermittent_phase(
+            {"intermittent": True},
+            analysis,
+        )
+
+        self.assertEqual("on", state["phase"])
+        self.assertEqual(
+            tuple(sorted(false_off_ids)),
+            state["physical_support_veto_ids"],
+        )
+        self.assertEqual((), state["candidate_failed_ids"])
+        self.assertEqual((), state["persistent_failed_ids"])
+
+        effective = runtime._display_auto_apply_intermittent_exact_veto(
+            analysis,
+            state,
+        )
+        self.assertTrue(effective["approved"])
+        self.assertEqual(28, effective["matched_mask_count"])
+
+    def test_campo_local_sem_lista_canonica_nao_tem_autoridade_produtiva(self):
+        runtime = self._runtime()
+        analysis = _analysis({"MASK_024"})
+        item = next(
+            row
+            for row in analysis["mask_results"]
+            if row["mask_id"] == "MASK_024"
+        )
+        item["intermittent_power_confirmation"] = True
+
+        state = None
+        for _ in range(3):
+            state = runtime._display_auto_observe_intermittent_phase(
+                {"intermittent": True},
+                analysis,
+            )
+
+        self.assertNotIn("MASK_024", state["physical_support_veto_ids"])
+        self.assertIn("MASK_024", state["persistent_failed_ids"])
+        self.assertEqual(3, state["failure_counts"]["MASK_024"])
 
     def test_defeito_real_sem_suporte_fisico_continua_persistente(self):
         runtime = self._runtime()
