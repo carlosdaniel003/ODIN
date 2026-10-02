@@ -386,13 +386,11 @@ def anotar_suporte_fisico_intermitente_f3(
         ):
             continue
 
-        try:
-            confidence = float(item.get("confidence", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            confidence = 0.0
-        if confidence >= float(F3_CHECK_PHOTO_MIN_CONFIDENCE):
-            continue
-
+        # A confiança semântica não veta a prova física same-mask.
+        # Ela mede proximidade no pool aprendido e pode discordar da emissão
+        # física direta da mesma ROI. O desempate continua seguro porque exige
+        # um par ON/OFF fisicamente discriminante e winner=powered; quando o
+        # segmento realmente está apagado, a evidência continua OFF/tie.
         mask_id = str(item.get("mask_id") or "")
         refs = support.get(mask_id)
         features = item.get("features")
