@@ -21,6 +21,7 @@ autoridade de decisão bloqueada até o CHECK atual possuir evidência própria.
 
 from copy import deepcopy
 
+import src.platform.display_auto_check_runtime as runtime_module
 import src.platform.display_f3_live_diagnostic_trace as trace_module
 import src.platform.display_f3_operational_status as operational_module
 import src.platform.display_f3_physical_learning_policy as physical_policy_module
@@ -151,6 +152,21 @@ def preparar_gate_decisao_sonda_exata_f3(
         "analysis_fully_confirmed": analise_confirma_check_integralmente_f3(analysis),
     }
     app._display_f3_exact_decision_bridge_last = info
+
+    # O bridge histórico nunca recebe autoridade sobre o primeiro CHECK neural.
+    # Isso vale inclusive antes de F3RuntimeAuthorities ser instalado.
+    if (
+        _is_reference_gate(app, context)
+        and bool(
+            getattr(
+                runtime_module,
+                "_display_f3_h1_neural_authority",
+                False,
+            )
+        )
+    ):
+        info["blocked_reason"] = "h1_neural_owns_check_decision"
+        return False
 
     # No produto final a decisão pertence ao F3CheckAnalyzerAuthority. Este
     # bridge continua apenas para composições legadas/testes sem a autoridade
