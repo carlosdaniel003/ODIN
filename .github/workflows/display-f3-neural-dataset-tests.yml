@@ -1,0 +1,40 @@
+name: Display F3 neural dataset tests
+
+on:
+  push:
+    branches:
+      - display
+  workflow_dispatch:
+
+jobs:
+  display-f3-neural-dataset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install opencv-python-headless numpy Pillow
+
+      - name: Compile neural dataset and training pipeline
+        run: |
+          python -m py_compile \
+            src/platform/display_f3_neural_dataset.py \
+            scripts/treinar_f3_segmentos_neural.py \
+            tests/test_display_f3_neural_dataset.py
+
+      - name: Run neural dataset tests
+        run: |
+          python -m unittest \
+            tests.test_display_f3_neural_dataset \
+            -v
