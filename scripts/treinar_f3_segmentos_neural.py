@@ -120,31 +120,26 @@ def _resolve_validation_check(
                 return check_id, check_name
         return None
 
-    # N1 é deliberadamente o primeiro CHECK da ordem configurada. Não dependemos
-    # do nome literal H1 para permitir projetos com nomes customizados.
-    for check in checks:
-        if not isinstance(check, dict):
-            continue
-        check_id = str(check.get("id") or "").strip()
-        if check_id in available:
-            return (
-                check_id,
-                str(check.get("name") or check_id).strip(),
-            )
-
-    first_id = next(iter(sorted(available)))
-    first_name = str(
-        next(
-            (
-                item.get("check_name")
-                for item in samples
-                if str(item.get("check_id") or "").strip() == first_id
-            ),
-            first_id,
-        )
-        or first_id
+    # N1 é deliberadamente o primeiro CHECK da ordem configurada. Se ele não
+    # possui foto/amostras, o preflight deve falhar; nunca deslocamos
+    # silenciosamente a validação para BLUE/USB/AUX.
+    first = next(
+        (
+            check
+            for check in checks
+            if isinstance(check, dict)
+            and str(check.get("id") or "").strip()
+        ),
+        None,
     )
-    return first_id, first_name
+    if isinstance(first, dict):
+        first_id = str(first.get("id") or "").strip()
+        first_name = str(first.get("name") or first_id).strip()
+        if first_id in available:
+            return first_id, first_name
+        return None
+
+    return None
 
 
 def preparar_preflight(
@@ -184,7 +179,7 @@ def preparar_preflight(
         report["reason"] = (
             "validation_check_not_found"
             if validation_check
-            else "validation_check_unavailable"
+            else "first_check_reference_missing"
         )
         return dataset, report, [], []
 
@@ -194,10 +189,11 @@ def preparar_preflight(
         for index, item in enumerate(samples)
         if str(item.get("check_id") or "").strip() == validation_check_id
     ]
+    val_set = set(val_indices)
     train_indices = [
         index
         for index in range(len(samples))
-        if index not in set(val_indices)
+        if index not in val_set
     ]
 
     report.update(
