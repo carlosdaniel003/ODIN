@@ -1,0 +1,540 @@
+from __future__ import annotations
+
+import inspect
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+import numpy as np
+
+import src.platform.display_auto_check_runtime as runtime_module
+import src.platform.display_f3_live_diagnostic_trace as trace_module
+import src.platform.display_f3_neural_runtime as neural_module
+from src.platform.desktop_production_app import DesktopProductionApp
+from src.platform.display_auto_check_policy import (
+    decidir_analise_display_f3,
+)
+from src.platform.display_f3_neural_dataset import (
+    f3_neural_model_path_for_repository,
+)
+from src.platform.display_f3_neural_runtime import (
+    F3H1NeuralAnalyzer,
+    F3NeuralSegmentDetector,
+)
+from src.platform.display_f3_runtime_authorities import (
+    F3CheckAnalyzerAuthority,
+)
+from src.platform.display_f3_same_mask_reference_fix import (
+    F3SameMaskReferenceAnalyzer,
+)
+from src.platform.display_project_repository import (
+    DisplayProjectRepository,
+)
+
+
+def _frame() -> np.ndarray:
+    image = np.full((96, 160, 3), 18, dtype=np.uint8)
+    image[34:62, 28:56] = 230
+    image[34:62, 104:132] = 26
+    return image
+
+
+def _repository(root: Path):
+    repository = DisplayProjectRepository(
+        root / "odin_display_projects.json"
+    )
+    assert repository.adicionar_projeto(
+        "DISPLAY A",
+        (160, 96),
+    )
+    masks = [
+        {
+            "id": "MASK_001",
+            "type": "segment",
+            "cx": 42,
+            "cy": 48,
+            "width": 28,
+            "height": 16,
+            "angle": 0.0,
+        },
+        {
+            "id": "MASK_002",
+            "type": "segment",
+            "cx": 118,
+            "cy": 48,
+            "width": 28,
+            "height": 16,
+            "angle": 0.0,
+        },
+    ]
+    assert repository.salvar_mascaras(
+        "DISPLAY A",
+        masks,
+    )
+    checks = repository.listar_checks(
+        "DISPLAY A"
+    )
+    h1, blue = checks[0], checks[1]
+    assert repository.salvar_estados_check(
+        "DISPLAY A",
+        h1["id"],
+        {
+            "MASK_001": "on",
+            "MASK_002": "off",
+        },
+    )
+    assert repository.salvar_estados_check(
+        "DISPLAY A",
+        blue["id"],
+        {
+            "MASK_001": "off",
+            "MASK_002": "on",
+        },
+    )
+    return repository, h1, blue
+
+
+def _ready_model_status():
+    return {
+        "ready": True,
+        "reason": "neural_model_ready",
+        "project_name": "DISPLAY A",
+        "model_path": "/tmp/display_a_segments.onnx",
+        "metadata_path": "/tmp/display_a_segments.json",
+        "model_type": "f3_segment_on_off_cnn",
+        "input_size": 48,
+        "on_min_on_probability": 0.80,
+        "off_max_on_probability": 0.20,
+        "load_count": 1,
+    }
+
+
+def _inference(states):
+    observations = []
+    for index, state in enumerate(states):
+        if state == "on":
+            probabilities = {"off": 0.02, "on": 0.98}
+        elif state == "off":
+            probabilities = {"off": 0.97, "on": 0.03}
+        else:
+            probabilities = {"off": 0.46, "on": 0.54}
+        observations.append(
+            {
+                "index": index,
+                "state": state,
+                "certain": state != "uncertain",
+                "confidence": max(probabilities.values()),
+                "probabilities": probabilities,
+                "logits": [0.0, 0.0],
+            }
+        )
+    return {
+        **_ready_model_status(),
+        "ready": True,
+        "reason": "neural_inference_ready",
+        "batch_size": len(observations),
+        "inference_count": 1,
+        "observations": observations,
+    }
+
+
+class _FakeNet:
+    def __init__(self):
+        self.inputs = []
+        self.forward_count = 0
+
+    def setInput(self, value):
+        self.inputs.append(np.asarray(value).copy())
+
+    def forward(self):
+        self.forward_count += 1
+        batch = int(self.inputs[-1].shape[0])
+        base = np.asarray(
+            [
+                [-3.0, 3.0],
+                [3.0, -3.0],
+            ],
+            dtype=np.float32,
+        )
+        if batch <= 2:
+            return base[:batch]
+        return np.vstack(
+            [base[index % 2] for index in range(batch)]
+        )
+
+
+class DisplayF3NeuralRuntimeTests(unittest.TestCase):
+    def test_detector_loads_onnx_once_and_infers_all_segments_as_one_batch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = _repository(
+                Path(temp)
+            )
+            model_path = f3_neural_model_path_for_repository(
+                repository,
+                "DISPLAY A",
+            )
+            model_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            model_path.write_bytes(b"fake-onnx")
+            model_path.with_suffix(".json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "model_type": "f3_segment_on_off_cnn",
+                        "project_name": "DISPLAY A",
+                        "input_size": 48,
+                        "labels": {
+                            "off": 0,
+                            "on": 1,
+                        },
+                        "suggested_thresholds": {
+                            "off_max_on_probability": 0.20,
+                            "on_min_on_probability": 0.80,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            network = _FakeNet()
+            with patch.object(
+                neural_module.cv2.dnn,
+                "readNetFromONNX",
+                return_value=network,
+            ) as loader:
+                detector = F3NeuralSegmentDetector(
+                    repository
+                )
+                tensors = [
+                    np.zeros(
+                        (4, 48, 48),
+                        dtype=np.float32,
+                    ),
+                    np.zeros(
+                        (4, 48, 48),
+                        dtype=np.float32,
+                    ),
+                ]
+
+                first = detector.predict(
+                    "DISPLAY A",
+                    tensors,
+                )
+                second = detector.predict(
+                    "DISPLAY A",
+                    tensors,
+                )
+
+            self.assertTrue(first["ready"])
+            self.assertTrue(second["ready"])
+            self.assertEqual(
+                ["on", "off"],
+                [
+                    item["state"]
+                    for item in first["observations"]
+                ],
+            )
+            self.assertEqual(
+                (2, 4, 48, 48),
+                network.inputs[0].shape,
+            )
+            self.assertEqual(1, loader.call_count)
+            self.assertEqual(1, detector.load_count)
+            self.assertEqual(2, detector.inference_count)
+
+    def test_detector_fails_closed_when_metadata_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = _repository(
+                Path(temp)
+            )
+            model_path = f3_neural_model_path_for_repository(
+                repository,
+                "DISPLAY A",
+            )
+            model_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            model_path.write_bytes(b"fake-onnx")
+
+            with patch.object(
+                neural_module.cv2.dnn,
+                "readNetFromONNX",
+            ) as loader:
+                status = F3NeuralSegmentDetector(
+                    repository
+                ).prepare("DISPLAY A")
+
+            self.assertFalse(status["ready"])
+            self.assertEqual(
+                "neural_metadata_missing",
+                status["reason"],
+            )
+            loader.assert_not_called()
+
+    def test_first_check_uses_neural_batch_as_only_visual_authority(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(
+                Path(temp)
+            )
+            analyzer = F3H1NeuralAnalyzer(
+                repository
+            )
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(
+                    ["on", "off"]
+                )
+            )
+
+            result = analyzer.analyze(
+                _frame(),
+                "DISPLAY A",
+                h1["id"],
+            )
+
+            self.assertTrue(result["ready"])
+            self.assertTrue(result["approved"])
+            self.assertEqual(2, result["active_mask_count"])
+            self.assertEqual(2, result["matched_mask_count"])
+            self.assertEqual(0, result["uncertain_mask_count"])
+            self.assertTrue(result["neural_visual_authority"])
+            self.assertFalse(
+                result["conventional_visual_authority_used"]
+            )
+            self.assertEqual(
+                neural_module.F3_H1_NEURAL_AUTHORITY,
+                result["reference_authority"],
+            )
+            analyzer.neural_detector.predict.assert_called_once()
+            batch = analyzer.neural_detector.predict.call_args.args[1]
+            self.assertEqual(2, len(batch))
+            self.assertTrue(
+                all(
+                    item.shape == (4, 48, 48)
+                    for item in batch
+                )
+            )
+
+    def test_missing_h1_model_never_falls_back_to_conventional_analyzer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(
+                Path(temp)
+            )
+            analyzer = F3H1NeuralAnalyzer(
+                repository
+            )
+            analyzer.neural_detector.prepare = Mock(
+                return_value={
+                    "ready": False,
+                    "reason": "neural_model_missing",
+                }
+            )
+
+            with patch.object(
+                F3SameMaskReferenceAnalyzer,
+                "analyze",
+                side_effect=AssertionError(
+                    "H1 neural must not call conventional analyzer"
+                ),
+            ) as conventional:
+                result = analyzer.analyze(
+                    _frame(),
+                    "DISPLAY A",
+                    h1["id"],
+                )
+
+            self.assertFalse(result["ready"])
+            self.assertIsNone(result["approved"])
+            self.assertEqual(
+                "neural_model_missing",
+                result["reason"],
+            )
+            self.assertTrue(result["neural_visual_authority"])
+            conventional.assert_not_called()
+
+    def test_non_migrated_blue_still_delegates_to_conventional_analyzer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, blue = _repository(
+                Path(temp)
+            )
+            analyzer = F3H1NeuralAnalyzer(
+                repository
+            )
+            expected = {
+                "ready": True,
+                "approved": True,
+                "source": "conventional-blue",
+            }
+            with patch.object(
+                F3SameMaskReferenceAnalyzer,
+                "analyze",
+                return_value=expected,
+            ) as conventional:
+                result = analyzer.analyze(
+                    _frame(),
+                    "DISPLAY A",
+                    blue["id"],
+                )
+
+            self.assertIs(expected, result)
+            conventional.assert_called_once()
+
+    def test_neural_h1_divergence_can_emit_ng_but_uncertain_cannot(self):
+        divergent = {
+            "ready": True,
+            "approved": False,
+            "neural_visual_authority": True,
+            "neural_check_scope": "first_check_only",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                    "confidence": 0.98,
+                    "neural_certain": True,
+                },
+                {
+                    "mask_id": "MASK_002",
+                    "expected": "off",
+                    "classified": "on",
+                    "matched": False,
+                    "confidence": 0.97,
+                    "neural_certain": True,
+                },
+            ],
+        }
+        decision = decidir_analise_display_f3(
+            divergent,
+            reference_gate=True,
+        )
+        self.assertEqual("ng", decision["decision"])
+        self.assertEqual(
+            "h1_neural_divergencia_confirmada",
+            decision["reason"],
+        )
+        self.assertEqual(
+            "MASK_002",
+            decision["failed_mask_id"],
+        )
+
+        uncertain = {
+            **divergent,
+            "mask_results": [
+                divergent["mask_results"][0],
+                {
+                    "mask_id": "MASK_002",
+                    "expected": "off",
+                    "classified": "uncertain",
+                    "matched": None,
+                    "confidence": 0.56,
+                    "neural_certain": False,
+                },
+            ],
+        }
+        decision = decidir_analise_display_f3(
+            uncertain,
+            reference_gate=True,
+        )
+        self.assertEqual(
+            "searching",
+            decision["decision"],
+        )
+        self.assertEqual(
+            "classificacao_neural_incerta",
+            decision["reason"],
+        )
+
+    def test_canonical_check_authority_embeds_neural_semantic_analyzer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = _repository(
+                Path(temp)
+            )
+            app = SimpleNamespace(
+                display_project_repository=repository,
+            )
+            owner = F3CheckAnalyzerAuthority(app)
+
+            self.assertIsInstance(
+                owner.analyzer.semantic,
+                F3H1NeuralAnalyzer,
+            )
+
+    def test_exact_probe_is_observer_only_for_migrated_first_check(self):
+        old = getattr(
+            runtime_module,
+            "_display_f3_h1_neural_authority",
+            None,
+        )
+        runtime_module._display_f3_h1_neural_authority = True
+        try:
+            result = trace_module._advance_positive_probe_if_needed(
+                SimpleNamespace(),
+                {
+                    "project_name": "DISPLAY A",
+                    "check_id": "CHECK_001",
+                    "check_name": "H1",
+                    "current_index": 0,
+                },
+                {"ready": True, "approved": True},
+                {"confirm": True},
+            )
+        finally:
+            if old is None:
+                try:
+                    delattr(
+                        runtime_module,
+                        "_display_f3_h1_neural_authority",
+                    )
+                except AttributeError:
+                    pass
+            else:
+                runtime_module._display_f3_h1_neural_authority = old
+
+        self.assertFalse(result["advanced"])
+        self.assertTrue(result["observer_only"])
+        self.assertEqual(
+            "h1_neural_owns_check_decision",
+            result["reason"],
+        )
+
+    def test_bootstrap_installs_neural_authority_after_conventional_layers(self):
+        source = inspect.getsource(
+            DesktopProductionApp.__init__
+        )
+        neural_position = source.index(
+            "instalar_autoridade_neural_h1_display_f3()"
+        )
+        photo_position = source.index(
+            "instalar_aprendizado_foto_check_display_f3()"
+        )
+        power_position = source.index(
+            "instalar_autoridade_energia_final_display_f3()"
+        )
+        super_position = source.index(
+            "super().__init__(root)"
+        )
+
+        self.assertGreater(
+            neural_position,
+            photo_position,
+        )
+        self.assertGreater(
+            neural_position,
+            power_position,
+        )
+        self.assertLess(
+            neural_position,
+            super_position,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
