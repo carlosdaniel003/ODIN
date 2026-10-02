@@ -3577,3 +3577,148 @@ H1 com um segmento esperado ON realmente apagado
 **Estado:** FAIL FÍSICO REGISTRADO — D-052 AINDA NÃO VALIDADA FISICAMENTE PARA H1 — PENDENTE DE DIAGNÓSTICO/CORREÇÃO.
 
 ---
+
+## 02/10/2026 — Correção após FAIL H1 27/28: MASK_013 passa a usar reconciliação física sem corte 0.58
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+### Evidência que motivou a correção
+
+No reteste anterior, H1 estava fisicamente correto mas ficou em 27/28 por
+`MASK_013`.
+
+O frame congelado mostrou simultaneamente:
+
+```text
+MASK_013 semântico:
+expected=ON
+classified=OFF
+confidence=0.5944
+
+gabarito exato H1:
+MASK_013=ON
+H1=28/28
+
+comparação física CHECK x PLACA DESLIGADA:
+MASK_013=powered
+powered_votes=7
+off_votes=0
+tie_votes=0
+```
+
+A D-052 não reconciliou o falso OFF porque consultava/aplicava a prova física
+somente quando a confiança semântica era menor que `0.58`.
+
+### Causa confirmada no código
+
+O bloqueio não estava na captura, no gate de presença, na energia geral nem na
+falta de emissão de `MASK_013`.
+
+O runtime continha um corte fixo:
+
+```text
+semantic confidence < 0.58
+→ consultar/aplicar reconciliação física
+
+semantic confidence >= 0.58
+→ não consultar/reconciliar
+```
+
+A confiança `0.5944` vem da distância no pool aprendido e não é uma medida
+física independente de emissão. Por isso ela não pode ser usada para impedir a
+comparação direta da mesma ROI quando existe uma referência OFF independente.
+
+Também foi esclarecida a divergência observada no DEBUG:
+
+- `current_check_power_mask_evidence` pertence à autoridade global de energia e
+  decide se há energia suficiente no display;
+- `CHECK x PLACA DESLIGADA` compara diretamente a mesma `MASK_xxx` entre
+  BOARD_OFF, LIVE e foto ON do CHECK atual;
+- para reconciliar um falso OFF individual do H1, a segunda evidência é a
+  específica para essa pergunta;
+- a autoridade global de energia continua intacta e não passa a decidir
+  conformidade de máscara.
+
+### Correção aplicada — D-053
+
+Foi removido o corte de confiança semântica da reconciliação física do primeiro
+CHECK.
+
+Agora:
+
+```text
+H1 / reference gate
++ expected=ON
++ classified=OFF
+→ solicitar prova física same-mask
+
+prova disponível
++ same_mask_comparison=True
++ referência ON/OFF discriminante
++ winner=powered
+→ reconciliar para ON
+
+winner=off/tie
+OU referência não discriminante
+OU evidência ausente
+→ preservar OFF
+```
+
+A confiança semântica anterior continua registrada em telemetria para DEBUG, mas
+não funciona mais como veto da prova física.
+
+O H1 continua exigindo 28/28 no mesmo frame. Nenhuma aprovação parcial foi
+criada.
+
+### Proteções mantidas
+
+- máscara esperada OFF não participa da reconciliação;
+- segmento realmente apagado continua OFF mesmo com confiança semântica alta;
+- foto do próprio H1 não aprova sozinha;
+- BOARD_OFF independente continua obrigatório para a prova relativa;
+- referência ON/OFF não discriminante não possui autoridade;
+- nenhum threshold global de ON/OFF foi reduzido;
+- nenhum timer, worker, scheduler ou fila foi adicionado.
+
+### Regressões automatizadas
+
+Foram adicionadas/ajustadas regressões para reproduzir exatamente:
+
+```text
+MASK_013
+confidence=0.5944
+semantic=OFF
+physical=powered
+→ reconciliada ON
+```
+
+Também foi mantido o teste oposto:
+
+```text
+expected=ON
+semantic=OFF com confidence=0.95
+physical=off
+→ continua OFF
+→ H1 não aprova
+```
+
+O workflow **Display F3 fast H1 BLUE tests** passou no HEAD da correção.
+
+Os workflows que permanecem vermelhos no repositório são os mesmos que já
+falhavam no commit imediatamente anterior a esta mudança; não foram introduzidos
+por esta correção.
+
+### Próximo reteste físico
+
+```text
+apresentar H1 correto
+→ 7 segmentos ON devem ser reconhecidos
+→ MASK_013 não deve permanecer OFF
+→ H1 deve fechar 28/28
+→ avançar para BLUE
+```
+
+Depois do PASS, repetir o teste de segurança com um segmento H1 esperado ON
+realmente apagado. O H1 não pode avançar nesse cenário.
+
+---
