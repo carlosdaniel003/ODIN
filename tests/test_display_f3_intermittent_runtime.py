@@ -16,9 +16,11 @@ BLUE_ON_IDS = {
 def _analysis(
     missing: set[str] | None = None,
     exact_similarity: dict[str, float] | None = None,
+    physical_support: set[str] | None = None,
 ):
     missing = set(missing or set())
     exact_similarity = dict(exact_similarity or {})
+    physical_support = set(physical_support or set())
     rows = []
     for index in range(1, 29):
         mask_id = f"MASK_{index:03d}"
@@ -34,6 +36,7 @@ def _analysis(
                 "confidence": 0.95,
                 "template_similarity": exact_similarity.get(mask_id),
                 "template_threshold": 0.82 if mask_id in exact_similarity else None,
+                "intermittent_power_confirmation": mask_id in physical_support,
             }
         )
     return {"ready": True, "mask_results": rows}
@@ -48,6 +51,7 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         runtime._display_auto_intermittent_failure_counts = {}
         runtime._display_auto_intermittent_persistent_failed_ids = set()
         runtime._display_auto_intermittent_exact_veto_ids = set()
+        runtime._display_auto_intermittent_physical_support_veto_ids = set()
         runtime._display_auto_intermittent_candidate_failed_ids = set()
         runtime._display_auto_intermittent_last_phase_analysis = None
         return runtime
@@ -122,6 +126,61 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         )
         self.assertEqual("off", by_id["MASK_027"]["classified"])
         self.assertFalse(by_id["MASK_027"]["matched"])
+
+    def test_falsos_off_ambiguos_com_suporte_fisico_fecham_blue(self):
+        runtime = self._runtime()
+        false_off_ids = {"MASK_021", "MASK_023", "MASK_024"}
+        analysis = _analysis(
+            false_off_ids,
+            physical_support=false_off_ids,
+        )
+
+        state = runtime._display_auto_observe_intermittent_phase(
+            {"intermittent": True},
+            analysis,
+        )
+
+        self.assertEqual("on", state["phase"])
+        self.assertEqual(
+            tuple(sorted(false_off_ids)),
+            state["physical_support_veto_ids"],
+        )
+        self.assertEqual((), state["candidate_failed_ids"])
+        self.assertEqual((), state["persistent_failed_ids"])
+
+        effective = runtime._display_auto_apply_intermittent_exact_veto(
+            analysis,
+            state,
+        )
+        by_id = {item["mask_id"]: item for item in effective["mask_results"]}
+        for mask_id in false_off_ids:
+            self.assertEqual("on", by_id[mask_id]["classified"])
+            self.assertTrue(by_id[mask_id]["matched"])
+            self.assertTrue(
+                by_id[mask_id]["intermittent_physical_support_veto"]
+            )
+            self.assertEqual(
+                "physical_power_support_veto_over_learned",
+                by_id[mask_id]["classification_source"],
+            )
+        self.assertTrue(effective["approved"])
+        self.assertEqual(
+            tuple(sorted(false_off_ids)),
+            effective["intermittent_physical_support_veto_ids"],
+        )
+
+    def test_defeito_real_sem_suporte_fisico_continua_persistente(self):
+        runtime = self._runtime()
+        state = None
+        for _ in range(3):
+            state = runtime._display_auto_observe_intermittent_phase(
+                {"intermittent": True},
+                _analysis({"MASK_024"}),
+            )
+
+        self.assertIn("MASK_024", state["persistent_failed_ids"])
+        self.assertNotIn("MASK_024", state["physical_support_veto_ids"])
+        self.assertEqual(3, state["failure_counts"]["MASK_024"])
 
     def test_mask_027_continua_defeito_apos_tres_fases_on(self):
         runtime = self._runtime()
