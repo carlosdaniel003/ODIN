@@ -56,6 +56,11 @@ from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
 F3_POWER_AUTHORITY_SOURCE = "f3_same_mask_relative_power_authority"
+# Nome estável da primitiva física CHECK atual x BOARD_OFF. A autoridade
+# unificada v2 reaponta F3_POWER_AUTHORITY_SOURCE e o nome legado em runtime;
+# esta fonte não pode acompanhar esse monkey patch porque é usada pela
+# reconciliação individual do primeiro CHECK.
+F3_CHECK_RELATIVE_POWER_SOURCE = "f3_same_mask_relative_power_authority"
 F3_POWER_STATE_POWERED = "powered"
 F3_POWER_STATE_OFF = "off"
 F3_POWER_STATE_UNCONFIRMED = "unconfirmed"
@@ -346,7 +351,7 @@ def _reference_context(app, frame, project_name: str, context: dict) -> dict | N
     return value
 
 
-def avaliar_evidencia_energia_relativa_display_f3(
+def avaliar_evidencia_energia_check_relativa_display_f3(
     app,
     frame,
     project_name: str,
@@ -449,7 +454,7 @@ def avaliar_evidencia_energia_relativa_display_f3(
     )
     result = {
         "available": bool(details),
-        "source": F3_POWER_AUTHORITY_SOURCE,
+        "source": F3_CHECK_RELATIVE_POWER_SOURCE,
         "same_mask_comparison": True,
         "same_visual_rotation": True,
         "visual_rotation": int(references.get("rotation", 0) or 0),
@@ -458,6 +463,28 @@ def avaliar_evidencia_energia_relativa_display_f3(
     }
     app._display_f3_power_evidence_cache = {"key": cache_key, "value": result}
     return deepcopy(result)
+
+
+def avaliar_evidencia_energia_relativa_display_f3(
+    app,
+    frame,
+    project_name: str,
+    context: dict | None,
+) -> dict:
+    """Nome legado da comparação relativa.
+
+    A autoridade unificada v2 substitui este símbolo em runtime para manter os
+    consumidores históricos na fonte global de energia. Código que precisa da
+    comparação física direta do CHECK atual deve chamar
+    avaliar_evidencia_energia_check_relativa_display_f3(), que é estável e não
+    participa do monkey patch.
+    """
+    return avaliar_evidencia_energia_check_relativa_display_f3(
+        app,
+        frame,
+        project_name,
+        context,
+    )
 
 
 def _presence_from_global_scores(state: dict | None) -> dict:
