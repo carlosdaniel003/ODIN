@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
-
 import numpy as np
 
 from scripts.treinar_f3_segmentos_neural import (
