@@ -201,8 +201,10 @@ class DisplayAutomaticCheckF3Mixin:
             "mascara_invalida": "Máscara inválida para análise",
             "mascara_fora_do_frame": "Máscara fora da imagem",
             "neural_model_missing": "Modelo neural H1 ainda não treinado",
+            "neural_metadata_missing": "Metadados do modelo neural H1 ausentes",
             "neural_model_project_mismatch": "Modelo neural pertence a outro projeto",
             "neural_model_type_unsupported": "Modelo neural incompatível",
+            "neural_label_map_unsupported": "Classes do modelo neural incompatíveis",
             "neural_model_load_error": "Falha ao carregar modelo neural H1",
             "neural_inference_error": "Falha na inferência neural H1",
             "neural_output_shape_invalid": "Saída neural incompatível",
@@ -216,6 +218,12 @@ class DisplayAutomaticCheckF3Mixin:
         messages = {
             "aguardando_referencia_h1": "buscando referência H1 válida",
             "classificacao_incerta": "leitura incerta • continuando busca",
+            "classificacao_neural_incerta": (
+                "leitura neural incerta • continuando busca"
+            ),
+            "aguardando_estado_neural_h1": (
+                "aguardando estado neural conclusivo do H1"
+            ),
             "aguardando_evidencia_placa_ligada": (
                 "buscando segmento aceso para confirmar placa ligada"
             ),
