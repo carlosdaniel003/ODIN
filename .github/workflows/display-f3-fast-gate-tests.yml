@@ -82,6 +82,9 @@ jobs:
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_h1_mascara_expected_off_nunca_e_corrigida_como_on \
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_runtime_h1_ambiguo_usa_autoridade_fisica_e_avanca \
             tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_current_check_relative_uses_stable_comparator_not_v2_monkey_patch \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_blue_suporte_intermitente_usa_autoridade_fisica_estavel \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_blue_autoridade_global_nao_pode_confirmar_suporte_intermitente \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_runtime_blue_falsos_off_022_024_026_usam_prova_fisica_e_avancam \
             -v
 
       - name: Validate blocked-gate neutral presentation
