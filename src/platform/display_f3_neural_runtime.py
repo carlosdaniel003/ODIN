@@ -1,0 +1,862 @@
+from __future__ import annotations
+
+"""Autoridade neural incremental do Display F3.
+
+Etapa N1.2:
+- somente o primeiro CHECK (H1 lógico) usa a CNN;
+- BLUE/USB/AUX continuam delegados ao analisador convencional atual;
+- o modelo ONNX é carregado uma única vez e reutilizado;
+- as 28 ROIs são inferidas em um único batch;
+- ausência/erro do modelo é fail-closed: H1 fica indisponível, sem fallback
+  convencional de ON/OFF.
+
+A rede decide apenas estado visual de segmento. Sequência, presença, energia,
+rearme e UI continuam com as autoridades canônicas já existentes.
+"""
+
+from copy import deepcopy
+import json
+from pathlib import Path
+import time
+
+import cv2
+import numpy as np
+
+import src.platform.display_auto_check_runtime as runtime_module
+import src.platform.display_f3_live_runtime_fix as live_runtime_module
+from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LABELS
+from src.platform.display_check_presence_reference import (
+    avaliar_referencia_presenca_display,
+)
+from src.platform.display_f3_neural_dataset import (
+    F3_NEURAL_INPUT_SIZE,
+    extrair_tensor_segmento_f3,
+    f3_neural_model_path_for_repository,
+)
+from src.platform.display_f3_same_mask_reference_fix import (
+    F3SameMaskReferenceAnalyzer,
+)
+from src.platform.display_project_repository import (
+    DISPLAY_CHECK_STATE_IGNORE,
+    DISPLAY_CHECK_STATE_OFF,
+    DISPLAY_CHECK_STATE_ON,
+    mascaras_geometria_runtime_fixa_display,
+    normalizar_resolucao_display,
+)
+from src.platform.display_visual_rotation import preparar_check_visual_display
+
+
+F3_H1_NEURAL_AUTHORITY = "f3_h1_neural_segment_detector"
+F3_H1_NEURAL_MODEL_TYPE = "f3_segment_on_off_cnn"
+F3_NEURAL_UNCERTAIN_STATE = "uncertain"
+F3_NEURAL_MODEL_REFRESH_S = 1.0
+F3_NEURAL_DEFAULT_ON_MIN_PROBABILITY = 0.80
+F3_NEURAL_DEFAULT_OFF_MAX_ON_PROBABILITY = 0.20
+
+
+def _safe_probability(value, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = float(default)
+    return max(0.0, min(1.0, number))
+
+
+def _file_signature(path: Path) -> tuple[str, int, int]:
+    try:
+        stat = path.stat()
+        return str(path), int(stat.st_mtime_ns), int(stat.st_size)
+    except OSError:
+        return str(path), 0, 0
+
+
+def _softmax_logits(logits: np.ndarray) -> np.ndarray:
+    values = np.asarray(logits, dtype=np.float32)
+    values = values - np.max(values, axis=1, keepdims=True)
+    exp = np.exp(values)
+    denominator = np.maximum(
+        np.sum(exp, axis=1, keepdims=True),
+        np.float32(1e-9),
+    )
+    return exp / denominator
+
+
+class F3NeuralSegmentDetector:
+    """Carrega ONNX uma vez e classifica um batch de segmentos ON/OFF."""
+
+    def __init__(self, repository) -> None:
+        self.repository = repository
+        self._project_name = ""
+        self._model_path: Path | None = None
+        self._metadata_path: Path | None = None
+        self._model_signature = None
+        self._metadata_signature = None
+        self._metadata: dict = {}
+        self._net = None
+        self._last_check_s = 0.0
+        self._last_status: dict = {
+            "ready": False,
+            "reason": "neural_model_not_loaded",
+        }
+        self.load_count = 0
+        self.inference_count = 0
+
+    def invalidate_model_cache(self) -> None:
+        self._project_name = ""
+        self._model_path = None
+        self._metadata_path = None
+        self._model_signature = None
+        self._metadata_signature = None
+        self._metadata = {}
+        self._net = None
+        self._last_check_s = 0.0
+        self._last_status = {
+            "ready": False,
+            "reason": "neural_model_not_loaded",
+        }
+
+    @staticmethod
+    def _read_metadata(path: Path) -> dict:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def prepare(self, project_name: str, *, force: bool = False) -> dict:
+        name = str(project_name or "").strip()
+        model_path = f3_neural_model_path_for_repository(
+            self.repository,
+            name,
+        )
+        metadata_path = model_path.with_suffix(".json")
+        now = time.monotonic()
+
+        same_paths = bool(
+            self._project_name == name
+            and self._model_path == model_path
+            and self._metadata_path == metadata_path
+        )
+        if (
+            not force
+            and same_paths
+            and (now - float(self._last_check_s or 0.0))
+            < F3_NEURAL_MODEL_REFRESH_S
+        ):
+            return deepcopy(self._last_status)
+
+        self._last_check_s = now
+        model_signature = _file_signature(model_path)
+        metadata_signature = _file_signature(metadata_path)
+
+        if model_signature[1] <= 0 or model_signature[2] <= 0:
+            self._project_name = name
+            self._model_path = model_path
+            self._metadata_path = metadata_path
+            self._model_signature = model_signature
+            self._metadata_signature = metadata_signature
+            self._metadata = {}
+            self._net = None
+            self._last_status = {
+                "ready": False,
+                "reason": "neural_model_missing",
+                "project_name": name,
+                "model_path": str(model_path),
+                "metadata_path": str(metadata_path),
+                "load_count": int(self.load_count),
+            }
+            return deepcopy(self._last_status)
+
+        needs_reload = bool(
+            self._net is None
+            or not same_paths
+            or model_signature != self._model_signature
+            or metadata_signature != self._metadata_signature
+        )
+
+        if needs_reload:
+            metadata = self._read_metadata(metadata_path)
+            declared_project = str(
+                metadata.get("project_name") or ""
+            ).strip()
+            if declared_project and declared_project != name:
+                self._net = None
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_model_project_mismatch",
+                    "project_name": name,
+                    "declared_project_name": declared_project,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
+            model_type = str(
+                metadata.get("model_type")
+                or F3_H1_NEURAL_MODEL_TYPE
+            )
+            if model_type != F3_H1_NEURAL_MODEL_TYPE:
+                self._net = None
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_model_type_unsupported",
+                    "project_name": name,
+                    "model_type": model_type,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
+            try:
+                net = cv2.dnn.readNetFromONNX(str(model_path))
+            except Exception as exc:
+                self._net = None
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_model_load_error",
+                    "project_name": name,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "error_type": type(exc).__name__,
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
+            self._project_name = name
+            self._model_path = model_path
+            self._metadata_path = metadata_path
+            self._model_signature = model_signature
+            self._metadata_signature = metadata_signature
+            self._metadata = metadata
+            self._net = net
+            self.load_count += 1
+
+        input_size = max(
+            16,
+            int(
+                self._metadata.get(
+                    "input_size",
+                    F3_NEURAL_INPUT_SIZE,
+                )
+                or F3_NEURAL_INPUT_SIZE
+            ),
+        )
+        thresholds = (
+            self._metadata.get("suggested_thresholds")
+            if isinstance(
+                self._metadata.get("suggested_thresholds"),
+                dict,
+            )
+            else {}
+        )
+        on_min = _safe_probability(
+            thresholds.get("on_min_on_probability"),
+            F3_NEURAL_DEFAULT_ON_MIN_PROBABILITY,
+        )
+        off_max = _safe_probability(
+            thresholds.get("off_max_on_probability"),
+            F3_NEURAL_DEFAULT_OFF_MAX_ON_PROBABILITY,
+        )
+        if off_max >= on_min:
+            off_max = F3_NEURAL_DEFAULT_OFF_MAX_ON_PROBABILITY
+            on_min = F3_NEURAL_DEFAULT_ON_MIN_PROBABILITY
+
+        self._last_status = {
+            "ready": True,
+            "reason": "neural_model_ready",
+            "project_name": name,
+            "model_path": str(self._model_path),
+            "metadata_path": str(self._metadata_path),
+            "model_type": F3_H1_NEURAL_MODEL_TYPE,
+            "input_size": int(input_size),
+            "on_min_on_probability": round(float(on_min), 6),
+            "off_max_on_probability": round(float(off_max), 6),
+            "load_count": int(self.load_count),
+        }
+        return deepcopy(self._last_status)
+
+    def predict(
+        self,
+        project_name: str,
+        tensors,
+    ) -> dict:
+        status = self.prepare(project_name)
+        if not bool(status.get("ready")):
+            return {
+                **status,
+                "observations": [],
+            }
+
+        batch_items = [
+            np.asarray(item, dtype=np.float32)
+            for item in (tensors or ())
+        ]
+        if not batch_items:
+            return {
+                **status,
+                "ready": False,
+                "reason": "neural_batch_empty",
+                "observations": [],
+            }
+
+        expected_size = int(status["input_size"])
+        for item in batch_items:
+            if item.shape != (4, expected_size, expected_size):
+                return {
+                    **status,
+                    "ready": False,
+                    "reason": "neural_tensor_shape_invalid",
+                    "tensor_shape": list(item.shape),
+                    "expected_shape": [
+                        4,
+                        expected_size,
+                        expected_size,
+                    ],
+                    "observations": [],
+                }
+
+        batch = np.ascontiguousarray(
+            np.stack(batch_items, axis=0),
+            dtype=np.float32,
+        )
+        try:
+            self._net.setInput(batch)
+            logits = np.asarray(
+                self._net.forward(),
+                dtype=np.float32,
+            )
+        except Exception as exc:
+            return {
+                **status,
+                "ready": False,
+                "reason": "neural_inference_error",
+                "error_type": type(exc).__name__,
+                "observations": [],
+            }
+
+        expected_values = int(batch.shape[0]) * 2
+        if logits.size != expected_values:
+            return {
+                **status,
+                "ready": False,
+                "reason": "neural_output_shape_invalid",
+                "output_shape": list(logits.shape),
+                "expected_values": expected_values,
+                "observations": [],
+            }
+        logits = logits.reshape(int(batch.shape[0]), 2)
+        probabilities = _softmax_logits(logits)
+
+        on_min = float(status["on_min_on_probability"])
+        off_max = float(status["off_max_on_probability"])
+        observations = []
+        for index, row in enumerate(probabilities):
+            p_off = float(row[0])
+            p_on = float(row[1])
+            if p_on >= on_min:
+                state = DISPLAY_CHECK_STATE_ON
+                certain = True
+                confidence = p_on
+            elif p_on <= off_max:
+                state = DISPLAY_CHECK_STATE_OFF
+                certain = True
+                confidence = p_off
+            else:
+                state = F3_NEURAL_UNCERTAIN_STATE
+                certain = False
+                confidence = max(p_on, p_off)
+
+            observations.append(
+                {
+                    "index": int(index),
+                    "state": state,
+                    "certain": bool(certain),
+                    "confidence": round(float(confidence), 6),
+                    "probabilities": {
+                        DISPLAY_CHECK_STATE_OFF: round(p_off, 6),
+                        DISPLAY_CHECK_STATE_ON: round(p_on, 6),
+                    },
+                    "logits": [
+                        round(float(logits[index, 0]), 6),
+                        round(float(logits[index, 1]), 6),
+                    ],
+                }
+            )
+
+        self.inference_count += 1
+        return {
+            **status,
+            "ready": True,
+            "reason": "neural_inference_ready",
+            "batch_size": len(observations),
+            "inference_count": int(self.inference_count),
+            "observations": observations,
+        }
+
+
+class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
+    """CNN para o primeiro CHECK; demais CHECKS permanecem convencionais."""
+
+    def __init__(self, repository) -> None:
+        super().__init__(repository)
+        self.neural_detector = F3NeuralSegmentDetector(repository)
+
+    def invalidate_learning_cache(self) -> None:
+        super().invalidate_learning_cache()
+        self.neural_detector.invalidate_model_cache()
+
+    def _is_first_check(
+        self,
+        project_name: str,
+        check_id: str,
+    ) -> bool:
+        try:
+            checks = self.repository.listar_checks(project_name)
+        except Exception:
+            checks = []
+        first = (
+            checks[0]
+            if isinstance(checks, list) and checks
+            else None
+        )
+        return bool(
+            isinstance(first, dict)
+            and str(first.get("id") or "").strip()
+            == str(check_id or "").strip()
+        )
+
+    @staticmethod
+    def _not_ready_neural(
+        reason: str,
+        *,
+        project_name: str,
+        check_id: str,
+        check_name: str = "",
+        **extra,
+    ) -> dict:
+        return {
+            "ready": False,
+            "approved": None,
+            "reason": str(reason),
+            "project_name": str(project_name),
+            "check_id": str(check_id),
+            "check_name": str(check_name or check_id),
+            "mask_results": [],
+            "active_mask_count": 0,
+            "matched_mask_count": 0,
+            "neural_visual_authority": True,
+            "neural_check_scope": "first_check_only",
+            "reference_authority": F3_H1_NEURAL_AUTHORITY,
+            "conventional_visual_authority_used": False,
+            **extra,
+        }
+
+    def analyze(
+        self,
+        frame,
+        project_name: str,
+        check_id: str,
+        visual_rotation: int = 0,
+        *,
+        mask_geometry_override=None,
+        mask_geometry_resolution=None,
+        mask_geometry_source: str = "",
+    ) -> dict:
+        if not self._is_first_check(project_name, check_id):
+            return super().analyze(
+                frame=frame,
+                project_name=project_name,
+                check_id=check_id,
+                visual_rotation=visual_rotation,
+                mask_geometry_override=mask_geometry_override,
+                mask_geometry_resolution=mask_geometry_resolution,
+                mask_geometry_source=mask_geometry_source,
+            )
+
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return self._not_ready_neural(
+                "camera_sem_frame",
+                project_name=project_name,
+                check_id=check_id,
+            )
+
+        project = self.repository.carregar_projeto(project_name)
+        if project is None:
+            return self._not_ready_neural(
+                "projeto_display_inexistente",
+                project_name=project_name,
+                check_id=check_id,
+            )
+        check = self.repository.carregar_check(
+            project_name,
+            check_id,
+        )
+        if check is None:
+            return self._not_ready_neural(
+                "check_display_inexistente",
+                project_name=project_name,
+                check_id=check_id,
+            )
+
+        check_name = str(
+            check.get("name") or check_id
+        )
+        master_resolution = normalizar_resolucao_display(
+            project.get("master_resolution")
+        )
+        if master_resolution is None:
+            return self._not_ready_neural(
+                "resolucao_mestra_ausente",
+                project_name=project_name,
+                check_id=check_id,
+                check_name=check_name,
+            )
+
+        model_status = self.neural_detector.prepare(project_name)
+        if not bool(model_status.get("ready")):
+            return self._not_ready_neural(
+                str(
+                    model_status.get("reason")
+                    or "neural_model_unavailable"
+                ),
+                project_name=project_name,
+                check_id=check_id,
+                check_name=check_name,
+                neural_model=deepcopy(model_status),
+            )
+
+        masks = mascaras_geometria_runtime_fixa_display(project)
+        states = (
+            check.get("mask_states", {})
+            if isinstance(check.get("mask_states"), dict)
+            else {}
+        )
+        active_masks = [
+            mask
+            for mask in masks
+            if states.get(str(mask.get("id"))) in (
+                DISPLAY_CHECK_STATE_ON,
+                DISPLAY_CHECK_STATE_OFF,
+            )
+        ]
+        if not active_masks:
+            return self._not_ready_neural(
+                "check_sem_mascaras_ativas",
+                project_name=project_name,
+                check_id=check_id,
+                check_name=check_name,
+                neural_model=deepcopy(model_status),
+            )
+
+        use_geometry_override = bool(
+            mask_geometry_override
+            and frame is not None
+            and getattr(frame, "size", 0) > 0
+        )
+        if use_geometry_override:
+            visual_frame = frame
+            visual_masks = [
+                item
+                for item in (mask_geometry_override or ())
+                if isinstance(item, dict)
+                and str(item.get("id") or "")
+            ]
+            frame_h, frame_w = visual_frame.shape[:2]
+            visual_resolution = (
+                int(frame_w),
+                int(frame_h),
+            )
+            if (
+                isinstance(
+                    mask_geometry_resolution,
+                    (list, tuple),
+                )
+                and len(mask_geometry_resolution) >= 2
+            ):
+                try:
+                    expected_resolution = (
+                        int(mask_geometry_resolution[0]),
+                        int(mask_geometry_resolution[1]),
+                    )
+                except (TypeError, ValueError):
+                    expected_resolution = visual_resolution
+                if expected_resolution != visual_resolution:
+                    use_geometry_override = False
+
+        if not use_geometry_override:
+            (
+                visual_frame,
+                visual_resolution,
+                visual_masks,
+            ) = preparar_check_visual_display(
+                frame,
+                master_resolution,
+                masks,
+                visual_rotation,
+            )
+
+        if (
+            visual_frame is None
+            or getattr(visual_frame, "size", 0) == 0
+        ):
+            return self._not_ready_neural(
+                "camera_sem_frame_visual",
+                project_name=project_name,
+                check_id=check_id,
+                check_name=check_name,
+                neural_model=deepcopy(model_status),
+            )
+
+        target_width = max(
+            1,
+            int(visual_resolution[0]),
+        )
+        target_height = max(
+            1,
+            int(visual_resolution[1]),
+        )
+        if tuple(visual_frame.shape[:2]) != (
+            target_height,
+            target_width,
+        ):
+            interpolation = (
+                cv2.INTER_AREA
+                if (
+                    visual_frame.shape[1] > target_width
+                    or visual_frame.shape[0] > target_height
+                )
+                else cv2.INTER_LINEAR
+            )
+            visual_frame = cv2.resize(
+                visual_frame,
+                (target_width, target_height),
+                interpolation=interpolation,
+            )
+
+        mask_by_id = {
+            str(mask.get("id")): mask
+            for mask in visual_masks
+            if isinstance(mask, dict)
+            and mask.get("id") is not None
+        }
+
+        input_size = int(
+            model_status.get(
+                "input_size",
+                F3_NEURAL_INPUT_SIZE,
+            )
+            or F3_NEURAL_INPUT_SIZE
+        )
+        tensors = []
+        rows = []
+        for original_mask in active_masks:
+            mask_id = str(
+                original_mask.get("id") or ""
+            )
+            expected = str(
+                states.get(mask_id) or ""
+            )
+            visual_mask = mask_by_id.get(mask_id)
+            if visual_mask is None:
+                return self._not_ready_neural(
+                    "mascara_visual_nao_encontrada",
+                    project_name=project_name,
+                    check_id=check_id,
+                    check_name=check_name,
+                    mask_id=mask_id,
+                    neural_model=deepcopy(model_status),
+                )
+
+            tensor = extrair_tensor_segmento_f3(
+                visual_frame,
+                visual_mask,
+                input_size=input_size,
+            )
+            if tensor is None:
+                return self._not_ready_neural(
+                    "mascara_neural_fora_do_frame",
+                    project_name=project_name,
+                    check_id=check_id,
+                    check_name=check_name,
+                    mask_id=mask_id,
+                    neural_model=deepcopy(model_status),
+                )
+            tensors.append(tensor)
+            rows.append(
+                {
+                    "mask_id": mask_id,
+                    "expected": expected,
+                }
+            )
+
+        inference = self.neural_detector.predict(
+            project_name,
+            tensors,
+        )
+        if not bool(inference.get("ready")):
+            return self._not_ready_neural(
+                str(
+                    inference.get("reason")
+                    or "neural_inference_unavailable"
+                ),
+                project_name=project_name,
+                check_id=check_id,
+                check_name=check_name,
+                neural_model=deepcopy(inference),
+            )
+
+        observations = list(
+            inference.get("observations") or ()
+        )
+        if len(observations) != len(rows):
+            return self._not_ready_neural(
+                "neural_batch_size_mismatch",
+                project_name=project_name,
+                check_id=check_id,
+                check_name=check_name,
+                neural_model=deepcopy(inference),
+            )
+
+        results = []
+        for row, observation in zip(rows, observations):
+            state = str(
+                observation.get("state")
+                or F3_NEURAL_UNCERTAIN_STATE
+            )
+            certain = bool(
+                observation.get("certain")
+            )
+            expected = str(row["expected"])
+            matched = (
+                bool(state == expected)
+                if certain
+                else None
+            )
+            result = {
+                "mask_id": str(row["mask_id"]),
+                "expected": expected,
+                "expected_label": DISPLAY_AUTO_CLASS_LABELS[
+                    expected
+                ],
+                "classified": state,
+                "classified_label": (
+                    DISPLAY_AUTO_CLASS_LABELS[state]
+                    if state in DISPLAY_AUTO_CLASS_LABELS
+                    else "INCERTO"
+                ),
+                "matched": matched,
+                "raw_matched": matched,
+                "confidence": float(
+                    observation.get("confidence", 0.0)
+                    or 0.0
+                ),
+                "neural_certain": certain,
+                "neural_probabilities": deepcopy(
+                    observation.get("probabilities") or {}
+                ),
+                "neural_logits": list(
+                    observation.get("logits") or ()
+                ),
+                "classification_source": F3_H1_NEURAL_AUTHORITY,
+                "reference_source": F3_H1_NEURAL_AUTHORITY,
+                "luminous_core_confirmed": bool(
+                    certain
+                    and state == DISPLAY_CHECK_STATE_ON
+                ),
+            }
+            results.append(result)
+
+        uncertain_count = sum(
+            1
+            for item in results
+            if not bool(item.get("neural_certain"))
+        )
+        matched_count = sum(
+            1
+            for item in results
+            if item.get("matched") is True
+        )
+        approved = bool(
+            results
+            and uncertain_count == 0
+            and matched_count == len(results)
+        )
+
+        if uncertain_count:
+            reason = "h1_neural_incerto"
+        elif approved:
+            reason = "h1_neural_conforme"
+        else:
+            reason = "h1_neural_divergente"
+
+        metadata = self.presence_store.get(
+            project_name,
+            check_id,
+        )
+        presence = avaliar_referencia_presenca_display(
+            frame,
+            metadata,
+        )
+        presence["decision_authority"] = False
+        presence["role"] = (
+            "check_photo_diagnostic_only_neural_h1"
+        )
+
+        return {
+            "ready": True,
+            "approved": bool(approved),
+            "reason": reason,
+            "project_name": str(project_name),
+            "check_id": str(check_id),
+            "check_name": check_name,
+            "mask_results": results,
+            "active_mask_count": len(results),
+            "matched_mask_count": int(matched_count),
+            "uncertain_mask_count": int(uncertain_count),
+            "ignored_mask_count": sum(
+                1
+                for mask in masks
+                if states.get(str(mask.get("id")))
+                == DISPLAY_CHECK_STATE_IGNORE
+            ),
+            "reference_authority": F3_H1_NEURAL_AUTHORITY,
+            "neural_visual_authority": True,
+            "neural_check_scope": "first_check_only",
+            "neural_batch_size": len(results),
+            "neural_model": {
+                key: deepcopy(value)
+                for key, value in inference.items()
+                if key != "observations"
+            },
+            "conventional_visual_authority_used": False,
+            "presence_reference": presence,
+            "live_geometry_override": bool(
+                use_geometry_override
+            ),
+            "live_geometry_source": (
+                str(mask_geometry_source or "")
+                if use_geometry_override
+                else ""
+            ),
+        }
+
+
+_INSTALLED = False
+
+
+def instalar_autoridade_neural_h1_display_f3() -> None:
+    """Torna a CNN a única autoridade semântica do primeiro CHECK."""
+    global _INSTALLED
+
+    # Reaplicado mesmo depois do guard, pois instaladores históricos alteram os
+    # aliases durante o bootstrap. A autoridade neural deve ficar literalmente
+    # por último para H1.
+    runtime_module.DisplayAutomaticCheckAnalyzer = F3H1NeuralAnalyzer
+    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3H1NeuralAnalyzer
+    runtime_module._display_f3_h1_neural_authority = True
+
+    if _INSTALLED:
+        return
+    _INSTALLED = True
