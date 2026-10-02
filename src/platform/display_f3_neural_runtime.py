@@ -149,17 +149,31 @@ class F3NeuralSegmentDetector:
         model_signature = _file_signature(model_path)
         metadata_signature = _file_signature(metadata_path)
 
+        self._project_name = name
+        self._model_path = model_path
+        self._metadata_path = metadata_path
+        self._model_signature = model_signature
+        self._metadata_signature = metadata_signature
+
         if model_signature[1] <= 0 or model_signature[2] <= 0:
-            self._project_name = name
-            self._model_path = model_path
-            self._metadata_path = metadata_path
-            self._model_signature = model_signature
-            self._metadata_signature = metadata_signature
             self._metadata = {}
             self._net = None
             self._last_status = {
                 "ready": False,
                 "reason": "neural_model_missing",
+                "project_name": name,
+                "model_path": str(model_path),
+                "metadata_path": str(metadata_path),
+                "load_count": int(self.load_count),
+            }
+            return deepcopy(self._last_status)
+
+        if metadata_signature[1] <= 0 or metadata_signature[2] <= 0:
+            self._metadata = {}
+            self._net = None
+            self._last_status = {
+                "ready": False,
+                "reason": "neural_metadata_missing",
                 "project_name": name,
                 "model_path": str(model_path),
                 "metadata_path": str(metadata_path),
@@ -197,12 +211,35 @@ class F3NeuralSegmentDetector:
                 or F3_H1_NEURAL_MODEL_TYPE
             )
             if model_type != F3_H1_NEURAL_MODEL_TYPE:
+                self._metadata = metadata
                 self._net = None
                 self._last_status = {
                     "ready": False,
                     "reason": "neural_model_type_unsupported",
                     "project_name": name,
                     "model_type": model_type,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
+            labels = (
+                metadata.get("labels")
+                if isinstance(metadata.get("labels"), dict)
+                else {}
+            )
+            if labels and (
+                int(labels.get("off", -1)) != 0
+                or int(labels.get("on", -1)) != 1
+            ):
+                self._metadata = metadata
+                self._net = None
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_label_map_unsupported",
+                    "project_name": name,
+                    "labels": deepcopy(labels),
                     "model_path": str(model_path),
                     "metadata_path": str(metadata_path),
                     "load_count": int(self.load_count),
@@ -224,11 +261,6 @@ class F3NeuralSegmentDetector:
                 }
                 return deepcopy(self._last_status)
 
-            self._project_name = name
-            self._model_path = model_path
-            self._metadata_path = metadata_path
-            self._model_signature = model_signature
-            self._metadata_signature = metadata_signature
             self._metadata = metadata
             self._net = net
             self.load_count += 1
