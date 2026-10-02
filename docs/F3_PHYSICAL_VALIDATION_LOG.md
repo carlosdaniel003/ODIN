@@ -4747,3 +4747,80 @@ Depois, repetir com um segmento BLUE esperado ON realmente apagado; nesse caso
 a autoridade direta deve retornar `off/tie` e o NG deve continuar ocorrendo.
 
 ---
+
+## 02/10/2026 — Reteste D-057 FAIL: BLUE correto permanece 26/28
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Projeto `CM_500_L`, CHECK `CHECK_002 / BLUE`, intermitente. O H1 já havia
+concluído. O operador apresentou o BLUE correto, com os segmentos corretos
+acesos/apagados, mas o sistema permaneceu em `AGUARDANDO BLUE`.
+
+Tela observada:
+
+```text
+BLUE NÃO CONFIRMADO
+26/28 CONFORMES
+16 ACESOS
+12 APAGADOS
+AUTO • BLUE • leitura incerta • continuando busca
+```
+
+Não houve NG terminal; o CHECK ficou preso sem avançar.
+
+### Evidência do DEBUG
+
+O frame manual do clique foi `frame_id=550`, estável, com energia confirmada
+e gate produtivo liberado.
+
+A comparação física direta do BLUE contra BOARD_OFF confirmou:
+
+```text
+expected_on=18
+powered_votes=18
+off_votes=0
+tie_votes=0
+```
+
+A D-057 chegou ao runtime: a autoridade física canônica confirmou suporte para
+`MASK_019`, `MASK_021`, `MASK_022` e `MASK_024` usando
+`f3_same_mask_relative_power_authority`.
+
+Mesmo assim apenas `MASK_021` e `MASK_024` entraram em
+`intermittent_physical_support_veto_ids`.
+
+O estado efetivo permaneceu:
+
+```text
+effective_failed_mask_ids=[MASK_019, MASK_022]
+effective_confirmed_failed_mask_ids=[]
+effective_validating_mask_ids=[MASK_019, MASK_022]
+effective_matched_mask_count=26
+candidate_failed_ids=[]
+persistent_failed_ids=[]
+```
+
+`MASK_019` e `MASK_022` estavam semanticamente OFF, porém a própria
+`F3PowerAuthority` marcou ambas como `powered` e
+`intermittent_power_confirmation=true`.
+
+Também foi observada divergência temporal entre o frame manual congelado
+(`550`) e o snapshot do runtime/autoridade (`533`). Em CHECK intermitente,
+essa diferença precisa ser investigada porque uma fase anterior não pode
+continuar bloqueando um frame posterior correto.
+
+### Estado da investigação
+
+**Causa ainda não encerrada.** A autoridade física correta já está chegando ao
+runtime, mas existe uma quebra entre a confirmação física, a aplicação do veto
+intermitente e a classificação efetiva usada para liberar o OK.
+
+Próxima investigação: rastrear `frame_token/frame_id` e o caminho exato que faz
+`MASK_019` e `MASK_022` permanecerem em `effective_failed_mask_ids` mesmo com
+confirmação física `powered`.
+
+**Estado:** D-057 RETESTADA FISICAMENTE — FAIL PARCIAL; BLUE preso em 26/28.
+
+---
