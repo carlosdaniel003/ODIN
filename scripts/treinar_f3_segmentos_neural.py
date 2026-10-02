@@ -24,6 +24,7 @@ import numpy as np
 from src.platform.display_f3_neural_dataset import (
     F3NeuralDatasetBuilder,
     F3_NEURAL_INPUT_SIZE,
+    f3_neural_model_path_for_repository,
 )
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
@@ -477,9 +478,9 @@ def treinar(args) -> dict:
     output = (
         Path(args.output)
         if args.output
-        else (
-            Path("data/models/f3_neural")
-            / f"{_slug(project_name)}_segments.onnx"
+        else f3_neural_model_path_for_repository(
+            repository,
+            project_name,
         )
     )
     output.parent.mkdir(
@@ -662,9 +663,8 @@ def _parse_args():
         "--output",
         default=None,
         help=(
-            "Destino .onnx. Padrão: "
-            "data/models/f3_neural/"
-            "<projeto>_segments.onnx"
+            "Destino .onnx. Padrão: diretório de modelos "
+            "associado ao DisplayProjectRepository."
         ),
     )
     parser.add_argument(
