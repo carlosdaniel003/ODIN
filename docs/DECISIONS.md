@@ -2993,3 +2993,95 @@ same-mask physical=off
 **Validação física:** pendente de reteste do BLUE correto.
 
 ---
+
+## D-057 — BLUE intermitente usa F3PowerAuthority como única fonte física de suporte
+
+**Status:** Accepted
+
+### Contexto
+
+O reteste físico posterior à D-056 ainda produziu falso NG no BLUE.
+A falha persistente migrou para `MASK_024`, embora o frame congelado e a
+comparação direta `CHECK BLUE x PLACA DESLIGADA` confirmassem os 18 segmentos
+esperados ON como `powered`.
+
+O problema remanescente não era mais o corte de confiança removido pela D-056.
+Existiam duas fontes diferentes de "suporte físico" no mesmo ciclo:
+
+```text
+F3StrictMaskConformityAnalyzer
+→ rederiva suporte a partir das features do aprendizado
+
+F3PowerAuthority.evaluate_current_check_relative
+→ compara diretamente BOARD_OFF ↔ LIVE ↔ foto ON do CHECK
+```
+
+O debounce intermitente consumia o primeiro caminho. O DEBUG manual mostrava o
+segundo. Quando esses dois caminhos discordavam, o runtime podia acumular falso
+OFF mesmo com a autoridade física direta indicando `powered`.
+
+### Decisão
+
+A partir de D-057, a única fonte física com autoridade para impedir um falso
+OFF no debounce intermitente é:
+
+```text
+F3PowerAuthority.evaluate_current_check_relative()
+source=f3_same_mask_relative_power_authority
+```
+
+Regras:
+
+1. em CHECK intermitente, o runtime consulta essa autoridade no mesmo frame
+   antes de contar falhas da fase ON;
+2. a evidência precisa declarar `same_mask_comparison=True`;
+3. a fonte precisa ser exatamente `f3_same_mask_relative_power_authority`;
+4. para uma máscara `expected=ON` e semanticamente OFF, somente
+   `reference_discriminative=True` + `winner=powered` confirma suporte;
+5. `winner=off`, `tie`, evidência ausente ou fonte diferente preservam a
+   divergência e o debounce normal;
+6. a estimativa local produzida pelo analyzer estrito permanece apenas como
+   telemetria/diagnóstico e é preservada em campos `intermittent_learning_*`;
+7. antes do debounce, qualquer `intermittent_power_confirmation` legado é
+   substituído pelo resultado da F3PowerAuthority;
+8. o runtime existente continua responsável por zerar o contador da máscara
+   confirmada fisicamente e reconciliá-la para ON na fase válida;
+9. não é criada nova autoridade, thread, timer, scheduler, fila ou threshold.
+
+### Segurança
+
+A mudança não transforma brilho alto em aprovação direta. A máscara só recebe
+suporte se a comparação física independente entre BOARD_OFF, LIVE e ON do mesmo
+ID for discriminante e escolher `powered`.
+
+Um segmento realmente apagado continua seguindo:
+
+```text
+semantic OFF
++ F3PowerAuthority same-mask = off/tie
+→ intermittent_power_confirmation=False
+→ contador de falha continua
+→ NG após debounce
+```
+
+A autoridade global `f3_unified_live_mask_power_authority` também não pode
+substituir essa evidência individual, mesmo que publique `same_mask_comparison`.
+
+### Relação com D-056
+
+D-056 permanece correta ao retirar o veto por confiança semântica. D-057 corrige
+a fonte efetivamente usada pelo debounce. O suporte local do analyzer deixa de
+ser autoridade produtiva.
+
+### Regressões obrigatórias
+
+- `MASK_024 semantic OFF confidence=0.6414` + fonte direta `powered` deve receber
+  suporte e não acumular falha;
+- fonte global/unificada não pode confirmar suporte intermitente;
+- `MASK_022`, `MASK_024` e `MASK_026` falsos OFF no mesmo BLUE devem ser
+  reconciliados no frame e permitir avanço quando o restante estiver conforme;
+- segmento realmente apagado com fonte direta `off` continua sem suporte.
+
+**Validação física:** pendente de reteste do BLUE correto.
+
+---
