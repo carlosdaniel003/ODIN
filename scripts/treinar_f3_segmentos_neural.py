@@ -597,12 +597,6 @@ def treinar(args) -> dict:
         augment=True,
         seed=args.seed,
     )
-    val_dataset = SegmentDataset(
-        val_indices,
-        augment=False,
-        seed=args.seed + 1,
-    )
-
     train_loader = DataLoader(
         train_dataset,
         batch_size=min(
