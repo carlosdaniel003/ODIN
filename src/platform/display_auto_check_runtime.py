@@ -95,6 +95,11 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_transition_frames = self.DISPLAY_AUTO_TRANSITION_FRAMES
         self._display_auto_last_frame_token = None
         self._display_auto_last_analysis = None
+        # Telemetria compacta da última decisão produtiva. Não participa de
+        # classificação, debounce ou avanço; existe para correlacionar uma
+        # análise 100% conforme com o resultado efetivamente devolvido pelo
+        # gate/registrador no mesmo ciclo.
+        self._display_auto_last_decision_trace = None
         self._display_auto_last_process_s = 0.0
         self._display_auto_manual_entry_signature = None
         self._display_auto_manual_entry_label = ""
@@ -1558,6 +1563,41 @@ class DisplayAutomaticCheckF3Mixin:
         )
         decision = str(policy.get("decision") or DISPLAY_AUTO_DECISION_SEARCHING)
 
+        confidences = []
+        for item in analysis.get("mask_results") or ():
+            if not isinstance(item, dict):
+                continue
+            try:
+                confidences.append(float(item.get("confidence", 0.0) or 0.0))
+            except (TypeError, ValueError):
+                continue
+        self._display_auto_last_decision_trace = {
+            "frame_token": deepcopy(frame_token),
+            "project_name": str(context.get("project_name") or ""),
+            "check_id": str(context.get("check_id") or ""),
+            "check_name": str(context.get("check_name") or ""),
+            "intermittent": bool(context.get("intermittent", False)),
+            "analysis_ready": bool(analysis.get("ready")),
+            "analysis_approved": analysis.get("approved"),
+            "matched_mask_count": int(
+                analysis.get("matched_mask_count", 0) or 0
+            ),
+            "active_mask_count": int(
+                analysis.get("active_mask_count", 0) or 0
+            ),
+            "minimum_confidence": (
+                min(confidences) if confidences else None
+            ),
+            "intermittent_ready": bool(intermittent_ready),
+            "intermittent_seen_on": int(intermittent_seen),
+            "intermittent_expected_on": int(intermittent_total),
+            "policy_decision": decision,
+            "policy_reason": str(policy.get("reason") or ""),
+            "registration_attempted": False,
+            "registration_event": "",
+            "registration_blocked_by": "",
+        }
+
         persistent_failed = (
             tuple(intermittent_phase.get("persistent_failed_ids") or ())
             if bool(context.get("intermittent", False))
@@ -1745,8 +1785,44 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_f3_pending_ng_analysis = deepcopy(analysis)
             self._display_f3_pending_ng_context = deepcopy(context)
 
+        decision_trace = getattr(
+            self,
+            "_display_auto_last_decision_trace",
+            None,
+        )
+        if isinstance(decision_trace, dict):
+            decision_trace["registration_attempted"] = True
+            decision_trace["registration_approved"] = bool(approved)
+            decision_trace["stable_frames_before_register"] = int(required)
+            decision_trace["required_stable_frames"] = int(required)
+
         event = self.registrar_resultado_check_display_f3(approved)
         event_type = str(event.get("event", ""))
+        if isinstance(decision_trace, dict):
+            decision_trace["registration_event"] = event_type
+            decision_trace["registration_blocked_by"] = str(
+                event.get("blocked_by") or ""
+            )
+            transition_authority = event.get("transition_authority")
+            if isinstance(transition_authority, dict):
+                decision_trace["transition_authority"] = {
+                    "source": str(transition_authority.get("source") or ""),
+                    "available": transition_authority.get("available"),
+                    "confirmed": transition_authority.get("confirmed"),
+                    "reason": str(transition_authority.get("reason") or ""),
+                    "previous_check_id": str(
+                        transition_authority.get("previous_check_id") or ""
+                    ),
+                    "current_check_id": str(
+                        transition_authority.get("current_check_id") or ""
+                    ),
+                    "matched_mask_count": transition_authority.get(
+                        "matched_mask_count"
+                    ),
+                    "active_mask_count": transition_authority.get(
+                        "active_mask_count"
+                    ),
+                }
         if event_type == "check_advanced":
             self._display_auto_arm_manual_entry_gate(context, event)
             self._display_auto_signature = None
