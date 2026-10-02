@@ -926,10 +926,10 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                     "classified": "off" if false_off else "on",
                     "matched": not false_off,
                     "raw_matched": not false_off,
-                    # MASK_022 reproduz a leitura física real abaixo do
-                    # limiar semântico. A autoridade same-mask deve prevalecer.
+                    # MASK_022 reproduz a confiança baixa observada no
+                    # reteste físico, ainda dentro do piso produtivo geral.
                     "confidence": (
-                        0.49
+                        0.538
                         if mask_id == "MASK_022"
                         else (0.6414 if false_off else 0.99)
                     ),
