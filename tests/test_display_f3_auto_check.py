@@ -406,6 +406,212 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         self.assertEqual(("MASK_ON_2",), result["effective_failed_mask_ids"])
         self.assertEqual("effective_mask_results_v1", result["ui_mask_authority"])
 
+    def test_h1_desempata_falsos_off_ambiguos_com_prova_fisica_same_mask(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "reason": "check_diverge_mascara_configurada",
+            "matched_mask_count": 26,
+            "active_mask_count": 28,
+            "failed_mask_ids": ["MASK_012", "MASK_020"],
+            "missing_on_mask_ids": ["MASK_012", "MASK_020"],
+            "mask_results": [],
+        }
+        expected_on_ids = {
+            "MASK_008",
+            "MASK_009",
+            "MASK_011",
+            "MASK_012",
+            "MASK_013",
+            "MASK_017",
+            "MASK_020",
+        }
+        for index in range(1, 29):
+            mask_id = f"MASK_{index:03d}"
+            expected = "on" if mask_id in expected_on_ids else "off"
+            false_off = mask_id in {"MASK_012", "MASK_020"}
+            analysis["mask_results"].append(
+                {
+                    "mask_id": mask_id,
+                    "expected": expected,
+                    "classified": "off" if false_off else expected,
+                    "matched": not false_off,
+                    "raw_matched": not false_off,
+                    "confidence": (
+                        0.5274
+                        if mask_id == "MASK_012"
+                        else (0.5106 if mask_id == "MASK_020" else 0.95)
+                    ),
+                }
+            )
+
+        evidence = {
+            "available": True,
+            "source": "f3_same_mask_relative_power_authority",
+            "details": [
+                {
+                    "mask_id": mask_id,
+                    "winner": "powered",
+                    "reference_discriminative": True,
+                    "power_position": 0.98,
+                }
+                for mask_id in sorted(expected_on_ids)
+            ],
+        }
+
+        result = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_apply_reference_gate_physical_tie_breaker(
+                analysis,
+                evidence,
+            )
+        )
+        by_id = {item["mask_id"]: item for item in result["mask_results"]}
+
+        self.assertTrue(result["approved"])
+        self.assertEqual(28, result["matched_mask_count"])
+        self.assertEqual([], result["failed_mask_ids"])
+        self.assertEqual([], result["missing_on_mask_ids"])
+        self.assertEqual(
+            ("MASK_012", "MASK_020"),
+            result["reference_gate_physical_tie_breaker_ids"],
+        )
+        for mask_id in ("MASK_012", "MASK_020"):
+            self.assertEqual("on", by_id[mask_id]["classified"])
+            self.assertTrue(by_id[mask_id]["matched"])
+            self.assertTrue(
+                by_id[mask_id]["reference_gate_physical_confirmation"]
+            )
+            self.assertEqual(
+                "reference_gate_same_mask_power_over_ambiguous_semantic",
+                by_id[mask_id]["classification_source"],
+            )
+
+    def test_h1_segmento_realmente_apagado_nao_e_resgatado(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "reason": "check_diverge_mascara_configurada",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_020",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "raw_matched": False,
+                    "confidence": 0.5106,
+                }
+            ],
+        }
+        evidence = {
+            "available": True,
+            "source": "f3_same_mask_relative_power_authority",
+            "details": [
+                {
+                    "mask_id": "MASK_020",
+                    "winner": "off",
+                    "reference_discriminative": True,
+                    "power_position": 0.05,
+                }
+            ],
+        }
+
+        result = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_apply_reference_gate_physical_tie_breaker(
+                analysis,
+                evidence,
+            )
+        )
+
+        self.assertFalse(result["approved"])
+        self.assertEqual(["MASK_020"], result["failed_mask_ids"])
+        self.assertEqual((), result["reference_gate_physical_tie_breaker_ids"])
+        self.assertEqual("off", result["mask_results"][0]["classified"])
+        self.assertFalse(result["mask_results"][0]["matched"])
+
+    def test_h1_off_semantico_confiante_nao_e_relaxado_por_desempate(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "reason": "check_diverge_mascara_configurada",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_020",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "raw_matched": False,
+                    "confidence": 0.95,
+                }
+            ],
+        }
+        evidence = {
+            "available": True,
+            "source": "f3_same_mask_relative_power_authority",
+            "details": [
+                {
+                    "mask_id": "MASK_020",
+                    "winner": "powered",
+                    "reference_discriminative": True,
+                    "power_position": 0.98,
+                }
+            ],
+        }
+
+        self.assertFalse(
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_reference_gate_needs_physical_tie_breaker(analysis)
+        )
+        result = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_apply_reference_gate_physical_tie_breaker(
+                analysis,
+                evidence,
+            )
+        )
+        self.assertFalse(result["approved"])
+        self.assertEqual(["MASK_020"], result["failed_mask_ids"])
+
+    def test_h1_mascara_expected_off_nunca_e_corrigida_como_on(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "reason": "check_diverge_mascara_configurada",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_014",
+                    "expected": "off",
+                    "classified": "on",
+                    "matched": False,
+                    "raw_matched": False,
+                    "confidence": 0.51,
+                }
+            ],
+        }
+        evidence = {
+            "available": True,
+            "source": "f3_same_mask_relative_power_authority",
+            "details": [
+                {
+                    "mask_id": "MASK_014",
+                    "winner": "powered",
+                    "reference_discriminative": True,
+                }
+            ],
+        }
+
+        result = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_apply_reference_gate_physical_tie_breaker(
+                analysis,
+                evidence,
+            )
+        )
+        self.assertFalse(result["approved"])
+        self.assertEqual(["MASK_014"], result["failed_mask_ids"])
+        self.assertEqual((), result["reference_gate_physical_tie_breaker_ids"])
+
     def test_runtime_approves_on_first_fully_conforming_frame(self):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app.display_f3_ativo = True
