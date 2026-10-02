@@ -5085,3 +5085,46 @@ está interrompendo o avanço.
 confirmada, avanço do BLUE ainda bloqueado.
 
 ---
+## 02/10/2026 — Mudança de direção após D-058: percepção visual F3 passa para trilha neural
+
+**Estado:** DECISÃO ARQUITETURAL ACEITA — D-059.
+
+O reteste D-058 permanece registrado como FAIL parcial e não é apagado. Porém,
+por decisão explícita do produto, a investigação deixou de buscar uma nova
+correção convencional para o julgamento visual do F3.
+
+A partir deste ponto:
+
+```text
+não continuar:
+threshold → veto → probe → debounce → wrapper → novo fix
+
+seguir:
+configuração F3 existente
+→ referência + contorno + máscaras + mask_states
+→ detector neural de estados dos segmentos
+→ comparação esperada x observada
+→ OK / NG / INCERTO
+→ state machine
+```
+
+A primeira etapa será restrita ao **H1**. O objetivo é provar fisicamente que a
+autoridade neural:
+
+- aprova H1 quando os 28 estados observados correspondem ao configurado;
+- rejeita H1 com um único segmento esperado ON apagado;
+- não transforma reflexo em segmento ON;
+- tolera pequenas variações de posição e iluminação dentro do escopo treinado;
+- não introduz latência perceptível no fluxo;
+- não depende de nuvem, API paga ou decisão manual do operador.
+
+As imagens, contornos e máscaras já configurados no Projeto Display serão
+reaproveitados como referência/anotação inicial.
+
+Os CHECKS ainda não migrados podem continuar temporariamente no caminho atual
+para permitir migração incremental, mas a partir da D-059 **não é prioridade
+adicionar novas heurísticas convencionais ao H1**.
+
+**Próximo passo:** projetar e implementar somente a Etapa N1 — H1 neural — e
+submeter ao reteste físico antes de migrar BLUE.
+
