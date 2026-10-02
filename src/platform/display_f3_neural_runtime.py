@@ -281,6 +281,55 @@ class F3NeuralSegmentDetector:
                 }
                 return deepcopy(self._last_status)
 
+            validation = (
+                metadata.get("validation")
+                if isinstance(metadata.get("validation"), dict)
+                else {}
+            )
+            split = (
+                metadata.get("split")
+                if isinstance(metadata.get("split"), dict)
+                else {}
+            )
+            try:
+                checks = self.repository.listar_checks(name)
+            except Exception:
+                checks = []
+            first_check_id = str(
+                (
+                    checks[0]
+                    if isinstance(checks, list) and checks
+                    and isinstance(checks[0], dict)
+                    else {}
+                ).get("id")
+                or ""
+            ).strip()
+            if not (
+                validation.get("accepted_for_physical_h1_retest") is True
+                and str(split.get("strategy") or "")
+                == "hold_out_first_check_for_n1"
+                and first_check_id
+                and str(split.get("validation_check_id") or "").strip()
+                == first_check_id
+            ):
+                self._metadata = metadata
+                self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_model_not_validated_for_h1",
+                    "project_name": name,
+                    "first_check_id": first_check_id,
+                    "validation_check_id": str(
+                        split.get("validation_check_id") or ""
+                    ),
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
             labels = (
                 metadata.get("labels")
                 if isinstance(metadata.get("labels"), dict)
