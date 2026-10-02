@@ -15,7 +15,6 @@ ODIN. Nenhuma API, nuvem ou serviço pago participa do fluxo.
 import argparse
 import json
 import random
-import re
 from pathlib import Path
 
 import cv2
@@ -29,15 +28,6 @@ from src.platform.display_f3_neural_dataset import (
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
 )
-
-
-def _slug(value: str) -> str:
-    text = re.sub(
-        r"[^A-Za-z0-9_-]+",
-        "_",
-        str(value or "").strip(),
-    )
-    return text.strip("_").lower() or "display"
 
 
 def _load_torch():
@@ -507,7 +497,7 @@ def treinar(args) -> dict:
             "segments": {0: "batch"},
             "logits": {0: "batch"},
         },
-        opset_version=17,
+        opset_version=13,
     )
 
     # O runtime do ODIN já possui OpenCV. Falhe ainda no treino se o artefato
