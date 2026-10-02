@@ -926,7 +926,13 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
                     "classified": "off" if false_off else "on",
                     "matched": not false_off,
                     "raw_matched": not false_off,
-                    "confidence": 0.6414 if false_off else 0.99,
+                    # MASK_022 reproduz a leitura física real abaixo do
+                    # limiar semântico. A autoridade same-mask deve prevalecer.
+                    "confidence": (
+                        0.49
+                        if mask_id == "MASK_022"
+                        else (0.6414 if false_off else 0.99)
+                    ),
                     # Simula a evidência antiga divergente que existia no analyzer.
                     "intermittent_power_confirmation": False,
                     "intermittent_power_support": {
