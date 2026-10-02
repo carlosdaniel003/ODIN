@@ -3722,3 +3722,303 @@ Depois do PASS, repetir o teste de segurança com um segmento H1 esperado ON
 realmente apagado. O H1 não pode avançar nesse cenário.
 
 ---
+
+## 02/10/2026 — Registro consolidado das últimas ocorrências: reflexos, BLUE, H1, zoom e D-053
+
+**Tipo:** consolidação histórica das últimas ocorrências e correções.
+
+Este bloco não substitui os registros individuais anteriores. Ele existe para
+manter, em um único ponto, a sequência completa de falhas recentes, diagnóstico,
+tentativas, correções e estado de validação, evitando que uma manutenção futura
+trate cada sintoma como problema novo e repita soluções já descartadas.
+
+### 1. Reflexos no espelho visual do H1
+
+**Resultado físico:** FAIL.
+
+No H1 correto, somente os segmentos:
+
+```text
+MASK_008
+MASK_009
+MASK_011
+MASK_012
+MASK_013
+MASK_017
+MASK_020
+```
+
+estavam realmente acesos.
+
+O espelho visual também marcava como ON, por reflexo/ruído:
+
+```text
+MASK_010
+MASK_014
+MASK_018
+MASK_021
+```
+
+A origem foi isolada no sampler visual leve. O fallback de brilho absoluto
+voltava a promover como ON ROIs intermediárias que a separação relativa já
+havia rejeitado.
+
+**Correção:** o fallback absoluto passou a atuar somente quando a separação
+relativa não está disponível. Quando existe contraste relativo utilizável, ele
+prevalece e os candidatos intermediários permanecem rejeitados.
+
+**Estado:** correção implementada; reteste físico específico de reflexos
+permanece como histórico pendente quando não houver confirmação posterior.
+
+### 2. BLUE correto preso em 25/28
+
+**Resultado físico:** FAIL.
+
+Após H1, o BLUE correto ficou em 25/28 por falso OFF de:
+
+```text
+MASK_021
+MASK_023
+MASK_024
+```
+
+A evidência direta `CHECK x PLACA DESLIGADA` mostrava 18/18 máscaras esperadas
+ON como energizadas, mas a autoridade semântica estrita mantinha as três como
+OFF ambíguas.
+
+**Correção D-051:** CHECK intermitente ganhou suporte físico same-mask somente
+para falso OFF ambíguo, preservando a classificação estrita e o debounce de NG.
+
+**Proteção mantida:** `MASK_024` realmente apagada não pode receber suporte
+ON e deve continuar chegando a NG após persistência.
+
+**Estado:** correção implementada; validação física completa do BLUE correto e
+do BLUE com defeito real continua sendo a referência de segurança.
+
+### 3. H1 correto preso em 26/28
+
+**Resultado físico:** FAIL.
+
+O primeiro H1 apresentou:
+
+```text
+MASK_012 expected=ON classified=OFF confidence≈0.527
+MASK_020 expected=ON classified=OFF confidence≈0.511
+```
+
+enquanto:
+
+```text
+GABARITO EXATO H1 = 28/28
+CHECK x PLACA DESLIGADA = 7 powered / 0 off / 0 tie
+```
+
+D-051 não cobria o caso porque H1 não é intermitente.
+
+**Correção D-052:** foi criada reconciliação física exclusiva do primeiro
+CHECK/reference gate, inicialmente limitada a falso OFF semântico com
+`confidence < 0.58`.
+
+**Estado:** a implementação resolveu o cenário automatizado de
+`MASK_012/MASK_020`, mas o teste físico seguinte provou que o limite fixo ainda
+era insuficiente.
+
+### 4. Reteste D-052: H1 correto preso em 27/28 por MASK_013
+
+**Resultado físico:** FAIL.
+
+No reteste seguinte:
+
+```text
+H1 = 27/28
+MASK_013 expected=ON
+semantic classified=OFF
+semantic confidence=0.5944
+```
+
+No mesmo frame:
+
+```text
+gabarito exato = 28/28
+MASK_013 template_similarity=0.9920
+CHECK x PLACA DESLIGADA:
+  powered_votes=7
+  off_votes=0
+  tie_votes=0
+  MASK_013 winner=powered
+```
+
+Foi preservada uma divergência importante do DEBUG:
+
+- a autoridade global de energia publicou 6 ON + 1 OFF para `MASK_013`;
+- a comparação física direta do CHECK contra BOARD_OFF publicou 7/7 powered.
+
+A conclusão foi que os dois blocos respondem perguntas diferentes:
+
+- autoridade global de energia → existe energia física suficiente no display;
+- comparação direta same-mask do CHECK → esta máscara específica está mais
+  próxima do extremo ON ou do extremo OFF.
+
+O erro da D-052 foi usar `confidence < 0.58` como condição para permitir a
+segunda pergunta.
+
+### 5. Correção D-053 do H1
+
+O limite semântico fixo foi removido como gate da reconciliação física.
+
+Agora, no primeiro CHECK não intermitente:
+
+```text
+expected=ON + classified=OFF
+→ consultar prova física same-mask
+
+same_mask_comparison=True
++ referência ON/OFF discriminante
++ winner=powered
+→ reconciliar para ON
+
+winner=off/tie
+OU referência não discriminante
+OU evidência indisponível
+→ manter OFF
+```
+
+A confiança semântica continua registrada em telemetria, mas não pode vetar uma
+prova física direta independente.
+
+**Proteções:**
+
+- H1 continua exigindo 100% das máscaras conformes no mesmo frame;
+- máscara esperada OFF nunca é promovida por essa regra;
+- foto do próprio H1 não aprova sozinha;
+- BOARD_OFF independente continua obrigatório;
+- segmento realmente apagado continua OFF mesmo com confiança semântica alta;
+- nenhum threshold global foi reduzido;
+- nenhum timer/worker/scheduler foi criado.
+
+**Validação automática:** o caso real de `MASK_013 confidence=0.5944` foi
+reproduzido e passou; o caso oposto `semantic OFF confidence=0.95 +
+physical=off` também passou mantendo a falha.
+
+**Validação física D-053:** ainda pendente. O próximo teste esperado é:
+
+```text
+H1 correto
+→ 7 segmentos esperados ON
+→ 28/28
+→ H1 CONCLUÍDO
+→ avanço para BLUE
+```
+
+Depois do PASS, repetir com um segmento H1 esperado ON realmente apagado; o H1
+não pode avançar.
+
+### 6. Regressão do zoom físico: zoom "se desfez"
+
+**Resultado físico:** FAIL operacional.
+
+Durante o uso do F3, o zoom físico da câmera deixou de permanecer aplicado,
+embora a configuração do Projeto Display continuasse salva.
+
+#### Causa
+
+O runtime guardava uma assinatura lógica do último zoom enviado. Se a câmera ou
+o driver reinicializasse `CAP_PROP_ZOOM`/controle equivalente sem alterar essa
+assinatura, o ODIN concluía incorretamente:
+
+```text
+assinatura não mudou
+→ zoom já aplicado
+→ não reaplicar
+```
+
+Assim, o hardware podia voltar a 1× e o F3 permanecer convencido de que o zoom
+configurado ainda estava ativo.
+
+#### Correção aplicada — D-054
+
+A assinatura lógica passou a ser validada contra o readback real do serviço
+canônico de controles da câmera, quando esse readback existe.
+
+```text
+zoom solicitado = zoom lido do hardware
+→ manter assinatura / não duplicar comando
+
+zoom solicitado != zoom lido do hardware
+→ considerar zoom físico perdido
+→ reaplicar configuração salva
+```
+
+Também foram preservadas as seguintes guardas:
+
+- alteração de câmera pendente não recebe comando duplicado;
+- enquanto CONFIGURAR está aberto, a recuperação automática não sobrescreve
+  ajuste ainda não salvo do operador;
+- backend sem readback continua compatível;
+- nenhum novo timer, thread, worker ou scheduler foi criado;
+- a correção reutiliza o repaint/coordenador canônico existente.
+
+**Validação automática:** passaram os testes de readback igual, reset de
+hardware, comando pendente e contratos de zoom/preview.
+
+**Validação física do zoom após D-054:** pendente de confirmação explícita.
+
+### 7. Situação dos testes/CI durante essas correções
+
+O gate específico relacionado ao problema atual ficou verde:
+
+```text
+Display F3 fast H1 BLUE tests = PASS
+```
+
+Dentro dele passaram, entre outros:
+
+```text
+H1 MASK_013 confidence=0.5944 + physical powered → reconciliado
+H1 segmento realmente apagado + physical off → não reconciliado
+runtime H1 → reconciliação válida → avanço oficial
+```
+
+Outros workflows do repositório continuaram vermelhos durante a mesma janela,
+mas já apresentavam falhas no HEAD imediatamente anterior às alterações de
+D-053. Eles não foram tratados como parte desta etapa para evitar misturar
+escopos e mascarar regressões históricas não relacionadas.
+
+### 8. Regra para manutenção futura
+
+Não repetir as seguintes estratégias como solução isolada:
+
+- aumentar arbitrariamente `0.58` para outro threshold próximo;
+- usar o gabarito exato do próprio CHECK como aprovação independente;
+- usar a autoridade global de energia como substituta da conformidade individual;
+- criar outro classificador, timer, worker ou scheduler para contornar o F3;
+- concluir que um segmento está realmente apagado quando
+  `CHECK x PLACA DESLIGADA` da mesma máscara prova `powered`;
+- confiar apenas no último comando lógico de zoom sem observar o readback real,
+  quando o backend disponibiliza essa informação.
+
+As autoridades permanecem separadas:
+
+```text
+câmera/zoom → serviço canônico de câmera
+presença → F3PresenceAuthority
+energia → F3PowerAuthority
+conformidade por máscara → analyzer estrito + reconciliação física restrita
+sequência → state machine do F3
+scheduler → F3RuntimeCoordinator
+debug → observador
+```
+
+**Estado consolidado em 02/10/2026:**
+
+```text
+Reflexos live: correção implementada
+BLUE 25/28: D-051 implementada
+H1 26/28: D-052 implementada, depois refinada
+H1 27/28 MASK_013: D-053 implementada
+Zoom físico perdido: D-054 implementada
+H1 D-053: pendente de reteste físico
+Zoom D-054: pendente de reteste físico explícito
+```
+
+---
