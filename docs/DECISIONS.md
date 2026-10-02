@@ -2905,3 +2905,91 @@ segunda.
 **Validação física:** pendente de reteste do H1 correto.
 
 ---
+
+## D-056 — CHECK intermitente não usa confiança semântica como veto da prova física same-mask
+
+**Status:** Accepted
+
+### Contexto
+
+Após a D-055, o H1 correto foi validado fisicamente e avançou para BLUE.
+
+No BLUE correto, o frame congelado mostrou os segmentos `MASK_022` e
+`MASK_026` fisicamente acesos. O diagnóstico direto do próprio CHECK contra
+BOARD_OFF confirmou os **18 segmentos esperados ON como powered**, incluindo
+`MASK_022` e `MASK_026`.
+
+Mesmo assim o analyzer estrito classificou `MASK_022` como OFF com
+`confidence=0.6605`, acumulou a divergência por três fases ON e confirmou NG.
+A função de suporte físico intermitente só consultava a prova same-mask quando a
+confiança semântica era menor que `F3_CHECK_PHOTO_MIN_CONFIDENCE`.
+
+Esse é o mesmo erro conceitual já eliminado do primeiro CHECK pela D-053:
+confiança do classificador aprendido e evidência física same-mask são grandezas
+diferentes.
+
+### Decisão
+
+Para CHECK intermitente:
+
+```text
+expected=ON
++ semantic classified=OFF
+→ sempre pode consultar a prova física same-mask disponível
+```
+
+A confiança semântica deixa de ser condição para executar essa comparação.
+
+A reconciliação continua restrita a:
+
+```text
+referência ON e BOARD_OFF disponíveis
++ par ON/OFF fisicamente discriminante
++ LIVE winner=powered
+→ suporte físico confirmado
+```
+
+Se a evidência retornar `off`, `tie`, referência não discriminante ou estiver
+indisponível, a divergência permanece e o debounce de NG continua normal.
+
+### Segurança
+
+- a foto do próprio CHECK não aprova sozinha;
+- BOARD_OFF independente continua obrigatório;
+- D-031 continua exigindo conformidade de todas as máscaras;
+- um segmento realmente apagado continua sem suporte físico;
+- o suporte apenas impede falso OFF semântico; não promove máscara esperada OFF;
+- o debounce de CHECK intermitente permanece inalterado;
+- não são criados novos thresholds, timers, workers, schedulers ou autoridades.
+
+### Apresentação terminal
+
+O visor/câmera congelados continuam usando a análise efetiva do mesmo frame que
+fecha o NG. Ao eliminar o falso OFF antes do debounce, máscaras fisicamente ON
+como `MASK_026` não devem mais chegar ao snapshot terminal como OFF por esse
+mesmo erro semântico.
+
+### Regressões
+
+Cobertura obrigatória:
+
+```text
+BLUE expected ON
+semantic OFF confidence=0.6605
+same-mask physical=powered
+→ suporte físico confirmado
+```
+
+e o oposto:
+
+```text
+BLUE expected ON
+semantic OFF confidence=0.95
+same-mask physical=off
+→ continua OFF
+→ nenhum suporte físico
+```
+
+**Validação física:** pendente de reteste do BLUE correto.
+
+---
