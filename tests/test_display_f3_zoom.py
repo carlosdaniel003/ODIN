@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 
+from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_f3_zoom import (
     aplicar_zoom_software_frame_display_f3,
     calcular_recorte_zoom_software_display_f3,
@@ -98,6 +99,63 @@ class DisplayF3ZoomTests(unittest.TestCase):
         )
         self.assertAlmostEqual(-180.0, pan, places=6)
         self.assertAlmostEqual(-180.0, tilt, places=6)
+
+    def test_zoom_hardware_readback_igual_mantem_assinatura_valida(self):
+        class Service:
+            @staticmethod
+            def tem_configuracoes_camera_ao_vivo_pendentes():
+                return False
+
+            @staticmethod
+            def obter_valores_controles_camera_ao_vivo():
+                return {"zoom": 250.0}
+
+        self.assertTrue(
+            DisplayProductionF3Mixin
+            ._zoom_camera_hardware_ainda_aplicado_display_f3(
+                Service(),
+                enabled=True,
+                value=250.0,
+            )
+        )
+
+    def test_zoom_hardware_resetado_invalida_assinatura_logica(self):
+        class Service:
+            @staticmethod
+            def tem_configuracoes_camera_ao_vivo_pendentes():
+                return False
+
+            @staticmethod
+            def obter_valores_controles_camera_ao_vivo():
+                return {"zoom": 100.0}
+
+        self.assertFalse(
+            DisplayProductionF3Mixin
+            ._zoom_camera_hardware_ainda_aplicado_display_f3(
+                Service(),
+                enabled=True,
+                value=250.0,
+            )
+        )
+
+    def test_zoom_hardware_pendente_nao_dispara_reaplicacao_duplicada(self):
+        class Service:
+            @staticmethod
+            def tem_configuracoes_camera_ao_vivo_pendentes():
+                return True
+
+            @staticmethod
+            def obter_valores_controles_camera_ao_vivo():
+                return {"zoom": 100.0}
+
+        self.assertTrue(
+            DisplayProductionF3Mixin
+            ._zoom_camera_hardware_ainda_aplicado_display_f3(
+                Service(),
+                enabled=True,
+                value=250.0,
+            )
+        )
 
     def test_zoom_cinco_no_canto_permanece_dentro_do_frame(self):
         x0, y0, x1, y1, center_x, center_y = (
