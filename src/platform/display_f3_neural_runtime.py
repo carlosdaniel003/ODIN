@@ -148,16 +148,18 @@ class F3NeuralSegmentDetector:
         self._last_check_s = now
         model_signature = _file_signature(model_path)
         metadata_signature = _file_signature(metadata_path)
+        previous_model_signature = self._model_signature
+        previous_metadata_signature = self._metadata_signature
 
         self._project_name = name
         self._model_path = model_path
         self._metadata_path = metadata_path
-        self._model_signature = model_signature
-        self._metadata_signature = metadata_signature
 
         if model_signature[1] <= 0 or model_signature[2] <= 0:
             self._metadata = {}
             self._net = None
+            self._model_signature = model_signature
+            self._metadata_signature = metadata_signature
             self._last_status = {
                 "ready": False,
                 "reason": "neural_model_missing",
@@ -171,6 +173,8 @@ class F3NeuralSegmentDetector:
         if metadata_signature[1] <= 0 or metadata_signature[2] <= 0:
             self._metadata = {}
             self._net = None
+            self._model_signature = model_signature
+            self._metadata_signature = metadata_signature
             self._last_status = {
                 "ready": False,
                 "reason": "neural_metadata_missing",
@@ -184,8 +188,8 @@ class F3NeuralSegmentDetector:
         needs_reload = bool(
             self._net is None
             or not same_paths
-            or model_signature != self._model_signature
-            or metadata_signature != self._metadata_signature
+            or model_signature != previous_model_signature
+            or metadata_signature != previous_metadata_signature
         )
 
         if needs_reload:
@@ -213,6 +217,8 @@ class F3NeuralSegmentDetector:
             if model_type != F3_H1_NEURAL_MODEL_TYPE:
                 self._metadata = metadata
                 self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
                 self._last_status = {
                     "ready": False,
                     "reason": "neural_model_type_unsupported",
@@ -229,12 +235,20 @@ class F3NeuralSegmentDetector:
                 if isinstance(metadata.get("labels"), dict)
                 else {}
             )
+            try:
+                off_label = int(labels.get("off", -1))
+                on_label = int(labels.get("on", -1))
+            except (TypeError, ValueError):
+                off_label = -1
+                on_label = -1
             if labels and (
-                int(labels.get("off", -1)) != 0
-                or int(labels.get("on", -1)) != 1
+                off_label != 0
+                or on_label != 1
             ):
                 self._metadata = metadata
                 self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
                 self._last_status = {
                     "ready": False,
                     "reason": "neural_label_map_unsupported",
@@ -250,6 +264,8 @@ class F3NeuralSegmentDetector:
                 net = cv2.dnn.readNetFromONNX(str(model_path))
             except Exception as exc:
                 self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
                 self._last_status = {
                     "ready": False,
                     "reason": "neural_model_load_error",
@@ -263,6 +279,8 @@ class F3NeuralSegmentDetector:
 
             self._metadata = metadata
             self._net = net
+            self._model_signature = model_signature
+            self._metadata_signature = metadata_signature
             self.load_count += 1
 
         input_size = max(
