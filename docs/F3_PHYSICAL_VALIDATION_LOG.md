@@ -4022,3 +4022,171 @@ Zoom D-054: pendente de reteste físico explícito
 ```
 
 ---
+
+## 02/10/2026 — FAIL físico após D-053: H1 ainda 27/28 porque reconciliação recebeu a autoridade global errada
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Projeto `CM_500_L`, primeiro CHECK `CHECK_001 / H1`, não intermitente,
+rotação visual 180°.
+
+O operador apresentou o H1 correto, com os sete segmentos esperados ON
+fisicamente acesos. Mesmo assim a tela permaneceu em:
+
+```text
+AGUARDANDO H1
+MÁSCARAS • H1 NÃO CONFIRMADO • 27/28 CONFORMES
+6 ACESOS • 22 APAGADOS • FALHA MASK_013
+```
+
+### Evidência do mesmo frame
+
+O relatório confirmou:
+
+```text
+ESTADO DA PLACA: PRESENTE • CONFIRMADA
+ENERGIA DO DISPLAY: CONFIRMADA
+CHECK LÓGICO: H1
+GATE PRODUTIVO: LIBERADO
+ANÁLISE BRUTA H1: 27/28
+```
+
+A única divergência semântica continuou sendo:
+
+```text
+MASK_013
+expected=ON
+classified=OFF
+confidence=0.5937
+```
+
+A comparação física direta do próprio CHECK contra BOARD_OFF, porém, mostrou:
+
+```text
+expected_on=7
+powered_votes=7
+off_votes=0
+tie_votes=0
+MASK_013 winner=powered
+```
+
+### Nova evidência decisiva
+
+Diferente dos testes anteriores, o DEBUG do runtime agora expôs também qual
+evidência a D-053 realmente recebeu:
+
+```text
+reference_gate_physical_tie_breaker_ids=[]
+reference_gate_physical_tie_breaker_source=f3_unified_live_mask_power_authority
+effective_failed_mask_ids=[MASK_013]
+```
+
+Isto provou que a D-053 não estava falhando por threshold nem porque
+`MASK_013` estava fisicamente OFF.
+
+A reconciliação do H1 estava recebendo a **autoridade global de energia**, e não
+a comparação direta same-mask que o diagnóstico manual mostrou como 7/7
+`powered`.
+
+### Causa confirmada no código
+
+A autoridade unificada v2 mantém compatibilidade com wrappers antigos
+substituindo dinamicamente:
+
+```text
+avaliar_evidencia_energia_relativa_display_f3
+→ avaliar_evidencia_energia_unificada_display_f3
+```
+
+O método recém-criado para D-052/D-053,
+`F3PowerAuthority.evaluate_current_check_relative()`, chamava esse mesmo nome
+substituível.
+
+Portanto a sequência real era:
+
+```text
+D-053 pede prova física direta da MASK_013
+→ chama nome legado
+→ camada v2 já reapontou esse nome
+→ retorna f3_unified_live_mask_power_authority
+→ MASK_013=off
+→ nenhum tie-breaker aplicado
+→ H1 permanece 27/28
+```
+
+Enquanto isso o diagnóstico direto, que executava a comparação
+BOARD_OFF/LIVE/ON do CHECK, continuava publicando `MASK_013=powered`.
+
+### Correção aplicada — D-055
+
+A comparação direta do CHECK atual foi separada em uma primitiva estável:
+
+```text
+avaliar_evidencia_energia_check_relativa_display_f3
+```
+
+`F3PowerAuthority.evaluate_current_check_relative()` agora chama somente essa
+primitiva.
+
+O símbolo legado continua disponível e pode ser reapontado pela energia v2 para
+não quebrar consumidores históricos.
+
+Também foi fixada a fonte da comparação direta como:
+
+```text
+f3_same_mask_relative_power_authority
+```
+
+para que um novo DEBUG deixe explícito se a reconciliação voltou a consumir a
+autoridade errada.
+
+### Regressão adicionada
+
+O teste reproduz deliberadamente o conflito:
+
+```text
+nome legado → f3_unified_live_mask_power_authority / MASK_013=off
+primitiva estável → f3_same_mask_relative_power_authority / MASK_013=powered
+```
+
+e exige que `F3PowerAuthority.evaluate_current_check_relative()` use a
+primitiva estável.
+
+O gate rápido H1/BLUE também passou a executar explicitamente essa regressão.
+
+### Proteções mantidas
+
+- D-053 continua sem usar threshold semântico como veto;
+- H1 continua exigindo 28/28;
+- segmento realmente apagado continua sem reconciliação quando a comparação
+  física direta retorna OFF/tie;
+- máscara esperada OFF não pode ser promovida;
+- energia global continua responsável por energia global;
+- nenhum novo timer, worker, scheduler, thread ou autoridade foi criado.
+
+### Próximo reteste físico esperado
+
+```text
+H1 correto
+→ análise semântica pode ainda produzir MASK_013=OFF bruto
+→ reference_gate_physical_tie_breaker_source deve ser
+   f3_same_mask_relative_power_authority
+→ MASK_013 deve entrar em reference_gate_physical_tie_breaker_ids
+→ análise efetiva deve fechar 28/28
+→ H1 deve concluir e avançar
+```
+
+Teste de segurança posterior:
+
+```text
+H1 com MASK_013 realmente apagada
+→ comparação direta same-mask = off/tie
+→ MASK_013 não entra no tie-breaker
+→ H1 não avança
+```
+
+**Estado:** CORREÇÃO D-055 IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+---
