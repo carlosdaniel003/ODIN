@@ -1442,6 +1442,10 @@ class DisplayAutomaticCheckF3Mixin:
             )
 
         if not bool(analysis.get("ready")):
+            # Publica também indisponibilidade como último snapshot. Isso impede
+            # que wrappers externos reutilizem um OK antigo do mesmo CHECK quando
+            # o modelo/referência atual ficou indisponível no frame corrente.
+            self._display_auto_last_analysis = deepcopy(analysis)
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
             self._display_auto_set_preview_status(
