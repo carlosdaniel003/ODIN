@@ -47,6 +47,7 @@ jobs:
             src/platform/display_project_config.py \
             src/platform/display_production_f3.py \
             src/platform/display_f3_runtime_coordinator.py \
+            src/platform/display_f3_runtime_authorities.py \
             src/platform/desktop_production_app.py \
             tests/test_display_f3_fast_expected_gate.py \
             tests/test_display_f3_h1_single_frame_probe.py \
@@ -64,6 +65,7 @@ jobs:
             tests/test_display_f3_zoom.py \
             tests/test_display_f3_config_architecture.py \
             tests/test_display_f3_runtime_coordinator.py \
+            tests/test_display_f3_runtime_authorities.py \
             tests/test_display_f3_strict_mask_conformity.py \
             tests/test_display_f3_intermittent_runtime.py \
             tests/test_display_project_repository.py \
@@ -79,6 +81,7 @@ jobs:
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_h1_false_off_05944_e_reconciliado_por_prova_fisica \
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_h1_mascara_expected_off_nunca_e_corrigida_como_on \
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_runtime_h1_ambiguo_usa_autoridade_fisica_e_avanca \
+            tests.test_display_f3_runtime_authorities.DisplayF3RuntimeAuthoritiesTests.test_current_check_relative_uses_stable_comparator_not_v2_monkey_patch \
             -v
 
       - name: Validate blocked-gate neutral presentation
