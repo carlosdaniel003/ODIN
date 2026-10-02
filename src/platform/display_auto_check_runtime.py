@@ -95,6 +95,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_failure_counts = {}
         self._display_auto_intermittent_persistent_failed_ids = set()
         self._display_auto_intermittent_exact_veto_ids = set()
+        self._display_auto_intermittent_physical_support_veto_ids = set()
         self._display_auto_intermittent_candidate_failed_ids = set()
         self._display_auto_intermittent_last_phase_analysis = None
         self._display_f3_pending_ng_frame = None
@@ -129,6 +130,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_failure_counts = {}
         self._display_auto_intermittent_persistent_failed_ids = set()
         self._display_auto_intermittent_exact_veto_ids = set()
+        self._display_auto_intermittent_physical_support_veto_ids = set()
         self._display_auto_intermittent_candidate_failed_ids = set()
         self._display_auto_intermittent_last_phase_analysis = None
         self._display_f3_pending_ng_frame = None
@@ -380,16 +382,32 @@ class DisplayAutomaticCheckF3Mixin:
         )
 
     @staticmethod
+    def _display_auto_physical_support_confirms_expected(item: dict) -> bool:
+        return bool(
+            str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+            and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_OFF
+            and item.get("intermittent_power_confirmation") is True
+        )
+
+    @staticmethod
     def _display_auto_apply_intermittent_exact_veto(
         analysis: dict,
         phase_evidence: dict,
     ) -> dict:
         result = deepcopy(analysis)
-        veto_ids = {
+        exact_veto_ids = {
             str(mask_id)
             for mask_id in (phase_evidence.get("exact_template_veto_ids") or ())
             if str(mask_id)
         }
+        physical_veto_ids = {
+            str(mask_id)
+            for mask_id in (
+                phase_evidence.get("physical_support_veto_ids") or ()
+            )
+            if str(mask_id)
+        }
+        veto_ids = exact_veto_ids.union(physical_veto_ids)
         if not veto_ids:
             return result
 
@@ -405,16 +423,32 @@ class DisplayAutomaticCheckF3Mixin:
             expected = str(item.get("expected") or "").strip().lower()
             if expected not in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF):
                 continue
-            item["learned_classified_before_exact_veto"] = str(
-                item.get("classified") or ""
-            )
-            item["learned_matched_before_exact_veto"] = item.get("matched")
-            item["intermittent_exact_template_veto"] = True
+
+            if mask_id in exact_veto_ids:
+                item["learned_classified_before_exact_veto"] = str(
+                    item.get("classified") or ""
+                )
+                item["learned_matched_before_exact_veto"] = item.get("matched")
+                item["intermittent_exact_template_veto"] = True
+                item["classification_source"] = (
+                    "exact_template_veto_over_learned"
+                )
+            else:
+                item["learned_classified_before_physical_support_veto"] = str(
+                    item.get("classified") or ""
+                )
+                item["learned_matched_before_physical_support_veto"] = (
+                    item.get("matched")
+                )
+                item["intermittent_physical_support_veto"] = True
+                item["classification_source"] = (
+                    "physical_power_support_veto_over_learned"
+                )
+
             item["classified"] = expected
             item["matched"] = True
             item["raw_matched"] = True
             item["intermittent_tolerated"] = False
-            item["classification_source"] = "exact_template_veto_over_learned"
 
         result["matched_mask_count"] = sum(
             1 for item in rows if bool(item.get("matched"))
@@ -424,7 +458,10 @@ class DisplayAutomaticCheckF3Mixin:
             bool(item.get("matched")) for item in rows
         )
         result["intermittent_exact_template_veto_ids"] = tuple(
-            sorted(veto_ids)
+            sorted(exact_veto_ids)
+        )
+        result["intermittent_physical_support_veto_ids"] = tuple(
+            sorted(physical_veto_ids)
         )
         return result
 
@@ -699,6 +736,7 @@ class DisplayAutomaticCheckF3Mixin:
                 getattr(self, "_display_auto_intermittent_failure_counts", {}) or {}
             )
             exact_veto_ids = set()
+            physical_support_veto_ids = set()
             candidate_failed_ids = set()
             for item in results:
                 mask_id = str(item.get("mask_id") or "")
@@ -722,6 +760,11 @@ class DisplayAutomaticCheckF3Mixin:
                     exact_veto_ids.add(mask_id)
                     continue
 
+                if self._display_auto_physical_support_confirms_expected(item):
+                    counts[mask_id] = 0
+                    physical_support_veto_ids.add(mask_id)
+                    continue
+
                 counts[mask_id] = int(counts.get(mask_id, 0) or 0) + 1
                 candidate_failed_ids.add(mask_id)
 
@@ -732,6 +775,9 @@ class DisplayAutomaticCheckF3Mixin:
                 if int(count or 0) >= self.DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES
             }
             self._display_auto_intermittent_exact_veto_ids = exact_veto_ids
+            self._display_auto_intermittent_physical_support_veto_ids = (
+                physical_support_veto_ids
+            )
             self._display_auto_intermittent_candidate_failed_ids = (
                 candidate_failed_ids
             )
@@ -753,6 +799,16 @@ class DisplayAutomaticCheckF3Mixin:
                     getattr(
                         self,
                         "_display_auto_intermittent_exact_veto_ids",
+                        set(),
+                    )
+                    or set()
+                )
+            ),
+            "physical_support_veto_ids": tuple(
+                sorted(
+                    getattr(
+                        self,
+                        "_display_auto_intermittent_physical_support_veto_ids",
                         set(),
                     )
                     or set()
@@ -951,6 +1007,7 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_auto_intermittent_failure_counts = {}
             self._display_auto_intermittent_persistent_failed_ids = set()
             self._display_auto_intermittent_exact_veto_ids = set()
+            self._display_auto_intermittent_physical_support_veto_ids = set()
             self._display_auto_intermittent_candidate_failed_ids = set()
             self._display_auto_intermittent_last_phase_analysis = None
             self._display_auto_last_decision = None
