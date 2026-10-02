@@ -26,15 +26,24 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install opencv-python-headless numpy Pillow
 
-      - name: Compile neural dataset and training pipeline
+      - name: Compile neural dataset, runtime and training pipeline
         run: |
           python -m py_compile \
             src/platform/display_f3_neural_dataset.py \
+            src/platform/display_f3_neural_runtime.py \
+            src/platform/display_auto_check_policy.py \
+            src/platform/display_auto_check_runtime.py \
+            src/platform/display_f3_runtime_authorities.py \
+            src/platform/display_f3_contour_check_identity.py \
+            src/platform/display_f3_live_diagnostic_trace.py \
+            src/platform/display_f3_powered_cycle_latch.py \
             scripts/treinar_f3_segmentos_neural.py \
-            tests/test_display_f3_neural_dataset.py
+            tests/test_display_f3_neural_dataset.py \
+            tests/test_display_f3_neural_runtime.py
 
-      - name: Run neural dataset tests
+      - name: Run neural F3 tests
         run: |
           python -m unittest \
             tests.test_display_f3_neural_dataset \
+            tests.test_display_f3_neural_runtime \
             -v
