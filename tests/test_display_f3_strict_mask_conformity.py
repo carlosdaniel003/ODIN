@@ -16,13 +16,18 @@ from src.platform.display_f3_strict_mask_conformity import (
     F3StrictMaskConformityAnalyzer,
     _failure_items,
     F3_STRICT_MASK_AUTHORITY,
+    anotar_suporte_fisico_intermitente_f3,
     filtrar_aprendizado_sem_check_atual_f3,
     reinjetar_on_proprio_validado_f3,
     resumir_falhas_mascaras_f3,
+    _referencias_suporte_intermitente_f3,
 )
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
+)
+from src.platform.display_visual_reference_status import (
+    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
 )
 
 
@@ -48,6 +53,13 @@ def _features(level: float):
         }
     )
     return SimpleNamespace(**values)
+
+
+def _power_features(level: float):
+    features = _features(level)
+    features.percent_hot_235 = 1.0 if level >= 235 else 0.0
+    features.percent_hot_245 = 1.0 if level >= 245 else 0.0
+    return features
 
 
 class DisplayF3StrictMaskConformityTests(TestCase):
@@ -230,6 +242,134 @@ class DisplayF3StrictMaskConformityTests(TestCase):
             rescued["by_mask"]["MASK_024"]["on"],
         )
         self.assertEqual((), rescued["validated_self_on_mask_ids"])
+
+    def test_falso_off_ambiguo_recebe_suporte_fisico_sem_alterar_raw(self):
+        on_reference = _power_features(250)
+        off_reference = _power_features(35)
+        learning = {
+            "by_mask": {
+                "MASK_024": {
+                    "on": [on_reference],
+                    "off": [off_reference],
+                    "sources": {
+                        "on": [
+                            _source("CHECK_002", "MASK_024", "on"),
+                        ],
+                        "off": [
+                            {
+                                **_source("BOARD_OFF", "MASK_024", "off"),
+                                "reference_kind": DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                            }
+                        ],
+                    },
+                }
+            }
+        }
+        references = _referencias_suporte_intermitente_f3(
+            learning,
+            "CHECK_002",
+        )
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.51,
+                    "features": vars(_power_features(248)),
+                }
+            ],
+        }
+
+        result = anotar_suporte_fisico_intermitente_f3(
+            analysis,
+            references,
+        )
+        item = result["mask_results"][0]
+
+        self.assertTrue(item["intermittent_power_confirmation"])
+        self.assertEqual(
+            "powered",
+            item["intermittent_power_support"]["winner"],
+        )
+        self.assertEqual("off", item["classified"])
+        self.assertFalse(item["matched"])
+        self.assertFalse(result["approved"])
+        self.assertEqual(
+            ("MASK_024",),
+            result["intermittent_power_support_confirmed_mask_ids"],
+        )
+
+    def test_segmento_realmente_apagado_nao_recebe_suporte_fisico(self):
+        on_reference = _power_features(250)
+        off_reference = _power_features(35)
+        references = {
+            "MASK_024": {
+                "on": on_reference,
+                "off": off_reference,
+            }
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.51,
+                    "features": vars(_power_features(38)),
+                }
+            ],
+        }
+
+        result = anotar_suporte_fisico_intermitente_f3(
+            analysis,
+            references,
+        )
+        item = result["mask_results"][0]
+
+        self.assertFalse(item["intermittent_power_confirmation"])
+        self.assertEqual("off", item["intermittent_power_support"]["winner"])
+        self.assertEqual(
+            (),
+            result["intermittent_power_support_confirmed_mask_ids"],
+        )
+
+    def test_referencia_on_escura_nao_pode_autoconfirmar_falso_off(self):
+        references = {
+            "MASK_024": {
+                "on": _power_features(42),
+                "off": _power_features(38),
+            }
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.51,
+                    "features": vars(_power_features(42)),
+                }
+            ],
+        }
+
+        result = anotar_suporte_fisico_intermitente_f3(
+            analysis,
+            references,
+        )
+        item = result["mask_results"][0]
+
+        self.assertFalse(item["intermittent_power_confirmation"])
+        self.assertEqual("tie", item["intermittent_power_support"]["winner"])
 
     def test_uma_unica_mascara_divergente_impede_aprovacao(self):
         base_analysis = {
