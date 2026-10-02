@@ -3312,7 +3312,7 @@ Direção técnica inicial:
 
 - treinamento local/offline com ferramenta gratuita;
 - exportação do modelo para ONNX;
-- inferência produtiva com ONNX Runtime;
+- inferência produtiva com OpenCV DNN carregando artefato ONNX, reutilizando a dependência OpenCV já presente no ODIN;
 - CPU-first;
 - sem LLM;
 - sem serviço cloud;
@@ -3325,6 +3325,35 @@ Direção técnica inicial:
 A seleção exata da arquitetura neural será validada na etapa de protótipo. A
 documentação não fixa antecipadamente um backbone específico sem benchmark no
 hardware real.
+
+### Estado da implementação N1
+
+A base neural foi dividida em duas entregas antes da validação física:
+
+- **N1.1 — dataset/treino:** concluída. As fotos já cadastradas nos CHECKS,
+  geometrias locais e `mask_states` formam automaticamente amostras ON/OFF por
+  `MASK_xxx`. O treinamento é offline e exporta ONNX no caminho associado ao
+  próprio `DisplayProjectRepository`.
+- **N1.2 — runtime H1:** implementada e aguardando treinamento/reteste físico.
+  O primeiro CHECK da ordem do projeto usa `F3H1NeuralAnalyzer` +
+  `F3NeuralSegmentDetector`; as máscaras ativas são inferidas em um único
+  batch pelo OpenCV DNN. BLUE/USB/AUX continuam no analisador convencional.
+- O artefato neural é **fail-closed**: modelo/metadados ausentes ou incompatíveis
+  deixam o H1 indisponível e não reativam o classificador convencional como
+  fallback.
+- Tracking permanece somente como fonte de geometria/pose para o H1 neural. O
+  desempate óptico e a reconciliação luminosa convencionais não podem alterar
+  ON/OFF publicados pela CNN.
+- A sonda exata/bridge histórico do primeiro CHECK é somente observador enquanto
+  a autoridade neural H1 estiver instalada, impedindo dupla autoridade de
+  aprovação.
+- `INCERTO` nunca aprova nem reprova. Divergência neural certa pode produzir
+  NG no H1 somente quando o próprio frame também contém evidência positiva de
+  display ligado; uma leitura totalmente escura continua aguardando evidência
+  de energia em vez de virar falso NG.
+
+**Validação física N1.2:** pendente. O próximo passo é treinar o ONNX com a
+configuração real do projeto e executar os casos físicos de aceitação do H1.
 
 ### Objetivos de robustez
 
