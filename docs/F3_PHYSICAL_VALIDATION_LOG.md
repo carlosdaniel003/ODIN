@@ -4824,3 +4824,131 @@ confirmação física `powered`.
 **Estado:** D-057 RETESTADA FISICAMENTE — FAIL PARCIAL; BLUE preso em 26/28.
 
 ---
+
+---
+
+## 02/10/2026 — Correção D-058 após BLUE preso em 26/28
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+### Causa confirmada
+
+O reteste D-057 mostrou que a F3PowerAuthority já chegava corretamente ao
+runtime e publicava quatro falsos OFF fisicamente confirmados:
+
+```text
+intermittent_power_support_confirmed_mask_ids:
+MASK_019
+MASK_021
+MASK_022
+MASK_024
+```
+
+Porém o observador da fase intermitente não consumia essa lista como contrato.
+Ele voltava a decidir máscara por máscara por
+`intermittent_power_confirmation`, mantendo uma segunda interpretação do
+mesmo suporte físico.
+
+O resultado real foi:
+
+```text
+canonical confirmed = MASK_019, MASK_021, MASK_022, MASK_024
+physical veto       = MASK_021, MASK_024
+effective failed    = MASK_019, MASK_022
+matched             = 26/28
+```
+
+Portanto a falha desta etapa estava no **consumidor da autoridade física**, não
+na F3PowerAuthority e não em threshold óptico.
+
+### Correção aplicada — D-058
+
+`_display_auto_observe_intermittent_phase()` agora consome diretamente
+`intermittent_power_support_confirmed_mask_ids` quando o envelope confirma:
+
+```text
+authoritative=true
+source=f3_same_mask_relative_power_authority
+authority=f3_power_authority_current_check_relative
+```
+
+Para um `expected=ON/classified=OFF` presente nessa lista:
+
+```text
+contador de falha = 0
+→ entra em physical_support_veto_ids
+→ reconciliação efetiva para ON
+```
+
+A aplicação ocorre antes do corte de confiança semântica. Assim a evidência
+física independente não volta a ser bloqueada por confiança do classificador
+aprendido.
+
+A antiga interpretação produtiva por
+`_display_auto_physical_support_confirms_expected(item)` foi removida. Os
+campos individuais continuam somente como telemetria/DEBUG.
+
+### Proteções mantidas
+
+- fonte global/unificada não concede suporte individual;
+- envelope não autorizado não concede veto;
+- campo local `intermittent_power_confirmation=True` sozinho não concede veto;
+- segmento realmente apagado continua acumulando falha e pode fechar NG após
+  debounce;
+- nenhuma alteração de threshold, debounce, timer, thread, worker, scheduler ou
+  fila;
+- nenhuma mudança foi aplicada ao pipeline assíncrono/frame scheduling nesta
+  etapa.
+
+### Regressões adicionadas/fortalecidas
+
+```text
+019/021/022/024 falsos OFF
++ lista canônica confirma os quatro
++ item local de 019/022 stale
++ confidence de 019/022 abaixo do limiar
+→ veto físico contém os quatro
+→ 28/28
+```
+
+Também foi adicionado o caso de segurança:
+
+```text
+campo local diz physical confirmation
++ lista canônica autorizada ausente
+→ não recebe veto
+→ falha real continua persistente
+```
+
+O teste integrado do BLUE foi endurecido com `MASK_022 confidence=0.49` e
+prova física canônica `powered`; o CHECK deve continuar avançando.
+
+### Próximo reteste físico
+
+```text
+H1 correto
+→ conclui
+
+BLUE correto
+→ qualquer falso OFF semântico que esteja na lista canônica powered
+   entra no mesmo physical_support_veto_ids
+→ effective_failed_mask_ids=[]
+→ 28/28
+→ BLUE conclui e avança para USB
+```
+
+Depois, repetir com um segmento BLUE esperado ON realmente apagado:
+
+```text
+same-mask=off/tie
+→ não entra na lista canônica confirmada
+→ sem veto
+→ falha persiste
+→ NG após debounce
+```
+
+A diferença já observada entre frame manual 550 e snapshot produtivo 533
+permanece registrada. Ela será reavaliada somente se o reteste D-058 ainda
+mostrar evidência stale.
+
+---
