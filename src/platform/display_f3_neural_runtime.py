@@ -15,6 +15,7 @@ rearme e UI continuam com as autoridades canônicas já existentes.
 """
 
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -68,6 +69,20 @@ def _file_signature(path: Path) -> tuple[str, int, int]:
         return str(path), int(stat.st_mtime_ns), int(stat.st_size)
     except OSError:
         return str(path), 0, 0
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()
 
 
 def _softmax_logits(logits: np.ndarray) -> np.ndarray:
@@ -226,6 +241,42 @@ class F3NeuralSegmentDetector:
                     "model_type": model_type,
                     "model_path": str(model_path),
                     "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
+            declared_hash = str(
+                metadata.get("onnx_sha256") or ""
+            ).strip().lower()
+            if not declared_hash:
+                self._metadata = metadata
+                self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_model_hash_missing",
+                    "project_name": name,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
+            actual_hash = _sha256_file(model_path)
+            if not actual_hash or actual_hash.lower() != declared_hash:
+                self._metadata = metadata
+                self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_model_hash_mismatch",
+                    "project_name": name,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "declared_sha256": declared_hash,
+                    "actual_sha256": actual_hash,
                     "load_count": int(self.load_count),
                 }
                 return deepcopy(self._last_status)
