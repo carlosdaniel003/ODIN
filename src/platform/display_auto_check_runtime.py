@@ -203,6 +203,7 @@ class DisplayAutomaticCheckF3Mixin:
             "neural_model_missing": "Modelo neural H1 ainda não treinado",
             "neural_metadata_missing": "Metadados do modelo neural H1 ausentes",
             "neural_model_project_mismatch": "Modelo neural pertence a outro projeto",
+            "neural_metadata_schema_unsupported": "Metadados do modelo neural incompatíveis",
             "neural_model_type_unsupported": "Modelo neural incompatível",
             "neural_model_hash_missing": "Integridade do modelo neural não registrada",
             "neural_model_hash_mismatch": "Modelo neural não corresponde aos metadados",
