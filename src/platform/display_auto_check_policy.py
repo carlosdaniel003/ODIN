@@ -32,8 +32,11 @@ def decidir_analise_display_f3(
     """Converte classificação óptica em OK, NG confirmado ou busca contínua.
 
     Regras operacionais:
-    - H1/primeiro CHECK é o referencial de entrada: nunca gera NG automático;
-      só avança quando estiver conforme.
+    - H1 convencional continua sendo referencial de entrada e nunca gera NG
+      automático;
+    - quando o primeiro CHECK está sob autoridade neural, uma divergência
+      neural certa pode gerar NG, desde que exista evidência positiva de display
+      ligado no mesmo frame;
     - Depois de H1, ausência de evidência não é defeito: continua buscando.
     - POUCA LUZ em uma máscara esperada ACESA/APAGADA é inconsistência.
     - ACESO onde era esperado APAGADO é inconsistência positiva.
@@ -106,6 +109,12 @@ def decidir_analise_display_f3(
         and not semantic_mismatches
     )
     all_confident = len(confident_results) == len(results)
+    neural_reference_gate = bool(
+        reference_gate
+        and data.get("neural_visual_authority") is True
+        and str(data.get("neural_check_scope") or "")
+        == "first_check_only"
+    )
 
     # O H1/primeiro CHECK só pode ser OK quando a própria leitura comprova que
     # existe pelo menos um segmento ACESO. Uma placa totalmente apagada nunca
@@ -126,9 +135,61 @@ def decidir_analise_display_f3(
             "board_powered": bool(board_powered),
         }
 
-    # O H1 é a referência que confirma que a placa entrou no fluxo correto.
-    # Até ele ficar OK, qualquer leitura diferente é tratada como transição ou
-    # ausência da condição esperada, nunca como NG automático.
+    # N1.2: no primeiro CHECK migrado, CNN é a única autoridade de ON/OFF.
+    # INCERTO nunca vira NG. Divergência certa vira NG somente com outro segmento
+    # ON confirmado no mesmo frame, evitando classificar placa desligada como
+    # segmento defeituoso.
+    if neural_reference_gate:
+        neural_uncertain = [
+            item
+            for item in results
+            if (
+                item.get("neural_certain") is False
+                or str(item.get("classified") or "") == "uncertain"
+            )
+        ]
+        if neural_uncertain or not all_confident:
+            return {
+                "decision": DISPLAY_AUTO_DECISION_SEARCHING,
+                "reason": "classificacao_neural_incerta",
+                "confirmed_ng": False,
+                "board_powered": bool(board_powered),
+                "uncertain_mask_ids": [
+                    str(item.get("mask_id") or "")
+                    for item in neural_uncertain
+                ],
+            }
+
+        neural_mismatches = [
+            item
+            for item in results
+            if item.get("matched") is False
+        ]
+        if neural_mismatches:
+            return {
+                "decision": DISPLAY_AUTO_DECISION_NG,
+                "reason": "h1_neural_divergencia_confirmada",
+                "confirmed_ng": True,
+                "board_powered": True,
+                "failed_mask_id": str(
+                    neural_mismatches[0].get("mask_id") or ""
+                ),
+                "failed_mask_ids": [
+                    str(item.get("mask_id") or "")
+                    for item in neural_mismatches
+                ],
+            }
+
+        return {
+            "decision": DISPLAY_AUTO_DECISION_SEARCHING,
+            "reason": "aguardando_estado_neural_h1",
+            "confirmed_ng": False,
+            "board_powered": bool(board_powered),
+        }
+
+    # O H1 convencional é a referência que confirma que a placa entrou no fluxo
+    # correto. Até ele ficar OK, qualquer leitura diferente continua sendo
+    # transição/ausência da condição esperada, nunca NG automático.
     if reference_gate:
         return {
             "decision": DISPLAY_AUTO_DECISION_SEARCHING,
