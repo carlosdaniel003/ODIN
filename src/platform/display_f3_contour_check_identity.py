@@ -888,11 +888,23 @@ class F3TrackedRawCheckAnalyzer:
                     geometry.get("geometry_space") or "tracking_live"
                 ),
             )
-            result = _apply_luminous_core_mask_evidence(
-                result,
-                geometry,
-                check_id,
-            )
+            # Tracking continua fornecendo apenas a geometria. Quando o CHECK
+            # atual já está sob autoridade neural, a evidência luminosa histórica
+            # não pode reclassificar ON/OFF nem transformar a CNN em mais um voto.
+            if not bool(
+                isinstance(result, dict)
+                and result.get("neural_visual_authority") is True
+            ):
+                result = _apply_luminous_core_mask_evidence(
+                    result,
+                    geometry,
+                    check_id,
+                )
+            elif isinstance(result, dict):
+                result["luminous_core_reconciliation_skipped"] = True
+                result["luminous_core_reconciliation_reason"] = (
+                    "neural_visual_authority"
+                )
             if isinstance(result, dict):
                 result["analysis_frame_source"] = (
                     "tracking_raw_with_live_geometry"
