@@ -39,11 +39,13 @@ jobs:
             src/platform/display_f3_powered_cycle_latch.py \
             scripts/treinar_f3_segmentos_neural.py \
             tests/test_display_f3_neural_dataset.py \
-            tests/test_display_f3_neural_runtime.py
+            tests/test_display_f3_neural_runtime.py \
+            tests/test_display_f3_neural_training.py
 
       - name: Run neural F3 tests
         run: |
           python -m unittest \
             tests.test_display_f3_neural_dataset \
             tests.test_display_f3_neural_runtime \
+            tests.test_display_f3_neural_training \
             -v
