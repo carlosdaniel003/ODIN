@@ -483,6 +483,21 @@ def _runtime_state_at_frame(app) -> dict:
                 runtime_debug.get("power_authority_status")
             ),
             "last_auto_analysis": _safe_deepcopy(evidence.get("analysis")),
+            "auto_last_frame_token": _safe_deepcopy(
+                runtime_debug.get("auto_last_frame_token")
+            ),
+            "auto_decision_trace": _safe_deepcopy(
+                runtime_debug.get("auto_decision_trace")
+            ),
+            "final_stability": _safe_deepcopy(
+                runtime_debug.get("final_stability")
+            ),
+            "final_stability_last_frame": _safe_deepcopy(
+                runtime_debug.get("final_stability_last_frame")
+            ),
+            "physical_transition_authority_status": _safe_deepcopy(
+                runtime_debug.get("physical_transition_authority_status")
+            ),
             "sequence": _safe_deepcopy(evidence.get("sequence")),
             "last_decision": _safe_deepcopy(runtime_debug.get("last_decision")),
             "stable_frames": _safe_deepcopy(runtime_debug.get("stable_frames")),
@@ -556,6 +571,25 @@ def _runtime_state_at_frame(app) -> dict:
         ),
         "last_auto_analysis": _safe_deepcopy(
             getattr(app, "_display_auto_last_analysis", None)
+        ),
+        "auto_last_frame_token": _safe_deepcopy(
+            getattr(app, "_display_auto_last_frame_token", None)
+        ),
+        "auto_decision_trace": _safe_deepcopy(
+            getattr(app, "_display_auto_last_decision_trace", None)
+        ),
+        "final_stability": _safe_deepcopy(
+            getattr(app, "_display_f3_final_stability_last", None)
+        ),
+        "final_stability_last_frame": _safe_deepcopy(
+            getattr(app, "_display_f3_final_stability_last_frame", None)
+        ),
+        "physical_transition_authority_status": _safe_deepcopy(
+            getattr(
+                app,
+                "_display_f3_physical_transition_authority_status",
+                None,
+            )
         ),
         "sequence": _safe_deepcopy(sequence),
         "last_decision": _safe_deepcopy(
