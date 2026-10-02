@@ -663,3 +663,48 @@ Modelo ou metadados ausentes/incompatíveis deixam o H1 indisponível. Não exis
 fallback convencional para a semântica ON/OFF do primeiro CHECK enquanto N1
 estiver ativo.
 
+
+
+### Treino e promoção do artefato — N1.3
+
+O treino permanece completamente fora do runtime produtivo. O fluxo canônico é:
+
+```text
+configuração/fotos locais dos CHECKS
+  ↓
+preflight sem PyTorch
+  ↓
+primeiro CHECK reservado integralmente para validação
+  ↓
+demais CHECKS alimentam treino ON/OFF por segmento
+  ↓
+TinyF3SegmentCNN
+  ↓
+exportação ONNX candidata
+  ↓
+comparação PyTorch x OpenCV DNN
+  ↓
+validação 100% do primeiro CHECK reservado
+  ↓
+SHA-256 + metadados schema 2
+  ↓
+promoção atômica do artefato
+```
+
+A separação por CHECK evita vazamento de validação entre recortes provenientes
+da mesma fotografia. No N1, o primeiro CHECK da ordem configurada precisa
+existir como referência real e conter as duas classes ON/OFF. O conjunto de
+treino, formado pelos demais CHECKS, também precisa conter ambas as classes.
+
+O runtime aceita somente artefato que declare:
+
+- `schema_version=2`;
+- projeto exatamente correspondente ao projeto ativo;
+- mapa de classes `off=0`, `on=1`;
+- `split.strategy=hold_out_first_check_for_n1`;
+- `validation_check_id` igual ao primeiro CHECK atual do projeto;
+- `validation.accepted_for_physical_h1_retest=true`;
+- `onnx_sha256` correspondente ao arquivo ONNX local.
+
+Qualquer divergência falha fechada e mantém o H1 sem decisão neural. O modelo
+rejeitado nunca é promovido ao caminho produtivo.
