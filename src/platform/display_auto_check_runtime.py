@@ -70,6 +70,10 @@ class DisplayAutomaticCheckF3Mixin:
     DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO = 0.55
     DISPLAY_AUTO_INTERMITTENT_OFF_PHASE_RATIO = 0.15
     DISPLAY_AUTO_INTERMITTENT_EXACT_TEMPLATE_VETO_MARGIN = 0.04
+    # O classificador same-mask considera abaixo de 0.58 uma decisão ambígua.
+    # O H1 pode desempatar SOMENTE essa faixa usando a autoridade física
+    # LIVE x BOARD_OFF x foto do próprio CHECK, sem relaxar falhas confiantes.
+    DISPLAY_AUTO_REFERENCE_GATE_AMBIGUOUS_MAX_CONFIDENCE = 0.58
     DISPLAY_AUTO_TRANSIENT_CHECK_NAMES = frozenset(
         {"BLUETOOTH", "BLUE", "BT"}
     )
@@ -463,6 +467,197 @@ class DisplayAutomaticCheckF3Mixin:
         result["intermittent_physical_support_veto_ids"] = tuple(
             sorted(physical_veto_ids)
         )
+        return result
+
+    @classmethod
+    def _display_auto_reference_gate_needs_physical_tie_breaker(
+        cls,
+        analysis: dict | None,
+    ) -> bool:
+        """True somente para falso OFF semanticamente ambíguo no primeiro CHECK."""
+        if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
+            return False
+        if analysis.get("approved") is True:
+            return False
+
+        for item in analysis.get("mask_results") or ():
+            if not isinstance(item, dict):
+                continue
+            if (
+                str(item.get("expected") or "") != DISPLAY_CHECK_STATE_ON
+                or str(item.get("classified") or "") != DISPLAY_CHECK_STATE_OFF
+                or item.get("matched") is not False
+            ):
+                continue
+            try:
+                confidence = float(item.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if confidence < cls.DISPLAY_AUTO_REFERENCE_GATE_AMBIGUOUS_MAX_CONFIDENCE:
+                return True
+        return False
+
+    def _display_auto_reference_gate_relative_power_evidence(
+        self,
+        frame,
+        context: dict | None,
+    ) -> dict:
+        """Obtém a prova física pela autoridade canônica sem criar classificador paralelo."""
+        owner = getattr(self, "_display_f3_runtime_authorities", None)
+        power = getattr(owner, "power", None)
+        evaluator = getattr(power, "evaluate_current_check_relative", None)
+        if not callable(evaluator) or not isinstance(context, dict):
+            return {}
+        try:
+            value = evaluator(
+                frame,
+                str(context.get("project_name") or ""),
+                context,
+            )
+        except Exception:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @classmethod
+    def _display_auto_apply_reference_gate_physical_tie_breaker(
+        cls,
+        analysis: dict,
+        physical_evidence: dict | None,
+    ) -> dict:
+        """Desempata falso OFF ambíguo do H1 com prova física da mesma máscara.
+
+        A foto do próprio CHECK não se autoaprova: ela é apenas o extremo ON.
+        Para haver correção, a referência BOARD_OFF independente precisa ser
+        discriminante e o LIVE atual precisa cair inequivocamente no lado ON.
+        """
+        result = deepcopy(analysis)
+        evidence = (
+            physical_evidence
+            if isinstance(physical_evidence, dict)
+            else {}
+        )
+        details_by_mask = {
+            str(item.get("mask_id") or ""): item
+            for item in (evidence.get("details") or ())
+            if isinstance(item, dict) and str(item.get("mask_id") or "")
+        }
+        corrected_ids = []
+
+        for item in result.get("mask_results") or ():
+            if not isinstance(item, dict):
+                continue
+            if (
+                str(item.get("expected") or "") != DISPLAY_CHECK_STATE_ON
+                or str(item.get("classified") or "") != DISPLAY_CHECK_STATE_OFF
+                or item.get("matched") is not False
+            ):
+                continue
+
+            try:
+                confidence = float(item.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if confidence >= cls.DISPLAY_AUTO_REFERENCE_GATE_AMBIGUOUS_MAX_CONFIDENCE:
+                continue
+
+            mask_id = str(item.get("mask_id") or "")
+            physical = details_by_mask.get(mask_id)
+            if not isinstance(physical, dict):
+                continue
+            if (
+                str(physical.get("winner") or "") != "powered"
+                or physical.get("reference_discriminative") is not True
+            ):
+                continue
+
+            item["semantic_classified_before_reference_power_tie_breaker"] = str(
+                item.get("classified") or ""
+            )
+            item["semantic_matched_before_reference_power_tie_breaker"] = (
+                item.get("matched")
+            )
+            item["reference_gate_physical_confirmation"] = True
+            item["reference_gate_physical_evidence"] = deepcopy(physical)
+            item["classification_source"] = (
+                "reference_gate_same_mask_power_over_ambiguous_semantic"
+            )
+            item["classified"] = DISPLAY_CHECK_STATE_ON
+            if item.get("expected_label"):
+                item["classified_label"] = item.get("expected_label")
+            item["matched"] = True
+            item["raw_matched"] = True
+            item["intermittent_tolerated"] = False
+            corrected_ids.append(mask_id)
+
+        rows = [
+            item
+            for item in (result.get("mask_results") or ())
+            if isinstance(item, dict)
+        ]
+        failed = [item for item in rows if not bool(item.get("matched"))]
+        missing_on = [
+            item
+            for item in failed
+            if str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+            and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_OFF
+        ]
+        unexpected_on = [
+            item
+            for item in failed
+            if str(item.get("expected") or "") == DISPLAY_CHECK_STATE_OFF
+            and str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
+        ]
+        low_light = [
+            item
+            for item in failed
+            if str(item.get("classified") or "") == "low_light"
+        ]
+
+        result["active_mask_count"] = len(rows)
+        result["matched_mask_count"] = len(rows) - len(failed)
+        result["failed_mask_ids"] = [
+            str(item.get("mask_id") or "") for item in failed
+        ]
+        result["missing_on_mask_ids"] = [
+            str(item.get("mask_id") or "") for item in missing_on
+        ]
+        result["unexpected_on_mask_ids"] = [
+            str(item.get("mask_id") or "") for item in unexpected_on
+        ]
+        result["low_light_mask_ids"] = [
+            str(item.get("mask_id") or "") for item in low_light
+        ]
+        result["expected_on_mask_count"] = sum(
+            1
+            for item in rows
+            if str(item.get("expected") or "") == DISPLAY_CHECK_STATE_ON
+        )
+        result["expected_off_mask_count"] = sum(
+            1
+            for item in rows
+            if str(item.get("expected") or "") == DISPLAY_CHECK_STATE_OFF
+        )
+        result["classified_on_mask_count"] = sum(
+            1
+            for item in rows
+            if str(item.get("classified") or "") == DISPLAY_CHECK_STATE_ON
+        )
+        result["classified_off_mask_count"] = sum(
+            1
+            for item in rows
+            if str(item.get("classified") or "") == DISPLAY_CHECK_STATE_OFF
+        )
+        result["reference_gate_physical_tie_breaker_ids"] = tuple(
+            sorted(set(corrected_ids))
+        )
+        result["reference_gate_physical_tie_breaker_source"] = str(
+            evidence.get("source") or ""
+        )
+        result["approved"] = bool(rows) and not failed
+        if result["approved"] and corrected_ids:
+            result["reason"] = (
+                "check_conforme_mascaras_com_desempate_fisico_reference_gate"
+            )
         return result
 
     @staticmethod
@@ -1079,6 +1274,26 @@ class DisplayAutomaticCheckF3Mixin:
                 "#FCA5A5",
             )
             return
+
+        if (
+            reference_gate
+            and not bool(context.get("intermittent", False))
+            and self._display_auto_reference_gate_needs_physical_tie_breaker(
+                analysis
+            )
+        ):
+            physical_evidence = (
+                self._display_auto_reference_gate_relative_power_evidence(
+                    frame,
+                    context,
+                )
+            )
+            analysis = (
+                self._display_auto_apply_reference_gate_physical_tie_breaker(
+                    analysis,
+                    physical_evidence,
+                )
+            )
 
         intermittent_phase = self._display_auto_observe_intermittent_phase(
             context,
