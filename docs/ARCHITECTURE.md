@@ -539,4 +539,110 @@ Segmentos apagados não participam da aquisição da pose. Um segmento ON ausent
 ou uma emissão extra pode permanecer como outlier durante o encaixe; a
 conformidade continua pertencendo ao analyzer, não ao tracker. O refinamento
 não cria nova autoridade, scheduler ou worker.
+## 14. Direção canônica do Display F3 — Neural Vision / Edge AI
+
+A partir da D-059, a arquitetura alvo do julgamento visual do Display F3 deixa
+de crescer por regras ópticas convencionais e passa a migrar, CHECK por CHECK,
+para uma autoridade neural local.
+
+O objetivo não é adicionar uma CNN à cadeia existente. O objetivo é substituir
+a autoridade visual do CHECK migrado.
+
+### Fluxo alvo
+
+```text
+Camera Service / Latest Frame
+  ↓
+configuração do Projeto Display
+  ├─ CHECK atual
+  ├─ imagem de referência
+  ├─ contorno
+  ├─ geometrias MASK_xxx
+  └─ mask_states esperados
+  ↓
+normalização/alinhamento
+  ↓
+F3NeuralSegmentDetector
+  ↓
+NeuralSegmentObservation[28]
+  ├─ mask_id
+  ├─ state = on/off/uncertain
+  └─ confidence
+  ↓
+F3CheckEvaluator
+  ↓
+CheckDecision = OK / NG / UNCERTAIN
+  ↓
+F3StateMachineAuthority
+  ↓
+DisplayCheckSequenceRuntime
+```
+
+### Responsabilidades
+
+| Responsabilidade | Proprietário alvo |
+| --- | --- |
+| captura/frame atual | serviços já canônicos de câmera/latest-frame |
+| configuração de referência | Display Project Repository |
+| geometria/pose | infraestrutura canônica de geometria/tracking |
+| estado visual ON/OFF | `F3NeuralSegmentDetector` |
+| comparação esperado x observado | `F3CheckEvaluator` |
+| sequência de CHECKS | `F3StateMachineAuthority` / `DisplayCheckSequenceRuntime` |
+| apresentação | UI/ViewModel, sem segunda decisão |
+| debug | observador, sem poder produtivo |
+
+O detector neural não controla a sequência. A state machine não reclassifica
+pixels. O evaluator não executa tracking.
+
+### Configuração como anotação inicial
+
+As imagens e geometrias já salvas no F3 são ativos de treinamento e contexto,
+não resíduos do classificador antigo:
+
+- a imagem do CHECK representa uma condição visual de referência;
+- o contorno delimita a região útil e auxilia normalização/alinhamento;
+- as geometrias locais identificam onde cada `MASK_xxx` aparece naquela foto;
+- `mask_states` fornece o rótulo esperado de cada segmento;
+- a geometria canônica de **Placa + Máscaras** continua representando o espaço
+  produtivo live.
+
+Não há requisito arquitetural de classificação manual pelo operador durante a
+produção para a primeira versão neural.
+
+### Migração incremental
+
+A ordem de implementação é deliberadamente estreita:
+
+```text
+ETAPA N1: H1 neural
+  ↓ validação física + OK do usuário
+ETAPA N2: BLUE neural
+  ↓ validação física + OK do usuário
+ETAPA N3: USB neural
+  ↓ validação física + OK do usuário
+ETAPA N4: AUX neural
+```
+
+Durante N1, os CHECKS ainda não migrados podem continuar usando o caminho atual
+somente como compatibilidade temporária. Não se deve criar uma segunda
+autoridade neural/convencional para o H1.
+
+### Performance e implantação
+
+O alvo operacional é inferência local, gratuita e CPU-first. O caminho
+preferencial é treinamento offline e artefato ONNX em produção.
+
+O hot path precisa preservar:
+
+- UI Tkinter não bloqueada;
+- latest-frame-wins;
+- nenhuma fila ilimitada;
+- nenhum novo scheduler periódico concorrente;
+- reutilização do executor pesado/coordenador F3 existentes quando apropriado;
+- modelo carregado uma vez e reutilizado;
+- preprocessamento e buffers reutilizáveis sempre que possível;
+- benchmark de latência no hardware real antes de ampliar para outros CHECKS.
+
+A escolha final do backbone neural é consequência de benchmark, não decisão
+arquitetural antecipada.
 
