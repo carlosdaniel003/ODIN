@@ -646,3 +646,20 @@ O hot path precisa preservar:
 A escolha final do backbone neural é consequência de benchmark, não decisão
 arquitetural antecipada.
 
+### Implementação incremental atual — N1.2
+
+No primeiro CHECK da ordem do Projeto Display, o proprietário semântico é
+`F3H1NeuralAnalyzer`, que usa `F3NeuralSegmentDetector`. O detector carrega
+um artefato ONNX por projeto com `cv2.dnn.readNetFromONNX`, mantém a rede em
+cache e executa todas as máscaras ativas em um único batch NCHW. Nenhuma
+dependência de treinamento entra no hot path produtivo.
+
+Quando tracking está ligado, `F3TrackedRawCheckAnalyzer` continua entregando
+frame RAW + máscaras projetadas do mesmo snapshot, porém a reconciliação
+luminosa convencional não pode alterar a classificação do H1 neural. Para os
+CHECKS ainda não migrados, o mesmo wrapper delega ao analisador convencional.
+
+Modelo ou metadados ausentes/incompatíveis deixam o H1 indisponível. Não existe
+fallback convencional para a semântica ON/OFF do primeiro CHECK enquanto N1
+estiver ativo.
+
