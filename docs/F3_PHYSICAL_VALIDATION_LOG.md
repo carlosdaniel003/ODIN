@@ -4633,3 +4633,117 @@ BLUE com um segmento esperado ON realmente apagado
 Diagnóstico de autoridade/fonte pendente antes de nova correção.
 
 ---
+
+## 02/10/2026 — Correção D-057 após falso NG de MASK_024 no BLUE
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+### Causa confirmada no caminho produtivo
+
+O reteste D-056 mostrou que remover o corte de confiança não bastava.
+
+O `F3StrictMaskConformityAnalyzer` continuava calculando
+`intermittent_power_confirmation` com um conjunto local de features derivado do
+aprendizado. Essa evidência era a que o debounce consultava.
+
+Em paralelo, `F3PowerAuthority.evaluate_current_check_relative()` comparava
+diretamente o mesmo `MASK_xxx` em:
+
+```text
+BOARD_OFF
+LIVE do frame atual
+foto ON do CHECK atual
+```
+
+e no frame que fechou o falso NG retornou 18/18 `powered`, inclusive
+`MASK_022`, `MASK_024` e `MASK_026`.
+
+Portanto existiam duas respostas concorrentes para a mesma pergunta física.
+O debounce estava ligado à resposta local do analyzer, enquanto o DEBUG exibia
+a comparação direta canônica.
+
+### Correção aplicada — D-057
+
+Antes de observar/contar a fase intermitente, o runtime agora consulta:
+
+```text
+F3PowerAuthority.evaluate_current_check_relative()
+```
+
+A análise recebe então a evidência canônica da mesma máscara. Para cada falso
+OFF `expected=ON`:
+
+```text
+source=f3_same_mask_relative_power_authority
++ same_mask_comparison=True
++ reference_discriminative=True
++ winner=powered
+→ intermittent_power_confirmation=True
+```
+
+Qualquer confirmação previamente calculada pelo analyzer é preservada apenas
+como diagnóstico em `intermittent_learning_support*` e deixa de participar da
+decisão.
+
+Se a fonte recebida for `f3_unified_live_mask_power_authority`, a evidência é
+explicitamente rejeitada para esse uso individual.
+
+### Efeito esperado no caso físico observado
+
+No BLUE correto do reteste:
+
+```text
+MASK_022 direct same-mask=powered
+MASK_024 direct same-mask=powered
+MASK_026 direct same-mask=powered
+```
+
+as três devem ser protegidas antes de incrementar `failure_count`. Assim nenhuma
+delas deve alcançar `persistent_failed_ids` por falso OFF semântico.
+
+### Proteções mantidas
+
+- o debounce intermitente continua com 3 amostras para falha real;
+- fase OFF/transição do pisca continua sem julgamento de NG;
+- máscara esperada OFF não recebe esse suporte;
+- `off`/`tie` físico não é promovido;
+- H1 continua usando a mesma autoridade física estável já validada pela D-055;
+- nenhuma aprovação parcial foi introduzida;
+- nenhum timer, thread, worker, scheduler ou nova autoridade foi criado.
+
+### Validação automatizada
+
+Foram adicionadas regressões para:
+
+```text
+MASK_024 confidence=0.6414 + direct powered
+→ suporte físico canônico confirmado
+
+fonte global/unificada + winner=powered
+→ NÃO pode confirmar suporte individual
+
+MASK_022 + MASK_024 + MASK_026 falsos OFF
++ direct same-mask powered para os três
+→ runtime reconcilia os três
+→ nenhum confirmed_failed
+→ BLUE pode avançar
+```
+
+### Próximo reteste físico
+
+```text
+H1 correto → conclui
+
+BLUE correto
+→ MASK_022 ON
+→ MASK_024 ON
+→ MASK_026 ON
+→ physical_support_veto_ids inclui os falsos OFF físicos
+→ persistent_failed_ids vazio
+→ BLUE conclui sem NG
+```
+
+Depois, repetir com um segmento BLUE esperado ON realmente apagado; nesse caso
+a autoridade direta deve retornar `off/tie` e o NG deve continuar ocorrendo.
+
+---
