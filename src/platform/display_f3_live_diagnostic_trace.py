@@ -295,6 +295,30 @@ def _advance_positive_probe_if_needed(
     if not bool(stability.get("confirm")) or not isinstance(context_before, dict):
         return None
 
+    # N1.2: o primeiro CHECK migrado não pode ser aprovado por uma sonda
+    # convencional, nem em composição legada antes da instalação das autoridades
+    # finais. A sonda pode continuar registrando telemetria, mas é observadora.
+    try:
+        first_check = int(context_before.get("current_index", -1)) == 0
+    except (TypeError, ValueError):
+        first_check = False
+    if (
+        first_check
+        and bool(
+            getattr(
+                runtime_module,
+                "_display_f3_h1_neural_authority",
+                False,
+            )
+        )
+    ):
+        return {
+            "advanced": False,
+            "reason": "h1_neural_owns_check_decision",
+            "source": F3_EXACT_PROBE_SOURCE,
+            "observer_only": True,
+        }
+
     # Com F3RuntimeAuthorities instalado, esta sonda é estritamente observadora.
     # Somente F3CheckAnalyzerAuthority + state machine podem registrar o CHECK.
     if _canonical_runtime_owns_check_analysis(app):
