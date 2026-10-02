@@ -2522,3 +2522,110 @@ referencia OFF independente da mesma mascara.
   permanece pendente.
 
 ---
+
+## D-052 — H1 desempata falso OFF ambíguo somente com prova física same-mask independente
+
+**Status:** Accepted
+
+### Contexto
+
+No reteste físico de 02/10/2026, a placa estava corretamente no H1 e o gate
+produtivo já estava liberado, mas o primeiro CHECK permaneceu em **26/28**.
+
+O DEBUG do mesmo frame mostrou uma contradição objetiva entre duas leituras da
+mesma região:
+
+- o gabarito exato da foto de H1 reconheceu **28/28**;
+- `MASK_012` e `MASK_020`, ambas esperadas ON, estavam visualmente saturadas e
+  muito próximas da própria referência H1;
+- o classificador semântico estrito, porém, decidiu OFF nas duas com confiança
+  praticamente empatada;
+- a comparação física direta da mesma máscara
+  `BOARD_OFF ↔ LIVE ↔ H1` confirmou **7/7 máscaras esperadas ON como powered**.
+
+D-051 não resolvia esse cenário porque foi deliberadamente limitada a CHECK
+intermitente. H1 é não intermitente. Além disso, o suporte de D-051 utiliza as
+features do aprendizado semântico; para `MASK_012` e `MASK_020`, as amostras
+aprendidas ON/OFF ficaram próximas demais para serem discriminantes, embora a
+comparação direta das imagens físicas H1 e PLACA DESLIGADA separasse corretamente
+o estado live.
+
+### Decisão
+
+O primeiro CHECK/reference gate recebe um **desempate físico restrito**, sem
+transformar a foto do próprio H1 em autoridade semântica isolada.
+
+A regra é:
+
+1. só é avaliada no primeiro CHECK/reference gate e fora do modo intermitente;
+2. só é chamada quando existe uma divergência
+   `expected=ON → classified=OFF`;
+3. a divergência precisa estar na faixa semântica já considerada ambígua
+   (`confidence < 0.58`);
+4. a evidência vem da `F3PowerAuthority`, reutilizando a comparação física já
+   existente da **mesma MASK_xxx** no mesmo frame:
+   - LIVE atual;
+   - foto do CHECK atual como extremo ON;
+   - referência independente **PLACA DESLIGADA** como extremo OFF;
+5. ON e OFF precisam ser fisicamente discriminantes;
+6. somente `winner=powered` pode desempatar a máscara para ON;
+7. `winner=off`, empate, referência não discriminante ou evidência ausente
+   preservam a falha original;
+8. uma decisão semântica OFF confiante não pode ser sobrescrita;
+9. máscaras `expected=OFF` nunca participam desse resgate;
+10. depois do desempate, a conformidade completa é recalculada. O H1 só recebe
+    OK se todas as máscaras ativas ficarem conformes;
+11. o gabarito exato de pixels continua diagnóstico. Ele sozinho não aprova H1;
+12. não há redução de threshold global, aprovação parcial, soma entre frames,
+    timer, worker, scheduler ou segunda máquina de decisão.
+
+### Proteção contra autoaprendizado de defeito
+
+D-038 permanece válida.
+
+A foto do H1 funciona apenas como o extremo ON de uma comparação contra uma
+referência OFF independente. Se a própria foto H1 tiver o segmento apagado, ON
+e OFF não serão discriminantes e o desempate não terá autoridade. Se o produto
+live estiver realmente com o segmento apagado, LIVE ficará do lado OFF e a
+divergência permanece.
+
+Portanto:
+
+```text
+H1 bom + classificador semântico empatado + LIVE fisicamente ON
+→ desempate físico same-mask
+→ 28/28
+→ fluxo normal de OK
+
+H1 com segmento realmente apagado
+→ LIVE próximo de BOARD_OFF
+→ nenhum desempate
+→ H1 continua não conforme
+```
+
+### Implementação
+
+- `F3PowerAuthority` expõe a primitiva existente de comparação relativa do
+  CHECK atual, sem ganhar autoridade de OK/NG;
+- `DisplayAutomaticCheckF3Mixin` solicita essa evidência somente quando o H1
+  possui falso OFF ambíguo;
+- a correção é aplicada sobre a cópia da análise do mesmo frame e preserva a
+  classificação semântica anterior em telemetria;
+- os contadores e IDs de falha são recalculados antes da política produtiva e da
+  publicação para a UI.
+
+### Validação
+
+Regressões automatizadas cobrem:
+
+- H1 26/28 com falsos OFF ambíguos em `MASK_012` e `MASK_020`, ambos
+  fisicamente powered, fechando 28/28;
+- segmento realmente apagado, que permanece OFF;
+- OFF semântico confiante, que não pode ser relaxado;
+- máscara esperada OFF, que nunca pode ser promovida por esta regra;
+- integração do runtime: H1 ambíguo + prova física válida avança pelo fluxo
+  produtivo existente.
+
+**Reteste físico:** pendente.
+
+---
