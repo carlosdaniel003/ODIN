@@ -3414,3 +3414,166 @@ deliberadamente um segmento esperado ON apagado; o H1 não pode avançar.
 **Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
 
 ---
+
+## 02/10/2026 — FAIL físico: reteste D-052 ainda deixou H1 correto preso em 27/28 por MASK_013
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Projeto `CM_500_L`, primeiro CHECK `CHECK_001 / H1`, não intermitente,
+rotação visual 180°.
+
+Este foi o reteste físico posterior à D-052. O padrão H1 estava fisicamente
+correto e todos os sete segmentos esperados ON estavam acesos, porém o fluxo
+permaneceu em:
+
+```text
+AGUARDANDO H1
+MÁSCARAS • H1 NÃO CONFIRMADO • 27/28 CONFORMES
+6 ACESOS • 22 APAGADOS • FALHA MASK_013
+```
+
+A imagem operacional também mostrava o segmento correspondente à
+`MASK_013` emitindo luz, mas o visor lógico do F3 manteve essa máscara como OFF.
+
+### Evidência objetiva do DEBUG do mesmo frame
+
+O frame analisado foi estável e o gate produtivo estava liberado:
+
+```text
+frame_id=4025
+frame_id_estavel=SIM
+ESTADO DA PLACA: PRESENTE • CONFIRMADA
+ENERGIA DO DISPLAY: CONFIRMADA
+GATE PRODUTIVO: LIBERADO
+CHECK LÓGICO: H1
+ANÁLISE BRUTA H1: 27/28
+```
+
+A única divergência produtiva do H1 era:
+
+```text
+MASK_013
+expected=ON
+classified=OFF
+confidence=0.5944
+```
+
+O classificador de aprendizado das fotos dos CHECKS também fechou H1 em
+`27/28`, novamente somente por `MASK_013`.
+
+Em contraste, o gabarito exato da própria foto H1 reconheceu o mesmo frame como
+totalmente conforme:
+
+```text
+GABARITO EXATO H1 = 28/28
+MASK_013 expected=ON
+classified=ON
+template_similarity=0.9920
+v_ref=250.46
+v_live=251.00
+```
+
+A comparação física explícita **CHECK x PLACA DESLIGADA** também publicou:
+
+```text
+expected_on=7
+powered_votes=7
+off_votes=0
+tie_votes=0
+MASK_013 winner=powered
+```
+
+Portanto o segmento não estava fisicamente apagado no frame congelado.
+
+### Discrepância adicional encontrada no DEBUG
+
+O mesmo relatório contém duas leituras físicas diferentes para a
+`MASK_013`.
+
+O bloco `current_check_power_mask_evidence` registrou:
+
+```text
+expected_on_mask_count=7
+powered_votes=6
+off_votes=1
+
+MASK_013
+classified=off
+confidence=0.5682
+primary_winner=off
+winner=off
+```
+
+Porém o bloco posterior e explícito
+`[EVIDÊNCIA DE ENERGIA: CHECK x PLACA DESLIGADA]` registrou as sete máscaras
+ON como `powered`, inclusive `MASK_013`.
+
+Essa divergência precisa ser preservada no histórico porque mostra que o falso
+OFF não é falta de emissão na câmera: existem caminhos diagnósticos do mesmo
+frame discordando sobre a mesma máscara.
+
+### Relação com D-052
+
+A D-052 foi criada para resgatar falso OFF ambíguo do primeiro CHECK somente
+quando:
+
+```text
+expected=ON
+classified=OFF
+confidence < 0.58
+evidência física same-mask = powered
+```
+
+Neste reteste, a classificação semântica que bloqueou o H1 veio com:
+
+```text
+confidence=0.5944
+```
+
+ou seja, ficou logo acima da faixa fixa `< 0.58` usada pela D-052, apesar de a
+ROI estar saturada e de o gabarito exato + comparação física direta confirmarem
+ON.
+
+O teste físico prova que a D-052 resolveu o caso anterior de
+`MASK_012/MASK_020`, mas **não cobre de forma suficiente todos os falsos OFF
+reais do H1**. O critério não pode ser considerado validado apenas pelos testes
+automatizados anteriores.
+
+### Alteração aplicada nesta etapa
+
+Nenhuma alteração de algoritmo foi realizada neste registro.
+
+Apenas o FAIL físico e suas evidências foram documentados para impedir que uma
+próxima correção:
+
+- trate novamente o problema como ausência real de luz;
+- ignore a diferença entre `current_check_power_mask_evidence` e a comparação
+  direta `CHECK x PLACA DESLIGADA`;
+- considere D-052 fisicamente validada no H1;
+- repita apenas uma mudança arbitrária de threshold sem investigar qual
+  evidência física deve ser a fonte correta do desempate.
+
+### Próximo reteste esperado após futura correção
+
+```text
+H1 correto
+→ 7 segmentos esperados ON fisicamente acesos
+→ MASK_013 reconhecida ON
+→ H1 fecha 28/28
+→ sequência avança para o próximo CHECK
+```
+
+E o teste oposto continua obrigatório:
+
+```text
+H1 com um segmento esperado ON realmente apagado
+→ comparação same-mask deve confirmar OFF/tie
+→ nenhuma reconciliação pode promover esse segmento
+→ H1 não pode avançar
+```
+
+**Estado:** FAIL FÍSICO REGISTRADO — D-052 AINDA NÃO VALIDADA FISICAMENTE PARA H1 — PENDENTE DE DIAGNÓSTICO/CORREÇÃO.
+
+---
