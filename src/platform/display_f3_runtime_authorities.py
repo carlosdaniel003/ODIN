@@ -462,7 +462,7 @@ class F3PowerAuthority:
         decidir OK/NG. O runtime de CHECK pode consumi-la somente como
         desempate físico de uma classificação semântica ambígua.
         """
-        return power_module.avaliar_evidencia_energia_relativa_display_f3(
+        return power_module.avaliar_evidencia_energia_check_relativa_display_f3(
             self.app,
             frame,
             project_name,
