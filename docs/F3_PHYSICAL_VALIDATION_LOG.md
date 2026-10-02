@@ -4190,3 +4190,223 @@ H1 com MASK_013 realmente apagada
 **Estado:** CORREÇÃO D-055 IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
 
 ---
+
+## 02/10/2026 — D-055 PASS físico no H1; novo FAIL no BLUE por falso OFF de MASK_022
+
+### 1. Reteste H1 após D-055
+
+**Resultado físico:** PASS.
+
+O H1 correto deixou de permanecer preso em 27/28. A correção da D-055 passou no
+equipamento real e a sequência avançou normalmente para BLUE.
+
+Resultado observado:
+
+```text
+H1 correto
+→ reconciliação física same-mask aplicada
+→ H1 CONCLUÍDO
+→ avanço para BLUE
+```
+
+**Estado D-055:** VALIDADA FISICAMENTE NO H1 CORRETO.
+
+---
+
+### 2. Novo cenário BLUE
+
+**Resultado físico:** FAIL.
+
+CHECK atual:
+
+```text
+CHECK_002 / BLUE
+intermittent=true
+18 máscaras esperadas ON
+10 máscaras esperadas OFF
+```
+
+Visualmente, os segmentos 22 e 26 estavam acesos no display real.
+
+A tela terminal mostrou:
+
+```text
+BLUE NÃO CONFIRMADO
+26/28 CONFORMES
+FALHA MASK_022
+PLACA NG
+```
+
+No visor congelado, `MASK_026` também apareceu como OFF, apesar de estar
+fisicamente acesa na imagem da câmera.
+
+### 3. Evidência objetiva do DEBUG
+
+O frame congelado utilizado pelo NG é o frame exato que fechou o debounce.
+
+No analyzer efetivo mais recente:
+
+```text
+effective_classifications:
+MASK_026=on
+MASK_022=off
+
+effective_failed_mask_ids:
+MASK_019
+MASK_022
+
+effective_confirmed_failed_mask_ids:
+MASK_022
+
+effective_validating_mask_ids:
+MASK_019
+```
+
+A fase intermitente acumulou:
+
+```text
+MASK_022 failure_count=3
+persistent_failed_ids=[MASK_022]
+```
+
+A própria ROI de `MASK_022` estava saturada/acesa no frame:
+
+```text
+v_mean≈251
+v_p95=251
+v_p99=251
+percent_hot_235=1.0
+percent_hot_245=1.0
+glow≈250
+```
+
+Mesmo assim o aprendizado semântico produziu:
+
+```text
+MASK_022
+expected=ON
+classified=OFF
+confidence=0.6605
+```
+
+Para `MASK_026`, outro frame/análise efetiva do mesmo ciclo registrou
+`classified=ON`, enquanto o snapshot visual congelado ainda mostrou OFF.
+
+### 4. Prova física independente
+
+A comparação direta:
+
+```text
+CHECK BLUE x PLACA DESLIGADA
+expected_on=18
+powered_votes=18
+off_votes=0
+tie_votes=0
+```
+
+confirmou explicitamente:
+
+```text
+MASK_026=powered
+MASK_022=powered
+```
+
+Portanto o NG de `MASK_022` não corresponde a um segmento fisicamente apagado.
+
+### 5. Causa no código
+
+A D-051 já possuía suporte físico same-mask para falso OFF em CHECK intermitente,
+mas a função `anotar_suporte_fisico_intermitente_f3()` continha um gate:
+
+```text
+semantic confidence < F3_CHECK_PHOTO_MIN_CONFIDENCE
+→ consultar prova física
+
+semantic confidence >= limite
+→ não consultar
+```
+
+Como `MASK_022` chegou com `confidence=0.6605`, a prova física não foi
+anotada:
+
+```text
+intermittent_power_support_confirmed_mask_ids=[]
+physical_support_veto_ids=[]
+MASK_022 acumulou 3 falhas
+→ NG
+```
+
+A confiança semântica não mede presença física de emissão e não pode impedir a
+pergunta mais específica BOARD_OFF/LIVE/ON da mesma máscara.
+
+### 6. Correção aplicada — D-056
+
+O corte de confiança foi removido do suporte físico intermitente.
+
+Agora:
+
+```text
+expected=ON + semantic OFF
+→ consultar same-mask físico
+
+winner=powered + referência discriminante
+→ marcar intermittent_power_confirmation=True
+→ zerar contador daquela máscara na fase ON
+→ reconciliar efetivamente para ON
+
+winner=off/tie ou referência inválida
+→ manter divergência
+→ debounce NG segue normal
+```
+
+A função continua apenas anotando evidência. A reconciliação permanece no
+runtime intermitente já existente.
+
+### 7. Regressões adicionadas
+
+Caso real:
+
+```text
+MASK_022
+semantic OFF
+confidence=0.6605
+physical powered
+→ suporte físico confirmado
+```
+
+Caso de segurança:
+
+```text
+semantic OFF
+confidence=0.95
+segmento fisicamente apagado
+physical off
+→ nenhum suporte
+→ OFF preservado
+```
+
+### 8. Próximo reteste físico
+
+```text
+H1 correto
+→ avança para BLUE
+
+BLUE correto
+→ MASK_022 e MASK_026 fisicamente ON
+→ ambas devem aparecer ON na análise efetiva/visor
+→ nenhuma delas pode acumular falha persistente
+→ BLUE deve concluir sem NG
+```
+
+Depois repetir com um segmento BLUE esperado ON realmente apagado:
+
+```text
+same-mask=off/tie
+→ sem suporte físico
+→ falha persiste
+→ NG correto
+```
+
+**Estado:** H1 D-055 PASS FÍSICO; BLUE D-056 CORRIGIDA — PENDENTE DE RETESTE FÍSICO.
+
+---
