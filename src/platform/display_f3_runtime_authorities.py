@@ -21,6 +21,7 @@ import src.platform.display_f3_presence_stability_fix as presence_module
 import src.platform.display_f3_runtime_contract_fix as contract_module
 import src.platform.display_f3_check_transition_guard as transition_module
 from src.platform.display_f3_contour_check_identity import F3TrackedRawCheckAnalyzer
+from src.platform.display_f3_neural_runtime import F3H1NeuralAnalyzer
 from src.platform.display_f3_object_tracking import (
     F3_TRACKING_MAX_OPERATIONAL_FRAME_GAP,
     F3_TRACKING_MAX_OPERATIONAL_RESULT_AGE_MS,
@@ -672,19 +673,34 @@ class F3PowerAuthority:
 
 
 class F3CheckAnalyzerAuthority:
-    """Uma instância de analyzer/cache para toda a sessão F3."""
+    """Uma instância de analyzer/cache para toda a sessão F3.
+
+    Tracking continua projetando as ROIs no frame RAW. A autoridade semântica
+    interna é híbrida durante a migração: CNN somente no primeiro CHECK e
+    analisador convencional somente nos CHECKS ainda não migrados.
+    """
 
     def __init__(self, app) -> None:
         self.app = app
         self.repository = app.display_project_repository
-        self.analyzer = F3TrackedRawCheckAnalyzer(self.repository, app)
+        self.analyzer = self._build_analyzer()
+
+    def _build_analyzer(self):
+        analyzer = F3TrackedRawCheckAnalyzer(
+            self.repository,
+            self.app,
+        )
+        analyzer.semantic = F3H1NeuralAnalyzer(
+            self.repository
+        )
+        return analyzer
 
     def rebuild(self):
         try:
             self.analyzer.invalidate_learning_cache()
         except Exception:
             pass
-        self.analyzer = F3TrackedRawCheckAnalyzer(self.repository, self.app)
+        self.analyzer = self._build_analyzer()
         self.app._display_f3_generic_power_analyzer = self.analyzer.semantic
         return self.analyzer
 
