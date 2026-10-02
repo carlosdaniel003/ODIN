@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-"""Treina a primeira CNN de segmentos do Display F3 usando a configuração real.
+"""Treina a CNN ON/OFF dos segmentos do Display F3 com dados reais locais.
 
-Uso:
-    python scripts/treinar_f3_segmentos_neural.py --project CM_500_L
+N1.3 mantém o primeiro CHECK fora do treino e o usa como validação
+independente. Assim segmentos recortados da mesma foto não podem aparecer
+simultaneamente em treino e validação.
+
+Uso recomendado:
+    python scripts/treinar_f3_segmentos_neural.py --preflight
+    python scripts/treinar_f3_segmentos_neural.py
 
 Dependências de treinamento (não entram no runtime produtivo):
-    pip install -r requirements-neural-training.txt
+    python -m pip install -r requirements-neural-training.txt
 
-O artefato de produção é ONNX e será consumido pelo OpenCV DNN já presente no
+O artefato de produção é ONNX e é consumido pelo OpenCV DNN já presente no
 ODIN. Nenhuma API, nuvem ou serviço pago participa do fluxo.
 """
 
 import argparse
+import hashlib
 import json
 import random
+import tempfile
 from pathlib import Path
 
 import cv2
@@ -30,6 +37,10 @@ from src.platform.display_project_repository import (
 )
 
 
+F3_NEURAL_REQUIRED_VALIDATION_ACCURACY = 1.0
+F3_NEURAL_REQUIRED_CLASS_ACCURACY = 1.0
+
+
 def _load_torch():
     try:
         import torch
@@ -38,9 +49,195 @@ def _load_torch():
     except Exception as exc:
         raise RuntimeError(
             "PyTorch não está disponível. Instale somente no ambiente de "
-            "treino com: pip install -r requirements-neural-training.txt"
+            "treino com: python -m pip install -r "
+            "requirements-neural-training.txt"
         ) from exc
     return torch, nn, DataLoader, Dataset
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _class_counts(samples, indices) -> dict[str, int]:
+    counts = {"off": 0, "on": 0}
+    for index in indices:
+        label = int(samples[index]["label"])
+        counts["on" if label == 1 else "off"] += 1
+    return counts
+
+
+def _check_ids(samples, indices) -> list[str]:
+    values: list[str] = []
+    seen = set()
+    for index in indices:
+        check_id = str(samples[index].get("check_id") or "").strip()
+        if check_id and check_id not in seen:
+            seen.add(check_id)
+            values.append(check_id)
+    return values
+
+
+def _resolve_validation_check(
+    repository: DisplayProjectRepository,
+    project_name: str,
+    samples: list[dict],
+    requested: str | None,
+) -> tuple[str, str] | None:
+    available = {
+        str(item.get("check_id") or "").strip()
+        for item in samples
+        if str(item.get("check_id") or "").strip()
+    }
+    if not available:
+        return None
+
+    try:
+        checks = repository.listar_checks(project_name)
+    except Exception:
+        checks = []
+
+    if requested:
+        target = str(requested).strip().lower()
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            check_id = str(check.get("id") or "").strip()
+            check_name = str(check.get("name") or check_id).strip()
+            if check_id not in available:
+                continue
+            if target in {
+                check_id.lower(),
+                check_name.lower(),
+            }:
+                return check_id, check_name
+        return None
+
+    # N1 é deliberadamente o primeiro CHECK da ordem configurada. Não dependemos
+    # do nome literal H1 para permitir projetos com nomes customizados.
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get("id") or "").strip()
+        if check_id in available:
+            return (
+                check_id,
+                str(check.get("name") or check_id).strip(),
+            )
+
+    first_id = next(iter(sorted(available)))
+    first_name = str(
+        next(
+            (
+                item.get("check_name")
+                for item in samples
+                if str(item.get("check_id") or "").strip() == first_id
+            ),
+            first_id,
+        )
+        or first_id
+    )
+    return first_id, first_name
+
+
+def preparar_preflight(
+    repository: DisplayProjectRepository,
+    builder: F3NeuralDatasetBuilder,
+    project_name: str | None,
+    *,
+    validation_check: str | None = None,
+) -> tuple[dict, dict, list[int], list[int]]:
+    dataset = builder.collect(project_name)
+    name = str(dataset.get("project_name") or project_name or "")
+    samples = list(dataset.get("samples") or ())
+
+    report = {
+        "ready": False,
+        "reason": str(dataset.get("reason") or "dataset_indisponivel"),
+        "project_name": name,
+        "sample_count": int(dataset.get("sample_count", 0) or 0),
+        "class_counts": dict(dataset.get("class_counts") or {}),
+        "checks_used": list(dataset.get("checks_used") or ()),
+        "missing_reference_check_ids": list(
+            dataset.get("missing_reference_check_ids") or ()
+        ),
+        "invalid_sample_ids": list(dataset.get("invalid_sample_ids") or ()),
+        "split_strategy": "hold_out_first_check_for_n1",
+    }
+    if not bool(dataset.get("ready")):
+        return dataset, report, [], []
+
+    validation = _resolve_validation_check(
+        repository,
+        name,
+        samples,
+        validation_check,
+    )
+    if validation is None:
+        report["reason"] = (
+            "validation_check_not_found"
+            if validation_check
+            else "validation_check_unavailable"
+        )
+        return dataset, report, [], []
+
+    validation_check_id, validation_check_name = validation
+    val_indices = [
+        index
+        for index, item in enumerate(samples)
+        if str(item.get("check_id") or "").strip() == validation_check_id
+    ]
+    train_indices = [
+        index
+        for index in range(len(samples))
+        if index not in set(val_indices)
+    ]
+
+    report.update(
+        {
+            "validation_check_id": validation_check_id,
+            "validation_check_name": validation_check_name,
+            "train_check_ids": _check_ids(samples, train_indices),
+            "validation_check_ids": _check_ids(samples, val_indices),
+            "train_count": len(train_indices),
+            "validation_count": len(val_indices),
+            "train_class_counts": _class_counts(samples, train_indices),
+            "validation_class_counts": _class_counts(samples, val_indices),
+        }
+    )
+
+    if not train_indices:
+        report["reason"] = "dataset_sem_treino_independente_do_h1"
+        return dataset, report, [], val_indices
+    if not val_indices:
+        report["reason"] = "h1_sem_amostras_de_validacao"
+        return dataset, report, train_indices, []
+
+    train_classes = {
+        int(samples[index]["label"])
+        for index in train_indices
+    }
+    val_classes = {
+        int(samples[index]["label"])
+        for index in val_indices
+    }
+    if train_classes != {0, 1}:
+        report["reason"] = "treino_sem_duas_classes_fora_do_h1"
+        return dataset, report, train_indices, val_indices
+    if val_classes != {0, 1}:
+        report["reason"] = "h1_validacao_sem_duas_classes"
+        return dataset, report, train_indices, val_indices
+
+    report["ready"] = True
+    report["reason"] = "preflight_neural_n1_pronto"
+    return dataset, report, train_indices, val_indices
 
 
 def _augment_sample(
@@ -161,47 +358,6 @@ def _augment_sample(
     )
 
 
-def _stratified_split(
-    labels: list[int],
-    seed: int,
-    val_ratio: float = 0.20,
-):
-    rng = random.Random(seed)
-    train_indices: list[int] = []
-    val_indices: list[int] = []
-
-    for target in sorted(set(labels)):
-        indices = [
-            index
-            for index, value in enumerate(labels)
-            if value == target
-        ]
-        rng.shuffle(indices)
-        if len(indices) <= 1:
-            train_indices.extend(indices)
-            continue
-
-        val_count = max(
-            1,
-            int(round(len(indices) * float(val_ratio))),
-        )
-        val_count = min(
-            val_count,
-            len(indices) - 1,
-        )
-        val_indices.extend(indices[:val_count])
-        train_indices.extend(indices[val_count:])
-
-    rng.shuffle(train_indices)
-    rng.shuffle(val_indices)
-    if not val_indices:
-        val_indices = list(train_indices[-1:])
-        train_indices = list(
-            train_indices[:-1] or train_indices
-        )
-    return train_indices, val_indices
-
-
 def _build_model(nn):
     class TinyF3SegmentCNN(nn.Module):
         def __init__(self):
@@ -227,40 +383,174 @@ def _build_model(nn):
     return TinyF3SegmentCNN()
 
 
+def _metrics_from_predictions(
+    samples: list[dict],
+    indices: list[int],
+    predictions: list[int],
+) -> dict:
+    total = len(indices)
+    correct = 0
+    by_class = {
+        0: {"total": 0, "correct": 0},
+        1: {"total": 0, "correct": 0},
+    }
+    check_rows: dict[str, list[bool]] = {}
+
+    for sample_index, predicted in zip(indices, predictions):
+        expected = int(samples[sample_index]["label"])
+        matched = int(predicted) == expected
+        correct += int(matched)
+        by_class[expected]["total"] += 1
+        by_class[expected]["correct"] += int(matched)
+        check_id = str(samples[sample_index].get("check_id") or "")
+        check_rows.setdefault(check_id, []).append(bool(matched))
+
+    class_accuracy = {}
+    for label, name in ((0, "off"), (1, "on")):
+        row = by_class[label]
+        class_accuracy[name] = (
+            row["correct"] / float(max(1, row["total"]))
+            if row["total"] > 0
+            else 0.0
+        )
+
+    exact_checks = {
+        check_id: bool(rows) and all(rows)
+        for check_id, rows in check_rows.items()
+    }
+    return {
+        "accuracy": correct / float(max(1, total)),
+        "correct": int(correct),
+        "total": int(total),
+        "class_accuracy": class_accuracy,
+        "exact_checks": exact_checks,
+        "all_validation_checks_exact": bool(exact_checks)
+        and all(exact_checks.values()),
+    }
+
+
+def _evaluate_model(torch, model, samples, indices) -> tuple[dict, np.ndarray]:
+    if not indices:
+        return (
+            {
+                "accuracy": 0.0,
+                "correct": 0,
+                "total": 0,
+                "class_accuracy": {"off": 0.0, "on": 0.0},
+                "exact_checks": {},
+                "all_validation_checks_exact": False,
+            },
+            np.empty((0, 2), dtype=np.float32),
+        )
+
+    batch = np.stack(
+        [
+            np.asarray(samples[index]["tensor"], dtype=np.float32)
+            for index in indices
+        ],
+        axis=0,
+    )
+    with torch.no_grad():
+        logits = model(torch.from_numpy(batch)).cpu().numpy()
+    predictions = np.asarray(logits).argmax(axis=1).astype(np.int64).tolist()
+    return (
+        _metrics_from_predictions(samples, indices, predictions),
+        np.asarray(logits, dtype=np.float32),
+    )
+
+
+def _validate_candidate(
+    *,
+    cv_logits: np.ndarray,
+    torch_logits: np.ndarray,
+    metrics: dict,
+) -> None:
+    if cv_logits.shape != torch_logits.shape:
+        raise RuntimeError(
+            "ONNX incompatível com OpenCV DNN: "
+            f"saída {tuple(cv_logits.shape)}; "
+            f"esperado {tuple(torch_logits.shape)}"
+        )
+    if cv_logits.ndim != 2 or cv_logits.shape[1] != 2:
+        raise RuntimeError(
+            "ONNX incompatível com OpenCV DNN: "
+            f"saída {tuple(cv_logits.shape)}"
+        )
+
+    max_abs_diff = float(
+        np.max(np.abs(cv_logits - torch_logits))
+        if cv_logits.size
+        else 0.0
+    )
+    if max_abs_diff > 1e-4:
+        raise RuntimeError(
+            "ONNX divergiu do modelo PyTorch acima da tolerância: "
+            f"max_abs_diff={max_abs_diff:.8f}"
+        )
+
+    if float(metrics.get("accuracy", 0.0)) < F3_NEURAL_REQUIRED_VALIDATION_ACCURACY:
+        raise RuntimeError(
+            "Modelo neural não atingiu 100% na foto H1 mantida fora do treino: "
+            f"{float(metrics.get('accuracy', 0.0)):.4f}"
+        )
+    class_accuracy = metrics.get("class_accuracy") or {}
+    for label in ("off", "on"):
+        if float(class_accuracy.get(label, 0.0)) < F3_NEURAL_REQUIRED_CLASS_ACCURACY:
+            raise RuntimeError(
+                "Modelo neural não atingiu 100% da classe "
+                f"{label.upper()} na validação H1: "
+                f"{float(class_accuracy.get(label, 0.0)):.4f}"
+            )
+    if not bool(metrics.get("all_validation_checks_exact")):
+        raise RuntimeError(
+            "Modelo neural não reproduziu integralmente todas as máscaras "
+            "do CHECK H1 de validação."
+        )
+
+
+def _print_preflight(report: dict) -> None:
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+
+
 def treinar(args) -> dict:
+    repository = DisplayProjectRepository(Path(args.config))
+    builder = F3NeuralDatasetBuilder(
+        repository,
+        input_size=args.input_size,
+    )
+    dataset, preflight, train_indices, val_indices = preparar_preflight(
+        repository,
+        builder,
+        args.project,
+        validation_check=args.validation_check,
+    )
+    output = (
+        Path(args.output)
+        if args.output
+        else f3_neural_model_path_for_repository(
+            repository,
+            str(dataset.get("project_name") or args.project or ""),
+        )
+    )
+    preflight["output_path"] = str(output)
+
+    if bool(args.preflight):
+        _print_preflight(preflight)
+        return preflight
+
+    if not bool(preflight.get("ready")):
+        raise RuntimeError(
+            "Preflight neural N1 não está pronto:\n"
+            + json.dumps(preflight, indent=2, ensure_ascii=False)
+        )
+
     torch, nn, DataLoader, Dataset = _load_torch()
 
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    repository = DisplayProjectRepository(
-        Path(args.config)
-    )
-    builder = F3NeuralDatasetBuilder(
-        repository,
-        input_size=args.input_size,
-    )
-    dataset = builder.collect(args.project)
-    if not bool(dataset.get("ready")):
-        raise RuntimeError(
-            "Dataset neural não está pronto: "
-            f"{dataset.get('reason')}. "
-            f"Amostras={dataset.get('sample_count')} "
-            f"classes={dataset.get('class_counts')} "
-            "CHECKS sem foto="
-            f"{dataset.get('missing_reference_check_ids')}"
-        )
-
     samples = list(dataset["samples"])
-    labels = [
-        int(item["label"])
-        for item in samples
-    ]
-    train_indices, val_indices = _stratified_split(
-        labels,
-        args.seed,
-    )
 
     class SegmentDataset(Dataset):
         def __init__(
@@ -326,30 +616,18 @@ def treinar(args) -> dict:
         shuffle=True,
         num_workers=0,
     )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=min(
-            args.batch_size,
-            max(1, len(val_dataset)),
-        ),
-        shuffle=False,
-        num_workers=0,
-    )
 
-    counts = np.bincount(
-        np.asarray(labels, dtype=np.int64),
+    train_counts = np.bincount(
+        np.asarray(
+            [int(samples[index]["label"]) for index in train_indices],
+            dtype=np.int64,
+        ),
         minlength=2,
     )
-    total = float(max(1, counts.sum()))
+    total = float(max(1, train_counts.sum()))
     weights = [
-        total / max(
-            1.0,
-            2.0 * float(counts[0]),
-        ),
-        total / max(
-            1.0,
-            2.0 * float(counts[1]),
-        ),
+        total / max(1.0, 2.0 * float(train_counts[0])),
+        total / max(1.0, 2.0 * float(train_counts[1])),
     ]
 
     model = _build_model(nn).cpu()
@@ -368,6 +646,7 @@ def treinar(args) -> dict:
     best_state = None
     best_val_accuracy = -1.0
     history = []
+    perfect_epochs = 0
 
     for epoch in range(int(args.epochs)):
         train_dataset.epoch = epoch
@@ -377,248 +656,262 @@ def treinar(args) -> dict:
         train_loss = 0.0
 
         for batch, target in train_loader:
-            optimizer.zero_grad(
-                set_to_none=True
-            )
+            optimizer.zero_grad(set_to_none=True)
             logits = model(batch)
-            loss = criterion(
-                logits,
-                target,
-            )
+            loss = criterion(logits, target)
             loss.backward()
             optimizer.step()
 
-            train_loss += (
-                float(loss.item())
-                * int(target.shape[0])
-            )
+            train_loss += float(loss.item()) * int(target.shape[0])
             train_total += int(target.shape[0])
             train_correct += int(
-                (
-                    logits.argmax(dim=1)
-                    == target
-                ).sum().item()
+                (logits.argmax(dim=1) == target).sum().item()
             )
 
         model.eval()
-        val_total = 0
-        val_correct = 0
-        val_loss = 0.0
-        with torch.no_grad():
-            for batch, target in val_loader:
-                logits = model(batch)
-                loss = criterion(
-                    logits,
-                    target,
-                )
-                val_loss += (
-                    float(loss.item())
-                    * int(target.shape[0])
-                )
-                val_total += int(target.shape[0])
-                val_correct += int(
-                    (
-                        logits.argmax(dim=1)
-                        == target
-                    ).sum().item()
-                )
-
+        val_metrics, _ = _evaluate_model(
+            torch,
+            model,
+            samples,
+            val_indices,
+        )
         train_accuracy = (
-            train_correct
-            / float(max(1, train_total))
+            train_correct / float(max(1, train_total))
         )
-        val_accuracy = (
-            val_correct
-            / float(max(1, val_total))
-        )
+        val_accuracy = float(val_metrics["accuracy"])
         history.append(
             {
                 "epoch": epoch + 1,
                 "train_loss": (
-                    train_loss
-                    / float(max(1, train_total))
+                    train_loss / float(max(1, train_total))
                 ),
                 "train_accuracy": train_accuracy,
-                "val_loss": (
-                    val_loss
-                    / float(max(1, val_total))
+                "validation_accuracy": val_accuracy,
+                "validation_class_accuracy": dict(
+                    val_metrics["class_accuracy"]
                 ),
-                "val_accuracy": val_accuracy,
+                "validation_exact_checks": dict(
+                    val_metrics["exact_checks"]
+                ),
             }
         )
         print(
             f"[{epoch + 1:03d}/{args.epochs:03d}] "
             f"train={train_accuracy:.3f} "
-            f"val={val_accuracy:.3f}"
+            f"h1_val={val_accuracy:.3f}"
         )
 
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
             best_state = {
                 key: value.detach().clone()
-                for key, value
-                in model.state_dict().items()
+                for key, value in model.state_dict().items()
             }
+
+        if (
+            val_accuracy >= F3_NEURAL_REQUIRED_VALIDATION_ACCURACY
+            and bool(val_metrics.get("all_validation_checks_exact"))
+        ):
+            perfect_epochs += 1
+        else:
+            perfect_epochs = 0
+
+        if (
+            int(args.early_stop_perfect_epochs) > 0
+            and perfect_epochs >= int(args.early_stop_perfect_epochs)
+        ):
+            print(
+                "Early stop: H1 mantido fora do treino permaneceu "
+                f"100% por {perfect_epochs} épocas."
+            )
+            break
 
     if best_state is not None:
         model.load_state_dict(best_state)
     model.eval()
 
-    project_name = str(dataset["project_name"])
-    output = (
-        Path(args.output)
-        if args.output
-        else f3_neural_model_path_for_repository(
-            repository,
-            project_name,
-        )
-    )
-    output.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    dummy = torch.zeros(
-        (
-            1,
-            4,
-            int(args.input_size),
-            int(args.input_size),
-        ),
-        dtype=torch.float32,
-    )
-    torch.onnx.export(
+    validation_metrics, torch_validation_logits = _evaluate_model(
+        torch,
         model,
-        dummy,
-        str(output),
-        input_names=["segments"],
-        output_names=["logits"],
-        dynamic_axes={
-            "segments": {0: "batch"},
-            "logits": {0: "batch"},
-        },
-        opset_version=13,
+        samples,
+        val_indices,
     )
 
-    # O runtime do ODIN já possui OpenCV. Falhe ainda no treino se o artefato
-    # exportado não puder ser carregado pelo mesmo backend do F3.
-    net = cv2.dnn.readNetFromONNX(
-        str(output)
-    )
-    probe_indices = train_indices[:2]
-    if not probe_indices:
-        probe_indices = val_indices[:1]
-    probe = np.stack(
-        [
-            np.asarray(
-                samples[index]["tensor"],
-                dtype=np.float32,
-            )
-            for index in probe_indices
-        ],
-        axis=0,
-    )
-    net.setInput(probe)
-    logits = net.forward()
-    if (
-        logits.ndim != 2
-        or logits.shape[1] != 2
-    ):
-        raise RuntimeError(
-            "ONNX incompatível com OpenCV DNN: "
-            f"saída {tuple(logits.shape)}"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging_model = None
+    staging_metadata = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f"{output.stem}.",
+            suffix=".candidate.onnx",
+            dir=str(output.parent),
+            delete=False,
+        ) as handle:
+            staging_model = Path(handle.name)
+
+        dummy = torch.zeros(
+            (
+                1,
+                4,
+                int(args.input_size),
+                int(args.input_size),
+            ),
+            dtype=torch.float32,
+        )
+        torch.onnx.export(
+            model,
+            dummy,
+            str(staging_model),
+            input_names=["segments"],
+            output_names=["logits"],
+            dynamic_axes={
+                "segments": {0: "batch"},
+                "logits": {0: "batch"},
+            },
+            opset_version=13,
         )
 
-    metadata_path = output.with_suffix(
-        ".json"
-    )
-    manifest = builder.manifest(
-        project_name
-    )
-    metadata = {
-        "schema_version": 1,
-        "model_type": "f3_segment_on_off_cnn",
-        "project_name": project_name,
-        "onnx_path": str(output),
-        "input_size": int(args.input_size),
-        "channels": [
-            "r",
-            "g",
-            "b",
-            "segment_mask",
-        ],
-        "labels": {
-            "off": 0,
-            "on": 1,
-        },
-        "suggested_thresholds": {
-            "off_max_on_probability": 0.20,
-            "on_min_on_probability": 0.80,
-        },
-        "dataset": {
-            "source": manifest.get("source"),
-            "sample_count": manifest.get(
-                "sample_count"
+        net = cv2.dnn.readNetFromONNX(str(staging_model))
+        validation_batch = np.stack(
+            [
+                np.asarray(samples[index]["tensor"], dtype=np.float32)
+                for index in val_indices
+            ],
+            axis=0,
+        )
+        net.setInput(validation_batch)
+        cv_logits = np.asarray(net.forward(), dtype=np.float32)
+        _validate_candidate(
+            cv_logits=cv_logits,
+            torch_logits=torch_validation_logits,
+            metrics=validation_metrics,
+        )
+
+        onnx_sha256 = _sha256_file(staging_model)
+        metadata_path = output.with_suffix(".json")
+        manifest = builder.manifest(str(dataset["project_name"]))
+        metadata = {
+            "schema_version": 2,
+            "model_type": "f3_segment_on_off_cnn",
+            "project_name": str(dataset["project_name"]),
+            "onnx_path": str(output),
+            "onnx_sha256": onnx_sha256,
+            "input_size": int(args.input_size),
+            "channels": [
+                "r",
+                "g",
+                "b",
+                "segment_mask",
+            ],
+            "labels": {
+                "off": 0,
+                "on": 1,
+            },
+            "suggested_thresholds": {
+                "off_max_on_probability": 0.20,
+                "on_min_on_probability": 0.80,
+            },
+            "dataset": {
+                "source": manifest.get("source"),
+                "sample_count": manifest.get("sample_count"),
+                "class_counts": manifest.get("class_counts"),
+                "checks_used": list(
+                    manifest.get("checks_used") or ()
+                ),
+                "missing_reference_check_ids": list(
+                    manifest.get("missing_reference_check_ids") or ()
+                ),
+                "invalid_sample_ids": list(
+                    manifest.get("invalid_sample_ids") or ()
+                ),
+            },
+            "split": {
+                "strategy": "hold_out_first_check_for_n1",
+                "validation_check_id": preflight["validation_check_id"],
+                "validation_check_name": preflight["validation_check_name"],
+                "train_check_ids": list(preflight["train_check_ids"]),
+                "train_count": int(preflight["train_count"]),
+                "validation_count": int(preflight["validation_count"]),
+                "train_class_counts": dict(preflight["train_class_counts"]),
+                "validation_class_counts": dict(
+                    preflight["validation_class_counts"]
+                ),
+            },
+            "validation": {
+                **validation_metrics,
+                "required_accuracy": F3_NEURAL_REQUIRED_VALIDATION_ACCURACY,
+                "required_class_accuracy": F3_NEURAL_REQUIRED_CLASS_ACCURACY,
+                "onnx_vs_torch_max_abs_diff": float(
+                    np.max(
+                        np.abs(cv_logits - torch_validation_logits)
+                    )
+                    if cv_logits.size
+                    else 0.0
+                ),
+                "accepted_for_physical_h1_retest": True,
+            },
+            "training": {
+                "seed": int(args.seed),
+                "epochs_requested": int(args.epochs),
+                "epochs_completed": len(history),
+                "batch_size": int(args.batch_size),
+                "learning_rate": float(args.learning_rate),
+                "history": history,
+            },
+            "note": (
+                "H1 ficou integralmente fora do treino e atingiu 100% nas "
+                "máscaras configuradas antes da promoção do ONNX. Isso ainda "
+                "não substitui o reteste físico de produção."
             ),
-            "class_counts": manifest.get(
-                "class_counts"
-            ),
-            "checks_used": list(
-                manifest.get("checks_used")
-                or ()
-            ),
-            "missing_reference_check_ids": list(
-                manifest.get(
-                    "missing_reference_check_ids"
-                )
-                or ()
-            ),
-        },
-        "training": {
-            "seed": int(args.seed),
-            "epochs": int(args.epochs),
-            "batch_size": int(args.batch_size),
-            "learning_rate": float(
-                args.learning_rate
-            ),
-            "train_count": len(
-                train_indices
-            ),
-            "validation_count": len(
-                val_indices
-            ),
-            (
-                "best_validation_accuracy_"
-                "on_configured_references"
-            ): float(
-                best_val_accuracy
-            ),
-            "history": history,
-        },
-        "note": (
-            "A validação real é o reteste físico H1. "
-            "Acurácia sobre referências configuradas/"
-            "augmentadas não mede sozinha generalização "
-            "de produção."
-        ),
-    }
-    metadata_path.write_text(
-        json.dumps(
-            metadata,
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+        }
+
+        with tempfile.NamedTemporaryFile(
+            prefix=f"{metadata_path.stem}.",
+            suffix=".candidate.json",
+            dir=str(output.parent),
+            delete=False,
+            mode="w",
+            encoding="utf-8",
+        ) as handle:
+            staging_metadata = Path(handle.name)
+            json.dump(
+                metadata,
+                handle,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        # O treino é offline. Ainda assim, cada arquivo é promovido por replace
+        # atômico e o runtime valida SHA-256, então uma dupla parcialmente
+        # atualizada falha fechada em vez de usar artefatos incompatíveis.
+        staging_model.replace(output)
+        staging_model = None
+        staging_metadata.replace(metadata_path)
+        staging_metadata = None
+
+    finally:
+        for candidate in (staging_model, staging_metadata):
+            if isinstance(candidate, Path):
+                try:
+                    candidate.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     print(f"Modelo: {output}")
+    print(f"Metadados: {output.with_suffix('.json')}")
     print(
-        f"Metadados: {metadata_path}"
+        "Validação H1 independente: "
+        f"{validation_metrics['correct']}/{validation_metrics['total']} "
+        f"({validation_metrics['accuracy'] * 100:.1f}%)"
     )
     print(
-        f"Amostras: {dataset['sample_count']} "
-        f"ON={dataset['class_counts']['on']} "
-        f"OFF={dataset['class_counts']['off']}"
+        "Classes H1: "
+        f"OFF={validation_metrics['class_accuracy']['off'] * 100:.1f}% "
+        f"ON={validation_metrics['class_accuracy']['on'] * 100:.1f}%"
+    )
+    print(
+        "Artefato liberado para RETESTE FÍSICO H1; "
+        "a validação de produção ainda está pendente."
     )
     return metadata
 
@@ -626,27 +919,25 @@ def treinar(args) -> dict:
 def _parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Treina a CNN local ON/OFF dos "
-            "segmentos do Display F3."
+            "Treina a CNN local ON/OFF dos segmentos do Display F3."
         )
     )
     parser.add_argument(
         "--config",
-        default=(
-            "data/config/"
-            "odin_display_projects.json"
-        ),
-        help=(
-            "Arquivo do "
-            "DisplayProjectRepository."
-        ),
+        default="data/config/odin_display_projects.json",
+        help="Arquivo do DisplayProjectRepository.",
     )
     parser.add_argument(
         "--project",
         default=None,
+        help="Projeto Display. Se omitido, usa o projeto ativo.",
+    )
+    parser.add_argument(
+        "--validation-check",
+        default=None,
         help=(
-            "Projeto Display. Se omitido, "
-            "usa o projeto ativo."
+            "CHECK mantido integralmente fora do treino. "
+            "No N1 o padrão é o primeiro CHECK configurado."
         ),
     )
     parser.add_argument(
@@ -658,15 +949,15 @@ def _parse_args():
         ),
     )
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=45,
+        "--preflight",
+        action="store_true",
+        help=(
+            "Valida fotos, classes e split H1 sem importar PyTorch "
+            "nem alterar o modelo produtivo."
+        ),
     )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=32,
-    )
+    parser.add_argument("--epochs", type=int, default=60)
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument(
         "--input-size",
         type=int,
@@ -677,10 +968,15 @@ def _parse_args():
         type=float,
         default=1e-3,
     )
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--seed",
+        "--early-stop-perfect-epochs",
         type=int,
-        default=42,
+        default=5,
+        help=(
+            "Encerra após N épocas consecutivas com H1 100% exato. "
+            "Use 0 para desabilitar."
+        ),
     )
     return parser.parse_args()
 
