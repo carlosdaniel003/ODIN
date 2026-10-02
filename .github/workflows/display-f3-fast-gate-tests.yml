@@ -41,6 +41,7 @@ jobs:
             src/platform/display_f3_preview_clarity_fix.py \
             src/platform/display_live_roi_overlay.py \
             src/platform/display_f3_manual_snapshot_debug.py \
+            src/platform/display_f3_strict_mask_conformity.py \
             src/platform/display_f3_zoom.py \
             src/platform/display_project_repository.py \
             src/platform/display_project_config.py \
@@ -63,6 +64,8 @@ jobs:
             tests/test_display_f3_zoom.py \
             tests/test_display_f3_config_architecture.py \
             tests/test_display_f3_runtime_coordinator.py \
+            tests/test_display_f3_strict_mask_conformity.py \
+            tests/test_display_f3_intermittent_runtime.py \
             tests/test_display_project_repository.py \
             tests/test_display_f3_config_open_smoke.py
 
@@ -119,6 +122,8 @@ jobs:
             tests.test_display_f3_strict_manual_transition_gate \
             tests.test_display_f3_exact_check_template \
             tests.test_display_f3_h1_single_frame_probe \
+            tests.test_display_f3_intermittent_runtime \
+            tests.test_display_f3_strict_mask_conformity \
             tests.test_display_f3_runtime_contract_fix \
             -v
 
