@@ -4920,8 +4920,10 @@ campo local diz physical confirmation
 → falha real continua persistente
 ```
 
-O teste integrado do BLUE foi endurecido com `MASK_022 confidence=0.49` e
-prova física canônica `powered`; o CHECK deve continuar avançando.
+O teste isolado do observador usa `confidence=0.49` para provar que a lista
+canônica não é filtrada por confiança semântica. O teste integrado do BLUE usa
+o valor observado fisicamente em `MASK_022` (`confidence=0.538`) junto da
+prova canônica `powered`; o CHECK deve continuar avançando.
 
 ### Próximo reteste físico
 
