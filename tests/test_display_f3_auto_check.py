@@ -668,6 +668,95 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
         self.assertEqual([True], events)
         self.assertEqual(0, app._display_auto_stable_frames)
 
+    def test_runtime_h1_ambiguo_usa_autoridade_fisica_e_avanca(self):
+        app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
+        app.display_f3_ativo = True
+        app.display_f3_result_after_id = None
+        app._display_project_config_window = None
+        app.camera_frame_atual = np.zeros((10, 10, 3), dtype=np.uint8)
+        app.camera_ultimo_frame_id = 2
+        app.display_f3_window = SimpleNamespace(
+            set_preview_status=lambda *_args, **_kwargs: None
+        )
+        app.display_project_repository = SimpleNamespace(
+            obter_projeto_ativo=lambda: "DISPLAY A"
+        )
+        app.display_check_runtime = SimpleNamespace(
+            snapshot=lambda: {
+                "current_index": 0,
+                "current_check": {"id": "CHECK_001", "name": "H1"},
+            }
+        )
+        app._display_auto_analyzer = SimpleNamespace(
+            repository=app.display_project_repository,
+            analyze=lambda **_kwargs: {
+                "ready": True,
+                "approved": False,
+                "reason": "check_diverge_mascara_configurada",
+                "matched_mask_count": 1,
+                "active_mask_count": 2,
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_008",
+                        "expected": "on",
+                        "classified": "on",
+                        "matched": True,
+                        "raw_matched": True,
+                        "confidence": 0.99,
+                    },
+                    {
+                        "mask_id": "MASK_012",
+                        "expected": "on",
+                        "classified": "off",
+                        "matched": False,
+                        "raw_matched": False,
+                        "confidence": 0.5274,
+                    },
+                ],
+            },
+        )
+        app._display_f3_runtime_authorities = SimpleNamespace(
+            power=SimpleNamespace(
+                evaluate_current_check_relative=lambda *_args, **_kwargs: {
+                    "available": True,
+                    "source": "f3_same_mask_relative_power_authority",
+                    "details": [
+                        {
+                            "mask_id": "MASK_012",
+                            "winner": "powered",
+                            "reference_discriminative": True,
+                            "power_position": 0.99,
+                        }
+                    ],
+                }
+            )
+        )
+        app._display_auto_signature = ("DISPLAY A", "CHECK_001")
+        app._display_auto_last_decision = None
+        app._display_auto_stable_frames = 0
+        app._display_auto_transition_frames = 0
+        app._display_auto_last_frame_token = None
+        app._display_auto_last_analysis = None
+        app._display_auto_manual_entry_signature = None
+        app._display_auto_manual_entry_label = ""
+        app._obter_rotacao_visual_display_f3 = lambda: 0
+        events = []
+        app.registrar_resultado_check_display_f3 = (
+            lambda approved: events.append(bool(approved))
+            or {"event": "check_advanced"}
+        )
+
+        app._process_display_auto_check()
+
+        self.assertEqual([True], events)
+        self.assertTrue(app._display_auto_last_analysis["approved"])
+        self.assertEqual(
+            ("MASK_012",),
+            app._display_auto_last_analysis[
+                "reference_gate_physical_tie_breaker_ids"
+            ],
+        )
+
     def test_auto_mixin_is_before_f3_runtime_and_does_not_replace_trigger_methods(self):
         mro = DesktopProductionApp.__mro__
         self.assertLess(
