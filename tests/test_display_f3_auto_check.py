@@ -778,6 +778,243 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
             ],
         )
 
+    def test_blue_suporte_intermitente_usa_autoridade_fisica_estavel(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "raw_matched": False,
+                    "confidence": 0.6414,
+                    "intermittent_power_confirmation": False,
+                    "intermittent_power_support": {
+                        "source": "f3_current_check_vs_board_off_same_mask_support",
+                        "winner": "off",
+                    },
+                }
+            ],
+        }
+        evidence = {
+            "available": True,
+            "source": "f3_same_mask_relative_power_authority",
+            "same_mask_comparison": True,
+            "details": [
+                {
+                    "mask_id": "MASK_024",
+                    "winner": "powered",
+                    "reference_discriminative": True,
+                    "power_position": 0.99,
+                }
+            ],
+        }
+
+        result = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_apply_intermittent_physical_authority(
+                analysis,
+                evidence,
+            )
+        )
+        item = result["mask_results"][0]
+
+        self.assertTrue(item["intermittent_power_confirmation"])
+        self.assertEqual(
+            "f3_same_mask_relative_power_authority",
+            item["intermittent_power_support"]["source"],
+        )
+        self.assertEqual(
+            "powered",
+            item["intermittent_power_support"]["winner"],
+        )
+        self.assertFalse(
+            item["intermittent_learning_support_confirmation"]
+        )
+        self.assertEqual(
+            ("MASK_024",),
+            result["intermittent_power_support_confirmed_mask_ids"],
+        )
+        self.assertTrue(result["intermittent_power_support_authoritative"])
+
+    def test_blue_autoridade_global_nao_pode_confirmar_suporte_intermitente(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "raw_matched": False,
+                    "confidence": 0.6414,
+                }
+            ],
+        }
+        evidence = {
+            "available": True,
+            "source": "f3_unified_live_mask_power_authority",
+            "same_mask_comparison": True,
+            "details": [
+                {
+                    "mask_id": "MASK_024",
+                    "winner": "powered",
+                    "reference_discriminative": True,
+                }
+            ],
+        }
+
+        result = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_apply_intermittent_physical_authority(
+                analysis,
+                evidence,
+            )
+        )
+
+        self.assertFalse(
+            result["mask_results"][0]["intermittent_power_confirmation"]
+        )
+        self.assertEqual(
+            (),
+            result["intermittent_power_support_confirmed_mask_ids"],
+        )
+        self.assertFalse(result["intermittent_power_support_authoritative"])
+
+    def test_runtime_blue_falsos_off_022_024_026_usam_prova_fisica_e_avancam(self):
+        app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
+        app.display_f3_ativo = True
+        app.display_f3_result_after_id = None
+        app._display_project_config_window = None
+        app.camera_frame_atual = np.zeros((10, 10, 3), dtype=np.uint8)
+        app.camera_ultimo_frame_id = 7
+        app.display_f3_window = SimpleNamespace(
+            set_preview_status=lambda *_args, **_kwargs: None
+        )
+        app.display_project_repository = SimpleNamespace(
+            obter_projeto_ativo=lambda: "DISPLAY A"
+        )
+        app.display_check_runtime = SimpleNamespace(
+            snapshot=lambda: {
+                "current_index": 1,
+                "current_check": {
+                    "id": "CHECK_002",
+                    "name": "BLUE",
+                    "intermittent": True,
+                },
+            }
+        )
+
+        false_off_ids = {"MASK_022", "MASK_024", "MASK_026"}
+        rows = []
+        for index in range(1, 19):
+            mask_id = f"MASK_{index:03d}"
+            if index == 16:
+                mask_id = "MASK_022"
+            elif index == 17:
+                mask_id = "MASK_024"
+            elif index == 18:
+                mask_id = "MASK_026"
+            false_off = mask_id in false_off_ids
+            rows.append(
+                {
+                    "mask_id": mask_id,
+                    "expected": "on",
+                    "classified": "off" if false_off else "on",
+                    "matched": not false_off,
+                    "raw_matched": not false_off,
+                    "confidence": 0.6414 if false_off else 0.99,
+                    # Simula a evidência antiga divergente que existia no analyzer.
+                    "intermittent_power_confirmation": False,
+                    "intermittent_power_support": {
+                        "source": "f3_current_check_vs_board_off_same_mask_support",
+                        "winner": "off",
+                    },
+                }
+            )
+
+        app._display_auto_analyzer = SimpleNamespace(
+            repository=app.display_project_repository,
+            analyze=lambda **_kwargs: {
+                "ready": True,
+                "approved": False,
+                "reason": "check_diverge_mascara_configurada",
+                "matched_mask_count": 15,
+                "active_mask_count": 18,
+                "mask_results": rows,
+            },
+        )
+        app._display_f3_runtime_authorities = SimpleNamespace(
+            power=SimpleNamespace(
+                evaluate_current_check_relative=lambda *_args, **_kwargs: {
+                    "available": True,
+                    "source": "f3_same_mask_relative_power_authority",
+                    "same_mask_comparison": True,
+                    "details": [
+                        {
+                            "mask_id": mask_id,
+                            "winner": "powered",
+                            "reference_discriminative": True,
+                            "power_position": 0.99,
+                        }
+                        for mask_id in sorted(false_off_ids)
+                    ],
+                }
+            )
+        )
+        app._display_auto_signature = ("DISPLAY A", "CHECK_002")
+        app._display_auto_last_decision = None
+        app._display_auto_stable_frames = 0
+        app._display_auto_transition_frames = 0
+        app._display_auto_last_frame_token = None
+        app._display_auto_last_analysis = None
+        app._display_auto_manual_entry_signature = None
+        app._display_auto_manual_entry_label = ""
+        app._display_auto_intermittent_signature = ("DISPLAY A", "CHECK_002")
+        app._display_auto_intermittent_seen_on = set()
+        app._display_auto_intermittent_phase = "unknown"
+        app._display_auto_intermittent_on_samples = 0
+        app._display_auto_intermittent_failure_counts = {}
+        app._display_auto_intermittent_persistent_failed_ids = set()
+        app._display_auto_intermittent_exact_veto_ids = set()
+        app._display_auto_intermittent_physical_support_veto_ids = set()
+        app._display_auto_intermittent_candidate_failed_ids = set()
+        app._display_auto_intermittent_last_phase_analysis = None
+        app._obter_rotacao_visual_display_f3 = lambda: 0
+        events = []
+        app.registrar_resultado_check_display_f3 = (
+            lambda approved: events.append(bool(approved))
+            or {"event": "check_advanced"}
+        )
+
+        app._process_display_auto_check()
+
+        self.assertEqual([True], events)
+        self.assertTrue(app._display_auto_last_analysis["approved"])
+        self.assertEqual(
+            tuple(sorted(false_off_ids)),
+            app._display_auto_last_analysis[
+                "intermittent_physical_support_veto_ids"
+            ],
+        )
+        self.assertEqual(
+            tuple(sorted(false_off_ids)),
+            app._display_auto_last_analysis[
+                "intermittent_power_support_confirmed_mask_ids"
+            ],
+        )
+        self.assertEqual(
+            (),
+            tuple(
+                app._display_auto_last_analysis[
+                    "effective_confirmed_failed_mask_ids"
+                ]
+            ),
+        )
+
     def test_auto_mixin_is_before_f3_runtime_and_does_not_replace_trigger_methods(self):
         mro = DesktopProductionApp.__mro__
         self.assertLess(
