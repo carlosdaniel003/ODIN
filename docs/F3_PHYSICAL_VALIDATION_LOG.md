@@ -4410,3 +4410,226 @@ same-mask=off/tie
 **Estado:** H1 D-055 PASS FÍSICO; BLUE D-056 CORRIGIDA — PENDENTE DE RETESTE FÍSICO.
 
 ---
+
+## 02/10/2026 — Reteste D-056 FAIL físico: falso NG migrou para MASK_024 no BLUE
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Projeto `CM_500_L`, CHECK `CHECK_002 / BLUE`, intermitente, após o H1 ter sido
+concluído corretamente.
+
+O padrão BLUE apresentado estava correto. Visualmente, o segmento 24 estava
+aceso no display físico, mas o ODIN encerrou o CHECK como NG.
+
+A tela terminal mostrou:
+
+```text
+PLACA NG
+BLUE NÃO CONFIRMADO
+24/28 CONFORMES
+14 ACESOS
+14 APAGADOS
+FALHA MASK_024
+```
+
+Na câmera congelada, `MASK_024` foi destacada em vermelho mesmo com emissão
+visível no segmento físico correspondente.
+
+### Evidência objetiva do DEBUG
+
+O frame congelado é o mesmo frame que fechou o NG.
+
+A análise efetiva registrou:
+
+```text
+effective_failed_mask_ids:
+MASK_019
+MASK_021
+MASK_022
+MASK_024
+
+effective_confirmed_failed_mask_ids:
+MASK_024
+
+effective_validating_mask_ids:
+MASK_019
+MASK_021
+MASK_022
+```
+
+No debounce intermitente:
+
+```text
+MASK_024 failure_count=3
+candidate_failed_ids=[MASK_024]
+persistent_failed_ids=[MASK_024]
+physical_support_veto_ids=[]
+```
+
+Portanto, nesta execução, a falha que efetivamente fechou o NG foi
+`MASK_024`.
+
+### Contradição física registrada
+
+O próprio frame mostra evidências conflitantes entre caminhos de análise.
+
+A análise semântica por aprendizado classificou:
+
+```text
+MASK_024
+expected=ON
+classified=OFF
+confidence=0.6414
+v_mean≈250.99
+v_p95=252
+v_p99=255
+glow≈252.85
+```
+
+O gabarito exato da foto do BLUE, porém, classificou a mesma máscara como:
+
+```text
+MASK_024
+expected=ON
+classified=ON
+template_similarity=0.9113
+```
+
+E a comparação direta:
+
+```text
+CHECK BLUE x PLACA DESLIGADA
+expected_on=18
+powered_votes=18
+off_votes=0
+tie_votes=0
+MASK_024 winner=powered
+```
+
+confirmou que `MASK_024` estava no lado físico ON.
+
+### Evidência de que a D-056 ainda não chegou à autoridade correta neste caso
+
+Apesar da prova física direta acima:
+
+```text
+intermittent_power_support_confirmed_mask_ids=[]
+physical_support_veto_ids=[]
+```
+
+No mesmo relatório existe outra leitura de energia do CHECK com:
+
+```text
+expected_on=18
+powered_votes=15
+off_votes=3
+
+MASK_026=off
+MASK_022=off
+MASK_024=off
+```
+
+enquanto a comparação direta `CHECK x PLACA DESLIGADA` registra as 18 como
+`powered`.
+
+Isto mostra que o problema remanescente não deve ser tratado simplesmente
+aumentando confiança, debounce ou tolerância. Há uma divergência entre a prova
+física direta do mesmo CHECK e a evidência que efetivamente alimenta o suporte
+intermitente.
+
+### Estado visual congelado
+
+O snapshot terminal registrou:
+
+```text
+FALHA MASK_024
+visor failed=[MASK_022, MASK_024, MASK_026]
+```
+
+e o visor/overlay congelados ainda apresentaram:
+
+```text
+MASK_026=off
+MASK_022=off
+MASK_024=off
+```
+
+embora as três sejam configuradas como `ON` no BLUE e a comparação direta
+tenha publicado `powered` para as três.
+
+Somente `MASK_024`, porém, estava em
+`effective_confirmed_failed_mask_ids` e foi a falha persistente que fechou o
+NG desta execução.
+
+### Relação com a D-056
+
+A D-056 removeu o veto por confiança semântica do suporte físico intermitente.
+O reteste atual prova que essa alteração, isoladamente, **não resolveu o problema
+físico completo**.
+
+A falha mudou de `MASK_022` para `MASK_024`, mas o padrão estrutural
+permanece:
+
+```text
+segmento esperado ON
++ segmento fisicamente ON
++ comparação direta same-mask = powered
++ suporte intermitente efetivo vazio
+→ falso OFF persistente
+→ NG indevido
+```
+
+### Causa
+
+**Ainda não considerada encerrada.**
+
+A evidência atual aponta para divergência de fonte/autoridade entre:
+
+```text
+comparação direta CHECK x BOARD_OFF
+```
+
+e
+
+```text
+evidência usada pelo suporte físico intermitente
+```
+
+Antes de nova alteração algorítmica, a próxima etapa deve identificar
+explicitamente qual fonte alimentou `intermittent_power_support` para
+`MASK_024` no runtime produtivo e por que ela divergiu da comparação direta
+que retornou `powered`.
+
+### Próximo reteste esperado
+
+Após a causa ser corrigida:
+
+```text
+H1 correto
+→ conclui
+
+BLUE correto
+→ MASK_022 ON
+→ MASK_024 ON
+→ MASK_026 ON
+→ suporte físico efetivo coerente com a comparação direta
+→ nenhuma dessas máscaras vira persistent_failed
+→ BLUE conclui sem NG
+```
+
+Teste de segurança posterior:
+
+```text
+BLUE com um segmento esperado ON realmente apagado
+→ prova física same-mask=off/tie
+→ sem reconciliação
+→ falha persiste
+→ NG correto
+```
+
+**Estado:** D-056 RETESTADA FISICAMENTE — FAIL; MASK_024 confirmou falso NG.
+Diagnóstico de autoridade/fonte pendente antes de nova correção.
+
+---
