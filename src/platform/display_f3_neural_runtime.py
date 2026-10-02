@@ -209,11 +209,34 @@ class F3NeuralSegmentDetector:
 
         if needs_reload:
             metadata = self._read_metadata(metadata_path)
+            try:
+                metadata_schema = int(metadata.get("schema_version", 0) or 0)
+            except (TypeError, ValueError):
+                metadata_schema = 0
+            if metadata_schema != 2:
+                self._metadata = metadata
+                self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_metadata_schema_unsupported",
+                    "project_name": name,
+                    "schema_version": metadata_schema,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
             declared_project = str(
                 metadata.get("project_name") or ""
             ).strip()
-            if declared_project and declared_project != name:
+            if declared_project != name:
+                self._metadata = metadata
                 self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
                 self._last_status = {
                     "ready": False,
                     "reason": "neural_model_project_mismatch",
@@ -226,9 +249,8 @@ class F3NeuralSegmentDetector:
                 return deepcopy(self._last_status)
 
             model_type = str(
-                metadata.get("model_type")
-                or F3_H1_NEURAL_MODEL_TYPE
-            )
+                metadata.get("model_type") or ""
+            ).strip()
             if model_type != F3_H1_NEURAL_MODEL_TYPE:
                 self._metadata = metadata
                 self._net = None
@@ -341,7 +363,7 @@ class F3NeuralSegmentDetector:
             except (TypeError, ValueError):
                 off_label = -1
                 on_label = -1
-            if labels and (
+            if (
                 off_label != 0
                 or on_label != 1
             ):
