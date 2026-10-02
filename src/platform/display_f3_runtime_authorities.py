@@ -450,6 +450,25 @@ class F3PowerAuthority:
             context,
         )
 
+    def evaluate_current_check_relative(
+        self,
+        frame,
+        project_name: str,
+        context: dict | None,
+    ) -> dict:
+        """Compara LIVE/OFF/ON do CHECK atual na mesma máscara física.
+
+        Esta primitiva já existia na autoridade de energia e continua sem
+        decidir OK/NG. O runtime de CHECK pode consumi-la somente como
+        desempate físico de uma classificação semântica ambígua.
+        """
+        return power_module.avaliar_evidencia_energia_relativa_display_f3(
+            self.app,
+            frame,
+            project_name,
+            context,
+        )
+
     def apply(
         self,
         state: dict,
