@@ -3178,9 +3178,10 @@ intermittent_power_confirmation=True apenas no item
 → defeito segue para debounce
 ```
 
-O teste integrado do BLUE também deve cobrir falso OFF com confiança semântica
-abaixo de `DISPLAY_AUTO_MIN_CONFIDENCE` e prova same-mask canônica
-`powered`.
+O teste do observador cobre inclusive campo local stale com confiança semântica
+abaixo do piso, provando que esse valor não filtra a lista canônica. O teste
+integrado do BLUE reproduz a confiança baixa observada fisicamente
+(`MASK_022=0.538`) junto da prova same-mask canônica `powered`.
 
 ### Escopo
 
