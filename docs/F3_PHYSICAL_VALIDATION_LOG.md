@@ -3288,3 +3288,129 @@ Depois, regressao de seguranca:
 **Estado:** CORRECAO IMPLEMENTADA — PENDENTE DE RETESTE FISICO.
 
 ---
+
+## 02/10/2026 — FAIL físico: H1 correto ficou preso em 26/28 por falso OFF ambíguo
+
+**Resultado físico:** FAIL.
+
+### Cenário
+
+Projeto `CM_500_L`, primeiro CHECK `CHECK_001 / H1`, não intermitente,
+rotação visual 180°.
+
+A placa estava no suporte e o padrão H1 apresentado era o correto. Os sete
+segmentos esperados ON estavam fisicamente acesos, mas a tela permaneceu em:
+
+```text
+AGUARDANDO H1
+MÁSCARAS • H1 NÃO CONFIRMADO • 26/28 CONFORMES
+5 ACESOS • 23 APAGADOS
+```
+
+### Evidência do DEBUG congelado
+
+O gate físico não era o bloqueio:
+
+```text
+ESTADO DA PLACA: PRESENTE • CONFIRMADA
+ENERGIA DO DISPLAY: CONFIRMADA
+GATE PRODUTIVO: LIBERADO
+CHECK LÓGICO: H1
+```
+
+A autoridade semântica estrita publicou duas divergências:
+
+```text
+MASK_012 expected=ON classified=OFF confidence≈0.527
+MASK_020 expected=ON classified=OFF confidence≈0.511
+H1 = 26/28
+```
+
+Nos dois casos a confiança estava praticamente empatada, apesar de as ROIs
+estarem intensamente luminosas.
+
+Ao mesmo tempo, duas evidências independentes do mesmo frame confirmaram o H1:
+
+```text
+GABARITO EXATO H1 = 28/28
+
+MASK_012 template_similarity=0.9926
+v_ref≈250.74
+v_live≈250.88
+
+MASK_020 template_similarity=0.9901
+v_ref≈251.44
+v_live≈250.30
+```
+
+e a comparação física direta contra PLACA DESLIGADA publicou:
+
+```text
+expected_on=7
+powered_votes=7
+off_votes=0
+tie_votes=0
+```
+
+Portanto a câmera não estava deixando de enxergar os dois segmentos. O falso
+OFF vinha do classificador semântico aprendido, cuja distância ON/OFF ficou
+quase empatada para essas máscaras.
+
+### Causa identificada
+
+D-051 tratava esse tipo de falso OFF somente em CHECK intermitente. O H1 é
+não intermitente e, portanto, nunca passava pela reconciliação criada para BLUE.
+
+Além disso, o suporte semântico auxiliar baseado nas features aprendidas também
+não ajudava `MASK_012` e `MASK_020`: as amostras aprendidas ON/OFF dessas
+máscaras eram próximas demais e produziam empate. A comparação física direta
+das imagens `BOARD_OFF ↔ LIVE ↔ H1`, porém, separou corretamente as sete
+máscaras ON.
+
+### Correção aplicada — D-052
+
+Foi adicionada uma reconciliação exclusiva do primeiro CHECK/reference gate:
+
+- só atua em `expected=ON → classified=OFF`;
+- só atua quando a classificação semântica está ambígua
+  (`confidence < 0.58`);
+- reutiliza a autoridade física existente da mesma máscara;
+- exige referência ON/OFF discriminante;
+- exige `winner=powered` para o LIVE atual;
+- não toca em OFF semântico confiante;
+- não toca em máscaras esperadas OFF;
+- não usa o gabarito exato isoladamente como aprovação;
+- recalcula a conformidade completa depois do desempate;
+- H1 continua exigindo 100% das máscaras conformes para avançar.
+
+Nenhum novo timer, worker, scheduler ou loop foi criado. A comparação física
+só é solicitada quando existe falso OFF ambíguo no reference gate.
+
+### Proteção do defeito real
+
+```text
+segmento H1 realmente apagado
+→ LIVE próximo de PLACA DESLIGADA
+→ winner=off ou tie
+→ máscara continua OFF
+→ H1 não recebe OK
+```
+
+Também permanece bloqueado qualquer resgate de uma classificação OFF confiante.
+
+### Próximo reteste físico esperado
+
+```text
+apresentar H1 correto
+→ MASK_012 e MASK_020 deixam de ficar presas em falso OFF
+→ H1 fecha 28/28
+→ H1 é concluído
+→ sequência avança normalmente
+```
+
+Depois disso, o teste de segurança do H1 deve ser repetido mantendo
+deliberadamente um segmento esperado ON apagado; o H1 não pode avançar.
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+---
