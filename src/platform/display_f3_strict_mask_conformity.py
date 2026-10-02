@@ -366,11 +366,13 @@ def anotar_suporte_fisico_intermitente_f3(
     analysis: dict | None,
     references_by_mask: dict | None,
 ) -> dict | None:
-    """Anota falso OFF ambiguo quando a mesma mascara prova emissao fisica.
+    """Mantém diagnóstico local de falso OFF pela memória aprendida.
 
-    Esta funcao nao altera classified, matched ou approved. A reconciliacao
-    continua pertencendo ao runtime de CHECK intermitente, que aplica a
-    evidencia somente na fase ON e preserva o debounce de NG.
+    Desde D-057 esta evidência NÃO é autoridade do debounce intermitente.
+    O runtime substitui intermittent_power_confirmation pela comparação
+    canônica da F3PowerAuthority no mesmo frame antes de contar falhas.
+    Esta função permanece para telemetria/regressão do aprendizado e não altera
+    classified, matched ou approved.
     """
     if not isinstance(analysis, dict) or not bool(analysis.get("ready")):
         return analysis
