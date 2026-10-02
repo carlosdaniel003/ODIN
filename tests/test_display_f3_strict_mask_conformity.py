@@ -303,6 +303,76 @@ class DisplayF3StrictMaskConformityTests(TestCase):
             result["intermittent_power_support_confirmed_mask_ids"],
         )
 
+    def test_blue_false_off_06605_ainda_consulta_suporte_fisico_same_mask(self):
+        references = {
+            "MASK_022": {
+                "on": _power_features(250),
+                "off": _power_features(35),
+            }
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_022",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.6605,
+                    "features": vars(_power_features(251)),
+                }
+            ],
+        }
+
+        result = anotar_suporte_fisico_intermitente_f3(
+            analysis,
+            references,
+        )
+        item = result["mask_results"][0]
+
+        self.assertTrue(item["intermittent_power_confirmation"])
+        self.assertEqual("powered", item["intermittent_power_support"]["winner"])
+        self.assertEqual(
+            ("MASK_022",),
+            result["intermittent_power_support_confirmed_mask_ids"],
+        )
+
+    def test_blue_high_confidence_false_off_realmente_apagado_continua_off(self):
+        references = {
+            "MASK_022": {
+                "on": _power_features(250),
+                "off": _power_features(35),
+            }
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_022",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.95,
+                    "features": vars(_power_features(38)),
+                }
+            ],
+        }
+
+        result = anotar_suporte_fisico_intermitente_f3(
+            analysis,
+            references,
+        )
+        item = result["mask_results"][0]
+
+        self.assertFalse(item["intermittent_power_confirmation"])
+        self.assertEqual("off", item["intermittent_power_support"]["winner"])
+        self.assertEqual(
+            (),
+            result["intermittent_power_support_confirmed_mask_ids"],
+        )
+
     def test_segmento_realmente_apagado_nao_recebe_suporte_fisico(self):
         on_reference = _power_features(250)
         off_reference = _power_features(35)
