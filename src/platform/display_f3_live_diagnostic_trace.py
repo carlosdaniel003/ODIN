@@ -295,26 +295,27 @@ def _advance_positive_probe_if_needed(
     if not bool(stability.get("confirm")) or not isinstance(context_before, dict):
         return None
 
-    # N1.2: o primeiro CHECK migrado não pode ser aprovado por uma sonda
+    # N2: H1 e BLUE migrados não podem ser aprovados por uma sonda
     # convencional, nem em composição legada antes da instalação das autoridades
     # finais. A sonda pode continuar registrando telemetria, mas é observadora.
     try:
-        first_check = int(context_before.get("current_index", -1)) == 0
+        current_index = int(context_before.get("current_index", -1))
     except (TypeError, ValueError):
-        first_check = False
+        current_index = -1
+    neural_migrated_check = 0 <= current_index < 2
     if (
-        first_check
+        neural_migrated_check
         and bool(
             getattr(
                 runtime_module,
-                "_display_f3_h1_neural_authority",
+                "_display_f3_neural_authority",
                 False,
             )
         )
     ):
         return {
             "advanced": False,
-            "reason": "h1_neural_owns_check_decision",
+            "reason": "neural_check_owns_check_decision",
             "source": F3_EXACT_PROBE_SOURCE,
             "observer_only": True,
         }
