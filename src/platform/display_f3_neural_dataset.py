@@ -243,6 +243,64 @@ class F3NeuralDatasetBuilder:
         image = cv2.imread(str(path), cv2.IMREAD_COLOR)
         return _prepare_bgr(image, resolution)
 
+    def _board_off_reference_context(
+        self,
+        project_name: str,
+        resolution: tuple[int, int],
+    ) -> tuple[dict | None, object | None, list[dict]]:
+        """Carrega a referência OFF física já configurada no próprio F3.
+
+        O import fica local porque display_visual_reference_status também
+        compõe UI/runtime F3. O dataset é usado offline e não deve criar ciclo
+        de import durante o carregamento do runtime neural.
+        """
+        try:
+            from src.platform.display_visual_reference_status import (
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                DisplayProjectPresenceReferenceStore,
+            )
+        except Exception:
+            return None, None, []
+
+        try:
+            metadata = DisplayProjectPresenceReferenceStore(
+                self.repository
+            ).get(
+                project_name,
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+            )
+        except Exception:
+            metadata = None
+        if not isinstance(metadata, dict):
+            return None, None, []
+
+        image = self._reference_image(metadata, resolution)
+        if image is None:
+            return metadata, None, []
+
+        # Somente geometria explicitamente salva sobre a foto de placa
+        # desligada é aceita. Não projetamos as máscaras canônicas por
+        # suposição, pois poucos pixels de erro já podem misturar a luz do
+        # segmento vizinho com o alvo.
+        masks: list[dict] = []
+        if "masks_reference" in metadata:
+            masks = normalizar_mascaras_display(
+                deepcopy(metadata.get("masks_reference", []))
+            )
+
+        if not masks:
+            overrides = metadata.get("mask_overrides_reference", {})
+            if isinstance(overrides, dict):
+                masks = normalizar_mascaras_display(
+                    [
+                        deepcopy(mask)
+                        for mask in overrides.values()
+                        if isinstance(mask, dict)
+                    ]
+                )
+
+        return metadata, image, masks
+
     def collect(self, project_name: str | None = None) -> dict:
         name = normalizar_nome_projeto_display(
             project_name or self.repository.obter_projeto_ativo()
