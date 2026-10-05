@@ -40,7 +40,8 @@ jobs:
             scripts/treinar_f3_segmentos_neural.py \
             tests/test_display_f3_neural_dataset.py \
             tests/test_display_f3_neural_runtime.py \
-            tests/test_display_f3_neural_training.py
+            tests/test_display_f3_neural_training.py \
+            tests/test_display_f3_debug_clarity_fix.py
 
       - name: Verify direct training CLI import path
         run: |
@@ -52,4 +53,5 @@ jobs:
             tests.test_display_f3_neural_dataset \
             tests.test_display_f3_neural_runtime \
             tests.test_display_f3_neural_training \
+            tests.test_display_f3_debug_clarity_fix \
             -v
