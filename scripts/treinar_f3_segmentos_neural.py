@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import random
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -51,6 +52,7 @@ from src.platform.display_project_repository import (
 F3_NEURAL_REQUIRED_VALIDATION_ACCURACY = 1.0
 F3_NEURAL_REQUIRED_CLASS_ACCURACY = 1.0
 F3_NEURAL_CALIBRATION_AUGMENTATIONS_PER_REFERENCE = 16
+F3_NEURAL_CALIBRATION_DIAGNOSTIC_TOP_K = 5
 
 
 def _load_torch():
@@ -252,8 +254,15 @@ def _augment_sample(
     tensor: np.ndarray,
     label: int,
     rng: random.Random,
+    *,
+    diagnostic: dict | None = None,
 ) -> np.ndarray:
-    """Augmentation leve focada nos defeitos físicos relatados no F3."""
+    """Augmentation leve focada nos defeitos físicos relatados no F3.
+
+    `diagnostic` apenas registra os mesmos valores aleatórios já usados pela
+    transformação. Nenhuma chamada extra ao RNG é feita, para que instrumentar
+    a calibração não altere a amostra gerada.
+    """
     hwc = np.ascontiguousarray(
         tensor.transpose(1, 2, 0),
         dtype=np.float32,
@@ -294,63 +303,140 @@ def _augment_sample(
         gamma,
     )
 
-    if rng.random() < 0.25:
+    blur_draw = rng.random()
+    blur_applied = blur_draw < 0.25
+    if blur_applied:
         rgb = cv2.GaussianBlur(
             rgb,
             (3, 3),
             0,
         )
 
-    if rng.random() < 0.45:
+    noise_draw = rng.random()
+    noise_applied = noise_draw < 0.45
+    noise_seed = None
+    noise_sigma = None
+    if noise_applied:
+        noise_seed = rng.randrange(1, 2**31)
+        noise_sigma = rng.uniform(0.006, 0.025)
         noise = np.random.default_rng(
-            rng.randrange(1, 2**31)
+            noise_seed
         ).normal(
             0.0,
-            rng.uniform(0.006, 0.025),
+            noise_sigma,
             rgb.shape,
         ).astype(np.float32)
         rgb = np.clip(rgb + noise, 0.0, 1.0)
 
+    reflection_draw = None
+    reflection_applied = False
+    reflection_center = None
+    reflection_axes = None
+    reflection_intensity = None
+    reflection_angle = None
+
     # Hard negative: um OFF pode receber um ponto/reflexo claro sem virar ON.
     # O reflexo não cobre deliberadamente toda a máscara, para não ensinar um
     # defeito artificial indistinguível de um segmento realmente energizado.
-    if int(label) == 0 and rng.random() < 0.35:
-        overlay = np.zeros_like(rgb, dtype=np.float32)
-        center = (
-            rng.randrange(
-                max(1, width // 5),
-                max(2, width - width // 5),
-            ),
-            rng.randrange(
-                max(1, height // 5),
-                max(2, height - height // 5),
-            ),
-        )
-        axes = (
-            rng.randrange(
-                2,
-                max(3, width // 7),
-            ),
-            rng.randrange(
-                2,
-                max(3, height // 7),
-            ),
-        )
-        intensity = rng.uniform(0.45, 0.95)
-        cv2.ellipse(
-            overlay,
-            center,
-            axes,
-            rng.uniform(0.0, 180.0),
-            0.0,
-            360.0,
-            (intensity, intensity, intensity),
-            thickness=-1,
-        )
-        rgb = np.clip(
-            rgb + overlay,
-            0.0,
-            1.0,
+    if int(label) == 0:
+        reflection_draw = rng.random()
+        reflection_applied = reflection_draw < 0.35
+        if reflection_applied:
+            reflection_center = (
+                rng.randrange(
+                    max(1, width // 5),
+                    max(2, width - width // 5),
+                ),
+                rng.randrange(
+                    max(1, height // 5),
+                    max(2, height - height // 5),
+                ),
+            )
+            reflection_axes = (
+                rng.randrange(
+                    2,
+                    max(3, width // 7),
+                ),
+                rng.randrange(
+                    2,
+                    max(3, height // 7),
+                ),
+            )
+            reflection_intensity = rng.uniform(0.45, 0.95)
+            reflection_angle = rng.uniform(0.0, 180.0)
+            overlay = np.zeros_like(rgb, dtype=np.float32)
+            cv2.ellipse(
+                overlay,
+                reflection_center,
+                reflection_axes,
+                reflection_angle,
+                0.0,
+                360.0,
+                (
+                    reflection_intensity,
+                    reflection_intensity,
+                    reflection_intensity,
+                ),
+                thickness=-1,
+            )
+            rgb = np.clip(
+                rgb + overlay,
+                0.0,
+                1.0,
+            )
+
+    if diagnostic is not None:
+        diagnostic.clear()
+        diagnostic.update(
+            {
+                "angle_deg": float(angle),
+                "scale": float(scale),
+                "dx_px": float(dx),
+                "dy_px": float(dy),
+                "brightness_alpha": float(alpha),
+                "brightness_beta": float(beta),
+                "gamma": float(gamma),
+                "blur_draw": float(blur_draw),
+                "blur_applied": bool(blur_applied),
+                "noise_draw": float(noise_draw),
+                "noise_applied": bool(noise_applied),
+                "noise_seed": (
+                    int(noise_seed)
+                    if noise_seed is not None
+                    else None
+                ),
+                "noise_sigma": (
+                    float(noise_sigma)
+                    if noise_sigma is not None
+                    else None
+                ),
+                "reflection_draw": (
+                    float(reflection_draw)
+                    if reflection_draw is not None
+                    else None
+                ),
+                "reflection_applied": bool(reflection_applied),
+                "reflection_center": (
+                    list(reflection_center)
+                    if reflection_center is not None
+                    else None
+                ),
+                "reflection_axes": (
+                    list(reflection_axes)
+                    if reflection_axes is not None
+                    else None
+                ),
+                "reflection_intensity": (
+                    float(reflection_intensity)
+                    if reflection_intensity is not None
+                    else None
+                ),
+                "reflection_angle_deg": (
+                    float(reflection_angle)
+                    if reflection_angle is not None
+                    else None
+                ),
+            }
         )
 
     out = np.concatenate(
@@ -364,7 +450,6 @@ def _augment_sample(
         out.transpose(2, 0, 1),
         dtype=np.float32,
     )
-
 
 def _softmax_logits(logits: np.ndarray) -> np.ndarray:
     values = np.asarray(logits, dtype=np.float32)
@@ -382,14 +467,49 @@ def _softmax_logits(logits: np.ndarray) -> np.ndarray:
     return exp / denominator
 
 
-def _build_calibration_batch(
+def _calibration_sample_detail(
+    item: dict,
+    *,
+    sample_index: int,
+    kind: str,
+    augmentation_index: int | None,
+    augmentation_seed: int | None,
+    transform: dict | None,
+) -> dict:
+    return {
+        "sample_index": int(sample_index),
+        "project_name": str(item.get("project_name") or ""),
+        "check_id": str(item.get("check_id") or ""),
+        "check_name": str(item.get("check_name") or ""),
+        "mask_id": str(item.get("mask_id") or ""),
+        "state": str(item.get("state") or ""),
+        "label": int(item.get("label", 0) or 0),
+        "reference_image_path": str(
+            item.get("reference_image_path") or ""
+        ),
+        "kind": str(kind),
+        "augmentation_index": (
+            int(augmentation_index)
+            if augmentation_index is not None
+            else None
+        ),
+        "augmentation_seed": (
+            int(augmentation_seed)
+            if augmentation_seed is not None
+            else None
+        ),
+        "transform": dict(transform or {}),
+    }
+
+
+def _build_calibration_batch_with_details(
     samples: list[dict],
     indices: list[int],
     *,
     augmentations_per_reference: int,
     seed: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Monta calibração somente com o H1 mantido fora do treino."""
+) -> tuple[np.ndarray, np.ndarray, list[dict]]:
+    """Monta o mesmo batch de calibração e registra a origem de cada tensor."""
     augmentation_count = int(augmentations_per_reference)
     if augmentation_count < 1:
         raise RuntimeError(
@@ -398,22 +518,54 @@ def _build_calibration_batch(
 
     tensors: list[np.ndarray] = []
     labels: list[int] = []
+    details: list[dict] = []
+
     for order, sample_index in enumerate(indices):
         item = samples[sample_index]
         tensor = np.asarray(item["tensor"], dtype=np.float32)
         label = int(item["label"])
         tensors.append(np.ascontiguousarray(tensor, dtype=np.float32))
         labels.append(label)
+        details.append(
+            _calibration_sample_detail(
+                item,
+                sample_index=sample_index,
+                kind="original",
+                augmentation_index=None,
+                augmentation_seed=None,
+                transform=None,
+            )
+        )
+
         for augmentation_index in range(augmentation_count):
-            rng = random.Random(
+            augmentation_seed = (
                 int(seed)
                 + 7000001
                 + int(sample_index) * 9176
                 + int(order) * 104729
                 + int(augmentation_index) * 1009
             )
-            tensors.append(_augment_sample(tensor, label, rng))
+            rng = random.Random(augmentation_seed)
+            transform: dict = {}
+            tensors.append(
+                _augment_sample(
+                    tensor,
+                    label,
+                    rng,
+                    diagnostic=transform,
+                )
+            )
             labels.append(label)
+            details.append(
+                _calibration_sample_detail(
+                    item,
+                    sample_index=sample_index,
+                    kind="augmented",
+                    augmentation_index=augmentation_index,
+                    augmentation_seed=augmentation_seed,
+                    transform=transform,
+                )
+            )
 
     if not tensors:
         raise RuntimeError("Calibração neural N1 ficou sem amostras H1.")
@@ -421,8 +573,211 @@ def _build_calibration_batch(
     return (
         np.ascontiguousarray(np.stack(tensors, axis=0), dtype=np.float32),
         np.asarray(labels, dtype=np.int64),
+        details,
     )
 
+
+def _build_calibration_batch(
+    samples: list[dict],
+    indices: list[int],
+    *,
+    augmentations_per_reference: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    batch, labels, _details = _build_calibration_batch_with_details(
+        samples,
+        indices,
+        augmentations_per_reference=augmentations_per_reference,
+        seed=seed,
+    )
+    return batch, labels
+
+
+def _safe_diagnostic_token(value: object) -> str:
+    text = str(value or "").strip()
+    cleaned = "".join(
+        char if char.isalnum() or char in ("-", "_") else "_"
+        for char in text
+    )
+    return cleaned.strip("_") or "item"
+
+
+def _calibration_preview_image(tensor: np.ndarray) -> np.ndarray:
+    array = np.asarray(tensor, dtype=np.float32)
+    if array.shape[0] < 4:
+        raise RuntimeError(
+            "Tensor de diagnóstico neural precisa ter RGB + máscara."
+        )
+
+    rgb = np.clip(
+        array[:3].transpose(1, 2, 0),
+        0.0,
+        1.0,
+    )
+    bgr = cv2.cvtColor(
+        np.rint(rgb * 255.0).astype(np.uint8),
+        cv2.COLOR_RGB2BGR,
+    )
+    preview = cv2.resize(
+        bgr,
+        (192, 192),
+        interpolation=cv2.INTER_NEAREST,
+    )
+
+    mask = (array[3] >= 0.5).astype(np.uint8) * 255
+    mask_big = cv2.resize(
+        mask,
+        (192, 192),
+        interpolation=cv2.INTER_NEAREST,
+    )
+    contours, _hierarchy = cv2.findContours(
+        mask_big,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    if contours:
+        cv2.drawContours(
+            preview,
+            contours,
+            -1,
+            (255, 255, 255),
+            1,
+        )
+    return preview
+
+
+def _write_calibration_diagnostics(
+    *,
+    batch: np.ndarray,
+    labels: np.ndarray,
+    details: list[dict],
+    logits: np.ndarray,
+    destination: Path,
+    top_k: int = F3_NEURAL_CALIBRATION_DIAGNOSTIC_TOP_K,
+) -> dict:
+    """Persiste apenas as amostras extremas que explicam a calibração.
+
+    Esta função é estritamente diagnóstica. Não altera logits, labels, thresholds
+    nem a decisão de promoção do modelo.
+    """
+    probabilities = _softmax_logits(logits)
+    labels_array = np.asarray(labels, dtype=np.int64).reshape(-1)
+    tensors = np.asarray(batch, dtype=np.float32)
+
+    total = int(probabilities.shape[0])
+    if (
+        tensors.shape[0] != total
+        or labels_array.shape[0] != total
+        or len(details) != total
+    ):
+        raise RuntimeError(
+            "Diagnóstico de calibração inconsistente: batch, labels, "
+            "detalhes e logits possuem tamanhos diferentes."
+        )
+
+    p_on = probabilities[:, 1]
+    off_indices = [
+        int(index)
+        for index in np.where(labels_array == 0)[0].tolist()
+    ]
+    on_indices = [
+        int(index)
+        for index in np.where(labels_array == 1)[0].tolist()
+    ]
+    if not off_indices or not on_indices:
+        raise RuntimeError(
+            "Diagnóstico de calibração exige exemplos OFF e ON."
+        )
+
+    off_ranked = sorted(
+        off_indices,
+        key=lambda index: float(p_on[index]),
+        reverse=True,
+    )
+    on_ranked = sorted(
+        on_indices,
+        key=lambda index: float(p_on[index]),
+    )
+
+    destination = Path(destination)
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    def item_record(index: int, rank: int, group: str) -> dict:
+        detail = dict(details[index])
+        probability = float(p_on[index])
+        mask_id = _safe_diagnostic_token(detail.get("mask_id"))
+        kind = _safe_diagnostic_token(detail.get("kind"))
+        augmentation_index = detail.get("augmentation_index")
+        variant = (
+            "original"
+            if augmentation_index is None
+            else f"aug{int(augmentation_index):02d}"
+        )
+        filename = (
+            f"{group}_rank{rank:02d}_{mask_id}_{kind}_{variant}_"
+            f"pon_{probability:.6f}.png"
+        )
+        image_path = destination / filename
+        if not cv2.imwrite(
+            str(image_path),
+            _calibration_preview_image(tensors[index]),
+        ):
+            raise RuntimeError(
+                f"Falha ao salvar diagnóstico neural: {image_path}"
+            )
+        return {
+            "rank": int(rank),
+            "batch_index": int(index),
+            "p_on": probability,
+            "image_file": filename,
+            **detail,
+        }
+
+    limit = max(1, int(top_k))
+    top_off = [
+        item_record(index, rank, "off")
+        for rank, index in enumerate(off_ranked[:limit], start=1)
+    ]
+    top_on = [
+        item_record(index, rank, "on")
+        for rank, index in enumerate(on_ranked[:limit], start=1)
+    ]
+
+    max_off = float(p_on[off_ranked[0]])
+    min_on = float(p_on[on_ranked[0]])
+    report = {
+        "schema_version": 1,
+        "purpose": "f3_neural_h1_calibration_diagnostics",
+        "sample_count": total,
+        "class_counts": {
+            "off": len(off_indices),
+            "on": len(on_indices),
+        },
+        "max_off_on_probability": max_off,
+        "min_on_on_probability": min_on,
+        "raw_gap": float(min_on - max_off),
+        "separable": bool(max_off < min_on),
+        "top_k": limit,
+        "worst_off": top_off[0],
+        "worst_on": top_on[0],
+        "top_off": top_off,
+        "top_on": top_on,
+    }
+
+    report_path = destination / "calibration_diagnostics.json"
+    report_path.write_text(
+        json.dumps(
+            report,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    report["report_path"] = str(report_path)
+    report["directory"] = str(destination)
+    return report
 
 def _calibrate_thresholds_from_logits(
     logits: np.ndarray,
@@ -895,7 +1250,11 @@ def treinar(args) -> dict:
         samples,
         val_indices,
     )
-    calibration_batch, calibration_labels = _build_calibration_batch(
+    (
+        calibration_batch,
+        calibration_labels,
+        calibration_details,
+    ) = _build_calibration_batch_with_details(
         samples,
         val_indices,
         augmentations_per_reference=int(
@@ -959,14 +1318,52 @@ def treinar(args) -> dict:
             torch_logits=torch_calibration_logits,
             label="calibração H1 aumentada",
         )
-        threshold_calibration = _calibrate_thresholds_from_logits(
-            cv_calibration_logits,
-            calibration_labels,
-            reference_sample_count=len(val_indices),
-            augmentations_per_reference=int(
-                args.calibration_augmentations_per_reference
-            ),
+        diagnostics_dir = (
+            output.parent
+            / "diagnostics"
+            / f"{output.stem}_calibration_latest"
         )
+        calibration_diagnostics = _write_calibration_diagnostics(
+            batch=calibration_batch,
+            labels=calibration_labels,
+            details=calibration_details,
+            logits=cv_calibration_logits,
+            destination=diagnostics_dir,
+        )
+        worst_off = calibration_diagnostics["worst_off"]
+        worst_on = calibration_diagnostics["worst_on"]
+        print(
+            "Diagnóstico calibração • pior OFF: "
+            f"{worst_off['mask_id']} P(ON)={worst_off['p_on']:.6f} "
+            f"• {worst_off['kind']} "
+            f"aug={worst_off['augmentation_index']}"
+        )
+        print(
+            "Diagnóstico calibração • pior ON: "
+            f"{worst_on['mask_id']} P(ON)={worst_on['p_on']:.6f} "
+            f"• {worst_on['kind']} "
+            f"aug={worst_on['augmentation_index']}"
+        )
+        print(
+            "Diagnóstico calibração salvo em: "
+            f"{calibration_diagnostics['directory']}"
+        )
+
+        try:
+            threshold_calibration = _calibrate_thresholds_from_logits(
+                cv_calibration_logits,
+                calibration_labels,
+                reference_sample_count=len(val_indices),
+                augmentations_per_reference=int(
+                    args.calibration_augmentations_per_reference
+                ),
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"{exc}\n"
+                "Amostras extremas e parâmetros foram preservados em: "
+                f"{calibration_diagnostics['directory']}"
+            ) from exc
 
         onnx_sha256 = _sha256_file(staging_model)
         metadata_path = output.with_suffix(".json")

@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
+
 import numpy as np
 
 from scripts.treinar_f3_segmentos_neural import (
+    _augment_sample,
     _build_calibration_batch,
+    _build_calibration_batch_with_details,
     _calibrate_thresholds_from_logits,
     _export_onnx_candidate,
     _validate_candidate,
+    _write_calibration_diagnostics,
     preparar_preflight,
 )
 
@@ -260,6 +267,141 @@ class DisplayF3NeuralTrainingTests(unittest.TestCase):
         self.assertEqual([0, 0, 0, 1, 1, 1], first_labels.tolist())
         np.testing.assert_array_equal(first_labels, second_labels)
         np.testing.assert_allclose(first_batch, second_batch)
+
+    def test_augmentation_trace_does_not_change_generated_tensor(self):
+        tensor = np.zeros((4, 48, 48), dtype=np.float32)
+        tensor[0] = 0.25
+        tensor[1] = 0.50
+        tensor[2] = 0.75
+        tensor[3, 12:36, 20:28] = 1.0
+
+        plain = _augment_sample(
+            tensor,
+            0,
+            __import__("random").Random(20261005),
+        )
+        trace = {}
+        instrumented = _augment_sample(
+            tensor,
+            0,
+            __import__("random").Random(20261005),
+            diagnostic=trace,
+        )
+
+        np.testing.assert_array_equal(plain, instrumented)
+        self.assertIn("angle_deg", trace)
+        self.assertIn("noise_applied", trace)
+        self.assertIn("reflection_applied", trace)
+
+    def test_calibration_details_preserve_mask_and_transform_origin(self):
+        samples = [
+            _sample("CHECK_001", "H1", 0, "MASK_010"),
+            _sample("CHECK_001", "H1", 1, "MASK_017"),
+        ]
+
+        batch, labels, details = _build_calibration_batch_with_details(
+            samples,
+            [0, 1],
+            augmentations_per_reference=1,
+            seed=42,
+        )
+
+        self.assertEqual((4, 4, 48, 48), batch.shape)
+        self.assertEqual([0, 0, 1, 1], labels.tolist())
+        self.assertEqual("MASK_010", details[0]["mask_id"])
+        self.assertEqual("original", details[0]["kind"])
+        self.assertIsNone(details[0]["augmentation_index"])
+        self.assertEqual("MASK_010", details[1]["mask_id"])
+        self.assertEqual("augmented", details[1]["kind"])
+        self.assertEqual(0, details[1]["augmentation_index"])
+        self.assertIn("angle_deg", details[1]["transform"])
+
+    def test_calibration_diagnostics_save_worst_off_and_on_images(self):
+        batch = np.zeros((4, 4, 48, 48), dtype=np.float32)
+        batch[:, 3, 14:34, 20:28] = 1.0
+        labels = np.asarray([0, 0, 1, 1], dtype=np.int64)
+        details = [
+            {
+                "mask_id": "MASK_010",
+                "state": "off",
+                "kind": "augmented",
+                "augmentation_index": 7,
+                "transform": {"reflection_applied": True},
+            },
+            {
+                "mask_id": "MASK_004",
+                "state": "off",
+                "kind": "original",
+                "augmentation_index": None,
+                "transform": {},
+            },
+            {
+                "mask_id": "MASK_017",
+                "state": "on",
+                "kind": "augmented",
+                "augmentation_index": 12,
+                "transform": {"blur_applied": True},
+            },
+            {
+                "mask_id": "MASK_013",
+                "state": "on",
+                "kind": "original",
+                "augmentation_index": None,
+                "transform": {},
+            },
+        ]
+        logits = np.asarray(
+            [
+                [0.0, 0.484],
+                [0.4, 0.0],
+                [0.0, 0.288],
+                [0.0, 1.2],
+            ],
+            dtype=np.float32,
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp) / "calibration_latest"
+            report = _write_calibration_diagnostics(
+                batch=batch,
+                labels=labels,
+                details=details,
+                logits=logits,
+                destination=destination,
+                top_k=2,
+            )
+
+            self.assertEqual(
+                "MASK_010",
+                report["worst_off"]["mask_id"],
+            )
+            self.assertEqual(
+                "MASK_017",
+                report["worst_on"]["mask_id"],
+            )
+            self.assertLess(report["raw_gap"], 0.0)
+            self.assertFalse(report["separable"])
+            self.assertTrue(
+                (destination / "calibration_diagnostics.json").is_file()
+            )
+            self.assertTrue(
+                (destination / report["worst_off"]["image_file"]).is_file()
+            )
+            self.assertTrue(
+                (destination / report["worst_on"]["image_file"]).is_file()
+            )
+            persisted = json.loads(
+                (destination / "calibration_diagnostics.json")
+                .read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                "MASK_010",
+                persisted["worst_off"]["mask_id"],
+            )
+            self.assertEqual(
+                7,
+                persisted["worst_off"]["augmentation_index"],
+            )
 
     def test_candidate_requires_exact_h1_and_torch_onnx_equivalence(self):
         logits = np.asarray(
