@@ -277,9 +277,10 @@ class F3ReferenceGeometryEditor(F3GeometryEditorInteractionBase):
         self._view_ty = 0.0
         self._precision_cursor = None
         self._photo = None
+        self._reference_background_key = None
+        self._reference_background_photo = None
         self._magnifier_photo = None
         self._render_after = None
-        self._last_decorated = None
 
         self.window = tk.Toplevel(parent)
         self.window.title(str(title))
