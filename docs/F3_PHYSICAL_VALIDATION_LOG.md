@@ -5342,3 +5342,174 @@ sintoma atual pertence de fato ao hardware.
 
 **Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
 
+---
+
+## 05/10/2026 — N1 físico #2: H1 correto separa ON/OFF na CNN, mas thresholds 0.20/0.80 mantêm 27 máscaras INCERTAS
+
+**Resultado físico:** FAIL CONTROLADO / CAUSA OBJETIVA IDENTIFICADA.
+
+### Cenário
+
+- Display F3 em produção;
+- Projeto Display: `CM_500_L`;
+- CHECK atual: H1 / `CHECK_001`;
+- placa fisicamente correta;
+- H1 fisicamente correto segundo validação do usuário;
+- modelo neural `cm_500_l_segments.onnx` carregado e ativo;
+- autoridade visual neural confirmada;
+- classificador visual convencional sem autoridade produtiva no H1.
+
+### Evidência produtiva
+
+O runtime publicou:
+
+```text
+last_auto_analysis.ready=true
+last_auto_analysis.approved=false
+last_auto_analysis.reason=h1_neural_incerto
+reference_authority=f3_h1_neural_segment_detector
+neural_visual_authority=true
+conventional_visual_authority_used=false
+active_mask_count=28
+matched_mask_count=1
+uncertain_mask_count=27
+```
+
+O modelo continua usando:
+
+```text
+OFF  se P(ON) <= 0.20
+ON   se P(ON) >= 0.80
+INCERTO no intervalo intermediário
+```
+
+Somente `MASK_013` atravessou o limiar produtivo de ON neste frame:
+
+```text
+MASK_013 esperado ON
+P(ON)=0.823357
+classified=on
+matched=true
+```
+
+As outras 27 máscaras permaneceram INCERTAS.
+
+### Diagnóstico quantitativo do frame
+
+Para as sete máscaras esperadas ON:
+
+```text
+P(ON) min = 0.684468
+P(ON) média = 0.746932
+P(ON) max = 0.823357
+```
+
+Para as 21 máscaras esperadas OFF:
+
+```text
+P(ON) min = 0.305094
+P(ON) média = 0.355693
+P(ON) max = 0.496080
+```
+
+Logo, neste frame correto:
+
+```text
+menor ON esperado = 0.684468
+maior OFF esperado = 0.496080
+gap = +0.188388
+midpoint = 0.590274
+```
+
+A ordenação bruta por argmax 0.5 ficou **28/28 semanticamente compatível com o
+H1 correto**. O bloqueio não é falta de separação entre ON e OFF neste frame;
+é a banda de certeza produtiva `0.20/0.80`, que é muito mais conservadora do
+que a distribuição real observada.
+
+### Causa encontrada no código
+
+O pipeline de treino exporta atualmente os thresholds do metadata como valores
+fixos:
+
+```text
+off_max_on_probability = 0.20
+on_min_on_probability  = 0.80
+```
+
+Esses valores não são calibrados a partir das probabilidades do modelo validado.
+O runtime apenas lê e aplica os thresholds gravados no metadata.
+
+Portanto, o gate offline N1.3 garante acurácia por classe/argmax no H1 mantido
+fora do treino, mas o runtime produtivo exige adicionalmente probabilidades
+extremas abaixo de 0.20 ou acima de 0.80. Essa segunda exigência não é derivada
+da calibração real do modelo.
+
+### Inconsistência visual secundária encontrada
+
+A tela exibiu:
+
+```text
+H1 DETECTADO • 28/28 CONFORMES • 1 ACESO
+```
+
+enquanto a própria análise neural produtiva possuía somente `1/28` matched e
+`27/28` uncertain.
+
+O DEBUG mostra simultaneamente:
+
+```text
+matched_mask_count=1
+uncertain_mask_count=27
+effective_matched_mask_count=28
+```
+
+A causa é a camada de apresentação `_display_auto_publish_effective_ui_authority`:
+ela conta como falha apenas máscaras com `matched is False`. No neural,
+`INCERTO` usa `matched=None`; assim nenhuma das 27 incertas entra em
+`raw_failed_mask_ids` e a UI calcula incorretamente `28 - 0 = 28`.
+
+Isso é **bug de apresentação/compatibilidade**, não da policy produtiva. A policy
+neural usa o `matched_mask_count` real e corretamente manteve:
+
+```text
+policy_decision=searching
+policy_reason=classificacao_neural_incerta
+registration_attempted=false
+```
+
+### Comparação com N1 físico #1
+
+No primeiro reteste correto, a separação por argmax ainda era 27/28 e
+`MASK_010` ficava ligeiramente do lado ON.
+
+Neste segundo reteste, `MASK_010` esperada OFF chegou a:
+
+```text
+P(ON)=0.496080
+```
+
+e todas as sete máscaras esperadas ON permaneceram acima disso. Portanto o
+segundo frame apresenta uma separação neural mais limpa do que o primeiro.
+
+### Próxima correção recomendada
+
+Não substituir `0.20/0.80` por um número manual escolhido apenas para este
+frame.
+
+A correção deve ser dividida em duas responsabilidades:
+
+1. **calibração neural do modelo**
+   - deixar de exportar thresholds fixos;
+   - calcular/registrar thresholds derivados de evidência validada;
+   - preservar uma faixa INCERTO entre OFF e ON;
+   - validar também H1 com segmento realmente apagado e reflexo antes de liberar
+     thresholds produtivos;
+
+2. **UI neural**
+   - `uncertain` não pode aparecer como máscara conforme;
+   - status/visor devem refletir `1 conforme + 27 incertas` neste caso;
+   - nenhuma correção visual pode alterar a decisão neural.
+
+**Estado:** diagnóstico suficiente para corrigir a causa; nenhuma alteração de
+threshold produtivo foi feita por tentativa neste passo.
+
