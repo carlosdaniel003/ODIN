@@ -6072,10 +6072,10 @@ usados como prova de robustez depois da atualização.
 
 ---
 
-## 05/10/2026 — N1.7 H1 neural: terceira placa OK aprovada e placa NG rejeitada
+## 05/10/2026 — N1.7 H1 neural: terceira placa OK aprovada; NG detectado no BLUE convencional
 
 **Resultado:** PASS FÍSICO DO H1 NEURAL EM PLACA INDEPENDENTE + DETECÇÃO NG
-CONFIRMADA.
+CONFIRMADA PELO CHECK BLUE CONVENCIONAL.
 
 ### Contexto
 
@@ -6102,22 +6102,29 @@ Resultado informado no teste físico:
 ```text
 placa OK
 H1 correto
-→ APROVADA COM SUCESSO
+→ H1 NEURAL APROVADO COM SUCESSO
 ```
 
-Na mesma etapa foi colocada também uma placa realmente NG:
+Na mesma etapa foi testada uma placa realmente NG. O defeito não estava no H1:
+no CHECK BLUE havia um segmento apagado, fazendo o display formar `BLUF`.
 
 ```text
-placa NG
-→ REPROVADA COM SUCESSO
+H1
+→ aprovado pela autoridade neural
+
+BLUE
+→ segmento apagado
+→ detectado pela autoridade visual convencional
+→ placa REPROVADA COM SUCESSO
 ```
 
 Portanto o melhor estado físico alcançado até esta etapa é:
 
-- H1 correto de placa independente aceito;
-- placa NG rejeitada;
-- autoridade neural do H1 operando no runtime produtivo;
-- calibração física baseada em mais de uma placa;
+- H1 correto de placa independente aceito pela autoridade neural;
+- H1 da placa NG também aceito quando visualmente correto;
+- defeito real no BLUE detectado pelo caminho convencional;
+- sequência completa impediu a aprovação da placa NG;
+- calibração física do H1 baseada em mais de uma placa;
 - `INCERTO` preservado como fail-closed fora das regiões calibradas;
 - nenhuma volta ao classificador convencional como autoridade do H1.
 
@@ -6141,7 +6148,9 @@ de sequência permanecem determinísticas.
 
 ```text
 H1 neural nominal em placa independente   PASS
-H1 neural rejeitando placa NG             PASS
+H1 neural na placa posteriormente NG      PASS
+BLUE convencional detectando segmento NG  PASS
+placa NG bloqueada pela sequência          PASS
 CNN retreinada nesta validação             NÃO
 ONNX alterado                              NÃO
 calibração física                          2 placas / 10 frames
@@ -6151,6 +6160,11 @@ AUX neural                                 NÃO
 ```
 
 Este resultado valida o H1 em um nível físico significativamente superior aos
-retestes anteriores. Ainda não autoriza migrar automaticamente BLUE/USB/AUX:
-essa progressão continua dependente dos cenários físicos restantes e de
-autorização explícita do usuário, conforme D-059/D-060/D-063.
+retestes anteriores e confirma que a arquitetura híbrida atual consegue combinar
+H1 neural com CHECKS seguintes ainda convencionais. O teste NG desta etapa não
+é evidência de detecção neural no BLUE; a detecção do segmento apagado ocorreu
+no caminho convencional.
+
+Ainda não está autorizado migrar automaticamente BLUE/USB/AUX: essa progressão
+continua dependente dos cenários físicos restantes e de autorização explícita
+do usuário, conforme D-059/D-060/D-063.
