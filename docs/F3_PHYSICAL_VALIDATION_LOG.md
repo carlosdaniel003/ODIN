@@ -5967,3 +5967,105 @@ Verificar:
 
 **Validação física produtiva:** ainda não executada; esta etapa é de treino e
 calibração offline.
+
+---
+
+## 05/10/2026 — N1.6 H1 nominal multi-frame: 1/5 PASS, MASK_017 incerta em 4/5
+
+**Resultado:** FAIL DE ROBUSTEZ NOMINAL CONFIRMADO — CORREÇÃO DE CALIBRAÇÃO
+MULTI-FRAME IMPLEMENTADA, PENDENTE DE APLICAÇÃO/RETESTE.
+
+### Cenário físico
+
+- Projeto: `CM_500_L`;
+- CHECK: H1;
+- placa fisicamente correta;
+- 7 segmentos H1 esperados acesos;
+- nenhuma alteração intencional de placa, câmera, zoom ou iluminação entre as
+  leituras;
+- modelo D-062 carregado com:
+
+```text
+OFF <= P(ON) 0.584876
+ON  >= P(ON) 0.827438
+gap offline  = 0.242561
+```
+
+### Resultado de cinco leituras nominais
+
+```text
+tentativa 1  MASK_017 P(ON)=0.828465  → ON / 28/28 / PASS
+tentativa 2  MASK_017 P(ON)=0.821631  → INCERTO / 27/28
+tentativa 3  MASK_017 P(ON)=0.820450  → INCERTO / 27/28
+tentativa 4  MASK_017 P(ON)=0.809613  → INCERTO / 27/28
+tentativa 5  MASK_017 P(ON)=0.809678  → INCERTO / 27/28
+```
+
+Resumo:
+
+```text
+PASS nominal = 1/5
+INCERTO      = 4/5
+máscara recorrente = MASK_017
+```
+
+As quatro reprovações de avanço não foram OFF falsos: a autoridade neural
+permaneceu fail-closed em `INCERTO`, como exigido por D-060.
+
+### Evidência física ON/OFF do lote
+
+A leitura das probabilidades de todas as 28 máscaras nos cinco frames mostrou:
+
+```text
+pior OFF físico:
+MASK_010 P(ON)=0.534034
+
+pior ON físico:
+MASK_017 P(ON)=0.809613
+
+gap físico:
+0.809613 - 0.534034 = +0.275579
+```
+
+Portanto as classes continuam fisicamente separáveis nesse lote. O bloqueio vem
+do limite ON `0.827438` calibrado com a foto H1 reservada + variações
+sintéticas, que não cobriu a distribuição nominal live recorrente da
+`MASK_017`.
+
+### Correção aplicada
+
+Conforme D-063, foi implementada calibração física H1 multi-frame offline:
+
+- no mínimo 5 frames congelados únicos;
+- entrada pelo DEBUG TÉCNICO já existente;
+- rótulos exclusivamente do `mask_states` H1 configurado;
+- H1 continua fora do otimizador;
+- CNN/ONNX não são retreinados;
+- nenhum threshold manual por máscara;
+- frames duplicados são removidos por `frame_sha256_24`;
+- origem do modelo/calibração e conjunto exato de máscaras são validados;
+- extremos físicos e augmented são combinados conservadoramente;
+- metadata é atualizado atomicamente;
+- runtime valida fail-closed a estrutura física antes de carregar o artefato.
+
+Para este lote, a combinação esperada é:
+
+```text
+max OFF final = max(0.584876, 0.534034) = 0.584876
+min ON final  = min(0.827438, 0.809613) = 0.809613
+gap final ≈ 0.224737
+```
+
+Os cinco frames acima passam a ser **dados de calibração** e não poderão ser
+usados como prova de robustez depois da atualização.
+
+### Próximo reteste
+
+1. aplicar a calibração multi-frame usando os DEBUGs físicos coletados;
+2. confirmar no console os extremos físicos e combinados;
+3. reiniciar/recarregar o runtime;
+4. executar novos H1 nominais com frames não usados na calibração;
+5. somente se o nominal novo for repetível, avançar para deslocamento,
+   iluminação, segmento ON apagado e reflexo em OFF.
+
+**BLUE neural:** ainda não autorizado.
