@@ -321,6 +321,14 @@ class F3NeuralDatasetBuilder:
                 "resolucao_mestra_ausente",
             )
 
+        project_mask_ids = {
+            str(mask.get("id") or "").strip()
+            for mask in normalizar_mascaras_display(
+                deepcopy(project.get("masks", []))
+            )
+            if str(mask.get("id") or "").strip()
+        }
+
         samples: list[dict] = []
         checks_used: list[str] = []
         missing_references: list[str] = []
@@ -412,6 +420,7 @@ class F3NeuralDatasetBuilder:
         board_off_geometry_configured = bool(board_off_masks)
         board_off_sample_count = 0
         board_off_invalid_mask_ids: list[str] = []
+        board_off_seen_mask_ids: set[str] = set()
 
         if board_off_image is not None and board_off_masks:
             board_points = deepcopy(
@@ -426,6 +435,16 @@ class F3NeuralDatasetBuilder:
                 mask_id = str(mask.get("id") or "").strip()
                 if not mask_id:
                     continue
+                if mask_id not in project_mask_ids:
+                    if mask_id not in board_off_invalid_mask_ids:
+                        board_off_invalid_mask_ids.append(mask_id)
+                    invalid_samples.append(
+                        f"{F3_NEURAL_BOARD_OFF_CHECK_ID}:{mask_id}"
+                    )
+                    continue
+                if mask_id in board_off_seen_mask_ids:
+                    continue
+                board_off_seen_mask_ids.add(mask_id)
 
                 tensor = extrair_tensor_segmento_f3(
                     board_off_image,
