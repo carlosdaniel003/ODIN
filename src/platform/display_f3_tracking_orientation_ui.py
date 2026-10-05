@@ -24,7 +24,6 @@ from src.platform.display_f3_object_tracking import (
     _normalize_points,
     _valid_frame,
     canonical_board_points,
-    draw_reference_geometry,
     photo_from_bgr,
     reset_tracking_runtime,
     set_tracking_enabled,
@@ -43,6 +42,32 @@ F3_EDITOR_ZOOM_MAX = 5.0
 F3_EDITOR_ZOOM_STEP = 1.16
 F3_SAFE_WINDOW_MARGIN_X = 64
 F3_SAFE_WINDOW_MARGIN_Y = 118
+
+
+def reference_editor_background_cache_key(
+    image,
+    canvas_width: int,
+    canvas_height: int,
+    scale: float,
+    tx: float,
+    ty: float,
+) -> tuple:
+    """Chave do bitmap estático do editor canônico Placa + Máscaras.
+
+    Geometria de placa/máscaras não entra na chave porque é desenhada como
+    vetor no Canvas. O bitmap só precisa mudar com imagem, resize, zoom ou pan.
+    """
+    shape = tuple(getattr(image, "shape", ()) or ())
+    return (
+        id(image),
+        shape,
+        max(1, int(canvas_width)),
+        max(1, int(canvas_height)),
+        round(float(scale), 6),
+        round(float(tx), 3),
+        round(float(ty), 3),
+    )
+
 
 _INSTALLED = False
 
@@ -929,10 +954,61 @@ class F3GeometryEditorInteractionBase:
         )
         self.canvas.tag_raise("f3_tracking_zoom_badge")
 
-    def render(self) -> None:
-        self._render_after = None
-        if not _valid_frame(self.image):
-            return
+    def _reference_background_photo_for_view(
+        self,
+        canvas_width: int,
+        canvas_height: int,
+        scale: float,
+        tx: float,
+        ty: float,
+    ):
+        key = reference_editor_background_cache_key(
+            self.image,
+            canvas_width,
+            canvas_height,
+            scale,
+            tx,
+            ty,
+        )
+        cached_key = getattr(self, "_reference_background_key", None)
+        cached_photo = getattr(self, "_reference_background_photo", None)
+        if cached_key == key and cached_photo is not None:
+            return cached_photo
+
+        affine = np.asarray(
+            [[scale, 0.0, tx], [0.0, scale, ty]],
+            dtype=np.float32,
+        )
+        display = cv2.warpAffine(
+            self.image,
+            affine,
+            (canvas_width, canvas_height),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(2, 6, 23),
+        )
+        photo = photo_from_bgr(display, canvas_width, canvas_height)
+        if photo is not None:
+            self._reference_background_key = key
+            self._reference_background_photo = photo
+        return photo
+
+    def _draw_reference_geometry_overlay(self) -> None:
+        board = _normalize_points(self.board, minimum=3)
+        if board:
+            coords = []
+            for point in board:
+                x, y = self._image_to_canvas(point[0], point[1])
+                coords.extend((x, y))
+            if len(coords) >= 6:
+                self.canvas.create_polygon(
+                    *coords,
+                    fill="",
+                    outline="#38BDF8",
+                    width=3,
+                    tags=("f3_reference_geometry",),
+                )
+
         selected_id = (
             str(self.selected[1])
             if isinstance(self.selected, tuple)
@@ -940,36 +1016,74 @@ class F3GeometryEditorInteractionBase:
             and self.selected[0] in {"mask", "mask_vertex"}
             else None
         )
-        decorated = draw_reference_geometry(
-            self.image,
-            self.board,
-            self.masks,
-            alpha=0.40,
-            selected_mask_id=selected_id,
-        )
-        self._last_decorated = decorated
+        for mask in tuple(self.masks or ()):
+            if not isinstance(mask, dict):
+                continue
+            mask_id = str(mask.get("id") or "")
+            color = "#D4EA5E" if mask_id == selected_id else "#FACC15"
+            width = 3 if mask_id == selected_id else 2
+            kind = str(mask.get("type") or "").lower()
+            if kind == "circle":
+                try:
+                    cx, cy = self._image_to_canvas(
+                        float(mask.get("cx", 0)),
+                        float(mask.get("cy", 0)),
+                    )
+                    radius = (
+                        max(1.0, float(mask.get("radius", 1)))
+                        * max(1e-6, float(self._display_scale))
+                    )
+                except (TypeError, ValueError):
+                    continue
+                self.canvas.create_oval(
+                    cx - radius,
+                    cy - radius,
+                    cx + radius,
+                    cy + radius,
+                    outline=color,
+                    width=width,
+                    tags=("f3_reference_geometry",),
+                )
+                continue
+
+            points = _normalize_points(mask.get("points"), minimum=3)
+            coords = []
+            for point in points:
+                x, y = self._image_to_canvas(point[0], point[1])
+                coords.extend((x, y))
+            if len(coords) >= 6:
+                self.canvas.create_polygon(
+                    *coords,
+                    fill="",
+                    outline=color,
+                    width=width,
+                    tags=("f3_reference_geometry",),
+                )
+
+    def render(self) -> None:
+        self._render_after = None
+        if not _valid_frame(self.image):
+            return
 
         cw = max(120, int(self.canvas.winfo_width()))
         ch = max(120, int(self.canvas.winfo_height()))
         scale, tx, ty = self._view_transform()
-        affine = np.asarray(
-            [[scale, 0.0, tx], [0.0, scale, ty]],
-            dtype=np.float32,
+        self._photo = self._reference_background_photo_for_view(
+            cw,
+            ch,
+            scale,
+            tx,
+            ty,
         )
-        display = cv2.warpAffine(
-            decorated,
-            affine,
-            (cw, ch),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(2, 6, 23),
-        )
-        self._photo = photo_from_bgr(display, cw, ch)
         if self._photo is None:
             return
 
+        # A foto é estática. Em mouse move/drag, somente os vetores de placa,
+        # máscaras, alças, números e lupa são refeitos. O bitmap Full HD não
+        # passa novamente por overlay + warp + PNG enquanto o viewport é igual.
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
+        self._draw_reference_geometry_overlay()
         self._draw_handles()
         self._draw_mask_numbers()
         self._draw_magnifier()
