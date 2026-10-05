@@ -385,6 +385,7 @@ class F3NeuralDatasetBuilder:
                         "project_name": name,
                         "check_id": check_id,
                         "check_name": check_name,
+                        "source_kind": "check_reference",
                         "mask_id": mask_id,
                         "state": state,
                         "label": int(F3_NEURAL_LABELS[state]),
@@ -400,6 +401,74 @@ class F3NeuralDatasetBuilder:
                 )
             if used_in_check:
                 checks_used.append(check_id)
+
+        board_off_metadata, board_off_image, board_off_masks = (
+            self._board_off_reference_context(
+                name,
+                resolution,
+            )
+        )
+        board_off_configured = isinstance(board_off_metadata, dict)
+        board_off_geometry_configured = bool(board_off_masks)
+        board_off_sample_count = 0
+        board_off_invalid_mask_ids: list[str] = []
+
+        if board_off_image is not None and board_off_masks:
+            board_points = deepcopy(
+                (board_off_metadata or {}).get(
+                    "board_points_reference",
+                    [],
+                )
+            )
+            for mask in board_off_masks:
+                if not isinstance(mask, dict):
+                    continue
+                mask_id = str(mask.get("id") or "").strip()
+                if not mask_id:
+                    continue
+
+                tensor = extrair_tensor_segmento_f3(
+                    board_off_image,
+                    mask,
+                    input_size=self.input_size,
+                    context_ratio=self.context_ratio,
+                )
+                if tensor is None:
+                    board_off_invalid_mask_ids.append(mask_id)
+                    invalid_samples.append(
+                        f"{F3_NEURAL_BOARD_OFF_CHECK_ID}:{mask_id}"
+                    )
+                    continue
+
+                class_counts[DISPLAY_CHECK_STATE_OFF] += 1
+                board_off_sample_count += 1
+                samples.append(
+                    {
+                        "project_name": name,
+                        "check_id": F3_NEURAL_BOARD_OFF_CHECK_ID,
+                        "check_name": F3_NEURAL_BOARD_OFF_CHECK_NAME,
+                        "reference_kind": (
+                            F3_NEURAL_BOARD_OFF_REFERENCE_KIND
+                        ),
+                        "source_kind": "board_off_reference",
+                        "mask_id": mask_id,
+                        "state": DISPLAY_CHECK_STATE_OFF,
+                        "label": int(
+                            F3_NEURAL_LABELS[
+                                DISPLAY_CHECK_STATE_OFF
+                            ]
+                        ),
+                        "tensor": tensor,
+                        "reference_image_path": str(
+                            (board_off_metadata or {}).get(
+                                "image_path"
+                            )
+                            or ""
+                        ),
+                        "mask_geometry": deepcopy(mask),
+                        "board_points_reference": board_points,
+                    }
+                )
 
         ready = bool(
             samples
@@ -428,6 +497,23 @@ class F3NeuralDatasetBuilder:
             "channels": ("r", "g", "b", "segment_mask"),
             "source": "configured_f3_check_references",
             "checks_used": tuple(checks_used),
+            "auxiliary_sources_used": (
+                (F3_NEURAL_BOARD_OFF_CHECK_ID,)
+                if board_off_sample_count > 0
+                else ()
+            ),
+            "board_off_reference_configured": bool(
+                board_off_configured
+            ),
+            "board_off_geometry_configured": bool(
+                board_off_geometry_configured
+            ),
+            "board_off_sample_count": int(
+                board_off_sample_count
+            ),
+            "board_off_invalid_mask_ids": tuple(
+                board_off_invalid_mask_ids
+            ),
             "missing_reference_check_ids": tuple(missing_references),
             "invalid_sample_ids": tuple(invalid_samples),
             "class_counts": class_counts,
@@ -473,6 +559,11 @@ class F3NeuralDatasetBuilder:
             "channels": ("r", "g", "b", "segment_mask"),
             "source": "configured_f3_check_references",
             "checks_used": (),
+            "auxiliary_sources_used": (),
+            "board_off_reference_configured": False,
+            "board_off_geometry_configured": False,
+            "board_off_sample_count": 0,
+            "board_off_invalid_mask_ids": (),
             "missing_reference_check_ids": (),
             "invalid_sample_ids": (),
             "class_counts": {
