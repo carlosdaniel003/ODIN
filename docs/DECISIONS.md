@@ -3861,3 +3861,85 @@ Esta calibração não conclui a validação produtiva do H1. Depois da atualiza
 
 BLUE não recebe autoridade neural antes desses cenários e de autorização
 explícita do usuário.
+
+---
+
+## D-064 — BLUE migra para autoridade neural com debounce por fase ON
+
+**Status:** Accepted
+
+### Contexto
+
+Após o PASS físico N1.7 do H1 neural, o usuário autorizou explicitamente a
+progressão para a Etapa N2. No mesmo lote foi apresentado um caso produtivo em
+que o BLUE estava fisicamente defeituoso: `MASK_024` deveria estar ACESA no
+CHECK BLUE, mas permanecia apagada. Apesar disso, a telemetria do ciclo anterior
+registrou BLUE como `28/28`, `policy_decision=ok` e
+`registration_event=check_advanced`.
+
+Esse caso torna inadequado continuar ampliando reconciliações convencionais do
+BLUE. Em especial, gabarito exato e suporte físico usados historicamente para
+corrigir falsos OFF não podem transformar um OFF neural real em ON esperado.
+
+### Decisão
+
+A Etapa N2 fica definida assim:
+
+1. H1 e BLUE usam `F3NeuralCheckAnalyzer` +
+   `F3NeuralSegmentDetector` como única autoridade semântica ON/OFF;
+2. USB e AUX permanecem convencionais nesta etapa;
+3. o mesmo ONNX já promovido é reutilizado; esta mudança não retreina a CNN e
+   não relaxa thresholds;
+4. BLUE continua intermitente e a intermitência permanece responsabilidade do
+   runtime temporal, não da CNN;
+5. fase OFF e fase de transição do pisca não geram OK nem NG;
+6. somente uma fase ON pode validar conformidade ou acumular divergência;
+7. divergência neural **certa** precisa aparecer em 3 amostras de fase ON para
+   fechar NG persistente;
+8. `INCERTO` neural não aprova, não reprova, não incrementa e não zera o
+   contador persistente;
+9. a antiga reconciliação por gabarito exato e o veto por
+   BOARD_OFF/LIVE/ON ficam desabilitados quando
+   `neural_visual_authority=true`;
+10. energia continua sendo autoridade de energia/presença operacional, mas não
+    pode reescrever o estado ON/OFF produzido pela CNN;
+11. a aprovação do BLUE ainda exige uma fase ON completa, no mesmo frame, com
+    todos os segmentos esperados ON efetivamente reconhecidos ON;
+12. modelo/metadados ausentes ou incompatíveis permanecem fail-closed, sem
+    fallback convencional no BLUE;
+13. o identificador histórico
+    `f3_h1_neural_segment_detector` é mantido por compatibilidade com os
+    DEBUGs e com a calibração física H1 já coletada; o escopo N2 é exposto por
+    `neural_check_scope=first_two_checks_n2` e `neural_stage`.
+
+### Implementação
+
+- autoridade neural incremental:
+  `src/platform/display_f3_neural_runtime.py`;
+- policy OK/NG/INCERTO:
+  `src/platform/display_auto_check_policy.py`;
+- fase ON/OFF/transição e debounce:
+  `src/platform/display_auto_check_runtime.py`;
+- composição canônica:
+  `src/platform/display_f3_runtime_authorities.py`;
+- sonda exata somente observadora:
+  `src/platform/display_f3_live_diagnostic_trace.py`;
+- bootstrap:
+  `src/platform/desktop_production_app.py`.
+
+### Critério do próximo reteste físico
+
+O N2 ainda não é considerado validado fisicamente. Antes de qualquer migração
+de USB, testar pelo menos:
+
+- BLUE correto piscando normalmente;
+- BLUE com `MASK_024` fisicamente apagada enquanto as demais esperadas ON
+  acendem;
+- fase totalmente apagada do pisca sem falso NG;
+- repetição de várias fases ON/OFF;
+- `INCERTO` em uma máscara sem aprovação indevida;
+- reflexo e pequena variação de posição/iluminação;
+- confirmação de que USB continua convencional.
+
+**USB/AUX neural continuam fora do escopo desta decisão.**
+
