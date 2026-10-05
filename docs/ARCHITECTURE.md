@@ -646,22 +646,29 @@ O hot path precisa preservar:
 A escolha final do backbone neural é consequência de benchmark, não decisão
 arquitetural antecipada.
 
-### Implementação incremental atual — N1.2
+### Implementação incremental atual — N2
 
-No primeiro CHECK da ordem do Projeto Display, o proprietário semântico é
-`F3H1NeuralAnalyzer`, que usa `F3NeuralSegmentDetector`. O detector carrega
-um artefato ONNX por projeto com `cv2.dnn.readNetFromONNX`, mantém a rede em
-cache e executa todas as máscaras ativas em um único batch NCHW. Nenhuma
-dependência de treinamento entra no hot path produtivo.
+Os dois primeiros CHECKS da ordem do Projeto Display, H1 e BLUE, usam
+`F3NeuralCheckAnalyzer` + `F3NeuralSegmentDetector` como única autoridade
+semântica ON/OFF. O detector carrega um artefato ONNX por projeto com
+`cv2.dnn.readNetFromONNX`, mantém a rede em cache e executa todas as máscaras
+ativas em um único batch NCHW. Nenhuma dependência de treinamento entra no hot
+path produtivo.
 
 Quando tracking está ligado, `F3TrackedRawCheckAnalyzer` continua entregando
-frame RAW + máscaras projetadas do mesmo snapshot, porém a reconciliação
-luminosa convencional não pode alterar a classificação do H1 neural. Para os
-CHECKS ainda não migrados, o mesmo wrapper delega ao analisador convencional.
+frame RAW + máscaras projetadas do mesmo snapshot. Reconciliação luminosa,
+gabarito exato e desempate físico convencionais não podem alterar ON/OFF de H1
+nem de BLUE neural. USB/AUX continuam delegados ao analisador convencional
+enquanto não forem migrados.
 
-Modelo ou metadados ausentes/incompatíveis deixam o H1 indisponível. Não existe
-fallback convencional para a semântica ON/OFF do primeiro CHECK enquanto N1
-estiver ativo.
+BLUE preserva sua natureza intermitente. Cada frame passa pela CNN, mas o
+runtime temporal classifica a fase como ON/OFF/transição. Fase OFF/transição é
+parte normal do pisca e não gera defeito. Na fase ON, uma divergência neural
+certa precisa persistir por três amostras ON para fechar NG; `INCERTO` não
+aprova, não reprova e não altera o contador de falha.
+
+Modelo ou metadados ausentes/incompatíveis deixam H1/BLUE indisponíveis. Não
+existe fallback convencional para a semântica ON/OFF dos CHECKS já migrados.
 
 
 
