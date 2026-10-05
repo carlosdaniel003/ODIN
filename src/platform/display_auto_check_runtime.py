@@ -1534,13 +1534,33 @@ class DisplayAutomaticCheckF3Mixin:
                 intermittent_phase.get("persistent_failed_ids") or ()
             )
 
-        reference_judgement_ready = (
+        reference_power_evidence = (
             self._display_auto_has_reference_power_evidence(analysis)
             if reference_gate
             else True
         )
+        neural_reference_authority = bool(
+            reference_gate
+            and analysis.get("neural_visual_authority") is True
+        )
+
+        # O gate histórico "primeiro segmento ON" pertence ao classificador
+        # convencional. Quando H1 está sob autoridade neural, energia/presença
+        # já foram resolvidas pelas autoridades operacionais antes deste ponto;
+        # a CNN deve publicar sua própria decisão (inclusive INCERTO) sem ser
+        # escondida por uma segunda trava óptica legada.
+        reference_judgement_ready = bool(
+            True
+            if neural_reference_authority
+            else reference_power_evidence
+        )
         analysis["first_expected_on_confirmed"] = bool(
-            reference_judgement_ready
+            reference_power_evidence
+        )
+        analysis["reference_judgement_owner"] = (
+            "neural_visual_authority"
+            if neural_reference_authority
+            else "legacy_first_expected_on_gate"
         )
         analysis = self._display_auto_publish_effective_ui_authority(
             analysis,
