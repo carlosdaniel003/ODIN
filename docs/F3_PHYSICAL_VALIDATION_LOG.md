@@ -5616,3 +5616,120 @@ Commits:
 
 **Resultado físico desta correção:** AINDA NÃO VALIDADO.
 
+---
+
+## 05/10/2026 — N1.4 offline: calibração aumentada encontrou sobreposição OFF/ON; instrumentação obrigatória aplicada
+
+**Resultado:** FAIL CONTROLADO / GATE OFFLINE BLOQUEOU PROMOÇÃO.
+
+Após o preflight real do projeto `CM_500_L` permanecer pronto, o treinamento
+voltou a atingir 100% no H1 original mantido fora da otimização:
+
+```text
+[008/060] h1_val=1.000
+[009/060] h1_val=1.000
+[010/060] h1_val=1.000
+[011/060] h1_val=1.000
+[012/060] h1_val=1.000
+Early stop: 5 épocas consecutivas em 100%
+```
+
+A nova etapa de calibração N1.4, porém, recusou o artefato:
+
+```text
+max_OFF_P(ON)=0.618684
+min_ON_P(ON)=0.571600
+gap=-0.047084
+```
+
+Logo, pelo menos uma variação OFF recebeu `P(ON)` maior que alguma variação
+ON. O contrato D-060 agiu corretamente: **nenhum metadata schema 3 foi
+promovido** e o artefato produtivo não foi substituído.
+
+### Interpretação desta falha
+
+Este resultado não autoriza:
+
+- reduzir a quantidade de augmentations;
+- trocar o seed até "passar";
+- escolher threshold manual entre 0.571600 e 0.618684;
+- enfraquecer o gate de separação;
+- voltar ao classificador convencional.
+
+Também ainda não permite concluir se:
+
+1. a CNN realmente não é robusta para alguma condição plausível; ou
+2. alguma combinação sintética do augmentation gerou uma imagem pouco realista
+   para o domínio físico da câmera.
+
+Pela regra das duas tentativas, a etapa seguinte é **diagnóstico**, não nova
+alteração algorítmica.
+
+### Instrumentação aplicada
+
+O pipeline de treino passa a preservar, sem alterar a geração das amostras:
+
+- máscara física de origem;
+- CHECK e estado esperado;
+- índice da augmentation;
+- seed exato;
+- rotação;
+- escala;
+- deslocamento X/Y;
+- alpha/beta de brilho;
+- gamma;
+- blur;
+- ruído e sigma;
+- reflexo sintético, centro, eixos, intensidade e ângulo;
+- `P(ON)` produzido pelo OpenCV DNN.
+
+A assinatura de `_augment_sample` recebeu apenas um coletor opcional de
+diagnóstico. As mesmas chamadas ao RNG e na mesma ordem são preservadas; assim,
+habilitar a instrumentação não muda o tensor que seria produzido.
+
+Em cada treino, o ODIN salva automaticamente os cinco OFF com maior `P(ON)` e
+os cinco ON com menor `P(ON)`, além de um JSON completo de resumo.
+
+Destino local canônico:
+
+```text
+data/models/f3_neural/diagnostics/
+  cm_500_l_segments_calibration_latest/
+    calibration_diagnostics.json
+    off_rank01_*.png
+    ...
+    on_rank01_*.png
+    ...
+```
+
+Em instalações cujo `DisplayProjectRepository` fica fora de `data/config`,
+o diretório acompanha o mesmo root local de modelos usado pelo projeto.
+
+O console passa a imprimir explicitamente:
+
+```text
+Diagnóstico calibração • pior OFF: <MASK> P(ON)=...
+Diagnóstico calibração • pior ON: <MASK> P(ON)=...
+Diagnóstico calibração salvo em: <pasta>
+```
+
+Se o gap continuar negativo, a exceção também informa a pasta preservada.
+
+### Objetivo do próximo passo
+
+Inspecionar visualmente e numericamente os extremos para responder de forma
+objetiva:
+
+- o pior OFF representa reflexo/movimento/iluminação plausíveis?
+- o pior ON ainda parece fisicamente um segmento aceso?
+- a sobreposição vem de uma máscara específica?
+- existe uma transformação sintética recorrente nos outliers?
+
+Somente após essa evidência será permitido decidir entre:
+
+- melhorar o modelo/aprendizado; ou
+- corrigir uma augmentation comprovadamente irrealista.
+
+**Estado:** INSTRUMENTAÇÃO IMPLEMENTADA — PENDENTE DE NOVA EXECUÇÃO DO TREINO
+PARA COLETAR OS EXTREMOS REAIS.
+
