@@ -99,6 +99,334 @@ def _check_ids(samples, indices) -> list[str]:
     return values
 
 
+def _mask_id_sort_key(mask_id: str):
+    text = str(mask_id or "").strip()
+    suffix = text.rsplit("_", 1)[-1]
+    try:
+        number = int(suffix)
+    except (TypeError, ValueError):
+        number = 10**9
+    return number, text
+
+
+def _ordered_check_catalog(
+    repository: DisplayProjectRepository,
+    project_name: str,
+    samples: list[dict],
+) -> list[dict]:
+    catalog: list[dict] = []
+    seen: set[str] = set()
+    try:
+        checks = repository.listar_checks(project_name)
+    except Exception:
+        checks = []
+
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get("id") or "").strip()
+        if not check_id or check_id in seen:
+            continue
+        seen.add(check_id)
+        catalog.append(
+            {
+                "check_id": check_id,
+                "check_name": str(
+                    check.get("name") or check_id
+                ).strip(),
+            }
+        )
+
+    for item in samples:
+        check_id = str(item.get("check_id") or "").strip()
+        if not check_id or check_id in seen:
+            continue
+        seen.add(check_id)
+        catalog.append(
+            {
+                "check_id": check_id,
+                "check_name": str(
+                    item.get("check_name") or check_id
+                ).strip(),
+            }
+        )
+    return catalog
+
+
+def _build_mask_state_coverage(
+    repository: DisplayProjectRepository,
+    project_name: str,
+    samples: list[dict],
+    train_indices: list[int],
+    val_indices: list[int],
+) -> dict:
+    """Audita cobertura ON/OFF por máscara física e por CHECK.
+
+    Esta função é estritamente diagnóstica: não altera split, labels, pesos,
+    treino, calibração ou decisão de promoção.
+    """
+    checks = _ordered_check_catalog(
+        repository,
+        project_name,
+        samples,
+    )
+    states_by_check: dict[tuple[str, str], set[str]] = {}
+    all_mask_ids: set[str] = set()
+
+    for item in samples:
+        mask_id = str(item.get("mask_id") or "").strip()
+        check_id = str(item.get("check_id") or "").strip()
+        state = str(item.get("state") or "").strip().lower()
+        if not mask_id or not check_id or state not in ("on", "off"):
+            continue
+        all_mask_ids.add(mask_id)
+        states_by_check.setdefault(
+            (check_id, mask_id),
+            set(),
+        ).add(state)
+
+    def states_for(indices: list[int], mask_id: str) -> set[str]:
+        values: set[str] = set()
+        for index in indices:
+            item = samples[index]
+            if str(item.get("mask_id") or "").strip() != mask_id:
+                continue
+            state = str(item.get("state") or "").strip().lower()
+            if state in ("on", "off"):
+                values.add(state)
+        return values
+
+    rows: list[dict] = []
+    validation_unseen: list[str] = []
+    single_state_training: list[str] = []
+    both_states_training: list[str] = []
+    no_training_state: list[str] = []
+
+    for mask_id in sorted(all_mask_ids, key=_mask_id_sort_key):
+        check_states = {}
+        for check in checks:
+            check_id = str(check["check_id"])
+            values = sorted(
+                states_by_check.get((check_id, mask_id), set())
+            )
+            check_states[check_id] = (
+                values[0]
+                if len(values) == 1
+                else ("mixed" if values else "missing")
+            )
+
+        train_states = states_for(train_indices, mask_id)
+        validation_states = states_for(val_indices, mask_id)
+        validation_seen = bool(
+            validation_states
+            and validation_states.issubset(train_states)
+        )
+
+        if not train_states:
+            status = "no_training_state"
+            no_training_state.append(mask_id)
+        elif validation_states and not validation_seen:
+            status = "validation_state_unseen_in_training"
+            validation_unseen.append(mask_id)
+        elif train_states == {"off", "on"}:
+            status = "both_states_seen_in_training"
+            both_states_training.append(mask_id)
+        else:
+            status = "single_state_seen_in_training"
+            single_state_training.append(mask_id)
+
+        rows.append(
+            {
+                "mask_id": mask_id,
+                "checks": check_states,
+                "training_states": sorted(train_states),
+                "training_off_count": sum(
+                    1
+                    for index in train_indices
+                    if str(samples[index].get("mask_id") or "").strip()
+                    == mask_id
+                    and str(samples[index].get("state") or "")
+                    .strip()
+                    .lower()
+                    == "off"
+                ),
+                "training_on_count": sum(
+                    1
+                    for index in train_indices
+                    if str(samples[index].get("mask_id") or "").strip()
+                    == mask_id
+                    and str(samples[index].get("state") or "")
+                    .strip()
+                    .lower()
+                    == "on"
+                ),
+                "validation_states": sorted(validation_states),
+                "validation_state_seen_in_training": validation_seen,
+                "status": status,
+            }
+        )
+
+    summary = {
+        "mask_count": len(rows),
+        "both_states_seen_in_training_count": len(
+            both_states_training
+        ),
+        "single_state_seen_in_training_count": len(
+            single_state_training
+        ),
+        "validation_state_unseen_in_training_count": len(
+            validation_unseen
+        ),
+        "no_training_state_count": len(no_training_state),
+        "both_states_seen_in_training_mask_ids": both_states_training,
+        "single_state_seen_in_training_mask_ids": single_state_training,
+        "validation_state_unseen_in_training_mask_ids": validation_unseen,
+        "no_training_state_mask_ids": no_training_state,
+    }
+
+    return {
+        "schema_version": 1,
+        "purpose": "f3_neural_mask_state_coverage_audit",
+        "project_name": str(project_name or ""),
+        "checks": checks,
+        "summary": summary,
+        "masks": rows,
+    }
+
+
+def _write_mask_state_coverage(
+    report: dict,
+    destination: Path,
+) -> Path:
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(
+            report,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return destination
+
+
+def _format_mask_state_coverage(report: dict) -> str:
+    checks = [
+        item
+        for item in (report.get("checks") or ())
+        if isinstance(item, dict)
+    ]
+    rows = [
+        item
+        for item in (report.get("masks") or ())
+        if isinstance(item, dict)
+    ]
+    if not rows:
+        return "MATRIZ ON/OFF POR MÁSCARA: sem amostras."
+
+    def short_state(value: object) -> str:
+        state = str(value or "").strip().lower()
+        return {
+            "on": "ON",
+            "off": "OFF",
+            "mixed": "MIX",
+            "missing": "--",
+        }.get(state, "--")
+
+    header = ["MÁSCARA"]
+    header.extend(
+        str(item.get("check_name") or item.get("check_id") or "")[:8]
+        for item in checks
+    )
+    header.extend(["TREINO", "VAL VISTA?", "STATUS"])
+
+    widths = [10]
+    widths.extend([8] * len(checks))
+    widths.extend([9, 10, 34])
+
+    def render(values):
+        return " | ".join(
+            str(value).ljust(width)
+            for value, width in zip(values, widths)
+        )
+
+    lines = [
+        "MATRIZ ON/OFF POR MÁSCARA FÍSICA",
+        render(header),
+        "-+-".join("-" * width for width in widths),
+    ]
+
+    for row in rows:
+        check_states = (
+            row.get("checks")
+            if isinstance(row.get("checks"), dict)
+            else {}
+        )
+        train_states = [
+            str(value).upper()
+            for value in (row.get("training_states") or ())
+        ]
+        values = [str(row.get("mask_id") or "")]
+        values.extend(
+            short_state(check_states.get(str(check.get("check_id") or "")))
+            for check in checks
+        )
+        values.extend(
+            [
+                "/".join(train_states) if train_states else "--",
+                (
+                    "SIM"
+                    if row.get("validation_state_seen_in_training")
+                    else "NÃO"
+                ),
+                str(row.get("status") or ""),
+            ]
+        )
+        lines.append(render(values))
+
+    summary = (
+        report.get("summary")
+        if isinstance(report.get("summary"), dict)
+        else {}
+    )
+    lines.extend(
+        [
+            "",
+            "RESUMO DE COBERTURA:",
+            (
+                "  ambas as classes no treino: "
+                f"{summary.get('both_states_seen_in_training_count', 0)}"
+            ),
+            (
+                "  somente uma classe no treino: "
+                f"{summary.get('single_state_seen_in_training_count', 0)}"
+            ),
+            (
+                "  estado exigido pela validação nunca visto no treino: "
+                f"{summary.get('validation_state_unseen_in_training_count', 0)}"
+            ),
+            (
+                "  sem estado de treino: "
+                f"{summary.get('no_training_state_count', 0)}"
+            ),
+        ]
+    )
+    unseen = list(
+        summary.get(
+            "validation_state_unseen_in_training_mask_ids",
+            [],
+        )
+        or []
+    )
+    if unseen:
+        lines.append(
+            "  máscaras com estado de validação inédito: "
+            + ", ".join(unseen)
+        )
+    return "\n".join(lines)
+
+
 def _resolve_validation_check(
     repository: DisplayProjectRepository,
     project_name: str,
@@ -221,6 +549,18 @@ def preparar_preflight(
             "train_class_counts": _class_counts(samples, train_indices),
             "validation_class_counts": _class_counts(samples, val_indices),
         }
+    )
+
+    coverage = _build_mask_state_coverage(
+        repository,
+        name,
+        samples,
+        train_indices,
+        val_indices,
+    )
+    report["state_coverage"] = coverage
+    report["state_coverage_summary"] = dict(
+        coverage.get("summary") or {}
     )
 
     if not train_indices:
@@ -1029,7 +1369,16 @@ def _validate_candidate(
 
 
 def _print_preflight(report: dict) -> None:
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+    compact = {
+        key: value
+        for key, value in report.items()
+        if key != "state_coverage"
+    }
+    print(json.dumps(compact, indent=2, ensure_ascii=False))
+    coverage = report.get("state_coverage")
+    if isinstance(coverage, dict):
+        print()
+        print(_format_mask_state_coverage(coverage))
 
 
 def treinar(args) -> dict:
@@ -1053,6 +1402,18 @@ def treinar(args) -> dict:
         )
     )
     preflight["output_path"] = str(output)
+    coverage = preflight.get("state_coverage")
+    if isinstance(coverage, dict):
+        coverage_path = (
+            output.parent
+            / "diagnostics"
+            / f"{output.stem}_state_coverage.json"
+        )
+        _write_mask_state_coverage(
+            coverage,
+            coverage_path,
+        )
+        preflight["state_coverage_path"] = str(coverage_path)
 
     if bool(args.preflight):
         _print_preflight(preflight)
@@ -1063,6 +1424,14 @@ def treinar(args) -> dict:
             "Preflight neural N1 não está pronto:\n"
             + json.dumps(preflight, indent=2, ensure_ascii=False)
         )
+
+    if isinstance(coverage, dict):
+        print(_format_mask_state_coverage(coverage))
+        print(
+            "Auditoria de cobertura salva em: "
+            f"{preflight.get('state_coverage_path')}"
+        )
+        print()
 
     torch, nn, DataLoader, Dataset = _load_torch()
 
