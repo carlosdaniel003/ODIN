@@ -671,12 +671,14 @@ O treino permanece completamente fora do runtime produtivo. O fluxo canônico é
 
 ```text
 configuração/fotos locais dos CHECKS
+  +
+PLACA DESLIGADA NO SUPORTE com máscaras locais explícitas
   ↓
 preflight sem PyTorch
   ↓
 primeiro CHECK reservado integralmente para validação
   ↓
-demais CHECKS alimentam treino ON/OFF por segmento
+demais CHECKS + BOARD_OFF alimentam treino por segmento
   ↓
 TinyF3SegmentCNN
   ↓
@@ -705,6 +707,18 @@ preprocessamento/augmentation já conhecido pelo pipeline. Essas variações nã
 ensinam H1 ao otimizador; servem para verificar se a saída probabilística ainda
 separa ON de OFF sob pequenas mudanças de brilho, contraste, deslocamento,
 blur/ruído e reflexo sintético em OFF.
+
+
+A referência **PLACA DESLIGADA NO SUPORTE** também é fonte neural de treino
+quando possuir foto válida e geometria de máscaras explicitamente salva sobre
+essa própria foto. Cada `MASK_xxx` gera uma amostra OFF física da mesma máscara.
+Ela não pertence ao H1 reservado e, portanto, entra somente no conjunto de
+treino. O dataset não projeta a geometria canônica por suposição: ausência de
+`masks_reference`/overrides explícitos mantém BOARD_OFF fora do dataset.
+
+Essa fonte existe para cobrir máscaras cujo estado OFF não aparece em
+BLUE/USB/AUX, sem fabricar o rótulo a partir de imagem H1 e sem ensinar o CHECK
+reservado ao otimizador.
 
 Os thresholds produtivos não são mais números fixos `0.20/0.80`. O artefato só
 é promovido quando existe um gap empírico positivo entre as duas classes de
