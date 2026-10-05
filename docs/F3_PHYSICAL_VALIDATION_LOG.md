@@ -6168,3 +6168,125 @@ no caminho convencional.
 Ainda não está autorizado migrar automaticamente BLUE/USB/AUX: essa progressão
 continua dependente dos cenários físicos restantes e de autorização explícita
 do usuário, conforme D-059/D-060/D-063.
+
+---
+
+## 05/10/2026 — N2.0 BLUE neural: migração autorizada após aprovação indevida com MASK_024 apagada
+
+**Resultado:** IMPLEMENTAÇÃO N2 APLICADA — PENDENTE DE RETESTE FÍSICO.
+
+### Caso que abriu a etapa
+
+Após o PASS físico N1.7 do H1, o usuário autorizou explicitamente a migração do
+CHECK BLUE para IA.
+
+Foi apresentado um caso real em que o display estava em BLUE intermitente e
+`MASK_024` permanecia fisicamente apagada, embora o gabarito do projeto espere
+essa máscara em `on` no BLUE.
+
+O DEBUG do ciclo anterior registrou simultaneamente:
+
+```text
+check_id=CHECK_002
+check_name=BLUE
+intermittent=true
+analysis_ready=true
+analysis_approved=true
+matched_mask_count=28
+active_mask_count=28
+intermittent_ready=true
+intermittent_seen_on=18
+intermittent_expected_on=18
+policy_decision=ok
+registration_event=check_advanced
+registration_approved=true
+```
+
+Portanto houve uma aprovação produtiva incompatível com a condição física
+informada. O objetivo da N2 não é adicionar outra exceção convencional para
+`MASK_024`; é retirar do BLUE os caminhos convencionais capazes de reescrever
+a decisão semântica.
+
+### Mudança implementada
+
+Escopo da autoridade após N2.0:
+
+```text
+H1        → autoridade visual neural
+BLUE      → autoridade visual neural
+USB       → autoridade visual convencional
+AUX       → autoridade visual convencional
+```
+
+O BLUE usa agora o mesmo detector ON/OFF por segmento já usado pelo H1. O
+comportamento intermitente permanece tratado fora da CNN:
+
+```text
+frame BLUE
+→ CNN classifica as máscaras
+→ runtime identifica fase ON / OFF / transição
+
+OFF ou transição
+→ parte normal do pisca
+→ não gera NG
+
+fase ON
+→ todos corretos        → candidato a OK
+→ divergência certa     → acumula 1/3
+→ mesma divergência 3/3 → NG persistente
+→ INCERTO               → não aprova e não acumula defeito
+```
+
+Para um BLUE neural, foram desativados como autoridades de reclassificação:
+
+- veto por gabarito exato;
+- reconciliação BOARD_OFF/LIVE/ON usada nos falsos OFF convencionais;
+- sonda exata capaz de avançar CHECK em composição legada.
+
+Energia, presença, tracking/pose, sequência e rearme continuam separados da
+autoridade semântica da CNN.
+
+### Proteção específica do caso MASK_024
+
+Foi adicionada regressão automatizada para o cenário:
+
+```text
+BLUE em fase ON
+17 segmentos esperados ON reconhecidos ON
+MASK_024 esperada ON reconhecida OFF
+suporte físico convencional tenta confirmar MASK_024
+```
+
+Contrato esperado:
+
+```text
+suporte convencional NÃO reescreve MASK_024
+MASK_024 continua OFF / matched=false
+3 fases ON divergentes → persistent_failed_ids contém MASK_024
+```
+
+Também foi adicionada regressão para `MASK_024=INCERTO`: o estado não
+incrementa nem zera o contador de falha e não pode fechar OK/NG sozinho.
+
+### Reteste físico obrigatório
+
+Ainda falta validar no JIG real:
+
+1. BLUE correto, incluindo vários ciclos do pisca;
+2. fase OFF completa sem falso NG;
+3. placa deste caso com `MASK_024` apagada;
+4. confirmar que a UI mantém `MASK_024` vermelha após o debounce 3/3;
+5. confirmar que o CHECK não avança para USB;
+6. BLUE correto após uma placa NG;
+7. confirmar que USB/AUX permanecem no caminho convencional.
+
+Até esse reteste, o estado é:
+
+```text
+H1 neural validado fisicamente    SIM
+BLUE neural implementado          SIM
+BLUE neural validado fisicamente  NÃO
+USB neural                        NÃO
+AUX neural                        NÃO
+```
+
