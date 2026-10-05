@@ -34,9 +34,11 @@ def decidir_analise_display_f3(
     Regras operacionais:
     - H1 convencional continua sendo referencial de entrada e nunca gera NG
       automático;
-    - quando o primeiro CHECK está sob autoridade neural, uma divergência
-      neural certa pode gerar NG, desde que exista evidência positiva de display
-      ligado no mesmo frame;
+    - nos CHECKS já migrados para IA (H1 e BLUE na etapa N2), INCERTO nunca
+      vira OK/NG e uma divergência neural certa só pode gerar NG quando existe
+      evidência positiva de display ligado no mesmo frame;
+    - BLUE intermitente é filtrado temporalmente pelo runtime antes desta policy:
+      fase OFF/transição não chega aqui como defeito;
     - Depois de H1, ausência de evidência não é defeito: continua buscando.
     - POUCA LUZ em uma máscara esperada ACESA/APAGADA é inconsistência.
     - ACESO onde era esperado APAGADO é inconsistência positiva.
@@ -109,11 +111,12 @@ def decidir_analise_display_f3(
         and not semantic_mismatches
     )
     all_confident = len(confident_results) == len(results)
+    neural_visual_authority = bool(
+        data.get("neural_visual_authority") is True
+    )
     neural_reference_gate = bool(
         reference_gate
-        and data.get("neural_visual_authority") is True
-        and str(data.get("neural_check_scope") or "")
-        == "first_check_only"
+        and neural_visual_authority
     )
 
     # O H1/primeiro CHECK só pode ser OK quando a própria leitura comprova que
@@ -135,11 +138,11 @@ def decidir_analise_display_f3(
             "board_powered": bool(board_powered),
         }
 
-    # N1.2: no primeiro CHECK migrado, CNN é a única autoridade de ON/OFF.
-    # INCERTO nunca vira NG. Divergência certa vira NG somente com outro segmento
-    # ON confirmado no mesmo frame, evitando classificar placa desligada como
-    # segmento defeituoso.
-    if neural_reference_gate:
+    # N2: nos CHECKS migrados, a CNN é a única autoridade de ON/OFF.
+    # INCERTO nunca vira NG. Divergência certa só vira NG com evidência positiva
+    # de que o display está na fase ligada; no BLUE, o debounce intermitente do
+    # runtime decide quando uma divergência certa se torna persistente.
+    if neural_visual_authority:
         neural_uncertain = [
             item
             for item in results
@@ -166,9 +169,24 @@ def decidir_analise_display_f3(
             if item.get("matched") is False
         ]
         if neural_mismatches:
+            if not board_powered:
+                return {
+                    "decision": DISPLAY_AUTO_DECISION_SEARCHING,
+                    "reason": "aguardando_evidencia_placa_ligada",
+                    "confirmed_ng": False,
+                    "board_powered": False,
+                    "failed_mask_ids": [
+                        str(item.get("mask_id") or "")
+                        for item in neural_mismatches
+                    ],
+                }
             return {
                 "decision": DISPLAY_AUTO_DECISION_NG,
-                "reason": "h1_neural_divergencia_confirmada",
+                "reason": (
+                    "h1_neural_divergencia_confirmada"
+                    if neural_reference_gate
+                    else "check_neural_divergencia_confirmada"
+                ),
                 "confirmed_ng": True,
                 "board_powered": True,
                 "failed_mask_id": str(
@@ -182,7 +200,11 @@ def decidir_analise_display_f3(
 
         return {
             "decision": DISPLAY_AUTO_DECISION_SEARCHING,
-            "reason": "aguardando_estado_neural_h1",
+            "reason": (
+                "aguardando_estado_neural_h1"
+                if neural_reference_gate
+                else "aguardando_estado_neural_check"
+            ),
             "confirmed_ng": False,
             "board_powered": bool(board_powered),
         }
