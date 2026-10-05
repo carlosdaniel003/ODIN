@@ -31,8 +31,11 @@ from src.platform.display_check_presence_reference import (
 )
 from src.platform.display_f3_neural_dataset import (
     F3_NEURAL_INPUT_SIZE,
+    F3_NEURAL_MIN_PHYSICAL_H1_CALIBRATION_FRAMES,
     F3_NEURAL_MODEL_METADATA_SCHEMA_VERSION,
+    F3_NEURAL_PHYSICAL_THRESHOLD_CALIBRATION_SOURCE,
     F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE,
+    F3_NEURAL_THRESHOLD_CALIBRATION_SOURCES,
     extrair_tensor_segmento_f3,
     f3_neural_model_path_for_repository,
 )
@@ -396,7 +399,7 @@ class F3NeuralSegmentDetector:
             )
             calibration_source = str(calibration.get("source") or "").strip()
             if (
-                calibration_source != F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE
+                calibration_source not in F3_NEURAL_THRESHOLD_CALIBRATION_SOURCES
                 or calibration.get("separable") is not True
             ):
                 self._metadata = metadata
@@ -482,6 +485,163 @@ class F3NeuralSegmentDetector:
                 }
                 return deepcopy(self._last_status)
 
+            if (
+                calibration_source
+                == F3_NEURAL_PHYSICAL_THRESHOLD_CALIBRATION_SOURCE
+            ):
+                physical = (
+                    calibration.get("physical_h1")
+                    if isinstance(calibration.get("physical_h1"), dict)
+                    else {}
+                )
+                base = (
+                    calibration.get("base_augmented_calibration")
+                    if isinstance(
+                        calibration.get("base_augmented_calibration"),
+                        dict,
+                    )
+                    else {}
+                )
+                frame_hashes = [
+                    str(value or "").strip()
+                    for value in (physical.get("frame_hashes") or ())
+                    if str(value or "").strip()
+                ]
+                frames = [
+                    value
+                    for value in (physical.get("frames") or ())
+                    if isinstance(value, dict)
+                ]
+                physical_counts = (
+                    physical.get("class_counts")
+                    if isinstance(physical.get("class_counts"), dict)
+                    else {}
+                )
+                base_counts = (
+                    base.get("class_counts")
+                    if isinstance(base.get("class_counts"), dict)
+                    else {}
+                )
+                try:
+                    physical_frame_count = int(
+                        physical.get("frame_count", 0) or 0
+                    )
+                    physical_sample_count = int(
+                        physical.get("sample_count", 0) or 0
+                    )
+                    physical_off_count = int(
+                        physical_counts.get("off", 0) or 0
+                    )
+                    physical_on_count = int(
+                        physical_counts.get("on", 0) or 0
+                    )
+                    base_sample_count = int(
+                        base.get("sample_count", 0) or 0
+                    )
+                    base_off_count = int(
+                        base_counts.get("off", 0) or 0
+                    )
+                    base_on_count = int(
+                        base_counts.get("on", 0) or 0
+                    )
+                except (TypeError, ValueError):
+                    physical_frame_count = 0
+                    physical_sample_count = 0
+                    physical_off_count = 0
+                    physical_on_count = 0
+                    base_sample_count = 0
+                    base_off_count = 0
+                    base_on_count = 0
+
+                physical_max_off = _strict_probability(
+                    physical.get("max_off_on_probability")
+                )
+                physical_min_on = _strict_probability(
+                    physical.get("min_on_on_probability")
+                )
+                physical_gap = _strict_probability(
+                    physical.get("uncertainty_gap")
+                )
+                base_max_off = _strict_probability(
+                    base.get("max_off_on_probability")
+                )
+                base_min_on = _strict_probability(
+                    base.get("min_on_on_probability")
+                )
+                base_gap = _strict_probability(
+                    base.get("uncertainty_gap")
+                )
+
+                physical_valid = bool(
+                    str(base.get("source") or "").strip()
+                    == F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE
+                    and base.get("separable") is True
+                    and physical.get("separable") is True
+                    and str(physical.get("project_name") or "").strip()
+                    == name
+                    and str(
+                        physical.get("validation_check_id") or ""
+                    ).strip()
+                    == first_check_id
+                    and str(physical.get("model_sha256") or "")
+                    .strip()
+                    .lower()
+                    == declared_hash
+                    and physical_frame_count
+                    >= F3_NEURAL_MIN_PHYSICAL_H1_CALIBRATION_FRAMES
+                    and len(frame_hashes) == physical_frame_count
+                    and len(set(frame_hashes)) == physical_frame_count
+                    and len(frames) == physical_frame_count
+                    and physical_sample_count
+                    == physical_off_count + physical_on_count
+                    and physical_off_count > 0
+                    and physical_on_count > 0
+                    and base_sample_count == base_off_count + base_on_count
+                    and base_off_count > 0
+                    and base_on_count > 0
+                    and calibration_samples
+                    == base_sample_count + physical_sample_count
+                    and calibration_off_count
+                    == base_off_count + physical_off_count
+                    and calibration_on_count
+                    == base_on_count + physical_on_count
+                    and physical_max_off is not None
+                    and physical_min_on is not None
+                    and physical_gap is not None
+                    and physical_max_off < physical_min_on
+                    and physical_gap > 0.0
+                    and base_max_off is not None
+                    and base_min_on is not None
+                    and base_gap is not None
+                    and base_max_off < base_min_on
+                    and base_gap > 0.0
+                    and abs(
+                        calibrated_max_off
+                        - max(base_max_off, physical_max_off)
+                    )
+                    <= 1e-6
+                    and abs(
+                        calibrated_min_on
+                        - min(base_min_on, physical_min_on)
+                    )
+                    <= 1e-6
+                )
+                if not physical_valid:
+                    self._metadata = metadata
+                    self._net = None
+                    self._model_signature = model_signature
+                    self._metadata_signature = metadata_signature
+                    self._last_status = {
+                        "ready": False,
+                        "reason": "neural_physical_h1_calibration_invalid",
+                        "project_name": name,
+                        "calibration_source": calibration_source,
+                        "model_path": str(model_path),
+                        "metadata_path": str(metadata_path),
+                        "load_count": int(self.load_count),
+                    }
+                    return deepcopy(self._last_status)
+
             try:
                 net = cv2.dnn.readNetFromONNX(str(model_path))
             except Exception as exc:
@@ -542,6 +702,17 @@ class F3NeuralSegmentDetector:
             ),
             "threshold_calibration_augmentations_per_reference": int(
                 calibration.get("augmentations_per_reference", 0) or 0
+            ),
+            "physical_h1_calibration_frame_count": int(
+                (
+                    calibration.get("physical_h1")
+                    if isinstance(calibration.get("physical_h1"), dict)
+                    else {}
+                ).get("frame_count", 0)
+                or 0
+            ),
+            "onnx_sha256": str(
+                self._metadata.get("onnx_sha256") or ""
             ),
             "load_count": int(self.load_count),
         }
