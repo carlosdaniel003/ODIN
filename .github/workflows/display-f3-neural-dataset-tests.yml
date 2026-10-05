@@ -30,6 +30,7 @@ jobs:
         run: |
           python -m py_compile \
             src/platform/display_f3_neural_dataset.py \
+            src/platform/display_f3_neural_physical_calibration.py \
             src/platform/display_f3_neural_runtime.py \
             src/platform/display_auto_check_policy.py \
             src/platform/display_auto_check_runtime.py \
