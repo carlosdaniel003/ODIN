@@ -3467,7 +3467,90 @@ neural a reproduzir a implementação convencional.
 A partir desta decisão, a direção canônica para **novas correções da percepção
 visual do Display F3** é a migração neural por segmentos.
 
-**Validação física:** ainda não iniciada; o protótipo neural H1 e o pipeline de
-treino N1.3 estão implementados, mas o ONNX real ainda precisa ser gerado com os
-ativos locais antes do reteste físico.
+**Validação física N1:** EM ANDAMENTO. O H1 já executou com autoridade neural
+real em produção; os retestes #1 e #2 identificaram a calibração fixa
+`0.20/0.80` como bloqueio de certeza. A correção de calibração passa a seguir
+D-060 e permanece pendente de novo reteste físico antes de migrar BLUE.
 
+
+
+---
+
+## D-060 — Certeza neural do H1 é calibrada no CHECK reservado; INCERTO não é CONFORME
+
+**Status:** Accepted
+
+### Contexto
+
+Nos dois primeiros retestes físicos do H1 neural, o ONNX estava carregado e era
+a única autoridade visual, mas a decisão permaneceu em `INCERTO`. O segundo
+snapshot mostrou separação útil entre as classes no frame real:
+
+```text
+maior P(ON) esperado OFF = 0.496080
+menor P(ON) esperado ON  = 0.684468
+gap live                 = +0.188388
+```
+
+Apesar disso, o metadata N1.3 exigia `OFF<=0.20` e `ON>=0.80`, valores
+fixados pelo pipeline e não derivados da distribuição do modelo. O mesmo
+snapshot revelou uma inconsistência apenas de apresentação: 27 resultados
+`uncertain` tinham `matched=None`, mas a UI os contabilizava como conformes
+porque descontava somente `matched is False`.
+
+### Decisão
+
+A certeza neural do H1 passa a fazer parte do próprio contrato do artefato.
+
+1. O primeiro CHECK continua integralmente fora da **otimização** da CNN.
+2. Depois de selecionar o melhor modelo, as amostras H1 reservadas são usadas
+   para calibração junto de variações determinísticas do augmentation existente.
+3. O mesmo batch de calibração precisa produzir logits equivalentes no PyTorch
+   e no OpenCV DNN produtivo.
+4. A promoção exige separação empírica estrita:
+   `max P(ON) dos OFF < min P(ON) dos ON`.
+5. O maior OFF e o menor ON delimitam a faixa produtiva `INCERTO`; não existe
+   fallback para thresholds manuais `0.20/0.80` nem uso produtivo do midpoint
+   observado em um frame.
+6. Se as distribuições de calibração se sobrepõem, o artefato não é promovido.
+7. O metadata neural passa para `schema_version=3` e registra origem da
+   calibração, contagens, extremos, gap e thresholds.
+8. O runtime aceita somente schema 3 com calibração íntegra e coerente. Artefato
+   antigo/schema 2 falha fechado e precisa ser regenerado pelo pipeline.
+9. `uncertain` continua sem gerar OK ou NG. Na UI, porém, ele também não pode
+   ser contado como CONFORME: a tela deve expor estado `INDETERMINADO` e a
+   contagem real de máscaras certas/incertas.
+
+### Limite desta calibração
+
+Augmentation melhora o gate offline, mas não substitui evidência física. A
+liberação produtiva N1 ainda exige os retestes reais de:
+
+- H1 correto nominal;
+- H1 correto com pequeno deslocamento;
+- pequena variação de iluminação;
+- segmento esperado ON fisicamente apagado;
+- reflexo em segmento esperado OFF.
+
+Só depois desses cenários e de autorização explícita do usuário a migração pode
+avançar para BLUE.
+
+### Implementação
+
+- pipeline: `scripts/treinar_f3_segmentos_neural.py`;
+- contrato compartilhado: `display_f3_neural_dataset.py`;
+- gate/runtime: `display_f3_neural_runtime.py`;
+- verdade visual efetiva: `display_auto_check_runtime.py`;
+- apresentação: `display_f3_mask_status.py`.
+
+Commits da implementação:
+
+```text
+1d3ca06bd52f427e297ab27b5a745d7b2eface50
+08d1cb7c59e373f82e4349eaf14b64d645d27579
+```
+
+Os testes dedicados **Display F3 neural dataset tests** e
+**Display F3 fast H1 BLUE tests** passaram no HEAD da correção.
+
+**Validação física:** PENDENTE DE RETESTE COM ARTEFATO SCHEMA 3.

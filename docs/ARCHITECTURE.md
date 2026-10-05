@@ -665,7 +665,7 @@ estiver ativo.
 
 
 
-### Treino e promoção do artefato — N1.3
+### Treino, calibração e promoção do artefato — N1.3/N1.4
 
 O treino permanece completamente fora do runtime produtivo. O fluxo canônico é:
 
@@ -682,29 +682,56 @@ TinyF3SegmentCNN
   ↓
 exportação ONNX candidata
   ↓
-comparação PyTorch x OpenCV DNN
+validação 100% do primeiro CHECK original
   ↓
-validação 100% do primeiro CHECK reservado
+H1 reservado + variações determinísticas de calibração
   ↓
-SHA-256 + metadados schema 2
+inferência PyTorch + OpenCV DNN nas mesmas amostras
+  ↓
+exigir max P(ON) dos OFF < min P(ON) dos ON
+  ↓
+extremos validados delimitam OFF / INCERTO / ON
+  ↓
+SHA-256 + metadados schema 3
   ↓
 promoção atômica do artefato
 ```
 
 A separação por CHECK evita vazamento de validação entre recortes provenientes
-da mesma fotografia. No N1, o primeiro CHECK da ordem configurada precisa
-existir como referência real e conter as duas classes ON/OFF. O conjunto de
-treino, formado pelos demais CHECKS, também precisa conter ambas as classes.
+da mesma fotografia. No N1, o primeiro CHECK da ordem configurada continua
+**fora da otimização do modelo**. Ele é usado como validação independente e,
+depois, como conjunto de calibração junto de variações determinísticas do mesmo
+preprocessamento/augmentation já conhecido pelo pipeline. Essas variações não
+ensinam H1 ao otimizador; servem para verificar se a saída probabilística ainda
+separa ON de OFF sob pequenas mudanças de brilho, contraste, deslocamento,
+blur/ruído e reflexo sintético em OFF.
+
+Os thresholds produtivos não são mais números fixos `0.20/0.80`. O artefato só
+é promovido quando existe um gap empírico positivo entre as duas classes de
+calibração. O maior `P(ON)` observado entre OFF e o menor `P(ON)` observado
+entre ON formam as bordas da faixa `INCERTO`. Se as distribuições se sobrepõem,
+o treino falha antes da promoção e o artefato produtivo anterior permanece
+intacto.
 
 O runtime aceita somente artefato que declare:
 
-- `schema_version=2`;
+- `schema_version=3`;
 - projeto exatamente correspondente ao projeto ativo;
 - mapa de classes `off=0`, `on=1`;
 - `split.strategy=hold_out_first_check_for_n1`;
 - `validation_check_id` igual ao primeiro CHECK atual do projeto;
 - `validation.accepted_for_physical_h1_retest=true`;
+- `threshold_calibration.source=held_out_h1_augmented_probability_gap`;
+- calibração separável, com exemplos ON/OFF, contagens coerentes e gap positivo;
+- thresholds gravados coerentes com os extremos efetivamente calibrados;
 - `onnx_sha256` correspondente ao arquivo ONNX local.
 
-Qualquer divergência falha fechada e mantém o H1 sem decisão neural. O modelo
-rejeitado nunca é promovido ao caminho produtivo.
+Artefato schema 2, metadata sem calibração ou calibração inconsistente falham
+fechado. Não há fallback para `0.20/0.80` e não se corrige o JSON manualmente:
+o modelo precisa ser regenerado pelo pipeline de treino. O modelo rejeitado
+nunca é promovido ao caminho produtivo.
+
+Na apresentação neural, `matched=None` / `uncertain` também não pode ser
+contado como máscara conforme. INCERTO permanece neutro para NG, mas reduz a
+contagem de conformidade e deve aparecer explicitamente como
+`INDETERMINADO`.

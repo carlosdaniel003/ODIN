@@ -5513,3 +5513,106 @@ A correção deve ser dividida em duas responsabilidades:
 **Estado:** diagnóstico suficiente para corrigir a causa; nenhuma alteração de
 threshold produtivo foi feita por tentativa neste passo.
 
+---
+
+## 05/10/2026 — N1 pós-diagnóstico: calibração neural deixa de usar 0.20/0.80 fixos
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETREINO E RETESTE FÍSICO.
+
+Esta entrada não altera o resultado dos retestes N1 #1 e #2. Ambos permanecem
+registrados como FAIL controlado. A alteração abaixo trata a causa encontrada
+nesses testes.
+
+### Alteração aplicada
+
+O pipeline neural foi ajustado para que os thresholds do H1 deixem de ser
+constantes escolhidas no código.
+
+Novo fluxo offline:
+
+```text
+H1 reservado fora do treino
+→ validação original 100%
+→ H1 reservado + variações determinísticas
+→ inferência PyTorch e OpenCV DNN
+→ medir P(ON) de OFF e ON
+→ exigir max_OFF < min_ON
+→ usar o gap como faixa INCERTO
+→ metadata schema 3
+→ promoção atômica
+```
+
+As variações usam o augmentation já existente para cobrir pequenas mudanças de
+posição/escala/rotação, brilho/contraste, blur/ruído e hard-negative de reflexo
+em OFF. Elas são usadas para **calibração**, não para ensinar H1 ao otimizador.
+
+Se qualquer OFF calibrado alcançar/superar o ON calibrado mais fraco, o treino
+é abortado antes da promoção. Não há fallback para `0.20/0.80`.
+
+### Contrato produtivo
+
+O runtime agora exige metadata `schema_version=3` com:
+
+- origem `held_out_h1_augmented_probability_gap`;
+- ambas as classes presentes;
+- contagens de calibração coerentes;
+- gap positivo;
+- thresholds coerentes com os extremos calibrados;
+- SHA-256 válido do ONNX;
+- H1 declarado como CHECK reservado e aceito pelo gate independente.
+
+O artefato anterior schema 2 passa deliberadamente a falhar fechado. Portanto,
+antes do próximo teste físico é obrigatório **regenerar ONNX + JSON pelo script
+oficial**; não editar o metadata manualmente.
+
+### Correção da apresentação neural
+
+O estado `uncertain` não é mais tratado como máscara conforme somente porque
+`matched=None`.
+
+No caso equivalente ao reteste #2:
+
+```text
+antes:
+1 matched + 27 uncertain
+→ UI: 28/28 CONFORMES
+
+agora:
+1 matched + 27 uncertain
+→ UI: 1/28 CONFORMES • 27 INCERTOS • INDETERMINADO
+```
+
+Essa mudança é exclusivamente de apresentação/telemetria. A policy neural
+continua sendo a autoridade de OK/NG/INCERTO.
+
+### Validação de software
+
+No HEAD da correção:
+
+- **Display F3 neural dataset tests:** PASS;
+- **Display F3 fast H1 BLUE tests:** PASS.
+
+Os workflows de isolamento/UNKNOWN/presença que permanecem vermelhos já estavam
+falhando no commit imediatamente anterior à correção; não foram usados para
+mascarar nem alterar esta etapa.
+
+Commits:
+
+```text
+1d3ca06bd52f427e297ab27b5a745d7b2eface50
+08d1cb7c59e373f82e4349eaf14b64d645d27579
+```
+
+### Próximo reteste obrigatório
+
+1. executar preflight;
+2. retreinar/regenerar o artefato neural do projeto `CM_500_L`;
+3. registrar os thresholds e o gap impressos pelo treino;
+4. repetir H1 correto em posição nominal;
+5. repetir com pequeno deslocamento e pequena variação de iluminação;
+6. testar um segmento esperado ON realmente apagado;
+7. testar reflexo em segmento esperado OFF;
+8. capturar DEBUG caso qualquer máscara permaneça INCERTA ou diverja.
+
+**Resultado físico desta correção:** AINDA NÃO VALIDADO.
+
