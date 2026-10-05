@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 
 from scripts.treinar_f3_segmentos_neural import (
+    _export_onnx_candidate,
     _validate_candidate,
     preparar_preflight,
 )
@@ -56,6 +57,19 @@ class _Builder:
             "invalid_sample_ids": (),
             "samples": list(self.samples),
         }
+
+
+class _FakeOnnxExporter:
+    def __init__(self):
+        self.calls = []
+
+    def export(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+
+
+class _FakeTorch:
+    def __init__(self):
+        self.onnx = _FakeOnnxExporter()
 
 
 class DisplayF3NeuralTrainingTests(unittest.TestCase):
@@ -144,6 +158,30 @@ class DisplayF3NeuralTrainingTests(unittest.TestCase):
         self.assertEqual(
             "treino_sem_duas_classes_fora_do_h1",
             report["reason"],
+        )
+
+    def test_export_uses_legacy_torchscript_path_without_onnxscript(self):
+        fake_torch = _FakeTorch()
+        model = object()
+        dummy = object()
+
+        _export_onnx_candidate(
+            fake_torch,
+            model,
+            dummy,
+            destination=__import__("pathlib").Path("candidate.onnx"),
+        )
+
+        self.assertEqual(1, len(fake_torch.onnx.calls))
+        args, kwargs = fake_torch.onnx.calls[0]
+        self.assertIs(model, args[0])
+        self.assertIs(dummy, args[1])
+        self.assertEqual("candidate.onnx", args[2])
+        self.assertEqual(13, kwargs["opset_version"])
+        self.assertFalse(kwargs["dynamo"])
+        self.assertEqual(
+            {"segments": {0: "batch"}, "logits": {0: "batch"}},
+            kwargs["dynamic_axes"],
         )
 
     def test_candidate_requires_exact_h1_and_torch_onnx_equivalence(self):
