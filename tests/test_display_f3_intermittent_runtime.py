@@ -17,6 +17,8 @@ def _analysis(
     missing: set[str] | None = None,
     exact_similarity: dict[str, float] | None = None,
     physical_support: set[str] | None = None,
+    *,
+    neural: bool = False,
 ):
     missing = set(missing or set())
     exact_similarity = dict(exact_similarity or {})
@@ -40,6 +42,13 @@ def _analysis(
             }
         )
     analysis = {"ready": True, "mask_results": rows}
+    if neural:
+        analysis.update(
+            neural_visual_authority=True,
+            neural_check_scope="first_two_checks_n2",
+        )
+        for item in rows:
+            item["neural_certain"] = True
     if physical_support:
         analysis.update(
             intermittent_power_support_confirmed_mask_ids=tuple(
@@ -247,6 +256,68 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         self.assertNotIn("MASK_024", state["physical_support_veto_ids"])
         self.assertIn("MASK_024", state["persistent_failed_ids"])
         self.assertEqual(3, state["failure_counts"]["MASK_024"])
+
+    def test_blue_neural_mask_024_off_nao_pode_ser_vetada_por_caminho_convencional(self):
+        runtime = self._runtime()
+        analysis = _analysis(
+            {"MASK_024"},
+            physical_support={"MASK_024"},
+            neural=True,
+        )
+
+        state = None
+        for _ in range(3):
+            state = runtime._display_auto_observe_intermittent_phase(
+                {"intermittent": True},
+                analysis,
+            )
+
+        self.assertEqual("on", state["phase"])
+        self.assertIn("MASK_024", state["persistent_failed_ids"])
+        self.assertNotIn("MASK_024", state["physical_support_veto_ids"])
+        self.assertEqual(3, state["failure_counts"]["MASK_024"])
+
+        effective = runtime._display_auto_apply_intermittent_exact_veto(
+            analysis,
+            state,
+        )
+        by_id = {
+            item["mask_id"]: item
+            for item in effective["mask_results"]
+        }
+        self.assertEqual("off", by_id["MASK_024"]["classified"])
+        self.assertFalse(by_id["MASK_024"]["matched"])
+        self.assertTrue(
+            effective["intermittent_conventional_veto_skipped"]
+        )
+
+    def test_blue_neural_incerto_nao_acumula_defeito_persistente(self):
+        runtime = self._runtime()
+        analysis = _analysis(neural=True)
+        mask_024 = next(
+            item
+            for item in analysis["mask_results"]
+            if item["mask_id"] == "MASK_024"
+        )
+        mask_024.update(
+            classified="uncertain",
+            matched=None,
+            raw_matched=None,
+            confidence=0.55,
+            neural_certain=False,
+        )
+
+        state = None
+        for _ in range(5):
+            state = runtime._display_auto_observe_intermittent_phase(
+                {"intermittent": True},
+                analysis,
+            )
+
+        self.assertEqual("on", state["phase"])
+        self.assertEqual(0, state["failure_counts"].get("MASK_024", 0))
+        self.assertNotIn("MASK_024", state["candidate_failed_ids"])
+        self.assertNotIn("MASK_024", state["persistent_failed_ids"])
 
     def test_defeito_real_sem_suporte_fisico_continua_persistente(self):
         runtime = self._runtime()
