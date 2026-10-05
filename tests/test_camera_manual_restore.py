@@ -340,6 +340,71 @@ class CameraManualRestoreTests(unittest.TestCase):
             service._status_controles_camera["gain"]["status"],
         )
 
+    def test_zoom_readback_ativo_detecta_reset_silencioso_do_driver(self):
+        service = ServiceFake()
+        service._capture = DirectShowAdvancedCaptureFake()
+        service._configuracoes_camera = {
+            "zoom_enabled": True,
+            "zoom": 250.0,
+        }
+        service._camera_live_valores_hardware["zoom"] = 250.0
+
+        # O driver perde o zoom sem passar pelo ODIN.
+        service._capture.props[cv2.CAP_PROP_ZOOM] = 100.0
+
+        valor = service._atualizar_readback_zoom_ativo(
+            service._capture,
+            force=True,
+        )
+
+        self.assertEqual(100.0, valor)
+        self.assertEqual(
+            100.0,
+            service.obter_valores_controles_camera_ao_vivo()["zoom"],
+        )
+
+    def test_zoom_readback_ignora_zero_de_backend_sem_suporte(self):
+        service = ServiceFake()
+        service._capture = DirectShowAdvancedCaptureFake()
+        service._configuracoes_camera = {
+            "zoom_enabled": True,
+            "zoom": 250.0,
+        }
+        service._camera_live_valores_hardware["zoom"] = 250.0
+        service._capture.props[cv2.CAP_PROP_ZOOM] = 0.0
+
+        valor = service._atualizar_readback_zoom_ativo(
+            service._capture,
+            force=True,
+        )
+
+        self.assertIsNone(valor)
+        self.assertEqual(
+            250.0,
+            service.obter_valores_controles_camera_ao_vivo()["zoom"],
+        )
+
+    def test_zoom_readback_nao_consulta_hardware_quando_desabilitado(self):
+        service = ServiceFake()
+        service._capture = DirectShowAdvancedCaptureFake()
+        service._configuracoes_camera = {
+            "zoom_enabled": False,
+            "zoom": 250.0,
+        }
+        service._camera_live_valores_hardware["zoom"] = 250.0
+        service._capture.props[cv2.CAP_PROP_ZOOM] = 100.0
+
+        valor = service._atualizar_readback_zoom_ativo(
+            service._capture,
+            force=True,
+        )
+
+        self.assertIsNone(valor)
+        self.assertEqual(
+            250.0,
+            service.obter_valores_controles_camera_ao_vivo()["zoom"],
+        )
+
     def test_autofocus_e_enviado_ao_driver(self):
         service = ServiceFake()
         service.atualizar_configuracoes_camera_ao_vivo(
