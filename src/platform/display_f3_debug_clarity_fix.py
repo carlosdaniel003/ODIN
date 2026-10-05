@@ -397,8 +397,8 @@ def _report_summary_block(snapshot: dict) -> str:
     lines.extend(
         [
             (
-                "ANÁLISE VISUAL GLOBAL: SOMENTE PRESENÇA/INFORMATIVA • "
-                "não altera OK/NG, máscaras ou avanço do fluxo"
+                "ANÁLISE VISUAL: SOMENTE INFORMATIVA • "
+                "global/presença • não altera OK/NG, máscaras ou avanço do fluxo"
             ),
             f"TEXTO VISUAL ORIGINAL: {raw_visual}",
         ]
