@@ -11,10 +11,12 @@ from scripts.treinar_f3_segmentos_neural import (
     _augment_sample,
     _build_calibration_batch,
     _build_calibration_batch_with_details,
+    _build_mask_state_coverage,
     _calibrate_thresholds_from_logits,
     _export_onnx_candidate,
     _validate_candidate,
     _write_calibration_diagnostics,
+    _write_mask_state_coverage,
     preparar_preflight,
 )
 
@@ -167,6 +169,116 @@ class DisplayF3NeuralTrainingTests(unittest.TestCase):
         self.assertEqual(
             "treino_sem_duas_classes_fora_do_h1",
             report["reason"],
+        )
+
+    def test_mask_state_coverage_finds_validation_state_unseen_in_training(self):
+        samples = [
+            _sample("CHECK_001", "H1", 1, "MASK_001"),
+            _sample("CHECK_001", "H1", 0, "MASK_002"),
+            _sample("CHECK_002", "BLUE", 0, "MASK_001"),
+            _sample("CHECK_002", "BLUE", 1, "MASK_002"),
+            _sample("CHECK_003", "USB", 0, "MASK_001"),
+            _sample("CHECK_003", "USB", 0, "MASK_002"),
+        ]
+        report = _build_mask_state_coverage(
+            _Repository(),
+            "DISPLAY A",
+            samples,
+            train_indices=[2, 3, 4, 5],
+            val_indices=[0, 1],
+        )
+
+        self.assertEqual(2, report["summary"]["mask_count"])
+        self.assertEqual(
+            ["MASK_001"],
+            report["summary"][
+                "validation_state_unseen_in_training_mask_ids"
+            ],
+        )
+        rows = {
+            item["mask_id"]: item
+            for item in report["masks"]
+        }
+        self.assertEqual(
+            ["off"],
+            rows["MASK_001"]["training_states"],
+        )
+        self.assertFalse(
+            rows["MASK_001"][
+                "validation_state_seen_in_training"
+            ]
+        )
+        self.assertEqual(
+            "validation_state_unseen_in_training",
+            rows["MASK_001"]["status"],
+        )
+        self.assertEqual(
+            ["off", "on"],
+            rows["MASK_002"]["training_states"],
+        )
+        self.assertTrue(
+            rows["MASK_002"][
+                "validation_state_seen_in_training"
+            ]
+        )
+
+    def test_mask_state_coverage_is_persisted_as_json(self):
+        samples = [
+            _sample("CHECK_001", "H1", 1, "MASK_001"),
+            _sample("CHECK_002", "BLUE", 0, "MASK_001"),
+            _sample("CHECK_003", "USB", 1, "MASK_001"),
+        ]
+        report = _build_mask_state_coverage(
+            _Repository(),
+            "DISPLAY A",
+            samples,
+            train_indices=[1, 2],
+            val_indices=[0],
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = _write_mask_state_coverage(
+                report,
+                Path(temp) / "coverage.json",
+            )
+            saved = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            "f3_neural_mask_state_coverage_audit",
+            saved["purpose"],
+        )
+        self.assertEqual("MASK_001", saved["masks"][0]["mask_id"])
+        self.assertEqual(
+            {"off": 1, "on": 1},
+            {
+                "off": saved["masks"][0]["training_off_count"],
+                "on": saved["masks"][0]["training_on_count"],
+            },
+        )
+
+    def test_preflight_exposes_mask_state_coverage_summary(self):
+        samples = [
+            _sample("CHECK_001", "H1", 1, "MASK_001"),
+            _sample("CHECK_001", "H1", 0, "MASK_002"),
+            _sample("CHECK_002", "BLUE", 0, "MASK_001"),
+            _sample("CHECK_002", "BLUE", 1, "MASK_002"),
+            _sample("CHECK_003", "USB", 0, "MASK_001"),
+            _sample("CHECK_003", "USB", 0, "MASK_002"),
+        ]
+
+        _dataset, report, _train, _val = preparar_preflight(
+            _Repository(),
+            _Builder(samples),
+            "DISPLAY A",
+        )
+
+        self.assertIn("state_coverage", report)
+        self.assertIn("state_coverage_summary", report)
+        self.assertEqual(
+            1,
+            report["state_coverage_summary"][
+                "validation_state_unseen_in_training_count"
+            ],
         )
 
     def test_export_uses_legacy_torchscript_path_without_onnxscript(self):
