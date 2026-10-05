@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 from types import SimpleNamespace
 
@@ -11,6 +12,10 @@ from src.platform.display_editor_performance import (
 )
 from src.platform.display_check_editor import DisplayCheckMaskEditorWindow
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
+from src.platform.display_f3_tracking_orientation_ui import (
+    F3GeometryEditorInteractionBase,
+    reference_editor_background_cache_key,
+)
 
 
 class DisplayF3EditorPerformanceTests(unittest.TestCase):
@@ -55,6 +60,49 @@ class DisplayF3EditorPerformanceTests(unittest.TestCase):
             DisplayCheckMaskEditorWindow._odin_display_check_editor_performance
         )
         self.assertTrue(hasattr(DisplayCheckMaskEditorWindow, "_odin_update_segment_button"))
+
+    def test_reference_editor_background_cache_changes_only_with_view(self):
+        image = SimpleNamespace(shape=(1080, 1920, 3))
+        key_a = reference_editor_background_cache_key(
+            image,
+            1280,
+            720,
+            0.666667,
+            0.0,
+            0.0,
+        )
+        key_b = reference_editor_background_cache_key(
+            image,
+            1280,
+            720,
+            0.666667,
+            0.0,
+            0.0,
+        )
+        self.assertEqual(key_a, key_b)
+
+        key_zoomed = reference_editor_background_cache_key(
+            image,
+            1280,
+            720,
+            0.8,
+            -120.0,
+            -60.0,
+        )
+        self.assertNotEqual(key_a, key_zoomed)
+
+    def test_reference_editor_render_keeps_full_frame_processing_out_of_pointer_hot_path(self):
+        source = inspect.getsource(F3GeometryEditorInteractionBase.render)
+        self.assertIn("_reference_background_photo_for_view", source)
+        self.assertIn("_draw_reference_geometry_overlay", source)
+        self.assertNotIn("draw_reference_geometry(", source)
+        self.assertNotIn("cv2.warpAffine(", source)
+
+        background_source = inspect.getsource(
+            F3GeometryEditorInteractionBase._reference_background_photo_for_view
+        )
+        self.assertIn("reference_editor_background_cache_key", background_source)
+        self.assertIn("cv2.warpAffine(", background_source)
 
 
 if __name__ == "__main__":
