@@ -282,6 +282,75 @@ class DisplayF3NeuralDatasetTests(unittest.TestCase):
                 )
             )
 
+    def test_builder_rejects_board_off_masks_outside_current_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = self._repository(Path(temp))
+            from src.platform.display_visual_reference_status import (
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                DisplayProjectPresenceReferenceStore,
+            )
+
+            project = repository.carregar_projeto("DISPLAY A")
+            self.assertIsNotNone(project)
+            masks = list(project.get("masks", []) or [])
+            stale_mask = {
+                "id": "MASK_999",
+                "type": "segment",
+                "cx": 80,
+                "cy": 48,
+                "width": 20,
+                "height": 14,
+                "angle": 0.0,
+            }
+            duplicate_mask = dict(masks[0])
+
+            store = DisplayProjectPresenceReferenceStore(repository)
+            self.assertIsNotNone(
+                store.capture(
+                    "DISPLAY A",
+                    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    _frame(22, 24),
+                    (160, 96),
+                )
+            )
+            self.assertTrue(
+                store.save_geometry(
+                    "DISPLAY A",
+                    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    [
+                        [12, 12],
+                        [148, 12],
+                        [148, 84],
+                        [12, 84],
+                    ],
+                    masks + [duplicate_mask, stale_mask],
+                )
+            )
+
+            result = F3NeuralDatasetBuilder(repository).collect(
+                "DISPLAY A"
+            )
+
+            board_off = [
+                sample
+                for sample in result["samples"]
+                if sample.get("check_id") == "BOARD_OFF"
+            ]
+            self.assertEqual(2, result["board_off_sample_count"])
+            self.assertEqual(2, len(board_off))
+            self.assertEqual(
+                {"MASK_001", "MASK_002"},
+                {sample["mask_id"] for sample in board_off},
+            )
+            self.assertEqual(
+                ("MASK_999",),
+                result["board_off_invalid_mask_ids"],
+            )
+            self.assertIn(
+                "BOARD_OFF:MASK_999",
+                result["invalid_sample_ids"],
+            )
+
     def test_builder_does_not_guess_board_off_geometry(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, _h1, _blue = self._repository(Path(temp))
