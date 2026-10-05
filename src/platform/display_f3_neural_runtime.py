@@ -31,6 +31,8 @@ from src.platform.display_check_presence_reference import (
 )
 from src.platform.display_f3_neural_dataset import (
     F3_NEURAL_INPUT_SIZE,
+    F3_NEURAL_MODEL_METADATA_SCHEMA_VERSION,
+    F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE,
     extrair_tensor_segmento_f3,
     f3_neural_model_path_for_repository,
 )
@@ -51,16 +53,16 @@ F3_H1_NEURAL_AUTHORITY = "f3_h1_neural_segment_detector"
 F3_H1_NEURAL_MODEL_TYPE = "f3_segment_on_off_cnn"
 F3_NEURAL_UNCERTAIN_STATE = "uncertain"
 F3_NEURAL_MODEL_REFRESH_S = 1.0
-F3_NEURAL_DEFAULT_ON_MIN_PROBABILITY = 0.80
-F3_NEURAL_DEFAULT_OFF_MAX_ON_PROBABILITY = 0.20
 
 
-def _safe_probability(value, default: float) -> float:
+def _strict_probability(value) -> float | None:
     try:
         number = float(value)
     except (TypeError, ValueError):
-        number = float(default)
-    return max(0.0, min(1.0, number))
+        return None
+    if not np.isfinite(number) or number < 0.0 or number > 1.0:
+        return None
+    return number
 
 
 def _file_signature(path: Path) -> tuple[str, int, int]:
@@ -213,7 +215,7 @@ class F3NeuralSegmentDetector:
                 metadata_schema = int(metadata.get("schema_version", 0) or 0)
             except (TypeError, ValueError):
                 metadata_schema = 0
-            if metadata_schema != 2:
+            if metadata_schema != F3_NEURAL_MODEL_METADATA_SCHEMA_VERSION:
                 self._metadata = metadata
                 self._net = None
                 self._model_signature = model_signature
@@ -382,6 +384,104 @@ class F3NeuralSegmentDetector:
                 }
                 return deepcopy(self._last_status)
 
+            thresholds = (
+                metadata.get("suggested_thresholds")
+                if isinstance(metadata.get("suggested_thresholds"), dict)
+                else {}
+            )
+            calibration = (
+                metadata.get("threshold_calibration")
+                if isinstance(metadata.get("threshold_calibration"), dict)
+                else {}
+            )
+            calibration_source = str(calibration.get("source") or "").strip()
+            if (
+                calibration_source != F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE
+                or calibration.get("separable") is not True
+            ):
+                self._metadata = metadata
+                self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_threshold_calibration_missing",
+                    "project_name": name,
+                    "calibration_source": calibration_source,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
+            on_min = _strict_probability(thresholds.get("on_min_on_probability"))
+            off_max = _strict_probability(thresholds.get("off_max_on_probability"))
+            calibrated_max_off = _strict_probability(
+                calibration.get("max_off_on_probability")
+            )
+            calibrated_min_on = _strict_probability(
+                calibration.get("min_on_on_probability")
+            )
+            calibration_gap = _strict_probability(
+                calibration.get("uncertainty_gap")
+            )
+            class_counts = (
+                calibration.get("class_counts")
+                if isinstance(calibration.get("class_counts"), dict)
+                else {}
+            )
+            try:
+                calibration_samples = int(calibration.get("sample_count", 0) or 0)
+                calibration_references = int(
+                    calibration.get("reference_sample_count", 0) or 0
+                )
+                calibration_augmentations = int(
+                    calibration.get("augmentations_per_reference", 0) or 0
+                )
+                calibration_off_count = int(class_counts.get("off", 0) or 0)
+                calibration_on_count = int(class_counts.get("on", 0) or 0)
+            except (TypeError, ValueError):
+                calibration_samples = 0
+                calibration_references = 0
+                calibration_augmentations = 0
+                calibration_off_count = 0
+                calibration_on_count = 0
+
+            calibration_valid = bool(
+                on_min is not None
+                and off_max is not None
+                and calibrated_max_off is not None
+                and calibrated_min_on is not None
+                and calibration_gap is not None
+                and off_max < on_min
+                and calibrated_max_off < calibrated_min_on
+                and calibration_gap > 0.0
+                and abs(off_max - calibrated_max_off) <= 1e-6
+                and abs(on_min - calibrated_min_on) <= 1e-6
+                and calibration_samples > 0
+                and calibration_references > 0
+                and calibration_augmentations > 0
+                and calibration_off_count > 0
+                and calibration_on_count > 0
+                and calibration_samples
+                == calibration_off_count + calibration_on_count
+            )
+            if not calibration_valid:
+                self._metadata = metadata
+                self._net = None
+                self._model_signature = model_signature
+                self._metadata_signature = metadata_signature
+                self._last_status = {
+                    "ready": False,
+                    "reason": "neural_threshold_calibration_invalid",
+                    "project_name": name,
+                    "calibration_source": calibration_source,
+                    "model_path": str(model_path),
+                    "metadata_path": str(metadata_path),
+                    "load_count": int(self.load_count),
+                }
+                return deepcopy(self._last_status)
+
             try:
                 net = cv2.dnn.readNetFromONNX(str(model_path))
             except Exception as exc:
@@ -415,25 +515,10 @@ class F3NeuralSegmentDetector:
                 or F3_NEURAL_INPUT_SIZE
             ),
         )
-        thresholds = (
-            self._metadata.get("suggested_thresholds")
-            if isinstance(
-                self._metadata.get("suggested_thresholds"),
-                dict,
-            )
-            else {}
-        )
-        on_min = _safe_probability(
-            thresholds.get("on_min_on_probability"),
-            F3_NEURAL_DEFAULT_ON_MIN_PROBABILITY,
-        )
-        off_max = _safe_probability(
-            thresholds.get("off_max_on_probability"),
-            F3_NEURAL_DEFAULT_OFF_MAX_ON_PROBABILITY,
-        )
-        if off_max >= on_min:
-            off_max = F3_NEURAL_DEFAULT_OFF_MAX_ON_PROBABILITY
-            on_min = F3_NEURAL_DEFAULT_ON_MIN_PROBABILITY
+        thresholds = self._metadata["suggested_thresholds"]
+        calibration = self._metadata["threshold_calibration"]
+        on_min = float(thresholds["on_min_on_probability"])
+        off_max = float(thresholds["off_max_on_probability"])
 
         self._last_status = {
             "ready": True,
@@ -445,6 +530,19 @@ class F3NeuralSegmentDetector:
             "input_size": int(input_size),
             "on_min_on_probability": round(float(on_min), 6),
             "off_max_on_probability": round(float(off_max), 6),
+            "threshold_calibration_source": str(
+                calibration.get("source") or ""
+            ),
+            "threshold_calibration_gap": round(
+                float(calibration.get("uncertainty_gap") or 0.0),
+                6,
+            ),
+            "threshold_calibration_sample_count": int(
+                calibration.get("sample_count", 0) or 0
+            ),
+            "threshold_calibration_augmentations_per_reference": int(
+                calibration.get("augmentations_per_reference", 0) or 0
+            ),
             "load_count": int(self.load_count),
         }
         return deepcopy(self._last_status)

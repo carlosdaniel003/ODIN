@@ -39,6 +39,8 @@ import numpy as np
 from src.platform.display_f3_neural_dataset import (
     F3NeuralDatasetBuilder,
     F3_NEURAL_INPUT_SIZE,
+    F3_NEURAL_MODEL_METADATA_SCHEMA_VERSION,
+    F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE,
     f3_neural_model_path_for_repository,
 )
 from src.platform.display_project_repository import (
@@ -48,6 +50,7 @@ from src.platform.display_project_repository import (
 
 F3_NEURAL_REQUIRED_VALIDATION_ACCURACY = 1.0
 F3_NEURAL_REQUIRED_CLASS_ACCURACY = 1.0
+F3_NEURAL_CALIBRATION_AUGMENTATIONS_PER_REFERENCE = 16
 
 
 def _load_torch():
@@ -363,6 +366,122 @@ def _augment_sample(
     )
 
 
+def _softmax_logits(logits: np.ndarray) -> np.ndarray:
+    values = np.asarray(logits, dtype=np.float32)
+    if values.ndim != 2 or values.shape[1] != 2:
+        raise RuntimeError(
+            "Logits de calibração inválidos: "
+            f"shape={tuple(values.shape)}"
+        )
+    values = values - np.max(values, axis=1, keepdims=True)
+    exp = np.exp(values)
+    denominator = np.maximum(
+        np.sum(exp, axis=1, keepdims=True),
+        np.float32(1e-9),
+    )
+    return exp / denominator
+
+
+def _build_calibration_batch(
+    samples: list[dict],
+    indices: list[int],
+    *,
+    augmentations_per_reference: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Monta calibração somente com o H1 mantido fora do treino."""
+    augmentation_count = int(augmentations_per_reference)
+    if augmentation_count < 1:
+        raise RuntimeError(
+            "Calibração neural N1 exige ao menos uma variação por referência."
+        )
+
+    tensors: list[np.ndarray] = []
+    labels: list[int] = []
+    for order, sample_index in enumerate(indices):
+        item = samples[sample_index]
+        tensor = np.asarray(item["tensor"], dtype=np.float32)
+        label = int(item["label"])
+        tensors.append(np.ascontiguousarray(tensor, dtype=np.float32))
+        labels.append(label)
+        for augmentation_index in range(augmentation_count):
+            rng = random.Random(
+                int(seed)
+                + 7000001
+                + int(sample_index) * 9176
+                + int(order) * 104729
+                + int(augmentation_index) * 1009
+            )
+            tensors.append(_augment_sample(tensor, label, rng))
+            labels.append(label)
+
+    if not tensors:
+        raise RuntimeError("Calibração neural N1 ficou sem amostras H1.")
+
+    return (
+        np.ascontiguousarray(np.stack(tensors, axis=0), dtype=np.float32),
+        np.asarray(labels, dtype=np.int64),
+    )
+
+
+def _calibrate_thresholds_from_logits(
+    logits: np.ndarray,
+    labels: np.ndarray,
+    *,
+    reference_sample_count: int,
+    augmentations_per_reference: int,
+) -> dict:
+    """Deriva a banda INCERTO do gap empírico OFF/ON do H1 reservado."""
+    probabilities = _softmax_logits(logits)
+    labels_array = np.asarray(labels, dtype=np.int64).reshape(-1)
+    if probabilities.shape[0] != labels_array.shape[0]:
+        raise RuntimeError(
+            "Calibração neural inconsistente: quantidade de logits e rótulos "
+            "não coincide."
+        )
+
+    p_on = probabilities[:, 1]
+    off_values = p_on[labels_array == 0]
+    on_values = p_on[labels_array == 1]
+    if off_values.size <= 0 or on_values.size <= 0:
+        raise RuntimeError(
+            "Calibração neural N1 exige exemplos OFF e ON no H1 reservado."
+        )
+
+    max_off = float(np.max(off_values))
+    min_on = float(np.min(on_values))
+    gap = float(min_on - max_off)
+    if not np.isfinite(gap) or gap <= 0.0:
+        raise RuntimeError(
+            "Modelo neural não separou OFF/ON nas variações do H1 reservado: "
+            f"max_OFF_P(ON)={max_off:.6f}, min_ON_P(ON)={min_on:.6f}."
+        )
+
+    off_threshold = float(np.nextafter(np.float64(max_off), np.float64(1.0)))
+    on_threshold = float(np.nextafter(np.float64(min_on), np.float64(0.0)))
+    if off_threshold >= on_threshold:
+        raise RuntimeError(
+            "Gap neural de calibração insuficiente após proteção numérica."
+        )
+
+    return {
+        "source": F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE,
+        "separable": True,
+        "reference_sample_count": int(reference_sample_count),
+        "augmentations_per_reference": int(augmentations_per_reference),
+        "sample_count": int(labels_array.size),
+        "class_counts": {
+            "off": int(off_values.size),
+            "on": int(on_values.size),
+        },
+        "max_off_on_probability": max_off,
+        "min_on_on_probability": min_on,
+        "uncertainty_gap": gap,
+        "off_max_on_probability": off_threshold,
+        "on_min_on_probability": on_threshold,
+    }
+
+
 def _build_model(nn):
     class TinyF3SegmentCNN(nn.Module):
         def __init__(self):
@@ -492,24 +611,23 @@ def _export_onnx_candidate(
     )
 
 
-def _validate_candidate(
+def _validate_logit_equivalence(
     *,
     cv_logits: np.ndarray,
     torch_logits: np.ndarray,
-    metrics: dict,
-) -> None:
+    label: str,
+) -> float:
     if cv_logits.shape != torch_logits.shape:
         raise RuntimeError(
-            "ONNX incompatível com OpenCV DNN: "
-            f"saída {tuple(cv_logits.shape)}; "
+            "ONNX incompatível com OpenCV DNN em "
+            f"{label}: saída {tuple(cv_logits.shape)}; "
             f"esperado {tuple(torch_logits.shape)}"
         )
     if cv_logits.ndim != 2 or cv_logits.shape[1] != 2:
         raise RuntimeError(
-            "ONNX incompatível com OpenCV DNN: "
-            f"saída {tuple(cv_logits.shape)}"
+            "ONNX incompatível com OpenCV DNN em "
+            f"{label}: saída {tuple(cv_logits.shape)}"
         )
-
     max_abs_diff = float(
         np.max(np.abs(cv_logits - torch_logits))
         if cv_logits.size
@@ -517,9 +635,23 @@ def _validate_candidate(
     )
     if max_abs_diff > 1e-4:
         raise RuntimeError(
-            "ONNX divergiu do modelo PyTorch acima da tolerância: "
-            f"max_abs_diff={max_abs_diff:.8f}"
+            "ONNX divergiu do modelo PyTorch acima da tolerância em "
+            f"{label}: max_abs_diff={max_abs_diff:.8f}"
         )
+    return max_abs_diff
+
+
+def _validate_candidate(
+    *,
+    cv_logits: np.ndarray,
+    torch_logits: np.ndarray,
+    metrics: dict,
+) -> None:
+    _validate_logit_equivalence(
+        cv_logits=cv_logits,
+        torch_logits=torch_logits,
+        label="validação H1 original",
+    )
 
     if float(metrics.get("accuracy", 0.0)) < F3_NEURAL_REQUIRED_VALIDATION_ACCURACY:
         raise RuntimeError(
@@ -763,6 +895,18 @@ def treinar(args) -> dict:
         samples,
         val_indices,
     )
+    calibration_batch, calibration_labels = _build_calibration_batch(
+        samples,
+        val_indices,
+        augmentations_per_reference=int(
+            args.calibration_augmentations_per_reference
+        ),
+        seed=int(args.seed),
+    )
+    with torch.no_grad():
+        torch_calibration_logits = (
+            model(torch.from_numpy(calibration_batch)).cpu().numpy()
+        )
 
     output.parent.mkdir(parents=True, exist_ok=True)
     staging_model = None
@@ -808,11 +952,27 @@ def treinar(args) -> dict:
             metrics=validation_metrics,
         )
 
+        net.setInput(calibration_batch)
+        cv_calibration_logits = np.asarray(net.forward(), dtype=np.float32)
+        calibration_onnx_diff = _validate_logit_equivalence(
+            cv_logits=cv_calibration_logits,
+            torch_logits=torch_calibration_logits,
+            label="calibração H1 aumentada",
+        )
+        threshold_calibration = _calibrate_thresholds_from_logits(
+            cv_calibration_logits,
+            calibration_labels,
+            reference_sample_count=len(val_indices),
+            augmentations_per_reference=int(
+                args.calibration_augmentations_per_reference
+            ),
+        )
+
         onnx_sha256 = _sha256_file(staging_model)
         metadata_path = output.with_suffix(".json")
         manifest = builder.manifest(str(dataset["project_name"]))
         metadata = {
-            "schema_version": 2,
+            "schema_version": F3_NEURAL_MODEL_METADATA_SCHEMA_VERSION,
             "model_type": "f3_segment_on_off_cnn",
             "project_name": str(dataset["project_name"]),
             "onnx_path": str(output),
@@ -829,9 +989,14 @@ def treinar(args) -> dict:
                 "on": 1,
             },
             "suggested_thresholds": {
-                "off_max_on_probability": 0.20,
-                "on_min_on_probability": 0.80,
+                "off_max_on_probability": threshold_calibration[
+                    "off_max_on_probability"
+                ],
+                "on_min_on_probability": threshold_calibration[
+                    "on_min_on_probability"
+                ],
             },
+            "threshold_calibration": threshold_calibration,
             "dataset": {
                 "source": manifest.get("source"),
                 "sample_count": manifest.get("sample_count"),
@@ -869,6 +1034,9 @@ def treinar(args) -> dict:
                     if cv_logits.size
                     else 0.0
                 ),
+                "calibration_onnx_vs_torch_max_abs_diff": float(
+                    calibration_onnx_diff
+                ),
                 "accepted_for_physical_h1_retest": True,
             },
             "training": {
@@ -877,12 +1045,17 @@ def treinar(args) -> dict:
                 "epochs_completed": len(history),
                 "batch_size": int(args.batch_size),
                 "learning_rate": float(args.learning_rate),
+                "calibration_augmentations_per_reference": int(
+                    args.calibration_augmentations_per_reference
+                ),
                 "history": history,
             },
             "note": (
-                "H1 ficou integralmente fora do treino e atingiu 100% nas "
-                "máscaras configuradas antes da promoção do ONNX. Isso ainda "
-                "não substitui o reteste físico de produção."
+                "H1 ficou integralmente fora do treino. A promoção exige "
+                "100% nas máscaras originais e separação OFF/ON também nas "
+                "variações de calibração; os extremos observados delimitam "
+                "a faixa INCERTO. Isso ainda não substitui o reteste físico "
+                "de produção."
             ),
         }
 
@@ -929,6 +1102,12 @@ def treinar(args) -> dict:
         "Classes H1: "
         f"OFF={validation_metrics['class_accuracy']['off'] * 100:.1f}% "
         f"ON={validation_metrics['class_accuracy']['on'] * 100:.1f}%"
+    )
+    print(
+        "Calibração H1: "
+        f"OFF<=P(ON) {threshold_calibration['off_max_on_probability']:.6f} | "
+        f"ON>=P(ON) {threshold_calibration['on_min_on_probability']:.6f} | "
+        f"gap={threshold_calibration['uncertainty_gap']:.6f}"
     )
     print(
         "Artefato liberado para RETESTE FÍSICO H1; "
@@ -979,6 +1158,15 @@ def _parse_args():
     )
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument(
+        "--calibration-augmentations-per-reference",
+        type=int,
+        default=F3_NEURAL_CALIBRATION_AUGMENTATIONS_PER_REFERENCE,
+        help=(
+            "Variações determinísticas por segmento do H1 reservado usadas "
+            "somente para calibrar a faixa OFF/INCERTO/ON."
+        ),
+    )
     parser.add_argument(
         "--input-size",
         type=int,

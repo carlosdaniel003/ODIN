@@ -870,6 +870,21 @@ class DisplayAutomaticCheckF3Mixin:
                 if item.get("matched") is False
             )
         )
+        neural_visual_authority = bool(
+            analysis.get("neural_visual_authority") is True
+        )
+        neural_uncertain_mask_ids = tuple(
+            sorted(
+                str(item.get("mask_id"))
+                for item in rows
+                if neural_visual_authority
+                and (
+                    item.get("neural_certain") is False
+                    or str(item.get("classified") or "").strip().lower()
+                    == "uncertain"
+                )
+            )
+        )
 
         analysis["ui_judgement_ready"] = bool(judgement_ready)
         if not bool(judgement_ready):
@@ -884,6 +899,8 @@ class DisplayAutomaticCheckF3Mixin:
             analysis["effective_failed_mask_ids"] = ()
             analysis["effective_confirmed_failed_mask_ids"] = ()
             analysis["effective_validating_mask_ids"] = ()
+            analysis["effective_uncertain_mask_ids"] = ()
+            analysis["effective_uncertain_mask_count"] = 0
             analysis["effective_active_mask_count"] = len(rows)
             analysis["effective_matched_mask_count"] = 0
             analysis["ui_mask_authority"] = (
@@ -925,10 +942,15 @@ class DisplayAutomaticCheckF3Mixin:
         analysis["effective_validating_mask_ids"] = tuple(
             sorted(validating)
         )
+        analysis["effective_uncertain_mask_ids"] = neural_uncertain_mask_ids
+        analysis["effective_uncertain_mask_count"] = len(
+            neural_uncertain_mask_ids
+        )
         analysis["effective_active_mask_count"] = len(rows)
-        analysis["effective_matched_mask_count"] = max(
-            0,
-            len(rows) - len(raw_failed_mask_ids),
+        analysis["effective_matched_mask_count"] = (
+            sum(1 for item in rows if item.get("matched") is True)
+            if neural_visual_authority
+            else max(0, len(rows) - len(raw_failed_mask_ids))
         )
         analysis["ui_mask_authority"] = "effective_mask_results_v1"
         analysis["ui_judgement_gate_reason"] = "primeiro_segmento_aceso_confirmado"

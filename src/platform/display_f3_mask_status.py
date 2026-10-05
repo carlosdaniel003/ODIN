@@ -81,6 +81,7 @@ def formatar_status_mascaras_f3(
         DISPLAY_CHECK_STATE_ON: 0,
         DISPLAY_CHECK_STATE_OFF: 0,
         DISPLAY_AUTO_CLASS_LOW_LIGHT: 0,
+        "uncertain": 0,
     }
     effective_classifications = analysis.get(
         "effective_classifications"
@@ -117,11 +118,23 @@ def formatar_status_mascaras_f3(
                 "POUCA LUZ",
             )
         )
+    if counts["uncertain"]:
+        readings.append(
+            _plural_count(counts["uncertain"], "INCERTO", "INCERTOS")
+        )
     if not readings:
         readings.append("SEM CLASSIFICAÇÃO")
 
     detected = total > 0 and matched == total
-    state_text = "DETECTADO" if detected else "NÃO CONFIRMADO"
+    neural_indeterminate = bool(
+        analysis.get("neural_visual_authority") is True
+        and counts["uncertain"] > 0
+    )
+    state_text = (
+        "INDETERMINADO"
+        if neural_indeterminate
+        else ("DETECTADO" if detected else "NÃO CONFIRMADO")
+    )
     detail = " • ".join(readings)
 
     signature = analysis.get("segment_signature")

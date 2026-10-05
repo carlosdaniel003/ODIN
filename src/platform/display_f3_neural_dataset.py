@@ -37,6 +37,10 @@ from src.platform.display_project_repository import (
 
 
 F3_NEURAL_DATASET_SCHEMA_VERSION = 1
+F3_NEURAL_MODEL_METADATA_SCHEMA_VERSION = 3
+F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE = (
+    "held_out_h1_augmented_probability_gap"
+)
 F3_NEURAL_INPUT_SIZE = 48
 F3_NEURAL_CONTEXT_RATIO = 0.65
 F3_NEURAL_LABELS = {
