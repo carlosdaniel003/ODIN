@@ -23,7 +23,7 @@ from src.platform.display_f3_neural_dataset import (
     f3_neural_model_path_for_repository,
 )
 from src.platform.display_f3_neural_runtime import (
-    F3H1NeuralAnalyzer,
+    F3NeuralCheckAnalyzer,
     F3NeuralSegmentDetector,
 )
 from src.platform.display_f3_runtime_authorities import (
@@ -538,7 +538,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             repository, h1, _blue = _repository(
                 Path(temp)
             )
-            analyzer = F3H1NeuralAnalyzer(
+            analyzer = F3NeuralCheckAnalyzer(
                 repository
             )
             analyzer.neural_detector.prepare = Mock(
@@ -680,7 +680,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             repository, h1, _blue = _repository(
                 Path(temp)
             )
-            analyzer = F3H1NeuralAnalyzer(
+            analyzer = F3NeuralCheckAnalyzer(
                 repository
             )
             analyzer.neural_detector.prepare = Mock(
@@ -712,18 +712,63 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertTrue(result["neural_visual_authority"])
             conventional.assert_not_called()
 
-    def test_non_migrated_blue_still_delegates_to_conventional_analyzer(self):
+    def test_blue_uses_neural_batch_as_only_visual_authority(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, _h1, blue = _repository(
                 Path(temp)
             )
-            analyzer = F3H1NeuralAnalyzer(
+            analyzer = F3NeuralCheckAnalyzer(
+                repository
+            )
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(
+                    ["off", "on"]
+                )
+            )
+
+            with patch.object(
+                F3SameMaskReferenceAnalyzer,
+                "analyze",
+                side_effect=AssertionError(
+                    "BLUE neural must not call conventional analyzer"
+                ),
+            ) as conventional:
+                result = analyzer.analyze(
+                    _frame(),
+                    "DISPLAY A",
+                    blue["id"],
+                )
+
+            self.assertTrue(result["ready"])
+            self.assertTrue(result["approved"])
+            self.assertTrue(result["neural_visual_authority"])
+            self.assertEqual(1, result["neural_check_index"])
+            self.assertEqual("N2", result["neural_stage"])
+            self.assertEqual(
+                neural_module.F3_NEURAL_CHECK_SCOPE,
+                result["neural_check_scope"],
+            )
+            self.assertFalse(
+                result["conventional_visual_authority_used"]
+            )
+            conventional.assert_not_called()
+
+    def test_usb_still_delegates_to_conventional_analyzer(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = _repository(
+                Path(temp)
+            )
+            usb = repository.listar_checks("DISPLAY A")[2]
+            analyzer = F3NeuralCheckAnalyzer(
                 repository
             )
             expected = {
                 "ready": True,
                 "approved": True,
-                "source": "conventional-blue",
+                "source": "conventional-usb",
             }
             with patch.object(
                 F3SameMaskReferenceAnalyzer,
@@ -733,7 +778,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                 result = analyzer.analyze(
                     _frame(),
                     "DISPLAY A",
-                    blue["id"],
+                    usb["id"],
                 )
 
             self.assertIs(expected, result)
@@ -744,7 +789,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             "ready": True,
             "approved": False,
             "neural_visual_authority": True,
-            "neural_check_scope": "first_check_only",
+            "neural_check_scope": neural_module.F3_NEURAL_CHECK_SCOPE,
             "mask_results": [
                 {
                     "mask_id": "MASK_001",
@@ -817,24 +862,24 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
 
             self.assertIsInstance(
                 owner.analyzer.semantic,
-                F3H1NeuralAnalyzer,
+                F3NeuralCheckAnalyzer,
             )
 
-    def test_exact_probe_is_observer_only_for_migrated_first_check(self):
+    def test_exact_probe_is_observer_only_for_migrated_blue(self):
         old = getattr(
             runtime_module,
-            "_display_f3_h1_neural_authority",
+            "_display_f3_neural_authority",
             None,
         )
-        runtime_module._display_f3_h1_neural_authority = True
+        runtime_module._display_f3_neural_authority = True
         try:
             result = trace_module._advance_positive_probe_if_needed(
                 SimpleNamespace(),
                 {
                     "project_name": "DISPLAY A",
-                    "check_id": "CHECK_001",
-                    "check_name": "H1",
-                    "current_index": 0,
+                    "check_id": "CHECK_002",
+                    "check_name": "BLUE",
+                    "current_index": 1,
                 },
                 {"ready": True, "approved": True},
                 {"confirm": True},
@@ -844,17 +889,17 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                 try:
                     delattr(
                         runtime_module,
-                        "_display_f3_h1_neural_authority",
+                        "_display_f3_neural_authority",
                     )
                 except AttributeError:
                     pass
             else:
-                runtime_module._display_f3_h1_neural_authority = old
+                runtime_module._display_f3_neural_authority = old
 
         self.assertFalse(result["advanced"])
         self.assertTrue(result["observer_only"])
         self.assertEqual(
-            "h1_neural_owns_check_decision",
+            "neural_check_owns_check_decision",
             result["reason"],
         )
 
@@ -888,7 +933,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             DesktopProductionApp.__init__
         )
         neural_position = source.index(
-            "instalar_autoridade_neural_h1_display_f3()"
+            "instalar_autoridade_neural_h1_blue_display_f3()"
         )
         photo_position = source.index(
             "instalar_aprendizado_foto_check_display_f3()"
