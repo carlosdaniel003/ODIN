@@ -2790,6 +2790,43 @@ configuração persistida
 Assim, uma reinicialização silenciosa do zoom pelo driver não deixa o F3 preso
 na falsa condição "zoom já aplicado".
 
+### Complemento de implementação — 05/10/2026
+
+O reteste físico mostrou que o zoom da câmera ainda podia se desfazer. A revisão
+do caminho real encontrou uma lacuna na primeira implementação da D-054:
+`obter_valores_controles_camera_ao_vivo()` expunha o último readback armazenado
+durante a aplicação do controle, mas esse valor **não era atualizado novamente**
+se o driver alterasse `CAP_PROP_ZOOM` sozinho depois disso.
+
+Portanto, um estado como:
+
+```text
+comando enviado = 250
+cache de readback = 250
+hardware reseta silenciosamente para 100
+cache continua = 250
+```
+
+fazia a assinatura lógica parecer válida e impedia a recuperação prevista pela
+própria D-054.
+
+O contrato é complementado sem criar nova autoridade:
+
+1. enquanto o zoom manual está habilitado, o serviço canônico de câmera atualiza
+   periodicamente o readback de `CAP_PROP_ZOOM`;
+2. essa leitura ocorre na **mesma thread canônica de captura**, preservando a
+   afinidade do `VideoCapture`;
+3. a leitura é limitada em cadência e não cria `after()`, timer, worker,
+   scheduler ou segunda câmera;
+4. valores fora da faixa configurada, como `0` retornado por backend sem
+   suporte, não substituem um readback válido nem provocam loop de reaplicação;
+5. o F3 continua sendo apenas consumidor desse readback: se o valor real diverge
+   do Projeto Display, reutiliza o mesmo caminho canônico já existente para
+   reaplicar zoom/pan/tilt.
+
+Assim, a D-054 passa a depender de **readback fresco do hardware**, e não apenas
+do último valor lido durante uma escrita anterior.
+
 ### Regressões automatizadas
 
 Foram adicionados testes para:
@@ -3338,13 +3375,11 @@ A base neural foi dividida em duas entregas antes da validação física:
   `F3H1NeuralAnalyzer` + `F3NeuralSegmentDetector`; as máscaras ativas são
   inferidas em um único batch pelo OpenCV DNN. BLUE/USB/AUX continuam no
   analisador convencional.
-- **N1.3 — treino real controlado:** pipeline implementado e aguardando execução
-  sobre os arquivos locais do projeto real. O primeiro CHECK fica integralmente
-  fora do treino e é usado como validação independente; segmentos recortados da
-  mesma foto não podem aparecer simultaneamente em treino e validação. O ONNX só
-  é promovido ao caminho produtivo quando reproduz 100% das máscaras ON/OFF do
-  primeiro CHECK mantido fora do treino e o resultado OpenCV DNN é equivalente
-  ao modelo PyTorch exportado.
+- **N1.3 — treino real controlado:** executada no Projeto Display real
+  `CM_500_L`. O primeiro CHECK permaneceu integralmente fora do treino como
+  validação independente; o artefato `cm_500_l_segments.onnx` foi aceito pelo
+  gate offline e promovido ao runtime produtivo somente após cumprir o contrato
+  de validação/compatibilidade do pipeline N1.3.
 - O artefato neural é **fail-closed**: modelo/metadados ausentes ou incompatíveis
   deixam o H1 indisponível e não reativam o classificador convencional como
   fallback. O runtime também exige schema de metadados N1.3, SHA-256 do ONNX e
@@ -3361,10 +3396,42 @@ A base neural foi dividida em duas entregas antes da validação física:
   display ligado; uma leitura totalmente escura continua aguardando evidência
   de energia em vez de virar falso NG.
 
-**Validação física N1:** pendente. O próximo passo operacional é executar o
-preflight e o treino N1.3 na máquina que contém as fotos/configurações reais do
-Projeto Display. Somente depois de o artefato ser aceito pelo gate offline deve
-ser iniciado o reteste físico do H1.
+### Marco de migração real — 05/10/2026
+
+O primeiro reteste físico com o artefato promovido confirmou que a migração não
+é apenas arquitetura planejada: o **H1 já está executando com autoridade neural
+real no runtime**.
+
+O snapshot produtivo registrou:
+
+```text
+reference_authority=f3_h1_neural_segment_detector
+neural_visual_authority=true
+conventional_visual_authority_used=false
+neural_batch_size=28
+neural_model.ready=true
+```
+
+Consequência arquitetural consolidada:
+
+- **H1:** a decisão visual ON/OFF pertence à CNN/ONNX; o classificador
+  convencional não aprova, reprova nem veta em paralelo;
+- **BLUE / USB / AUX:** permanecem temporariamente no caminho convencional até
+  a migração individual de cada CHECK ser autorizada;
+- presença, energia, geometria/pose, sequência, resultado terminal e rearme
+  continuam fora da rede e preservam seus proprietários canônicos;
+- o caminho convencional do H1 passa a ser legado sem autoridade produtiva e
+  deverá ser removido quando não houver mais consumidor necessário.
+
+O primeiro H1 físico correto não foi aprovado ainda porque as 28 saídas ficaram
+na faixa `INCERTO` com os limiares conservadores `OFF<=0.20` e `ON>=0.80`.
+Isso é um problema de calibração/robustez neural, **não um retorno ao
+classificador convencional**.
+
+**Validação física N1:** EM ANDAMENTO. A migração de autoridade do H1 foi
+confirmada; a aceitação produtiva ainda depende de calibrar/validar o modelo
+contra H1 correto, segmento apagado, reflexo, deslocamento e variação de
+iluminação antes de migrar BLUE.
 
 ### Objetivos de robustez
 
