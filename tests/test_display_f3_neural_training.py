@@ -4,6 +4,8 @@ import unittest
 import numpy as np
 
 from scripts.treinar_f3_segmentos_neural import (
+    _build_calibration_batch,
+    _calibrate_thresholds_from_logits,
     _export_onnx_candidate,
     _validate_candidate,
     preparar_preflight,
@@ -183,6 +185,81 @@ class DisplayF3NeuralTrainingTests(unittest.TestCase):
             {"segments": {0: "batch"}, "logits": {0: "batch"}},
             kwargs["dynamic_axes"],
         )
+
+    def test_calibration_derives_uncertain_band_from_held_out_h1_gap(self):
+        logits = np.asarray(
+            [
+                [1.4, 0.0],
+                [0.8, 0.0],
+                [0.0, 0.7],
+                [0.0, 1.6],
+            ],
+            dtype=np.float32,
+        )
+        labels = np.asarray([0, 0, 1, 1], dtype=np.int64)
+
+        calibration = _calibrate_thresholds_from_logits(
+            logits,
+            labels,
+            reference_sample_count=4,
+            augmentations_per_reference=2,
+        )
+
+        self.assertTrue(calibration["separable"])
+        self.assertEqual(
+            "held_out_h1_augmented_probability_gap",
+            calibration["source"],
+        )
+        self.assertLess(
+            calibration["off_max_on_probability"],
+            calibration["on_min_on_probability"],
+        )
+        self.assertGreater(calibration["uncertainty_gap"], 0.0)
+        self.assertEqual({"off": 2, "on": 2}, calibration["class_counts"])
+
+    def test_calibration_rejects_overlapping_h1_probability_distributions(self):
+        logits = np.asarray(
+            [
+                [0.0, 1.0],
+                [1.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+        labels = np.asarray([0, 1], dtype=np.int64)
+
+        with self.assertRaisesRegex(RuntimeError, "não separou OFF/ON"):
+            _calibrate_thresholds_from_logits(
+                logits,
+                labels,
+                reference_sample_count=2,
+                augmentations_per_reference=1,
+            )
+
+    def test_calibration_batch_is_deterministic_and_keeps_h1_labels(self):
+        samples = [
+            _sample("CHECK_001", "H1", 0, "MASK_001"),
+            _sample("CHECK_001", "H1", 1, "MASK_002"),
+        ]
+        samples[0]["tensor"][0] = 0.2
+        samples[1]["tensor"][1] = 0.8
+
+        first_batch, first_labels = _build_calibration_batch(
+            samples,
+            [0, 1],
+            augmentations_per_reference=2,
+            seed=42,
+        )
+        second_batch, second_labels = _build_calibration_batch(
+            samples,
+            [0, 1],
+            augmentations_per_reference=2,
+            seed=42,
+        )
+
+        self.assertEqual((6, 4, 48, 48), first_batch.shape)
+        self.assertEqual([0, 0, 0, 1, 1, 1], first_labels.tolist())
+        np.testing.assert_array_equal(first_labels, second_labels)
+        np.testing.assert_allclose(first_batch, second_batch)
 
     def test_candidate_requires_exact_h1_and_torch_onnx_equivalence(self):
         logits = np.asarray(

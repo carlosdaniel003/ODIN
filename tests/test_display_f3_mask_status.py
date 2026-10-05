@@ -99,6 +99,52 @@ class DisplayF3MaskStatusTests(unittest.TestCase):
         self.assertIn("1 ACESO", text)
         self.assertIn("1 APAGADO", text)
 
+    def test_status_neural_mostra_incerto_sem_fabricar_28_de_28(self):
+        context = {
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "h1",
+            "check_name": "H1",
+        }
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "project_name": "DISPLAY_TESTE",
+            "check_id": "h1",
+            "check_name": "H1",
+            "neural_visual_authority": True,
+            "active_mask_count": 3,
+            "matched_mask_count": 1,
+            "effective_matched_mask_count": 1,
+            "effective_classifications": {
+                "MASK_001": "on",
+                "MASK_002": "uncertain",
+                "MASK_003": "uncertain",
+            },
+            "effective_uncertain_mask_count": 2,
+            "mask_results": [
+                {"mask_id": "MASK_001", "classified": "on", "matched": True},
+                {
+                    "mask_id": "MASK_002",
+                    "classified": "uncertain",
+                    "matched": None,
+                },
+                {
+                    "mask_id": "MASK_003",
+                    "classified": "uncertain",
+                    "matched": None,
+                },
+            ],
+        }
+
+        text, color = formatar_status_mascaras_f3(analysis, context)
+
+        self.assertIn("MÁSCARAS • H1 INDETERMINADO", text)
+        self.assertIn("1/3 CONFORMES", text)
+        self.assertIn("1 ACESO", text)
+        self.assertIn("2 INCERTOS", text)
+        self.assertNotIn("3/3 CONFORMES", text)
+        self.assertEqual(F3_MASK_STATUS_COLORS["partial"], color)
+
     def test_status_expoe_blue_bluf_quando_assinatura_diverge(self):
         context = {
             "project_name": "DISPLAY_TESTE",

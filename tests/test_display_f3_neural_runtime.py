@@ -189,7 +189,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             model_path.with_suffix(".json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 2,
+                        "schema_version": 3,
                         "model_type": "f3_segment_on_off_cnn",
                         "project_name": "DISPLAY A",
                         "input_size": 48,
@@ -206,8 +206,26 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                             "on": 1,
                         },
                         "suggested_thresholds": {
-                            "off_max_on_probability": 0.20,
-                            "on_min_on_probability": 0.80,
+                            "off_max_on_probability": 0.48,
+                            "on_min_on_probability": 0.62,
+                        },
+                        "threshold_calibration": {
+                            "source": (
+                                "held_out_h1_augmented_probability_gap"
+                            ),
+                            "separable": True,
+                            "reference_sample_count": 2,
+                            "augmentations_per_reference": 4,
+                            "sample_count": 10,
+                            "class_counts": {
+                                "off": 5,
+                                "on": 5,
+                            },
+                            "max_off_on_probability": 0.48,
+                            "min_on_on_probability": 0.62,
+                            "uncertainty_gap": 0.14,
+                            "off_max_on_probability": 0.48,
+                            "on_min_on_probability": 0.62,
                         },
                     }
                 ),
@@ -258,6 +276,12 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertEqual(1, loader.call_count)
             self.assertEqual(1, detector.load_count)
             self.assertEqual(2, detector.inference_count)
+            self.assertEqual(0.48, first["off_max_on_probability"])
+            self.assertEqual(0.62, first["on_min_on_probability"])
+            self.assertEqual(
+                "held_out_h1_augmented_probability_gap",
+                first["threshold_calibration_source"],
+            )
 
     def test_detector_rejects_artifact_without_held_out_h1_acceptance(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -279,7 +303,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             model_path.with_suffix(".json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 2,
+                        "schema_version": 3,
                         "model_type": "f3_segment_on_off_cnn",
                         "project_name": "DISPLAY A",
                         "input_size": 48,
@@ -332,7 +356,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             model_path.with_suffix(".json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 2,
+                        "schema_version": 3,
                         "model_type": "f3_segment_on_off_cnn",
                         "project_name": "DISPLAY A",
                         "input_size": 48,
@@ -436,6 +460,102 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                     for item in batch
                 )
             )
+
+    def test_detector_rejects_schema3_without_calibrated_threshold_contract(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            model_path = f3_neural_model_path_for_repository(
+                repository,
+                "DISPLAY A",
+            )
+            model_path.parent.mkdir(parents=True, exist_ok=True)
+            model_path.write_bytes(b"fake-onnx")
+            model_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
+            model_path.with_suffix(".json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 3,
+                        "model_type": "f3_segment_on_off_cnn",
+                        "project_name": "DISPLAY A",
+                        "input_size": 48,
+                        "onnx_sha256": model_hash,
+                        "split": {
+                            "strategy": "hold_out_first_check_for_n1",
+                            "validation_check_id": h1["id"],
+                        },
+                        "validation": {
+                            "accepted_for_physical_h1_retest": True,
+                        },
+                        "labels": {
+                            "off": 0,
+                            "on": 1,
+                        },
+                        "suggested_thresholds": {
+                            "off_max_on_probability": 0.20,
+                            "on_min_on_probability": 0.80,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(
+                neural_module.cv2.dnn,
+                "readNetFromONNX",
+            ) as loader:
+                status = F3NeuralSegmentDetector(repository).prepare(
+                    "DISPLAY A"
+                )
+
+            self.assertFalse(status["ready"])
+            self.assertEqual(
+                "neural_threshold_calibration_missing",
+                status["reason"],
+            )
+            loader.assert_not_called()
+
+    def test_neural_effective_ui_does_not_count_uncertain_as_conforming(self):
+        analysis = {
+            "ready": True,
+            "neural_visual_authority": True,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_001",
+                    "classified": "on",
+                    "matched": True,
+                    "neural_certain": True,
+                },
+                {
+                    "mask_id": "MASK_002",
+                    "classified": "uncertain",
+                    "matched": None,
+                    "neural_certain": False,
+                },
+                {
+                    "mask_id": "MASK_003",
+                    "classified": "uncertain",
+                    "matched": None,
+                    "neural_certain": False,
+                },
+            ],
+        }
+
+        published = (
+            DisplayAutomaticCheckF3Mixin
+            ._display_auto_publish_effective_ui_authority(analysis)
+        )
+
+        self.assertEqual(1, published["effective_matched_mask_count"])
+        self.assertEqual(2, published["effective_uncertain_mask_count"])
+        self.assertEqual(
+            ("MASK_002", "MASK_003"),
+            published["effective_uncertain_mask_ids"],
+        )
+        self.assertEqual((), published["effective_failed_mask_ids"])
+        self.assertEqual(
+            "uncertain",
+            published["effective_classifications"]["MASK_002"],
+        )
 
     def test_missing_h1_model_never_falls_back_to_conventional_analyzer(self):
         with tempfile.TemporaryDirectory() as temp:
