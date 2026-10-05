@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 import src.platform.display_auto_check_runtime as runtime_module
+from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 import src.platform.display_f3_live_diagnostic_trace as trace_module
 import src.platform.display_f3_neural_runtime as neural_module
 from src.platform.desktop_production_app import DesktopProductionApp
@@ -618,6 +619,31 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             "h1_neural_owns_check_decision",
             result["reason"],
         )
+
+    def test_neural_h1_bypasses_only_legacy_first_on_judgement_gate(self):
+        source = inspect.getsource(
+            DisplayAutomaticCheckF3Mixin._process_display_auto_check
+        )
+        self.assertIn("neural_reference_authority", source)
+        self.assertIn(
+            'analysis.get("neural_visual_authority") is True',
+            source,
+        )
+        self.assertIn(
+            '"reference_judgement_owner"',
+            source,
+        )
+        self.assertIn(
+            '"neural_visual_authority"',
+            source,
+        )
+        self.assertIn(
+            "else reference_power_evidence",
+            source,
+        )
+        # A policy neural continua responsável por INCERTO/OK/NG; o bypass
+        # remove apenas a trava óptica convencional do primeiro segmento ON.
+        self.assertIn("decidir_analise_display_f3(", source)
 
     def test_bootstrap_installs_neural_authority_after_conventional_layers(self):
         source = inspect.getsource(
