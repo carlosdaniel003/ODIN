@@ -6069,3 +6069,88 @@ usados como prova de robustez depois da atualização.
    iluminação, segmento ON apagado e reflexo em OFF.
 
 **BLUE neural:** ainda não autorizado.
+
+---
+
+## 05/10/2026 — N1.7 H1 neural: terceira placa OK aprovada e placa NG rejeitada
+
+**Resultado:** PASS FÍSICO DO H1 NEURAL EM PLACA INDEPENDENTE + DETECÇÃO NG
+CONFIRMADA.
+
+### Contexto
+
+Após a calibração física multi-frame definida em D-063, o artefato do projeto
+`CM_500_L` passou a usar evidência física acumulada de duas placas corretas:
+
+```text
+10 frames físicos
+280 observações
+OFF <= P(ON) 0.660738
+ON  >= P(ON) 0.809613
+gap = +0.148875
+```
+
+A CNN/ONNX permaneceu a mesma. A atualização foi apenas de metadata/calibração;
+o H1 continuou fora da otimização.
+
+### Validação independente
+
+Foi usada uma terceira placa correta que não participou da calibração.
+
+Resultado informado no teste físico:
+
+```text
+placa OK
+H1 correto
+→ APROVADA COM SUCESSO
+```
+
+Na mesma etapa foi colocada também uma placa realmente NG:
+
+```text
+placa NG
+→ REPROVADA COM SUCESSO
+```
+
+Portanto o melhor estado físico alcançado até esta etapa é:
+
+- H1 correto de placa independente aceito;
+- placa NG rejeitada;
+- autoridade neural do H1 operando no runtime produtivo;
+- calibração física baseada em mais de uma placa;
+- `INCERTO` preservado como fail-closed fora das regiões calibradas;
+- nenhuma volta ao classificador convencional como autoridade do H1.
+
+### Escopo da autoridade nesta etapa
+
+A migração neural continua **somente no H1**.
+
+```text
+H1        → autoridade visual neural
+BLUE      → autoridade visual convencional
+USB       → autoridade visual convencional
+AUX       → autoridade visual convencional
+```
+
+Presença, energia, sequência de CHECKS, rearme, resultado terminal e UI
+continuam com seus proprietários canônicos. A CNN decide os estados ON/OFF das
+28 máscaras apenas no CHECK H1; a comparação com o `mask_states` e a decisão
+de sequência permanecem determinísticas.
+
+### Estado
+
+```text
+H1 neural nominal em placa independente   PASS
+H1 neural rejeitando placa NG             PASS
+CNN retreinada nesta validação             NÃO
+ONNX alterado                              NÃO
+calibração física                          2 placas / 10 frames
+BLUE neural                                NÃO
+USB neural                                 NÃO
+AUX neural                                 NÃO
+```
+
+Este resultado valida o H1 em um nível físico significativamente superior aos
+retestes anteriores. Ainda não autoriza migrar automaticamente BLUE/USB/AUX:
+essa progressão continua dependente dos cenários físicos restantes e de
+autorização explícita do usuário, conforme D-059/D-060/D-063.
