@@ -19,6 +19,10 @@ from scripts.treinar_f3_segmentos_neural import (
     _write_mask_state_coverage,
     preparar_preflight,
 )
+from src.platform.display_f3_neural_physical_calibration import (
+    collect_physical_h1_debug_calibration,
+    combine_augmented_and_physical_calibration,
+)
 
 
 class _Repository:
@@ -27,6 +31,20 @@ class _Repository:
             {"id": "CHECK_001", "name": "H1"},
             {"id": "CHECK_002", "name": "BLUE"},
             {"id": "CHECK_003", "name": "USB"},
+        ]
+
+
+class _PhysicalCalibrationRepository:
+    def listar_checks(self, _project_name):
+        return [
+            {
+                "id": "CHECK_001",
+                "name": "H1",
+                "mask_states": {
+                    "MASK_001": "off",
+                    "MASK_002": "on",
+                },
+            }
         ]
 
 
@@ -645,6 +663,186 @@ class DisplayF3NeuralTrainingTests(unittest.TestCase):
                 7,
                 persisted["worst_off"]["augmentation_index"],
             )
+
+    def test_physical_h1_debug_calibration_uses_five_unique_frozen_frames(self):
+        base_calibration = {
+            "source": "held_out_h1_augmented_probability_gap",
+            "separable": True,
+            "reference_sample_count": 2,
+            "augmentations_per_reference": 16,
+            "sample_count": 34,
+            "class_counts": {"off": 17, "on": 17},
+            "max_off_on_probability": 0.58,
+            "min_on_on_probability": 0.83,
+            "uncertainty_gap": 0.25,
+            "off_max_on_probability": 0.58,
+            "on_min_on_probability": 0.83,
+        }
+        metadata = {
+            "schema_version": 3,
+            "model_type": "f3_segment_on_off_cnn",
+            "project_name": "DISPLAY A",
+            "input_size": 48,
+            "onnx_sha256": "a" * 64,
+            "suggested_thresholds": {
+                "off_max_on_probability": 0.58,
+                "on_min_on_probability": 0.83,
+            },
+            "threshold_calibration": base_calibration,
+        }
+
+        def debug_report(frame_number, off_p, on_p):
+            analysis = {
+                "ready": True,
+                "approved": bool(on_p >= 0.83),
+                "reason": (
+                    "h1_neural_conforme"
+                    if on_p >= 0.83
+                    else "h1_neural_incerto"
+                ),
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+                "check_name": "H1",
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_001",
+                        "expected": "off",
+                        "neural_probabilities": {
+                            "off": 1.0 - off_p,
+                            "on": off_p,
+                        },
+                    },
+                    {
+                        "mask_id": "MASK_002",
+                        "expected": "on",
+                        "neural_probabilities": {
+                            "off": 1.0 - on_p,
+                            "on": on_p,
+                        },
+                    },
+                ],
+                "reference_authority": "f3_h1_neural_segment_detector",
+                "neural_visual_authority": True,
+                "conventional_visual_authority_used": False,
+                "neural_model": {
+                    "ready": True,
+                    "project_name": "DISPLAY A",
+                    "model_type": "f3_segment_on_off_cnn",
+                    "input_size": 48,
+                    "off_max_on_probability": 0.58,
+                    "on_min_on_probability": 0.83,
+                    "threshold_calibration_source": (
+                        "held_out_h1_augmented_probability_gap"
+                    ),
+                    "threshold_calibration_gap": 0.25,
+                    "threshold_calibration_sample_count": 34,
+                    "threshold_calibration_augmentations_per_reference": 16,
+                },
+            }
+            return (
+                "[RESUMO OPERACIONAL - LEIA PRIMEIRO]\n"
+                f"capturado_em=2026-10-05T12:1{frame_number}:00-04:00\n"
+                f"frame_sha256_24={frame_number:024x}\n"
+                '"last_auto_analysis": '
+                + json.dumps(analysis)
+                + "\n"
+            )
+
+        payload = "".join(
+            [
+                debug_report(1, 0.51, 0.84),
+                debug_report(2, 0.54, 0.82),
+                debug_report(3, 0.52, 0.81),
+                debug_report(4, 0.50, 0.815),
+                debug_report(5, 0.49, 0.812),
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "h1_debug.txt"
+            path.write_text(payload, encoding="utf-8")
+            physical = collect_physical_h1_debug_calibration(
+                [path],
+                repository=_PhysicalCalibrationRepository(),
+                project_name="DISPLAY A",
+                validation_check_id="CHECK_001",
+                metadata=metadata,
+            )
+
+        self.assertEqual(5, physical["frame_count"])
+        self.assertEqual(10, physical["sample_count"])
+        self.assertEqual(
+            {"off": 5, "on": 5},
+            physical["class_counts"],
+        )
+        self.assertAlmostEqual(
+            0.54,
+            physical["max_off_on_probability"],
+        )
+        self.assertAlmostEqual(
+            0.81,
+            physical["min_on_on_probability"],
+        )
+        self.assertEqual(
+            "MASK_001",
+            physical["worst_off"]["mask_id"],
+        )
+        self.assertEqual(
+            "MASK_002",
+            physical["worst_on"]["mask_id"],
+        )
+
+    def test_physical_h1_calibration_combines_conservative_extremes(self):
+        base = {
+            "source": "held_out_h1_augmented_probability_gap",
+            "separable": True,
+            "reference_sample_count": 28,
+            "augmentations_per_reference": 16,
+            "sample_count": 476,
+            "class_counts": {"off": 357, "on": 119},
+            "max_off_on_probability": 0.584876,
+            "min_on_on_probability": 0.827438,
+            "uncertainty_gap": 0.242562,
+            "off_max_on_probability": 0.584876,
+            "on_min_on_probability": 0.827438,
+        }
+        physical = {
+            "separable": True,
+            "frame_count": 5,
+            "sample_count": 140,
+            "class_counts": {"off": 105, "on": 35},
+            "max_off_on_probability": 0.534034,
+            "min_on_on_probability": 0.809613,
+            "uncertainty_gap": 0.275579,
+        }
+
+        combined = combine_augmented_and_physical_calibration(
+            base,
+            physical,
+        )
+
+        self.assertEqual(
+            "held_out_h1_augmented_plus_physical_multiframe_probability_gap",
+            combined["source"],
+        )
+        self.assertAlmostEqual(
+            0.584876,
+            combined["max_off_on_probability"],
+        )
+        self.assertAlmostEqual(
+            0.809613,
+            combined["min_on_on_probability"],
+        )
+        self.assertAlmostEqual(
+            0.224737,
+            combined["uncertainty_gap"],
+            places=6,
+        )
+        self.assertEqual(616, combined["sample_count"])
+        self.assertEqual(
+            {"off": 462, "on": 154},
+            combined["class_counts"],
+        )
 
     def test_candidate_requires_exact_h1_and_torch_onnx_equivalence(self):
         logits = np.asarray(
