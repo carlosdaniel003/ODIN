@@ -200,6 +200,40 @@ class DisplayF3DebugClarityFixTests(unittest.TestCase):
             block,
         )
 
+    def test_relatorio_neural_identifica_blue_sem_rotulo_h1(self):
+        snapshot = _neural_snapshot()
+        snapshot["logical_context"].update(
+            check_id="CHECK_002",
+            check_name="BLUE",
+            current_index=1,
+        )
+        snapshot["runtime_at_click"]["logical_context"].update(
+            check_id="CHECK_002",
+            check_name="BLUE",
+        )
+        analysis = snapshot["runtime_at_click"]["last_auto_analysis"]
+        analysis.update(
+            check_id="CHECK_002",
+            check_name="BLUE",
+            reason="blue_neural_incerto",
+            neural_stage="N2",
+            neural_check_scope="first_two_checks_n2",
+        )
+        snapshot["operational_summary"] = (
+            construir_resumo_operacional_debug_f3(snapshot)
+        )
+
+        block = _report_summary_block(snapshot)
+
+        self.assertIn(
+            "AUTORIDADE VISUAL PRODUTIVA: IA NEURAL BLUE",
+            block,
+        )
+        self.assertNotIn(
+            "AUTORIDADE VISUAL PRODUTIVA: IA NEURAL H1",
+            block,
+        )
+
     def test_snapshot_corrige_atributo_real_do_rearme_e_clareia_preview(self):
         snapshot = aplicar_clareza_snapshot_debug_f3(_snapshot(), _App())
         runtime = snapshot["runtime_at_click"]
