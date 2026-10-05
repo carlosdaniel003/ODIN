@@ -31,6 +31,7 @@ from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_ON,
     DisplayProjectRepository,
     mascaras_geometria_check_display,
+    normalizar_mascaras_display,
     normalizar_nome_projeto_display,
     normalizar_resolucao_display,
 )
@@ -43,6 +44,9 @@ F3_NEURAL_THRESHOLD_CALIBRATION_SOURCE = (
 )
 F3_NEURAL_INPUT_SIZE = 48
 F3_NEURAL_CONTEXT_RATIO = 0.65
+F3_NEURAL_BOARD_OFF_CHECK_ID = "BOARD_OFF"
+F3_NEURAL_BOARD_OFF_CHECK_NAME = "PLACA OFF"
+F3_NEURAL_BOARD_OFF_REFERENCE_KIND = "board_off"
 F3_NEURAL_LABELS = {
     DISPLAY_CHECK_STATE_OFF: 0,
     DISPLAY_CHECK_STATE_ON: 1,
