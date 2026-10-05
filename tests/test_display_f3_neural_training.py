@@ -57,13 +57,31 @@ class _Builder:
             check_id = str(item["check_id"])
             if check_id not in checks:
                 checks.append(check_id)
+        board_off_count = sum(
+            1
+            for item in self.samples
+            if str(item.get("check_id") or "") == "BOARD_OFF"
+        )
         return {
             "ready": bool(self.samples and counts["off"] and counts["on"]),
             "reason": "dataset_pronto",
             "project_name": "DISPLAY A",
             "sample_count": len(self.samples),
             "class_counts": counts,
-            "checks_used": tuple(checks),
+            "checks_used": tuple(
+                check_id
+                for check_id in checks
+                if check_id != "BOARD_OFF"
+            ),
+            "auxiliary_sources_used": (
+                ("BOARD_OFF",)
+                if board_off_count
+                else ()
+            ),
+            "board_off_reference_configured": bool(board_off_count),
+            "board_off_geometry_configured": bool(board_off_count),
+            "board_off_sample_count": board_off_count,
+            "board_off_invalid_mask_ids": (),
             "missing_reference_check_ids": self.missing,
             "invalid_sample_ids": (),
             "samples": list(self.samples),
@@ -127,6 +145,56 @@ class DisplayF3NeuralTrainingTests(unittest.TestCase):
         self.assertEqual(
             {"off": 2, "on": 2},
             report["train_class_counts"],
+        )
+
+    def test_board_off_samples_stay_in_training_and_close_h1_off_coverage_gap(self):
+        samples = [
+            _sample("CHECK_001", "H1", 1, "MASK_001"),
+            _sample("CHECK_001", "H1", 0, "MASK_002"),
+            _sample("CHECK_002", "BLUE", 1, "MASK_001"),
+            _sample("CHECK_002", "BLUE", 1, "MASK_002"),
+            _sample("CHECK_003", "USB", 1, "MASK_001"),
+            _sample("CHECK_003", "USB", 1, "MASK_002"),
+            _sample("BOARD_OFF", "PLACA OFF", 0, "MASK_001"),
+            _sample("BOARD_OFF", "PLACA OFF", 0, "MASK_002"),
+        ]
+
+        _dataset, report, train_indices, val_indices = preparar_preflight(
+            _Repository(),
+            _Builder(samples),
+            "DISPLAY A",
+        )
+
+        self.assertTrue(report["ready"])
+        self.assertEqual(
+            ["CHECK_002", "CHECK_003", "BOARD_OFF"],
+            report["train_check_ids"],
+        )
+        self.assertEqual(["BOARD_OFF"], report["auxiliary_sources_used"])
+        self.assertEqual(2, report["board_off_sample_count"])
+        self.assertTrue(
+            all(
+                samples[index]["check_id"] != "CHECK_001"
+                for index in train_indices
+            )
+        )
+        self.assertTrue(
+            all(
+                samples[index]["check_id"] == "CHECK_001"
+                for index in val_indices
+            )
+        )
+        self.assertEqual(
+            0,
+            report["state_coverage_summary"][
+                "validation_state_unseen_in_training_count"
+            ],
+        )
+        self.assertEqual(
+            [],
+            report["state_coverage_summary"][
+                "validation_state_unseen_in_training_mask_ids"
+            ],
         )
 
     def test_n1_does_not_silently_validate_blue_when_h1_photo_is_missing(self):
