@@ -3642,3 +3642,87 @@ arbitrário.
 
 **Validação:** testes de software passam; preflight real ainda pendente.
 
+---
+
+## D-062 — Augmentation fotométrico neural não pode empilhar transformações que mudem a classe física
+
+**Status:** Accepted
+
+### Contexto
+
+Após D-061, o preflight real de `CM_500_L` confirmou a cobertura esperada:
+
+```text
+sample_count=140
+train_count=112
+validation_count=28
+BOARD_OFF=28
+26 máscaras com ON+OFF no treino
+2 máscaras somente OFF (MASK_002, MASK_003)
+0 estados H1 inéditos
+```
+
+O novo treino manteve H1 integralmente fora da otimização e atingiu 100% na
+foto H1 original, mas a calibração com 16 variações determinísticas por
+referência ainda apresentou sobreposição:
+
+```text
+max OFF P(ON)=0.736686  → MASK_010 / aug06
+min ON  P(ON)=0.611381  → MASK_012 / aug07
+gap=-0.125305
+```
+
+A inspeção dos parâmetros mostrou um padrão sistemático. O pior OFF recebeu
+simultaneamente ganho > 1, offset positivo e gamma < 1, além de reflexo; o pior
+ON recebeu simultaneamente ganho < 1, offset negativo e gamma > 1. Outros
+extremos repetiram o mesmo comportamento mesmo sem reflexo.
+
+O augmentation anterior sorteava `alpha`, `beta` e `gamma`
+independentemente. Três mecanismos fotométricos podiam, portanto, empilhar
+clareamento ou escurecimento sobre a mesma amostra até alterar semanticamente a
+aparência ON/OFF.
+
+### Decisão
+
+Nesta etapa a arquitetura CNN, o tensor `4x48x48`, o contexto espacial, o
+split, BOARD_OFF, thresholds, reflection hard-negative e a autoridade produtiva
+permanecem inalterados.
+
+A política fotométrica passa a usar **um único operador principal por amostra**:
+
+```text
+gain   → alpha 0.85 .. 1.15 | beta=0 | gamma=1
+offset → beta -0.06 .. +0.06 | alpha=1 | gamma=1
+gamma  → gamma 0.85 .. 1.18 | alpha=1 | beta=0
+```
+
+O operador é escolhido de forma determinística a partir do RNG já usado pelo
+pipeline. O mesmo contrato vale para ON e OFF; não existe ajuste dependente do
+rótulo.
+
+O diagnóstico passa a registrar também:
+
+- `photometric_mode`;
+- `photometric_draw`;
+- os valores finais de `brightness_alpha`, `brightness_beta` e `gamma`.
+
+Blur, ruído, pequena rotação/escala/translação e o reflexo sintético de OFF
+continuam ativos. As 16 variações por referência H1 continuam obrigatórias.
+
+### Critério
+
+O objetivo não é facilitar artificialmente o gate, mas impedir que o próprio
+augmentation produza exemplos cuja transformação fotométrica acumulada troque a
+semântica física.
+
+Depois desta mudança o mesmo modelo deve ser retreinado. A promoção continua
+exigindo:
+
+```text
+H1 original = 100%
+max_OFF_P(ON) < min_ON_P(ON)
+```
+
+Se a sobreposição persistir com esta política fotométrica conservadora, a
+próxima hipótese permitida é capacidade/contexto espacial da CNN, sem voltar ao
+classificador convencional e sem relaxar o threshold.
