@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 
 import cv2
 
@@ -18,6 +19,11 @@ class CameraLiveControlServiceMixin:
     - autofocus/exposição automática/white balance automático são comandos
       explícitos ao driver, inclusive no modo nativo do Windows.
     """
+
+    # CAP_PROP_ZOOM pode ser reinicializado silenciosamente pelo driver/UVC.
+    # O readback é atualizado na própria thread canônica de captura, sem criar
+    # scheduler/worker paralelo nem tocar no capture a partir do Tkinter.
+    _ZOOM_HARDWARE_READBACK_INTERVAL_S = 0.75
 
     _PROPRIEDADES_MANUAIS = {
         "pan": "CAP_PROP_PAN",
@@ -78,6 +84,7 @@ class CameraLiveControlServiceMixin:
         self._camera_live_chaves_pendentes: list[str] = []
         self._camera_live_baselines: dict[str, float] = {}
         self._camera_live_valores_hardware: dict[str, float] = {}
+        self._camera_live_zoom_readback_last_at = 0.0
         super().__init__(*args, **kwargs)
 
     def _preparar_configuracoes_camera_ao_vivo(
@@ -378,6 +385,62 @@ class CameraLiveControlServiceMixin:
                 self._camera_live_valores_hardware[nome] = float(valor)
         return valor
 
+    def _atualizar_readback_zoom_ativo(
+        self,
+        capture,
+        *,
+        force: bool = False,
+    ):
+        """Atualiza o zoom físico real sem criar uma segunda autoridade.
+
+        D-054 já exige que o F3 compare a configuração persistida com o
+        readback do hardware. Antes, porém, o dicionário exposto ao F3 guardava
+        somente a última leitura feita durante uma aplicação de controle. Se o
+        driver resetasse CAP_PROP_ZOOM depois disso, o cache continuava dizendo
+        que o zoom antigo estava aplicado.
+
+        A leitura acontece na própria thread de captura, com cadência limitada.
+        Valores fora da faixa UVC configurada são tratados como ausência de
+        readback, evitando que backends que devolvem 0 para propriedade não
+        suportada provoquem reaplicação infinita.
+        """
+        configuracoes = self.obter_configuracoes_camera()
+        if not bool(configuracoes.get("zoom_enabled", False)):
+            return None
+
+        agora = time.monotonic()
+        with self._lock:
+            ultimo = float(
+                self._camera_live_zoom_readback_last_at or 0.0
+            )
+            cached = self._camera_live_valores_hardware.get("zoom")
+
+        if (
+            not bool(force)
+            and agora - ultimo < self._ZOOM_HARDWARE_READBACK_INTERVAL_S
+        ):
+            return cached
+
+        propriedade = self._propriedade_manual("zoom")
+        valor = self._ler_propriedade_capture(capture, propriedade)
+
+        with self._lock:
+            self._camera_live_zoom_readback_last_at = agora
+
+        if valor is None:
+            return None
+
+        tolerancia = self._tolerancia_controle("zoom")
+        if (
+            float(valor) < float(CAMERA_ZOOM_MIN) - tolerancia
+            or float(valor) > float(CAMERA_ZOOM_MAX) + tolerancia
+        ):
+            return None
+
+        with self._lock:
+            self._camera_live_valores_hardware["zoom"] = float(valor)
+        return float(valor)
+
     def _garantir_baseline(self, capture, nome: str):
         with self._lock:
             existente = self._camera_live_baselines.get(nome)
@@ -624,3 +687,16 @@ class CameraLiveControlServiceMixin:
             self._aplicar_chave_ao_vivo(capture, chave, configuracoes)
 
         self._controles_pendentes = False
+
+    def _publicar_frame_otimizado(self, frame, estavel: bool) -> None:
+        """Publica frame e mantém fresco o readback físico do zoom.
+
+        Este método continua no mesmo loop/thread de captura. O custo adicional
+        é no máximo um CAP_PROP_ZOOM get() por intervalo de readback quando o
+        zoom manual está habilitado.
+        """
+        super()._publicar_frame_otimizado(frame, estavel=estavel)
+        capture = getattr(self, "_capture", None)
+        if capture is not None:
+            self._atualizar_readback_zoom_ativo(capture)
+
