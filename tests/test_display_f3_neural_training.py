@@ -473,6 +473,69 @@ class DisplayF3NeuralTrainingTests(unittest.TestCase):
         self.assertIn("noise_applied", trace)
         self.assertIn("reflection_applied", trace)
 
+    def test_photometric_augmentation_uses_one_primary_operator_per_sample(self):
+        tensor = np.zeros((4, 48, 48), dtype=np.float32)
+        tensor[:3] = 0.5
+        tensor[3, 12:36, 20:28] = 1.0
+
+        modes_seen = set()
+        for seed in range(120):
+            trace = {}
+            _augment_sample(
+                tensor,
+                seed % 2,
+                __import__("random").Random(seed),
+                diagnostic=trace,
+            )
+            mode = trace["photometric_mode"]
+            modes_seen.add(mode)
+
+            alpha = float(trace["brightness_alpha"])
+            beta = float(trace["brightness_beta"])
+            gamma = float(trace["gamma"])
+
+            if mode == "gain":
+                self.assertGreaterEqual(alpha, 0.85)
+                self.assertLessEqual(alpha, 1.15)
+                self.assertEqual(0.0, beta)
+                self.assertEqual(1.0, gamma)
+            elif mode == "offset":
+                self.assertEqual(1.0, alpha)
+                self.assertGreaterEqual(beta, -0.06)
+                self.assertLessEqual(beta, 0.06)
+                self.assertEqual(1.0, gamma)
+            elif mode == "gamma":
+                self.assertEqual(1.0, alpha)
+                self.assertEqual(0.0, beta)
+                self.assertGreaterEqual(gamma, 0.85)
+                self.assertLessEqual(gamma, 1.18)
+            else:
+                self.fail(f"Modo fotométrico inesperado: {mode}")
+
+        self.assertEqual({"gain", "offset", "gamma"}, modes_seen)
+
+    def test_photometric_trace_prevents_old_cumulative_extremes(self):
+        tensor = np.zeros((4, 48, 48), dtype=np.float32)
+        tensor[:3] = 0.5
+        tensor[3, 12:36, 20:28] = 1.0
+
+        for seed in range(250):
+            trace = {}
+            _augment_sample(
+                tensor,
+                0,
+                __import__("random").Random(seed),
+                diagnostic=trace,
+            )
+            non_neutral = sum(
+                (
+                    abs(float(trace["brightness_alpha"]) - 1.0) > 1e-12,
+                    abs(float(trace["brightness_beta"])) > 1e-12,
+                    abs(float(trace["gamma"]) - 1.0) > 1e-12,
+                )
+            )
+            self.assertLessEqual(non_neutral, 1)
+
     def test_calibration_details_preserve_mask_and_transform_origin(self):
         samples = [
             _sample("CHECK_001", "H1", 0, "MASK_010"),
