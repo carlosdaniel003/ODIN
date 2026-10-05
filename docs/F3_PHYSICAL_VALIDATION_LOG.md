@@ -5796,3 +5796,80 @@ Não repetir:
 
 **Resultado físico:** não aplicável; etapa estritamente diagnóstica/offline.
 
+---
+
+## 05/10/2026 — N1.4 cobertura real: cinco máscaras H1 OFF nunca viram OFF no treino
+
+**Resultado:** DIAGNÓSTICO OFFLINE CONFIRMADO.
+
+Preflight real do projeto `CM_500_L`:
+
+```text
+sample_count=112
+train_count=84
+validation_count=28
+
+ambas as classes no treino: 18
+somente uma classe no treino: 5
+estado exigido pela validação nunca visto no treino: 5
+sem estado de treino: 0
+```
+
+Máscaras com estado H1 inédito:
+
+```text
+MASK_015: H1=OFF | BLUE=ON | USB=ON | AUX=ON
+MASK_021: H1=OFF | BLUE=ON | USB=ON | AUX=ON
+MASK_022: H1=OFF | BLUE=ON | USB=ON | AUX=ON
+MASK_023: H1=OFF | BLUE=ON | USB=ON | AUX=ON
+MASK_025: H1=OFF | BLUE=ON | USB=ON | AUX=ON
+```
+
+Esse resultado comprova uma lacuna real de cobertura do dataset funcional:
+essas máscaras eram exigidas como OFF no H1 reservado, mas o otimizador só
+havia visto ON para elas.
+
+Ao mesmo tempo, os ON do H1 estão cobertos, e máscaras como `MASK_010`,
+`MASK_014`, `MASK_018` e `MASK_021` reforçam que halo/reflexo de vizinhos
+continua sendo requisito de robustez distinto da simples cobertura de classe.
+
+### Alteração aplicada
+
+O dataset neural passa a incorporar a referência já existente
+**PLACA DESLIGADA NO SUPORTE** como OFF físico por máscara, conforme D-061.
+
+Regras:
+- somente foto BOARD_OFF real;
+- somente máscaras locais explicitamente salvas sobre essa foto;
+- cada `MASK_xxx` mantém identidade física;
+- BOARD_OFF entra apenas no treino;
+- H1 continua integralmente reservado;
+- nenhuma mudança em CNN, augmentation ou thresholds nesta etapa.
+
+O preflight passa a expor:
+- `auxiliary_sources_used`;
+- `board_off_reference_configured`;
+- `board_off_geometry_configured`;
+- `board_off_sample_count`;
+- `board_off_invalid_mask_ids`.
+
+### Próximo passo
+
+Executar novamente:
+
+```powershell
+python scripts/treinar_f3_segmentos_neural.py --preflight --project CM_500_L
+```
+
+Critério esperado se BOARD_OFF possuir as 28 máscaras válidas:
+
+```text
+board_off_sample_count=28
+validation_state_unseen_in_training_count=0
+```
+
+Somente depois desse resultado deve ser executado novo treinamento/calibração.
+
+**Estado físico:** não aplicável; alteração de dataset offline pendente de
+preflight real.
+
