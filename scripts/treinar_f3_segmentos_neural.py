@@ -973,7 +973,7 @@ def _parse_args():
         type=int,
         default=5,
         help=(
-            "Encerra após N épocas consecutivas com H1 100% exato. "
+            "Encerra após N épocas consecutivas com H1 100%% exato. "
             "Use 0 para desabilitar."
         ),
     )
