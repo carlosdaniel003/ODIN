@@ -155,6 +155,13 @@ def _neural_diagnostics(analysis: dict | None) -> dict:
     return {
         "active": True,
         "authority": str(analysis.get("reference_authority") or ""),
+        "check_name": str(
+            analysis.get("check_name")
+            or analysis.get("check_id")
+            or "CHECK"
+        ).strip().upper(),
+        "neural_stage": str(analysis.get("neural_stage") or ""),
+        "neural_check_scope": str(analysis.get("neural_check_scope") or ""),
         "reason": str(analysis.get("reason") or ""),
         "approved": analysis.get("approved"),
         "active_mask_count": len(rows),
@@ -336,9 +343,15 @@ def _report_summary_block(snapshot: dict) -> str:
         midpoint = neural.get("diagnostic_midpoint")
         active = int(neural.get("active_mask_count", 0) or 0)
         raw_matches = int(neural.get("raw_argmax_match_count", 0) or 0)
+        neural_check_name = str(
+            neural.get("check_name") or "CHECK"
+        ).strip().upper()
         lines.extend(
             [
-                "AUTORIDADE VISUAL PRODUTIVA: IA NEURAL H1 (CNN/ONNX)",
+                (
+                    "AUTORIDADE VISUAL PRODUTIVA: "
+                    f"IA NEURAL {neural_check_name} (CNN/ONNX)"
+                ),
                 (
                     "MODELO IA: "
                     f"ready={neural.get('model_ready', False)} • "
