@@ -648,11 +648,28 @@ def _augment_sample(
     rgb = np.clip(hwc[..., :3], 0.0, 1.0)
     mask = np.clip(hwc[..., 3:4], 0.0, 1.0)
 
-    alpha = rng.uniform(0.78, 1.22)
-    beta = rng.uniform(-0.10, 0.10)
-    rgb = np.clip(rgb * alpha + beta, 0.0, 1.0)
+    # Variação fotométrica semanticamente conservadora.
+    #
+    # Antes, ganho + offset + gamma eram sorteados independentemente e podiam
+    # empilhar três transformações na mesma direção. Isso produziu casos H1
+    # artificiais em que OFF era clareado até parecer ON e ON era escurecido
+    # até parecer OFF. Mantemos a robustez de iluminação, mas apenas um operador
+    # fotométrico principal atua por amostra.
+    photometric_draw = rng.random()
+    alpha = 1.0
+    beta = 0.0
+    gamma = 1.0
+    if photometric_draw < (1.0 / 3.0):
+        photometric_mode = "gain"
+        alpha = rng.uniform(0.85, 1.15)
+    elif photometric_draw < (2.0 / 3.0):
+        photometric_mode = "offset"
+        beta = rng.uniform(-0.06, 0.06)
+    else:
+        photometric_mode = "gamma"
+        gamma = rng.uniform(0.85, 1.18)
 
-    gamma = rng.uniform(0.78, 1.28)
+    rgb = np.clip(rgb * alpha + beta, 0.0, 1.0)
     rgb = np.power(
         np.clip(rgb, 1e-5, 1.0),
         gamma,
@@ -748,6 +765,8 @@ def _augment_sample(
                 "scale": float(scale),
                 "dx_px": float(dx),
                 "dy_px": float(dy),
+                "photometric_mode": str(photometric_mode),
+                "photometric_draw": float(photometric_draw),
                 "brightness_alpha": float(alpha),
                 "brightness_beta": float(beta),
                 "gamma": float(gamma),
