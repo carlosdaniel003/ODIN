@@ -5216,3 +5216,129 @@ Não repetir:
 - não usar o argmax diagnóstico como autoridade de OK/NG;
 - não restaurar o classificador convencional como fallback para fazer H1 passar.
 
+---
+
+## 05/10/2026 — Marco de migração: H1 convencional deixa de ser autoridade visual
+
+**Estado:** MIGRAÇÃO DE AUTORIDADE CONFIRMADA NO RUNTIME — VALIDAÇÃO NEURAL AINDA EM ANDAMENTO.
+
+Este registro torna explícita a mudança de produto iniciada pela D-059.
+
+O primeiro teste físico com o modelo real confirmou no próprio runtime:
+
+```text
+CHECK=H1 / CHECK_001
+reference_authority=f3_h1_neural_segment_detector
+neural_visual_authority=true
+conventional_visual_authority_used=false
+neural_batch_size=28
+neural_model.ready=true
+```
+
+Portanto, a partir deste marco:
+
+```text
+H1:
+frame live
+→ geometria/máscaras configuradas
+→ CNN ONNX
+→ 28 probabilidades ON/OFF
+→ comparação determinística expected x observed
+→ OK / NG / INCERTO
+→ state machine
+```
+
+O classificador convencional de ON/OFF **não é mais fallback nem veto produtivo
+do H1**. Ele pode existir no código histórico enquanto outros CHECKS ainda o
+consomem, mas não pode decidir H1 em paralelo.
+
+Estado da migração por CHECK:
+
+- H1 → **NEURAL / EM VALIDAÇÃO FÍSICA**;
+- BLUE → convencional temporário;
+- USB → convencional temporário;
+- AUX → convencional temporário.
+
+A migração do próximo CHECK somente ocorrerá depois da validação física do H1 e
+de autorização explícita para avançar a etapa.
+
+Este marco não transforma o teste atual em PASS: o primeiro H1 correto chegou à
+CNN, porém as 28 máscaras ficaram INCERTAS pelos limiares conservadores. A
+migração da autoridade está confirmada; a robustez/calibração do modelo ainda
+precisa ser concluída.
+
+Não repetir:
+- não restaurar o classificador convencional como fallback do H1;
+- não adicionar novo threshold óptico convencional para "ajudar" a CNN;
+- não migrar BLUE antes de fechar a validação física do H1.
+
+---
+
+## 05/10/2026 — FAIL físico D-054: zoom da câmera volta a se desfazer
+
+**Resultado físico:** FAIL / RECORRÊNCIA DO ZOOM FÍSICO.
+
+### Sintoma informado
+
+Durante o uso do F3, o enquadramento ampliado voltou a se desfazer. Pela
+característica observada e pela revisão do código, o suspeito atual é o
+**zoom físico da câmera / CAP_PROP_ZOOM**, e não o Zoom ODIN por software.
+
+### Revisão da D-054
+
+A D-054 já havia introduzido a regra de conferir o readback real do hardware
+antes de confiar apenas na assinatura lógica do último comando. Porém a revisão
+do serviço canônico encontrou uma lacuna objetiva:
+
+```text
+CAP_PROP_ZOOM aplicado
+→ readback é salvo em _camera_live_valores_hardware
+→ driver pode resetar zoom depois
+→ _camera_live_valores_hardware não era atualizado novamente
+→ F3 continuava lendo o valor antigo
+→ assinatura parecia válida
+→ zoom não era reaplicado
+```
+
+Ou seja, o valor exposto por
+`obter_valores_controles_camera_ao_vivo()` podia ser um readback real **antigo**,
+não a situação física atual da câmera.
+
+### Correção aplicada
+
+O proprietário canônico da câmera passa a refrescar `CAP_PROP_ZOOM` enquanto
+o zoom manual estiver habilitado:
+
+- leitura executada na mesma thread de captura do `VideoCapture`;
+- cadência limitada para não acrescentar custo por frame;
+- nenhum novo timer, `after()`, worker, scheduler ou serviço;
+- valores inválidos/fora da faixa, inclusive `0` típico de backend sem suporte,
+  não substituem um readback válido;
+- quando o driver realmente voltar a outro zoom, o cache passa a refletir a
+  divergência;
+- a recuperação continua sendo feita pelo mecanismo existente da D-054:
+  Projeto Display → readback divergente → reaplicar zoom/pan/tilt pelo serviço
+  canônico.
+
+### Regressões adicionadas
+
+- reset silencioso 250 → 100 precisa aparecer no readback;
+- backend que devolve 0 não pode fabricar falso reset;
+- zoom desabilitado não dispara leitura/revalidação desnecessária.
+
+### Próximo reteste físico
+
+```text
+F3 aberto
+→ zoom da câmera configurado > 1×
+→ manter em produção por alguns minutos
+→ observar se o driver tenta voltar a 1×
+→ confirmar que o ODIN detecta a divergência e recupera o zoom
+→ confirmar que o enquadramento permanece estável
+```
+
+Também confirmar separadamente o Zoom ODIN por software para garantir que o
+sintoma atual pertence de fato ao hardware.
+
+**Estado:** CORREÇÃO IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
