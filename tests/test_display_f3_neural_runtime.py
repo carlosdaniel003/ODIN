@@ -283,6 +283,124 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                 first["threshold_calibration_source"],
             )
 
+    def test_detector_accepts_physical_multiframe_threshold_calibration(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            model_path = f3_neural_model_path_for_repository(
+                repository,
+                "DISPLAY A",
+            )
+            model_path.parent.mkdir(parents=True, exist_ok=True)
+            model_path.write_bytes(b"fake-onnx")
+            model_hash = hashlib.sha256(
+                model_path.read_bytes()
+            ).hexdigest()
+
+            base = {
+                "source": "held_out_h1_augmented_probability_gap",
+                "separable": True,
+                "reference_sample_count": 2,
+                "augmentations_per_reference": 4,
+                "sample_count": 10,
+                "class_counts": {"off": 5, "on": 5},
+                "max_off_on_probability": 0.45,
+                "min_on_on_probability": 0.62,
+                "uncertainty_gap": 0.17,
+                "off_max_on_probability": 0.45,
+                "on_min_on_probability": 0.62,
+            }
+            physical = {
+                "source": "f3_debug_technical_frozen_frames",
+                "separable": True,
+                "project_name": "DISPLAY A",
+                "validation_check_id": h1["id"],
+                "model_sha256": model_hash,
+                "minimum_frame_count": 5,
+                "frame_count": 5,
+                "frame_hashes": [
+                    f"frame-{index}"
+                    for index in range(5)
+                ],
+                "sample_count": 10,
+                "class_counts": {"off": 5, "on": 5},
+                "max_off_on_probability": 0.48,
+                "min_on_on_probability": 0.60,
+                "uncertainty_gap": 0.12,
+                "frames": [
+                    {"frame_hash": f"frame-{index}"}
+                    for index in range(5)
+                ],
+            }
+            combined = {
+                "source": (
+                    "held_out_h1_augmented_plus_physical_multiframe_probability_gap"
+                ),
+                "separable": True,
+                "reference_sample_count": 2,
+                "augmentations_per_reference": 4,
+                "sample_count": 20,
+                "class_counts": {"off": 10, "on": 10},
+                "max_off_on_probability": 0.48,
+                "min_on_on_probability": 0.60,
+                "uncertainty_gap": 0.12,
+                "off_max_on_probability": 0.48,
+                "on_min_on_probability": 0.60,
+                "base_augmented_calibration": base,
+                "physical_h1": physical,
+            }
+            model_path.with_suffix(".json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 3,
+                        "model_type": "f3_segment_on_off_cnn",
+                        "project_name": "DISPLAY A",
+                        "input_size": 48,
+                        "onnx_sha256": model_hash,
+                        "split": {
+                            "strategy": "hold_out_first_check_for_n1",
+                            "validation_check_id": h1["id"],
+                        },
+                        "validation": {
+                            "accepted_for_physical_h1_retest": True,
+                        },
+                        "labels": {
+                            "off": 0,
+                            "on": 1,
+                        },
+                        "suggested_thresholds": {
+                            "off_max_on_probability": 0.48,
+                            "on_min_on_probability": 0.60,
+                        },
+                        "threshold_calibration": combined,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            network = _FakeNet()
+            with patch.object(
+                neural_module.cv2.dnn,
+                "readNetFromONNX",
+                return_value=network,
+            ):
+                status = F3NeuralSegmentDetector(repository).prepare(
+                    "DISPLAY A"
+                )
+
+            self.assertTrue(status["ready"])
+            self.assertEqual(
+                "held_out_h1_augmented_plus_physical_multiframe_probability_gap",
+                status["threshold_calibration_source"],
+            )
+            self.assertEqual(
+                5,
+                status["physical_h1_calibration_frame_count"],
+            )
+            self.assertEqual(
+                model_hash,
+                status["onnx_sha256"],
+            )
+
     def test_detector_rejects_artifact_without_held_out_h1_acceptance(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, _h1, _blue = _repository(
