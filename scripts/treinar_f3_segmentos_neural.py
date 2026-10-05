@@ -502,6 +502,21 @@ def preparar_preflight(
         "sample_count": int(dataset.get("sample_count", 0) or 0),
         "class_counts": dict(dataset.get("class_counts") or {}),
         "checks_used": list(dataset.get("checks_used") or ()),
+        "auxiliary_sources_used": list(
+            dataset.get("auxiliary_sources_used") or ()
+        ),
+        "board_off_reference_configured": bool(
+            dataset.get("board_off_reference_configured", False)
+        ),
+        "board_off_geometry_configured": bool(
+            dataset.get("board_off_geometry_configured", False)
+        ),
+        "board_off_sample_count": int(
+            dataset.get("board_off_sample_count", 0) or 0
+        ),
+        "board_off_invalid_mask_ids": list(
+            dataset.get("board_off_invalid_mask_ids") or ()
+        ),
         "missing_reference_check_ids": list(
             dataset.get("missing_reference_check_ids") or ()
         ),
