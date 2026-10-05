@@ -5127,4 +5127,92 @@ adicionar novas heurísticas convencionais ao H1**.
 
 **Próximo passo:** projetar e implementar somente a Etapa N1 — H1 neural — e
 submeter ao reteste físico antes de migrar BLUE.
+## 05/10/2026 — N1 físico #1: H1 correto chega à CNN, mas 28/28 ficam INCERTOS
+
+Modo:
+- Display F3 em produção;
+- CHECK atual: H1 / CHECK_001;
+- modelo neural `cm_500_l_segments.onnx` já treinado e aceito pelo gate N1.3;
+- placa fisicamente correta;
+- H1 fisicamente correto segundo validação do usuário.
+
+Evidência do mesmo snapshot:
+- placa PRESENTE e CONFIRMADA;
+- energia do display CONFIRMADA;
+- gate produtivo LIBERADO;
+- autoridade visual produtiva: `f3_h1_neural_segment_detector`;
+- `neural_visual_authority=true`;
+- `conventional_visual_authority_used=false`;
+- modelo `ready=true`;
+- batch neural = 28 máscaras;
+- `load_count=1`;
+- `inference_count=355`;
+- limiares produtivos atuais:
+  - OFF se `P(ON) <= 0.20`;
+  - ON se `P(ON) >= 0.80`;
+  - intervalo intermediário = INCERTO;
+- resultado final da CNN no frame:
+  - `matched_mask_count=0`;
+  - `uncertain_mask_count=28`;
+  - motivo `h1_neural_incerto`.
+
+Diagnóstico quantitativo da própria saída neural:
+- máscaras esperadas ON:
+  - `P(ON) min=0.564678`;
+  - média `0.666891`;
+  - max `0.756886`;
+- máscaras esperadas OFF:
+  - `P(ON) min=0.291826`;
+  - média `0.331517`;
+  - max `0.523389`;
+- direção bruta por argmax 0.5, **somente para diagnóstico**:
+  - 27/28 compatíveis com o H1 correto;
+  - única divergência: `MASK_010` esperada OFF com `P(ON)=0.523389`;
+- existe separação positiva no frame entre as duas classes:
+  - menor ON esperado = `0.564678`;
+  - maior OFF esperado = `0.523389`;
+  - gap diagnóstico = `+0.041289`;
+  - midpoint diagnóstico = `0.544034`.
+
+Interpretação:
+- o runtime neural está instalado, carregando o ONNX e inferindo as 28 máscaras;
+- o bloqueio atual não é falta de modelo nem veto do classificador convencional;
+- a CNN está ordenando ON/OFF de forma útil no frame live, mas os limiares
+  `0.20/0.80` estão muito distantes das probabilidades observadas no domínio
+  real da câmera;
+- ainda não é seguro simplesmente baixar limiares com base em um único frame
+  correto, porque precisamos preservar detecção de segmento realmente apagado,
+  reflexo, movimento e variação de luz.
+
+Correção de observabilidade aplicada:
+- DEBUG TÉCNICO passa a destacar a autoridade neural no topo;
+- exibe modelo, batch, inference count e limiares;
+- exibe `P(ON)` min/média/max para classes esperadas ON e OFF;
+- exibe argmax bruto e máscaras divergentes explicitamente como
+  **diagnóstico sem autoridade**;
+- exibe gap/midpoint de separação live somente para calibração;
+- H1 com 28 máscaras incertas deixa de ser descrito como "NÃO CONFORME" no
+  resumo e passa a ser "INDETERMINADO";
+- a trava visual legada "aguardando primeiro segmento ON" deixa de esconder a
+  decisão neural quando `neural_visual_authority=true`; presença/energia
+  continuam com suas autoridades próprias, e a policy neural continua
+  responsável por INCERTO/OK/NG.
+
+Resultado:
+- N1 físico #1 = **FAIL CONTROLADO / DIAGNÓSTICO OBTIDO**;
+- nenhum limiar neural produtivo foi alterado neste passo;
+- nenhuma autoridade convencional de ON/OFF foi reativada.
+
+Próximo reteste:
+1. atualizar código e repetir H1 correto;
+2. capturar DEBUG TÉCNICO em mais de uma condição física correta:
+   posição nominal, pequeno deslocamento e pequena variação de iluminação;
+3. comparar distribuições `P(ON)` de ON/OFF entre os snapshots;
+4. somente então definir calibração neural e repetir:
+   H1 correto, um segmento ON apagado, reflexo em OFF e deslocamento.
+
+Não repetir:
+- não baixar `0.80/0.20` por tentativa visual sem dados de produção;
+- não usar o argmax diagnóstico como autoridade de OK/NG;
+- não restaurar o classificador convencional como fallback para fazer H1 passar.
 
