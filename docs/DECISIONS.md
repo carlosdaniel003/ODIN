@@ -3554,3 +3554,91 @@ Os testes dedicados **Display F3 neural dataset tests** e
 **Display F3 fast H1 BLUE tests** passaram no HEAD da correção.
 
 **Validação física:** PENDENTE DE RETESTE COM ARTEFATO SCHEMA 3.
+
+---
+
+## D-061 — BOARD_OFF entra no treino neural como OFF físico da mesma máscara
+
+**Status:** Accepted
+
+### Contexto
+
+A auditoria de cobertura por máscara física executada no projeto real
+`CM_500_L` mostrou:
+
+```text
+28 máscaras totais
+18 com ON+OFF no treino
+5 com somente uma classe, mas compatível com H1
+5 com estado exigido pelo H1 nunca visto no treino
+```
+
+As cinco lacunas eram:
+
+```text
+MASK_015 → H1 OFF; BLUE/USB/AUX ON
+MASK_021 → H1 OFF; BLUE/USB/AUX ON
+MASK_022 → H1 OFF; BLUE/USB/AUX ON
+MASK_023 → H1 OFF; BLUE/USB/AUX ON
+MASK_025 → H1 OFF; BLUE/USB/AUX ON
+```
+
+A mesma análise mostrou que o F3 já possui uma referência física dedicada
+`PLACA DESLIGADA NO SUPORTE`, com foto real e possibilidade de geometria local
+das mesmas máscaras. Essa referência já era usada no caminho convencional como
+OFF local por máscara e pode fornecer a classe ausente sem usar a foto H1.
+
+### Decisão
+
+O dataset neural passa a reaproveitar `PLACA DESLIGADA NO SUPORTE` como fonte
+auxiliar de treino.
+
+Contrato:
+
+1. BOARD_OFF gera somente rótulo `off`;
+2. cada amostra mantém o mesmo `MASK_xxx` físico;
+3. somente foto válida + geometria explicitamente salva sobre essa foto podem
+   entrar no dataset;
+4. ausência de geometria explícita não autoriza projetar máscaras canônicas por
+   suposição;
+5. BOARD_OFF nunca entra no conjunto reservado de H1;
+6. H1 continua integralmente fora da otimização da CNN;
+7. o preflight deve expor `board_off_sample_count`, fonte auxiliar usada e a
+   nova matriz de cobertura;
+8. BLUE/USB/AUX continuam sendo as referências funcionais de CHECK do treino;
+9. nenhuma mudança em arquitetura CNN, augmentation, thresholds ou authority é
+   feita nesta etapa.
+
+### Efeito esperado
+
+Com as 28 máscaras BOARD_OFF corretamente configuradas, o conjunto real
+`CM_500_L` deve passar de:
+
+```text
+18 máscaras com ON+OFF
+5 somente uma classe compatível
+5 com estado H1 inédito
+```
+
+para aproximadamente:
+
+```text
+26 máscaras com ON+OFF
+2 somente OFF (MASK_002, MASK_003)
+0 estados H1 inéditos
+```
+
+Esse resultado precisa ser confirmado pelo preflight real; não é considerado
+validado apenas pela expectativa arquitetural.
+
+### Limite
+
+BOARD_OFF ensina como cada segmento fisicamente apagado aparece sem emissão
+própria. Ele não garante sozinho cobertura de todos os casos de halo/reflexo
+proveniente de segmentos vizinhos acesos. Se a calibração continuar com overlap
+depois de fechar a cobertura, a próxima evidência deve apontar para contexto
+espacial/capacidade do modelo, e não para nova tentativa de balanceamento
+arbitrário.
+
+**Validação:** testes de software passam; preflight real ainda pendente.
+
