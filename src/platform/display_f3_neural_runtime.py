@@ -2,13 +2,17 @@ from __future__ import annotations
 
 """Autoridade neural incremental do Display F3.
 
-Etapa N1.2:
-- somente o primeiro CHECK (H1 lógico) usa a CNN;
-- BLUE/USB/AUX continuam delegados ao analisador convencional atual;
+Etapa N2:
+- H1 e BLUE usam a mesma CNN local de estado ON/OFF por segmento;
+- USB/AUX continuam delegados ao analisador convencional atual;
 - o modelo ONNX é carregado uma única vez e reutilizado;
 - as 28 ROIs são inferidas em um único batch;
-- ausência/erro do modelo é fail-closed: H1 fica indisponível, sem fallback
+- ausência/erro do modelo é fail-closed nos CHECKS já migrados, sem fallback
   convencional de ON/OFF.
+
+BLUE continua intermitente. A CNN classifica cada frame, enquanto o runtime
+temporal decide se o frame pertence à fase ON, OFF ou transição. Somente a fase
+ON pode validar conformidade ou acumular uma divergência neural certa.
 
 A rede decide apenas estado visual de segmento. Sequência, presença, energia,
 rearme e UI continuam com as autoridades canônicas já existentes.
@@ -52,10 +56,14 @@ from src.platform.display_project_repository import (
 from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
-F3_H1_NEURAL_AUTHORITY = "f3_h1_neural_segment_detector"
+# Nome histórico mantido como API de compatibilidade. O valor agora representa
+# o detector neural canônico compartilhado por H1 e BLUE.
+F3_H1_NEURAL_AUTHORITY = "f3_neural_segment_detector"
 F3_H1_NEURAL_MODEL_TYPE = "f3_segment_on_off_cnn"
 F3_NEURAL_UNCERTAIN_STATE = "uncertain"
 F3_NEURAL_MODEL_REFRESH_S = 1.0
+F3_NEURAL_MIGRATED_CHECK_COUNT = 2
+F3_NEURAL_CHECK_SCOPE = "first_two_checks_n2"
 
 
 def _strict_probability(value) -> float | None:
@@ -837,8 +845,8 @@ class F3NeuralSegmentDetector:
         }
 
 
-class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
-    """CNN para o primeiro CHECK; demais CHECKS permanecem convencionais."""
+class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
+    """CNN para H1 + BLUE; CHECKS seguintes permanecem convencionais."""
 
     def __init__(self, repository) -> None:
         super().__init__(repository)
@@ -848,25 +856,29 @@ class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
         super().invalidate_learning_cache()
         self.neural_detector.invalidate_model_cache()
 
-    def _is_first_check(
+    def _neural_check_index(
         self,
         project_name: str,
         check_id: str,
-    ) -> bool:
+    ) -> int | None:
+        """Retorna o índice do CHECK migrado para IA nesta etapa N2."""
         try:
             checks = self.repository.listar_checks(project_name)
         except Exception:
             checks = []
-        first = (
-            checks[0]
-            if isinstance(checks, list) and checks
-            else None
-        )
-        return bool(
-            isinstance(first, dict)
-            and str(first.get("id") or "").strip()
-            == str(check_id or "").strip()
-        )
+        if not isinstance(checks, list):
+            return None
+
+        requested = str(check_id or "").strip()
+        for index, check in enumerate(
+            checks[:F3_NEURAL_MIGRATED_CHECK_COUNT]
+        ):
+            if (
+                isinstance(check, dict)
+                and str(check.get("id") or "").strip() == requested
+            ):
+                return int(index)
+        return None
 
     @staticmethod
     def _not_ready_neural(
@@ -888,7 +900,7 @@ class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
             "active_mask_count": 0,
             "matched_mask_count": 0,
             "neural_visual_authority": True,
-            "neural_check_scope": "first_check_only",
+            "neural_check_scope": F3_NEURAL_CHECK_SCOPE,
             "reference_authority": F3_H1_NEURAL_AUTHORITY,
             "conventional_visual_authority_used": False,
             **extra,
@@ -905,7 +917,11 @@ class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
         mask_geometry_resolution=None,
         mask_geometry_source: str = "",
     ) -> dict:
-        if not self._is_first_check(project_name, check_id):
+        neural_check_index = self._neural_check_index(
+            project_name,
+            check_id,
+        )
+        if neural_check_index is None:
             return super().analyze(
                 frame=frame,
                 project_name=project_name,
@@ -1225,12 +1241,17 @@ class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
             and matched_count == len(results)
         )
 
+        reason_prefix = (
+            "h1"
+            if neural_check_index == 0
+            else "blue"
+        )
         if uncertain_count:
-            reason = "h1_neural_incerto"
+            reason = f"{reason_prefix}_neural_incerto"
         elif approved:
-            reason = "h1_neural_conforme"
+            reason = f"{reason_prefix}_neural_conforme"
         else:
-            reason = "h1_neural_divergente"
+            reason = f"{reason_prefix}_neural_divergente"
 
         metadata = self.presence_store.get(
             project_name,
@@ -1242,7 +1263,7 @@ class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
         )
         presence["decision_authority"] = False
         presence["role"] = (
-            "check_photo_diagnostic_only_neural_h1"
+            "check_photo_diagnostic_only_neural"
         )
 
         return {
@@ -1264,7 +1285,11 @@ class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
             ),
             "reference_authority": F3_H1_NEURAL_AUTHORITY,
             "neural_visual_authority": True,
-            "neural_check_scope": "first_check_only",
+            "neural_check_scope": F3_NEURAL_CHECK_SCOPE,
+            "neural_check_index": int(neural_check_index),
+            "neural_stage": (
+                "N1" if neural_check_index == 0 else "N2"
+            ),
             "neural_batch_size": len(results),
             "neural_model": {
                 key: deepcopy(value)
@@ -1284,20 +1309,33 @@ class F3H1NeuralAnalyzer(F3SameMaskReferenceAnalyzer):
         }
 
 
+# Compatibilidade de import para extensões externas antigas. Internamente, o
+# proprietário canônico é F3NeuralCheckAnalyzer.
+F3H1NeuralAnalyzer = F3NeuralCheckAnalyzer
+
+
 _INSTALLED = False
 
 
-def instalar_autoridade_neural_h1_display_f3() -> None:
-    """Torna a CNN a única autoridade semântica do primeiro CHECK."""
+def instalar_autoridade_neural_h1_blue_display_f3() -> None:
+    """Torna a CNN a única autoridade semântica de H1 e BLUE."""
     global _INSTALLED
 
     # Reaplicado mesmo depois do guard, pois instaladores históricos alteram os
     # aliases durante o bootstrap. A autoridade neural deve ficar literalmente
-    # por último para H1.
-    runtime_module.DisplayAutomaticCheckAnalyzer = F3H1NeuralAnalyzer
-    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3H1NeuralAnalyzer
+    # por último para os CHECKS já migrados.
+    runtime_module.DisplayAutomaticCheckAnalyzer = F3NeuralCheckAnalyzer
+    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3NeuralCheckAnalyzer
+    runtime_module._display_f3_neural_authority = True
+    # Marcadores nominais preservados somente para compatibilidade de telemetria.
     runtime_module._display_f3_h1_neural_authority = True
+    runtime_module._display_f3_blue_neural_authority = True
 
     if _INSTALLED:
         return
     _INSTALLED = True
+
+
+def instalar_autoridade_neural_h1_display_f3() -> None:
+    """Compatibilidade: delega para a autoridade neural N2 canônica."""
+    instalar_autoridade_neural_h1_blue_display_f3()
