@@ -47,6 +47,9 @@ from src.platform.display_f3_neural_dataset import (
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
 )
+from src.platform.display_f3_neural_physical_calibration import (
+    recalibrate_physical_h1_thresholds,
+)
 
 
 F3_NEURAL_REQUIRED_VALIDATION_ACCURACY = 1.0
@@ -1449,6 +1452,21 @@ def treinar(args) -> dict:
         )
         preflight["state_coverage_path"] = str(coverage_path)
 
+    physical_debug_paths = list(
+        getattr(args, "physical_h1_debug", None) or ()
+    )
+    recalibrate_physical_h1 = bool(
+        getattr(args, "recalibrate_physical_h1", False)
+    )
+    if physical_debug_paths and not recalibrate_physical_h1:
+        raise RuntimeError(
+            "--physical-h1-debug exige --recalibrate-physical-h1."
+        )
+    if recalibrate_physical_h1 and bool(args.preflight):
+        raise RuntimeError(
+            "--recalibrate-physical-h1 não pode ser combinado com --preflight."
+        )
+
     if bool(args.preflight):
         _print_preflight(preflight)
         return preflight
@@ -1458,6 +1476,48 @@ def treinar(args) -> dict:
             "Preflight neural N1 não está pronto:\n"
             + json.dumps(preflight, indent=2, ensure_ascii=False)
         )
+
+    if recalibrate_physical_h1:
+        if not physical_debug_paths:
+            raise RuntimeError(
+                "--recalibrate-physical-h1 exige ao menos um "
+                "--physical-h1-debug <arquivo>."
+            )
+        result = recalibrate_physical_h1_thresholds(
+            repository=repository,
+            project_name=str(dataset.get("project_name") or ""),
+            model_path=output,
+            debug_paths=physical_debug_paths,
+        )
+        physical = result["physical_h1"]
+        calibration = result["threshold_calibration"]
+        print(
+            "Calibração física H1: "
+            f"frames={physical['frame_count']} "
+            f"amostras={physical['sample_count']}"
+        )
+        print(
+            "Extremos físicos H1: "
+            f"OFF<=P(ON) {physical['max_off_on_probability']:.6f} | "
+            f"ON>=P(ON) {physical['min_on_on_probability']:.6f} | "
+            f"gap={physical['uncertainty_gap']:.6f}"
+        )
+        print(
+            "Calibração combinada: "
+            f"OFF<=P(ON) "
+            f"{calibration['off_max_on_probability']:.6f} | "
+            f"ON>=P(ON) "
+            f"{calibration['on_min_on_probability']:.6f} | "
+            f"gap={calibration['uncertainty_gap']:.6f}"
+        )
+        print(f"ONNX preservado sem retreino: {result['model_path']}")
+        print(f"Metadados atualizados: {result['metadata_path']}")
+        print(f"Diagnóstico: {result['diagnostics_path']}")
+        print(
+            "Os frames usados agora são calibração; o próximo H1 físico "
+            "deve usar frames novos como reteste independente."
+        )
+        return result["metadata"]
 
     if isinstance(coverage, dict):
         print(_format_mask_state_coverage(coverage))
@@ -1954,6 +2014,23 @@ def _parse_args():
         help=(
             "Valida fotos, classes e split H1 sem importar PyTorch "
             "nem alterar o modelo produtivo."
+        ),
+    )
+    parser.add_argument(
+        "--recalibrate-physical-h1",
+        action="store_true",
+        help=(
+            "Recalibra somente os thresholds do ONNX já promovido usando "
+            "múltiplos DEBUGs físicos H1. Não retreina a CNN."
+        ),
+    )
+    parser.add_argument(
+        "--physical-h1-debug",
+        action="append",
+        default=[],
+        help=(
+            "Arquivo TXT de DEBUG TÉCNICO com snapshots neurais H1. "
+            "Pode ser repetido; um arquivo também pode conter vários DEBUGs."
         ),
     )
     parser.add_argument("--epochs", type=int, default=60)
