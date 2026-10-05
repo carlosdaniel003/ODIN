@@ -5873,3 +5873,97 @@ Somente depois desse resultado deve ser executado novo treinamento/calibração.
 **Estado físico:** não aplicável; alteração de dataset offline pendente de
 preflight real.
 
+---
+
+## 05/10/2026 — N1.5 overlap após BOARD_OFF: augmentation fotométrico cumulativo identificado
+
+**Resultado:** DIAGNÓSTICO OFFLINE CONFIRMADO — CORREÇÃO IMPLEMENTADA,
+PENDENTE DE NOVO TREINO LOCAL.
+
+O preflight real após D-061 confirmou:
+
+```text
+sample_count=140
+board_off_sample_count=28
+train_count=112
+validation_count=28
+ambas as classes no treino=26
+somente uma classe no treino=2
+estado H1 nunca visto no treino=0
+```
+
+Portanto a lacuna de cobertura ON/OFF foi encerrada.
+
+No treino seguinte a CNN atingiu 100% no H1 original e fez early stop após cinco
+épocas perfeitas, mas a calibração robusta não foi separável:
+
+```text
+worst OFF: MASK_010 aug06 P(ON)=0.736686
+worst ON : MASK_012 aug07 P(ON)=0.611381
+raw_gap=-0.125305
+```
+
+A inspeção das cinco piores amostras OFF e ON mostrou:
+
+- OFF problemáticos predominantemente clareados;
+- ON problemáticos predominantemente escurecidos;
+- `MASK_010 aug06`: alpha=1.1426, beta=+0.0266, gamma=0.8014 e reflexo
+  de intensidade 0.9294;
+- `MASK_012 aug07`: alpha=0.7811, beta=-0.0612, gamma=1.2627, sem
+  reflexo/ruído/blur;
+- outros extremos repetiram o mesmo empilhamento de ganho + offset + gamma,
+  inclusive casos OFF sem reflexo.
+
+### Correção desta etapa
+
+Somente a política fotométrica do augmentation foi alterada:
+
+```text
+uma amostra → gain OU offset OU gamma
+```
+
+Nunca os três juntos.
+
+Faixas:
+
+```text
+gain   0.85 .. 1.15
+offset -0.06 .. +0.06
+gamma  0.85 .. 1.18
+```
+
+Permanecem sem alteração:
+
+- arquitetura CNN;
+- entrada 4x48x48;
+- context ratio;
+- split H1 reservado;
+- BOARD_OFF;
+- 16 variações de calibração por referência;
+- blur, ruído, deslocamento, escala e rotação;
+- reflexo sintético OFF;
+- thresholds derivados do gap;
+- autoridade produtiva H1.
+
+Regressões automatizadas foram adicionadas para exigir que apenas um dos três
+operadores fotométricos esteja não neutro em cada amostra e para cobrir todas as
+três modalidades.
+
+### Próximo reteste
+
+Executar:
+
+```powershell
+python scripts/treinar_f3_segmentos_neural.py --project CM_500_L
+```
+
+Verificar:
+
+1. H1 original continua 100%;
+2. `max_OFF_P(ON) < min_ON_P(ON)`;
+3. quais máscaras ficam nos novos extremos;
+4. se ainda houver overlap, não alterar threshold: revisar contexto/capacidade
+   espacial da CNN como próxima hipótese.
+
+**Validação física produtiva:** ainda não executada; esta etapa é de treino e
+calibração offline.
