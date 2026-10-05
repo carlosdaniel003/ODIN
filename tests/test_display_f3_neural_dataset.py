@@ -212,6 +212,104 @@ class DisplayF3NeuralDatasetTests(unittest.TestCase):
                 ]["board_points_reference"],
             )
 
+    def test_builder_adds_board_off_as_real_off_for_same_masks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, blue = self._repository(Path(temp))
+            from src.platform.display_visual_reference_status import (
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                DisplayProjectPresenceReferenceStore,
+            )
+
+            project = repository.carregar_projeto("DISPLAY A")
+            self.assertIsNotNone(project)
+            masks = list(project.get("masks", []) or [])
+            store = DisplayProjectPresenceReferenceStore(repository)
+            self.assertIsNotNone(
+                store.capture(
+                    "DISPLAY A",
+                    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    _frame(22, 24),
+                    (160, 96),
+                )
+            )
+            self.assertTrue(
+                store.save_geometry(
+                    "DISPLAY A",
+                    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    [
+                        [12, 12],
+                        [148, 12],
+                        [148, 84],
+                        [12, 84],
+                    ],
+                    masks,
+                )
+            )
+
+            result = F3NeuralDatasetBuilder(repository).collect(
+                "DISPLAY A"
+            )
+
+            self.assertTrue(result["ready"])
+            self.assertTrue(result["board_off_reference_configured"])
+            self.assertTrue(result["board_off_geometry_configured"])
+            self.assertEqual(2, result["board_off_sample_count"])
+            self.assertEqual(("BOARD_OFF",), result["auxiliary_sources_used"])
+            self.assertEqual(6, result["sample_count"])
+            self.assertEqual({"off": 4, "on": 2}, result["class_counts"])
+            self.assertEqual((h1["id"], blue["id"]), result["checks_used"])
+
+            board_off = [
+                sample
+                for sample in result["samples"]
+                if sample.get("check_id") == "BOARD_OFF"
+            ]
+            self.assertEqual(2, len(board_off))
+            self.assertEqual(
+                {"MASK_001", "MASK_002"},
+                {sample["mask_id"] for sample in board_off},
+            )
+            self.assertTrue(
+                all(sample["state"] == "off" for sample in board_off)
+            )
+            self.assertTrue(
+                all(sample["label"] == 0 for sample in board_off)
+            )
+            self.assertTrue(
+                all(
+                    sample["source_kind"] == "board_off_reference"
+                    for sample in board_off
+                )
+            )
+
+    def test_builder_does_not_guess_board_off_geometry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = self._repository(Path(temp))
+            from src.platform.display_visual_reference_status import (
+                DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                DisplayProjectPresenceReferenceStore,
+            )
+
+            store = DisplayProjectPresenceReferenceStore(repository)
+            self.assertIsNotNone(
+                store.capture(
+                    "DISPLAY A",
+                    DISPLAY_PROJECT_REFERENCE_BOARD_OFF,
+                    _frame(22, 24),
+                    (160, 96),
+                )
+            )
+
+            result = F3NeuralDatasetBuilder(repository).collect(
+                "DISPLAY A"
+            )
+
+            self.assertTrue(result["board_off_reference_configured"])
+            self.assertFalse(result["board_off_geometry_configured"])
+            self.assertEqual(0, result["board_off_sample_count"])
+            self.assertEqual(4, result["sample_count"])
+            self.assertEqual((), result["auxiliary_sources_used"])
+
     def test_segment_tensor_is_small_four_channel_input_with_explicit_mask(self):
         frame = _frame(230, 28)
         mask = {
