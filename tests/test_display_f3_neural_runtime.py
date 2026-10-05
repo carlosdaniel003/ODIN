@@ -850,6 +850,69 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             decision["reason"],
         )
 
+    def test_neural_blue_divergence_emits_ng_but_uncertain_cannot(self):
+        divergent = {
+            "ready": True,
+            "approved": False,
+            "neural_visual_authority": True,
+            "neural_check_scope": neural_module.F3_NEURAL_CHECK_SCOPE,
+            "mask_results": [
+                {
+                    "mask_id": "MASK_023",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                    "confidence": 0.98,
+                    "neural_certain": True,
+                },
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                    "confidence": 0.97,
+                    "neural_certain": True,
+                },
+            ],
+        }
+        decision = decidir_analise_display_f3(
+            divergent,
+            reference_gate=False,
+        )
+        self.assertEqual("ng", decision["decision"])
+        self.assertEqual(
+            "check_neural_divergencia_confirmada",
+            decision["reason"],
+        )
+        self.assertEqual(
+            "MASK_024",
+            decision["failed_mask_id"],
+        )
+
+        uncertain = {
+            **divergent,
+            "mask_results": [
+                divergent["mask_results"][0],
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "uncertain",
+                    "matched": None,
+                    "confidence": 0.56,
+                    "neural_certain": False,
+                },
+            ],
+        }
+        decision = decidir_analise_display_f3(
+            uncertain,
+            reference_gate=False,
+        )
+        self.assertEqual("searching", decision["decision"])
+        self.assertEqual(
+            "classificacao_neural_incerta",
+            decision["reason"],
+        )
+
     def test_canonical_check_authority_embeds_neural_semantic_analyzer(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, _h1, _blue = _repository(
