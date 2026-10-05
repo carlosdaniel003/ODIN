@@ -459,6 +459,15 @@ class DisplayAutomaticCheckF3Mixin:
         phase_evidence: dict,
     ) -> dict:
         result = deepcopy(analysis)
+        if result.get("neural_visual_authority") is True:
+            # N2: CHECK neural não pode ser reescrito por gabarito exato nem
+            # por veto físico legado. INCERTO/ON/OFF pertencem somente à CNN.
+            result["intermittent_conventional_veto_skipped"] = True
+            result["intermittent_conventional_veto_skip_reason"] = (
+                "neural_visual_authority"
+            )
+            return result
+
         exact_veto_ids = {
             str(mask_id)
             for mask_id in (phase_evidence.get("exact_template_veto_ids") or ())
@@ -600,6 +609,15 @@ class DisplayAutomaticCheckF3Mixin:
         máscara possui autoridade para confirmar um falso OFF como fisicamente ON.
         """
         result = deepcopy(analysis)
+        if result.get("neural_visual_authority") is True:
+            # N2: energia continua provando que o display está ligado, mas não
+            # pode corrigir a classificação semântica de um segmento no BLUE.
+            result["intermittent_physical_reconciliation_skipped"] = True
+            result["intermittent_physical_reconciliation_skip_reason"] = (
+                "neural_visual_authority"
+            )
+            return result
+
         evidence = (
             physical_evidence
             if isinstance(physical_evidence, dict)
@@ -1092,8 +1110,13 @@ class DisplayAutomaticCheckF3Mixin:
         if total <= 0:
             return {"phase": "on", "persistent_failed_ids": ()}
 
+        neural_visual_authority = bool(
+            analysis.get("neural_visual_authority") is True
+        )
         canonical_physical_support_ids = (
-            self._display_auto_canonical_intermittent_physical_support_ids(
+            set()
+            if neural_visual_authority
+            else self._display_auto_canonical_intermittent_physical_support_ids(
                 analysis
             )
         )
@@ -1144,11 +1167,23 @@ class DisplayAutomaticCheckF3Mixin:
                     continue
                 classified = str(item.get("classified") or "")
 
-                # D-058: a lista canônica já foi produzida pela única
-                # autoridade física aceita (D-057). Não a rederive de campos
-                # locais nem deixe a confiança semântica vetar essa evidência.
+                # D-060/N2: INCERTO neural não é acerto nem defeito. Ele mantém
+                # a evidência anterior, mas não incrementa nem zera o contador.
                 if (
-                    expected == DISPLAY_CHECK_STATE_ON
+                    neural_visual_authority
+                    and (
+                        item.get("neural_certain") is False
+                        or classified == "uncertain"
+                        or item.get("matched") is None
+                    )
+                ):
+                    continue
+
+                # D-058 permanece somente para CHECKS convencionais. No BLUE
+                # neural, a energia não pode reclassificar um segmento OFF.
+                if (
+                    not neural_visual_authority
+                    and expected == DISPLAY_CHECK_STATE_ON
                     and classified == DISPLAY_CHECK_STATE_OFF
                     and mask_id in canonical_physical_support_ids
                 ):
@@ -1167,7 +1202,10 @@ class DisplayAutomaticCheckF3Mixin:
                     counts[mask_id] = 0
                     continue
 
-                if self._display_auto_exact_template_confirms_expected(item):
+                if (
+                    not neural_visual_authority
+                    and self._display_auto_exact_template_confirms_expected(item)
+                ):
                     counts[mask_id] = 0
                     exact_veto_ids.add(mask_id)
                     continue
@@ -1512,7 +1550,13 @@ class DisplayAutomaticCheckF3Mixin:
                 )
             )
 
-        if bool(context.get("intermittent", False)):
+        neural_visual_authority = bool(
+            analysis.get("neural_visual_authority") is True
+        )
+        if (
+            bool(context.get("intermittent", False))
+            and not neural_visual_authority
+        ):
             intermittent_physical_evidence = (
                 self._display_auto_current_check_relative_power_evidence(
                     frame,
@@ -1522,6 +1566,11 @@ class DisplayAutomaticCheckF3Mixin:
             analysis = self._display_auto_apply_intermittent_physical_authority(
                 analysis,
                 intermittent_physical_evidence,
+            )
+        elif bool(context.get("intermittent", False)):
+            analysis["intermittent_physical_reconciliation_skipped"] = True
+            analysis["intermittent_physical_reconciliation_skip_reason"] = (
+                "neural_visual_authority"
             )
 
         intermittent_phase = self._display_auto_observe_intermittent_phase(
@@ -1546,10 +1595,16 @@ class DisplayAutomaticCheckF3Mixin:
                 )
                 return
 
-            analysis = self._display_auto_apply_intermittent_exact_veto(
-                analysis,
-                intermittent_phase,
-            )
+            if not neural_visual_authority:
+                analysis = self._display_auto_apply_intermittent_exact_veto(
+                    analysis,
+                    intermittent_phase,
+                )
+            else:
+                analysis["intermittent_conventional_veto_skipped"] = True
+                analysis["intermittent_conventional_veto_skip_reason"] = (
+                    "neural_visual_authority"
+                )
             analysis["intermittent_phase"] = "on"
             analysis["intermittent_phase_evidence"] = deepcopy(intermittent_phase)
             analysis["intermittent_persistent_failed_ids"] = list(
