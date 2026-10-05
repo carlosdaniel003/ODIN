@@ -3726,3 +3726,138 @@ max_OFF_P(ON) < min_ON_P(ON)
 Se a sobreposição persistir com esta política fotométrica conservadora, a
 próxima hipótese permitida é capacidade/contexto espacial da CNN, sem voltar ao
 classificador convencional e sem relaxar o threshold.
+
+---
+
+## D-063 — Calibração neural H1 incorpora múltiplos frames físicos sem entrar no treino
+
+**Status:** Accepted
+
+### Contexto
+
+Após D-062, o mesmo modelo manteve o H1 integralmente fora da otimização e
+passou pelo gate offline:
+
+```text
+H1 original: 28/28 = 100%
+max OFF P(ON)=0.584876
+min ON  P(ON)=0.827438
+gap=+0.242561
+```
+
+O reteste nominal físico, porém, mostrou que a distribuição live da
+`MASK_017` fica repetidamente abaixo do limite ON derivado apenas da foto H1
+reservada + augmentation. Em cinco frames congelados independentes da mesma
+condição H1 correta:
+
+```text
+MASK_017 P(ON)
+0.828465 → ON / PASS
+0.821631 → INCERTO
+0.820450 → INCERTO
+0.809613 → INCERTO
+0.809678 → INCERTO
+```
+
+Resultado operacional: 1/5 aprovações e 4/5 leituras `27/28`, sempre com
+`MASK_017` INCERTA.
+
+Nos mesmos cinco frames, os extremos físicos permaneceram separáveis:
+
+```text
+max OFF físico P(ON)=0.534034  → MASK_010
+min ON físico  P(ON)=0.809613  → MASK_017
+gap físico=+0.275579
+```
+
+Portanto não existe evidência de overlap físico ON/OFF. O problema é que o
+limite ON da calibração sintética não cobria a variação física nominal
+recorrente da `MASK_017`.
+
+### Decisão
+
+A calibração de certeza do H1 passa a poder incorporar **múltiplos frames
+físicos H1 congelados**, sem alterar os pesos da CNN.
+
+Contrato:
+
+1. H1 continua integralmente fora da **otimização** da rede;
+2. a calibração física exige no mínimo 5 frames congelados H1 únicos;
+3. os rótulos ON/OFF vêm exclusivamente do `mask_states` configurado do H1;
+4. a classificação produzida pela própria CNN nunca vira rótulo de treino;
+5. os frames são ingeridos offline a partir do DEBUG TÉCNICO já existente,
+   usando o bloco `last_auto_analysis` e as probabilidades neurais por máscara;
+6. cada snapshot precisa declarar a autoridade
+   `f3_h1_neural_segment_detector`, projeto/check compatíveis e a mesma
+   assinatura de calibração do artefato;
+7. frames duplicados são eliminados por `frame_sha256_24`;
+8. o conjunto físico também precisa ser estritamente separável:
+   `max OFF físico < min ON físico`;
+9. a calibração final combina os extremos de forma conservadora:
+
+```text
+max_OFF_final = max(max_OFF_augmented, max_OFF_físico)
+min_ON_final  = min(min_ON_augmented, min_ON_físico)
+```
+
+10. o gap combinado também precisa permanecer positivo;
+11. não existe midpoint, threshold manual ou exceção específica para
+    `MASK_017`;
+12. o ONNX e seus pesos permanecem inalterados; somente o metadata schema 3 é
+    atualizado atomicamente com a nova evidência e os thresholds derivados;
+13. o runtime aceita a origem anterior para compatibilidade e valida
+    fail-closed o novo contrato físico quando presente;
+14. DEBUGs futuros passam a expor o SHA-256 do ONNX, reforçando a identidade do
+    artefato usado na coleta física;
+15. depois de incorporados, esses frames deixam de ser validação independente:
+    o reteste físico posterior precisa usar frames novos.
+
+### Resultado esperado no lote físico atual
+
+Com os cinco frames já coletados:
+
+```text
+base augmented:
+  max OFF=0.584876
+  min ON =0.827438
+
+physical:
+  max OFF=0.534034
+  min ON =0.809613
+
+combined:
+  max OFF=0.584876
+  min ON =0.809613
+  gap≈0.224737
+```
+
+A faixa continua derivada de evidência empírica e mantém uma região INCERTO
+real entre OFF e ON.
+
+### Implementação
+
+- contrato compartilhado:
+  `src/platform/display_f3_neural_dataset.py`;
+- ingestão/validação/calibração física offline:
+  `src/platform/display_f3_neural_physical_calibration.py`;
+- CLI:
+  `scripts/treinar_f3_segmentos_neural.py`;
+- validação fail-closed no runtime:
+  `src/platform/display_f3_neural_runtime.py`.
+
+A recalibração física é um caminho offline de engenharia. Não cria scheduler,
+thread, worker, autoridade produtiva paralela ou novo processamento por frame.
+
+### Limite da decisão
+
+Esta calibração não conclui a validação produtiva do H1. Depois da atualização,
+é obrigatório usar **novos frames físicos** para validar novamente:
+
+- H1 nominal repetido;
+- pequeno deslocamento;
+- variação moderada de iluminação;
+- segmento esperado ON realmente apagado;
+- reflexo em segmento esperado OFF.
+
+BLUE não recebe autoridade neural antes desses cenários e de autorização
+explícita do usuário.
