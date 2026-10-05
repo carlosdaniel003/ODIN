@@ -68,6 +68,124 @@ def _productive_counts(analysis: dict | None) -> tuple[int, int]:
     return max(0, matched), max(0, active)
 
 
+def _safe_probability(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 <= number <= 1.0):
+        return None
+    return number
+
+
+def _fmt_probability(value) -> str:
+    number = _safe_probability(value)
+    return "--" if number is None else f"{number:.4f}"
+
+
+def _neural_diagnostics(analysis: dict | None) -> dict:
+    """Resume a CNN sem transformar diagnóstico em segunda autoridade.
+
+    O relatório deve permitir distinguir três situações muito diferentes:
+    modelo ausente, inferência neural incerta e divergência neural certa.
+    Também publica a direção bruta por argmax apenas como instrumento de
+    calibração; esse valor nunca participa de OK/NG.
+    """
+    if not isinstance(analysis, dict) or analysis.get("neural_visual_authority") is not True:
+        return {"active": False}
+
+    rows = [
+        item
+        for item in (analysis.get("mask_results") or ())
+        if isinstance(item, dict) and str(item.get("mask_id") or "")
+    ]
+    model = analysis.get("neural_model")
+    model = dict(model) if isinstance(model, dict) else {}
+
+    uncertain_ids = []
+    raw_mismatch_ids = []
+    raw_matches = 0
+    expected_on_probabilities = []
+    expected_off_probabilities = []
+
+    for item in rows:
+        mask_id = str(item.get("mask_id") or "")
+        expected = str(item.get("expected") or "").strip().lower()
+        classified = str(item.get("classified") or "").strip().lower()
+        certain = bool(item.get("neural_certain") is True)
+        if not certain or classified == "uncertain":
+            uncertain_ids.append(mask_id)
+
+        probabilities = item.get("neural_probabilities")
+        probabilities = probabilities if isinstance(probabilities, dict) else {}
+        p_on = _safe_probability(probabilities.get("on"))
+        p_off = _safe_probability(probabilities.get("off"))
+        if p_on is None or p_off is None:
+            continue
+
+        if expected == "on":
+            expected_on_probabilities.append(p_on)
+        elif expected == "off":
+            expected_off_probabilities.append(p_on)
+
+        raw_state = "on" if p_on >= p_off else "off"
+        if expected in ("on", "off"):
+            if raw_state == expected:
+                raw_matches += 1
+            else:
+                raw_mismatch_ids.append(mask_id)
+
+    def stats(values):
+        if not values:
+            return {"min": None, "mean": None, "max": None}
+        return {
+            "min": min(values),
+            "mean": sum(values) / float(len(values)),
+            "max": max(values),
+        }
+
+    on_stats = stats(expected_on_probabilities)
+    off_stats = stats(expected_off_probabilities)
+    gap = None
+    midpoint = None
+    if on_stats["min"] is not None and off_stats["max"] is not None:
+        gap = float(on_stats["min"]) - float(off_stats["max"])
+        midpoint = (float(on_stats["min"]) + float(off_stats["max"])) / 2.0
+
+    return {
+        "active": True,
+        "authority": str(analysis.get("reference_authority") or ""),
+        "reason": str(analysis.get("reason") or ""),
+        "approved": analysis.get("approved"),
+        "active_mask_count": len(rows),
+        "matched_mask_count": int(analysis.get("matched_mask_count", 0) or 0),
+        "uncertain_count": len(uncertain_ids),
+        "uncertain_mask_ids": tuple(uncertain_ids),
+        "raw_argmax_match_count": int(raw_matches),
+        "raw_argmax_mismatch_ids": tuple(raw_mismatch_ids),
+        "expected_on_p_on": on_stats,
+        "expected_off_p_on": off_stats,
+        "diagnostic_separation_gap": gap,
+        "diagnostic_midpoint": midpoint,
+        "model_ready": bool(model.get("ready")),
+        "model_reason": str(model.get("reason") or ""),
+        "model_path": str(model.get("model_path") or ""),
+        "input_size": model.get("input_size"),
+        "on_min_on_probability": _safe_probability(
+            model.get("on_min_on_probability")
+        ),
+        "off_max_on_probability": _safe_probability(
+            model.get("off_max_on_probability")
+        ),
+        "load_count": model.get("load_count"),
+        "batch_size": model.get("batch_size"),
+        "inference_count": model.get("inference_count"),
+        "conventional_visual_authority_used": bool(
+            analysis.get("conventional_visual_authority_used")
+        ),
+    }
+
+
 def construir_resumo_operacional_debug_f3(snapshot: dict) -> dict:
     context = _context(snapshot)
     runtime = _runtime(snapshot)
@@ -79,6 +197,7 @@ def construir_resumo_operacional_debug_f3(snapshot: dict) -> dict:
     ready = bool(isinstance(analysis, dict) and analysis.get("ready"))
     approved = bool(ready and analysis.get("approved") is True)
     fully_matched = bool(approved and active > 0 and matched >= active)
+    neural = _neural_diagnostics(analysis)
 
     waiting_empty = bool(runtime.get("waiting_empty_rearm"))
     waiting_new = bool(runtime.get("waiting_new_board_after_empty"))
@@ -96,6 +215,11 @@ def construir_resumo_operacional_debug_f3(snapshot: dict) -> dict:
     check_name = str(context.get("check_name") or context.get("check_id") or "CHECK")
     if fully_matched:
         productive_text = f"{check_name} CONFORME {matched}/{active} máscaras"
+    elif bool(neural.get("active")) and ready and int(neural.get("uncertain_count", 0) or 0) > 0:
+        productive_text = (
+            f"{check_name} INDETERMINADO • "
+            f"{int(neural.get('uncertain_count', 0) or 0)}/{active} máscaras incertas"
+        )
     elif ready:
         productive_text = f"{check_name} NÃO CONFORME {matched}/{active} máscaras"
     else:
@@ -117,6 +241,7 @@ def construir_resumo_operacional_debug_f3(snapshot: dict) -> dict:
         "waiting_new_board_after_empty": waiting_new,
         "cycle_rearm_waiting": cycle_waiting,
         "cycle_rearmed_waiting_new_board": cycle_waiting_new,
+        "neural": neural,
     }
 
 
@@ -197,12 +322,87 @@ def _report_summary_block(snapshot: dict) -> str:
             f"waiting_new_board={summary.get('waiting_new_board_after_empty', False)} • "
             f"cycle_waiting={summary.get('cycle_rearm_waiting', False)}"
         ),
-        (
-            "ANÁLISE VISUAL: SOMENTE INFORMATIVA • "
-            "não altera OK/NG, máscaras ou avanço do fluxo"
-        ),
-        f"TEXTO VISUAL ORIGINAL: {raw_visual}",
     ]
+
+    neural = summary.get("neural")
+    neural = neural if isinstance(neural, dict) else {}
+    if bool(neural.get("active")):
+        on_stats = neural.get("expected_on_p_on")
+        on_stats = on_stats if isinstance(on_stats, dict) else {}
+        off_stats = neural.get("expected_off_p_on")
+        off_stats = off_stats if isinstance(off_stats, dict) else {}
+        mismatch_ids = tuple(neural.get("raw_argmax_mismatch_ids") or ())
+        gap = neural.get("diagnostic_separation_gap")
+        midpoint = neural.get("diagnostic_midpoint")
+        active = int(neural.get("active_mask_count", 0) or 0)
+        raw_matches = int(neural.get("raw_argmax_match_count", 0) or 0)
+        lines.extend(
+            [
+                "AUTORIDADE VISUAL PRODUTIVA: IA NEURAL H1 (CNN/ONNX)",
+                (
+                    "MODELO IA: "
+                    f"ready={neural.get('model_ready', False)} • "
+                    f"reason={neural.get('model_reason') or '--'} • "
+                    f"input={neural.get('input_size') or '--'} • "
+                    f"batch={neural.get('batch_size') or '--'} • "
+                    f"load_count={neural.get('load_count') or '--'} • "
+                    f"inference_count={neural.get('inference_count') or '--'}"
+                ),
+                (
+                    "LIMIARES IA PRODUTIVOS: "
+                    f"OFF se P(ON)≤{_fmt_probability(neural.get('off_max_on_probability'))} • "
+                    f"ON se P(ON)≥{_fmt_probability(neural.get('on_min_on_probability'))} • "
+                    "entre os dois = INCERTO"
+                ),
+                (
+                    "DECISÃO IA: "
+                    f"reason={neural.get('reason') or '--'} • "
+                    f"matched={neural.get('matched_mask_count', 0)}/{active} • "
+                    f"incertos={neural.get('uncertain_count', 0)}/{active}"
+                ),
+                (
+                    "DIREÇÃO BRUTA IA (DIAGNÓSTICO; NÃO DECIDE): "
+                    f"argmax={raw_matches}/{active} compatíveis"
+                    + (
+                        f" • divergentes={','.join(mismatch_ids)}"
+                        if mismatch_ids
+                        else " • divergentes=nenhuma"
+                    )
+                ),
+                (
+                    "P(ON) NAS MÁSCARAS ESPERADAS ON: "
+                    f"min={_fmt_probability(on_stats.get('min'))} • "
+                    f"média={_fmt_probability(on_stats.get('mean'))} • "
+                    f"max={_fmt_probability(on_stats.get('max'))}"
+                ),
+                (
+                    "P(ON) NAS MÁSCARAS ESPERADAS OFF: "
+                    f"min={_fmt_probability(off_stats.get('min'))} • "
+                    f"média={_fmt_probability(off_stats.get('mean'))} • "
+                    f"max={_fmt_probability(off_stats.get('max'))}"
+                ),
+                (
+                    "SEPARAÇÃO LIVE IA (DIAGNÓSTICO; NÃO DECIDE): "
+                    f"gap={('--' if gap is None else f'{float(gap):+.4f}')} • "
+                    f"midpoint={_fmt_probability(midpoint)}"
+                ),
+                (
+                    "AUTORIDADE CONVENCIONAL DE ON/OFF USADA: "
+                    + ("SIM" if neural.get("conventional_visual_authority_used") else "NÃO")
+                ),
+                f"MODELO IA PATH: {neural.get('model_path') or '--'}",
+            ]
+        )
+
+    lines.extend(
+        [
+            (
+                "ANÁLISE VISUAL GLOBAL: SOMENTE PRESENÇA/INFORMATIVA • "
+                "não altera OK/NG, máscaras ou avanço do fluxo"
+            ),
+            f"TEXTO VISUAL ORIGINAL: {raw_visual}",
+        ]
+    )
     return "\n".join(lines)
 
 
