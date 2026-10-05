@@ -42,6 +42,10 @@ jobs:
             tests/test_display_f3_neural_runtime.py \
             tests/test_display_f3_neural_training.py
 
+      - name: Verify direct training CLI import path
+        run: |
+          python scripts/treinar_f3_segmentos_neural.py --help
+
       - name: Run neural F3 tests
         run: |
           python -m unittest \
