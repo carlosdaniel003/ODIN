@@ -51,7 +51,7 @@ from src.platform.display_f3_mask_status import (
     instalar_status_mascaras_display_f3,
 )
 from src.platform.display_f3_neural_runtime import (
-    instalar_autoridade_neural_h1_display_f3,
+    instalar_autoridade_neural_h1_blue_display_f3,
 )
 from src.platform.display_f3_operational_status import (
     instalar_status_operacional_display_f3,
@@ -288,9 +288,9 @@ class DesktopProductionApp(
         # energia vem da mesma máscara OFF<->ON. Sem energia confirmada não há
         # OK, NG nem avanço, embora overlay/debug continuem lendo o mesmo frame.
         instalar_autoridade_energia_final_display_f3()
-        # N1.2: última autoridade semântica do bootstrap. O primeiro CHECK usa
-        # exclusivamente a CNN; BLUE/USB/AUX permanecem no caminho convencional.
-        instalar_autoridade_neural_h1_display_f3()
+        # N2: última autoridade semântica do bootstrap. H1 e BLUE usam
+        # exclusivamente a CNN; USB/AUX permanecem no caminho convencional.
+        instalar_autoridade_neural_h1_blue_display_f3()
         super().__init__(root)
         iniciar_debug_periodico_camera_windows(self)
 
