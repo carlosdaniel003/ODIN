@@ -5733,3 +5733,66 @@ Somente após essa evidência será permitido decidir entre:
 **Estado:** INSTRUMENTAÇÃO IMPLEMENTADA — PENDENTE DE NOVA EXECUÇÃO DO TREINO
 PARA COLETAR OS EXTREMOS REAIS.
 
+---
+
+## 05/10/2026 — N1.4 diagnóstico: auditoria ON/OFF por máscara física implementada
+
+**Estado:** INSTRUMENTAÇÃO IMPLEMENTADA — AGUARDANDO RESULTADO NO PROJETO REAL.
+
+Motivação:
+- os extremos da calibração confirmaram que o problema não é explicado somente
+  por um reflexo sintético;
+- antes de alterar CNN, contexto espacial ou augmentation, é necessário verificar
+  se cada `MASK_xxx` viu no conjunto de treino os estados ON/OFF que o H1 exige;
+- exemplo de risco a confirmar: uma máscara fisicamente ON no H1 ter aparecido
+  somente como OFF em BLUE/USB/AUX durante o treino.
+
+A auditoria foi incorporada ao mesmo pipeline neural, sem alterar:
+- split de treino/validação;
+- labels;
+- pesos;
+- augmentation;
+- CNN;
+- thresholds;
+- gate de promoção.
+
+Para cada máscara física o relatório agora registra:
+- estado em cada CHECK configurado;
+- quantidade ON e OFF no treino;
+- estados efetivamente vistos no treino;
+- estado exigido pelo CHECK de validação;
+- se esse estado de validação já apareceu no treino;
+- classificação diagnóstica:
+  - `both_states_seen_in_training`;
+  - `single_state_seen_in_training`;
+  - `validation_state_unseen_in_training`;
+  - `no_training_state`.
+
+O preflight imprime uma matriz legível por CHECK e salva o JSON completo em:
+
+```text
+data/models/f3_neural/diagnostics/
+  cm_500_l_segments_state_coverage.json
+```
+
+O relatório é somente diagnóstico. Mesmo que uma máscara tenha estado de H1
+inédito no treino, o preflight não é artificialmente reprovado por essa regra;
+o objetivo desta etapa é medir a cobertura real antes de decidir a próxima
+mudança algorítmica.
+
+Próximo passo:
+1. executar novamente o preflight do `CM_500_L`;
+2. enviar a matriz impressa ou o JSON de cobertura;
+3. identificar quais máscaras H1 ON/OFF nunca viram esse mesmo estado em
+   BLUE/USB/AUX;
+4. somente com essa evidência decidir entre ampliar contexto/modelo ou corrigir
+   cobertura do dataset.
+
+Não repetir:
+- não mudar arquitetura da CNN antes desta auditoria;
+- não adicionar exemplos artificiais apenas para equilibrar a matriz sem
+  evidência física;
+- não voltar ao classificador convencional do H1.
+
+**Resultado físico:** não aplicável; etapa estritamente diagnóstica/offline.
+
