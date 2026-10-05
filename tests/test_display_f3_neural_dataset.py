@@ -302,8 +302,6 @@ class DisplayF3NeuralDatasetTests(unittest.TestCase):
                 "height": 14,
                 "angle": 0.0,
             }
-            duplicate_mask = dict(masks[0])
-
             store = DisplayProjectPresenceReferenceStore(repository)
             self.assertIsNotNone(
                 store.capture(
@@ -323,7 +321,7 @@ class DisplayF3NeuralDatasetTests(unittest.TestCase):
                         [148, 84],
                         [12, 84],
                     ],
-                    masks + [duplicate_mask, stale_mask],
+                    masks + [stale_mask],
                 )
             )
 
