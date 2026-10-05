@@ -56,9 +56,9 @@ from src.platform.display_project_repository import (
 from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
-# Nome histórico mantido como API de compatibilidade. O valor agora representa
-# o detector neural canônico compartilhado por H1 e BLUE.
-F3_H1_NEURAL_AUTHORITY = "f3_neural_segment_detector"
+# Identificador histórico preservado para compatibilidade com a calibração
+# física H1 e DEBUGs já coletados. A instância agora é compartilhada por H1/BLUE.
+F3_H1_NEURAL_AUTHORITY = "f3_h1_neural_segment_detector"
 F3_H1_NEURAL_MODEL_TYPE = "f3_segment_on_off_cnn"
 F3_NEURAL_UNCERTAIN_STATE = "uncertain"
 F3_NEURAL_MODEL_REFRESH_S = 1.0
