@@ -464,6 +464,34 @@ def _evaluate_model(torch, model, samples, indices) -> tuple[dict, np.ndarray]:
     )
 
 
+def _export_onnx_candidate(
+    torch,
+    model,
+    dummy,
+    destination: Path,
+) -> None:
+    """Exporta ONNX simples compatível com OpenCV sem depender de onnxscript.
+
+    PyTorch 2.14 usa o exporter Dynamo por padrão, que exige o pacote adicional
+    `onnxscript`. O ODIN não precisa dele para esta CNN simples. Mantemos o
+    exporter TorchScript/legacy explicitamente para reduzir dependências do
+    ambiente de treino e preservar `dynamic_axes` + opset 13.
+    """
+    torch.onnx.export(
+        model,
+        dummy,
+        str(destination),
+        input_names=["segments"],
+        output_names=["logits"],
+        dynamic_axes={
+            "segments": {0: "batch"},
+            "logits": {0: "batch"},
+        },
+        opset_version=13,
+        dynamo=False,
+    )
+
+
 def _validate_candidate(
     *,
     cv_logits: np.ndarray,
@@ -757,17 +785,11 @@ def treinar(args) -> dict:
             ),
             dtype=torch.float32,
         )
-        torch.onnx.export(
+        _export_onnx_candidate(
+            torch,
             model,
             dummy,
-            str(staging_model),
-            input_names=["segments"],
-            output_names=["logits"],
-            dynamic_axes={
-                "segments": {0: "batch"},
-                "logits": {0: "batch"},
-            },
-            opset_version=13,
+            staging_model,
         )
 
         net = cv2.dnn.readNetFromONNX(str(staging_model))
