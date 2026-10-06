@@ -4186,3 +4186,130 @@ Assim, ativar o Rastreamento Automático não cria outro modelo de inspeção ne
 muda o critério que já funcionou com tracking desativado.
 
 **Validação física:** PENDENTE DE RETESTE COM TRACKING ON.
+
+
+---
+
+## D-067 — Aquisição neural de pose para LOCK rápido do tracking F3
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Contexto
+
+No primeiro reteste de tracking ON após D-066, o frame ao vivo estava em
+`camera_frame_id=1489`, enquanto o último resultado do object tracking ainda
+pertencia ao frame `1330`. A câmera operava em aproximadamente 15 FPS. Portanto
+o caminho pesado de aquisição podia ficar vários segundos atrás do vídeo atual.
+
+O mesmo snapshot mostrou:
+
+- `object_not_locked`;
+- ORB/rescue sem candidato;
+- filtro preto detectado com sucesso;
+- D-025 encontrou uma pose plausível e melhorou o alinhamento;
+- o encaixe luminoso global encontrou componentes, mas nenhuma hipótese válida;
+- quando o tracking finalmente encontra a pose em outros frames, as máscaras
+  acompanham corretamente os segmentos.
+
+A falha principal desta etapa é, portanto, **aquisição lenta/ambígua da pose**,
+não a decisão semântica D-065.
+
+### Decisão
+
+Adicionar um prior neural separado, treinado offline somente para GEOMETRIA.
+
+```text
+referências configuradas do F3
++ contorno/pose salvos
+        |
+        v
+Tiny CNN de pose
+        |
+        v
+quatro âncoras canônicas aproximadas no frame
+        |
+        +--- detector do filtro preto
+        |
+        v
+selecionar correspondência geométrica correta
+        |
+        v
+CURRENT -> CANÔNICO
+        |
+        v
+refino luminoso
+        |
+        v
+F3HybridCheckAnalyzer
+```
+
+### Restrições obrigatórias
+
+1. A CNN de pose não recebe nem produz OK/NG.
+2. A CNN de pose não decide ON/OFF/POUCA LUZ/INCERTO.
+3. O estado esperado do CHECK não é função de perda do alinhamento; isso evita
+   deslocar ROIs para fazer um produto defeituoso parecer conforme.
+4. A saída neural sozinha não é aceita como LOCK produtivo.
+5. O detector estrutural do filtro/contorno precisa fornecer o quadrilátero
+   observado; a rede serve para desambiguar a correspondência/orientação.
+6. A pose final continua sujeita aos limites de escala, translação, continuidade
+   e frescor do tracking.
+7. Após LOCK, fluxo óptico temporal é tentado antes de ORB Full HD.
+8. ORB/AKAZE/template continuam como fallback integral se o ONNX estiver
+   ausente, inválido ou rejeitado.
+9. O modelo é treinado offline e produção usa apenas OpenCV DNN/ONNX.
+10. Nenhum novo thread, timer ou executor é criado.
+11. D-066 permanece soberana: o tracking fornece geometria; a IA Híbrida decide
+    a semântica.
+
+### Dataset
+
+As amostras vêm do próprio Projeto Display:
+
+- foto de Máscaras;
+- placa desligada no suporte;
+- fotos H1/BLUE/USB/AUX;
+- futuras fotos de CHECK;
+- `reference_to_canonical` já calculado pelo tracker;
+- contorno canônico salvo.
+
+O primeiro CHECK configurado fica fora do treino como validação independente.
+Augmentations simulam pequena rotação, escala, deslocamento, blur e variação de
+exposição sem alterar a identidade geométrica.
+
+### Runtime
+
+A ordem nominal passa a ser:
+
+```text
+COM LOCK ANTERIOR
+  fluxo óptico -> neural reacquire -> ORB -> AKAZE -> template
+
+SEM LOCK
+  neural + filtro -> ORB -> AKAZE -> template
+```
+
+A CNN opera em 192x108; ORB/AKAZE Full HD só são pagos quando os caminhos
+rápidos falham.
+
+### Artefatos
+
+- `src/platform/display_f3_neural_tracking.py`;
+- `scripts/treinar_f3_tracking_neural.py`;
+- modelo local `data/models/f3_tracking/<projeto>_pose.onnx`;
+- metadados JSON com hash, geometria e métricas de validação.
+
+### Validação exigida
+
+Antes de considerar D-067 fisicamente validada:
+
+- executar `--preflight`;
+- treinar e promover o ONNX somente se os thresholds de validação passarem;
+- medir `worker_elapsed_ms` e `worker_age_ms`;
+- confirmar LOCK inicial rápido em H1;
+- deslocar/rotacionar levemente a placa e confirmar reacquisition;
+- confirmar que as 28 máscaras continuam coincidindo com os segmentos;
+- confirmar que H1/BLUE/USB/AUX mantêm exatamente a decisão D-065/D-066;
+- confirmar que modelo ausente continua usando o tracking legado.
+
+**Estado físico:** PENDENTE.
