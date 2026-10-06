@@ -539,14 +539,19 @@ Segmentos apagados não participam da aquisição da pose. Um segmento ON ausent
 ou uma emissão extra pode permanecer como outlier durante o encaixe; a
 conformidade continua pertencendo ao analyzer, não ao tracker. O refinamento
 não cria nova autoridade, scheduler ou worker.
-## 14. Direção canônica do Display F3 — Neural Vision / Edge AI
+## 14. Direção canônica do Display F3 — autoridade híbrida Edge AI por máscara
 
-A partir da D-059, a arquitetura alvo do julgamento visual do Display F3 deixa
-de crescer por regras ópticas convencionais e passa a migrar, CHECK por CHECK,
-para uma autoridade neural local.
+D-059 iniciou a migração neural. D-065 consolidou o estado atual: o julgamento
+visual não é mais migrado CHECK por CHECK e também não volta a uma cadeia de
+classificadores convencionais concorrentes.
 
-O objetivo não é adicionar uma CNN à cadeia existente. O objetivo é substituir
-a autoridade visual do CHECK migrado.
+Todos os CHECKS configurados usam uma única autoridade semântica híbrida que
+combina a CNN local com evidência física ON/OFF da **mesma MASK_xxx**. CHECKS
+criados futuramente entram automaticamente pelo contrato do projeto.
+
+O objetivo não é somar votos de algoritmos independentes. CNN e same-mask são
+duas fontes internas de um único proprietário semântico; conflito forte produz
+INCERTO em vez de fabricar OK ou NG.
 
 ### Fluxo alvo
 
@@ -555,23 +560,23 @@ Camera Service / Latest Frame
   ↓
 configuração do Projeto Display
   ├─ CHECK atual
-  ├─ imagem de referência
-  ├─ contorno
   ├─ geometrias MASK_xxx
   └─ mask_states esperados
   ↓
 normalização/alinhamento
   ↓
-F3NeuralSegmentDetector
+por MASK_xxx
+  ├─ F3NeuralSegmentDetector → ON/OFF/INCERTO + probabilidades
+  └─ same-mask físico        → ON/OFF/POUCA LUZ + confiança/separação
   ↓
-NeuralSegmentObservation[28]
-  ├─ mask_id
-  ├─ state = on/off/uncertain
-  └─ confidence
+F3HybridCheckAnalyzer
+  ├─ consenso → estado confirmado
+  ├─ CNN incerta + físico local forte → físico resolve
+  └─ conflito forte → INCERTO
   ↓
-F3CheckEvaluator
+expected x observed
   ↓
-CheckDecision = OK / NG / UNCERTAIN
+CheckDecision = OK / NG / SEARCHING
   ↓
 F3StateMachineAuthority
   ↓
@@ -585,8 +590,10 @@ DisplayCheckSequenceRuntime
 | captura/frame atual | serviços já canônicos de câmera/latest-frame |
 | configuração de referência | Display Project Repository |
 | geometria/pose | infraestrutura canônica de geometria/tracking |
-| estado visual ON/OFF | `F3NeuralSegmentDetector` |
-| comparação esperado x observado | `F3CheckEvaluator` |
+| inferência neural ON/OFF | `F3NeuralSegmentDetector` |
+| evidência física same-mask | `F3SameMaskReferenceAnalyzer` como fonte interna |
+| estado visual final ON/OFF/POUCA LUZ/INCERTO | `F3HybridCheckAnalyzer` |
+| comparação esperado x observado | policy/evaluator determinístico do F3 |
 | sequência de CHECKS | `F3StateMachineAuthority` / `DisplayCheckSequenceRuntime` |
 | apresentação | UI/ViewModel, sem segunda decisão |
 | debug | observador, sem poder produtivo |
@@ -609,23 +616,22 @@ não resíduos do classificador antigo:
 Não há requisito arquitetural de classificação manual pelo operador durante a
 produção para a primeira versão neural.
 
-### Migração incremental
+### Escopo universal após D-065
 
-A ordem de implementação é deliberadamente estreita:
+A antiga sequência N1→N2→N3→N4 permanece somente como histórico nas decisões.
+O runtime atual não possui limite de quantidade ou lista hardcoded de nomes:
 
 ```text
-ETAPA N1: H1 neural
-  ↓ validação física + OK do usuário
-ETAPA N2: BLUE neural
-  ↓ validação física + OK do usuário
-ETAPA N3: USB neural
-  ↓ validação física + OK do usuário
-ETAPA N4: AUX neural
+for CHECK in projeto.checks:
+    usar F3HybridCheckAnalyzer
 ```
 
-Durante N1, os CHECKS ainda não migrados podem continuar usando o caminho atual
-somente como compatibilidade temporária. Não se deve criar uma segunda
-autoridade neural/convencional para o H1.
+Isso vale para H1, BLUE, AUX, USB e qualquer CHECK adicional. O nome do CHECK
+não determina a autoridade semântica; somente propriedades de domínio, como
+`intermittent=true`, acrescentam comportamento temporal.
+
+Não existe segunda autoridade convencional de fallback. O same-mask participa
+dentro da fusão e sua telemetria permanece separada da CNN para auditoria.
 
 ### Performance e implantação
 
@@ -641,34 +647,42 @@ O hot path precisa preservar:
 - reutilização do executor pesado/coordenador F3 existentes quando apropriado;
 - modelo carregado uma vez e reutilizado;
 - preprocessamento e buffers reutilizáveis sempre que possível;
-- benchmark de latência no hardware real antes de ampliar para outros CHECKS.
+- benchmark de latência no hardware real com o escopo universal ativo.
 
 A escolha final do backbone neural é consequência de benchmark, não decisão
 arquitetural antecipada.
 
-### Implementação incremental atual — N2
+### Implementação atual — autoridade híbrida universal D-065
 
-Os dois primeiros CHECKS da ordem do Projeto Display, H1 e BLUE, usam
-`F3NeuralCheckAnalyzer` + `F3NeuralSegmentDetector` como única autoridade
-semântica ON/OFF. O detector carrega um artefato ONNX por projeto com
-`cv2.dnn.readNetFromONNX`, mantém a rede em cache e executa todas as máscaras
-ativas em um único batch NCHW. Nenhuma dependência de treinamento entra no hot
-path produtivo.
+`F3HybridCheckAnalyzer` + `F3NeuralSegmentDetector` são usados em todos os
+CHECKS configurados. O detector carrega um artefato ONNX por projeto com
+`cv2.dnn.readNetFromONNX`, mantém a rede em cache e executa as máscaras ativas
+em um único batch NCHW. O mesmo analyzer obtém, no mesmo frame/geometria, a
+classificação física ON/OFF/POUCA LUZ da mesma máscara.
+
+A fusão preserva as duas evidências brutas:
+
+- `neural_certain`: certeza original da CNN;
+- `semantic_certain`: certeza da autoridade final após a fusão;
+- `hybrid_resolution`: explica consenso, resolução física ou conflito;
+- campos `physical_*`: expõem a evidência same-mask usada.
+
+Apenas referência física local
+`f3_check_photos_same_mask`, acima do contrato de confiança já existente,
+pode resolver uma CNN incerta. Pool entre máscaras diferentes não ganha essa
+autoridade. CNN e físico local fortes em desacordo resultam em `INCERTO`.
 
 Quando tracking está ligado, `F3TrackedRawCheckAnalyzer` continua entregando
-frame RAW + máscaras projetadas do mesmo snapshot. Reconciliação luminosa,
-gabarito exato e desempate físico convencionais não podem alterar ON/OFF de H1
-nem de BLUE neural. USB/AUX continuam delegados ao analisador convencional
-enquanto não forem migrados.
+frame RAW + máscaras projetadas do mesmo snapshot. Gabarito exato e sondas
+históricas não podem reescrever a decisão final da fusão.
 
-BLUE preserva sua natureza intermitente. Cada frame passa pela CNN, mas o
-runtime temporal classifica a fase como ON/OFF/transição. Fase OFF/transição é
-parte normal do pisca e não gera defeito. Na fase ON, uma divergência neural
-certa precisa persistir por três amostras ON para fechar NG; `INCERTO` não
-aprova, não reprova e não altera o contador de falha.
+CHECKS intermitentes preservam a camada temporal. OFF/transição não gera
+defeito; fase ON consome o estado final e uma divergência semanticamente certa
+precisa persistir pelo debounce configurado. Uma incerteza bruta da CNN já
+resolvida pelo físico pode participar desse debounce; uma incerteza final não.
 
-Modelo ou metadados ausentes/incompatíveis deixam H1/BLUE indisponíveis. Não
-existe fallback convencional para a semântica ON/OFF dos CHECKS já migrados.
+Modelo/metadados ausentes ou incompatíveis deixam a autoridade indisponível.
+Não existe fallback convencional produtivo.
 
 
 
