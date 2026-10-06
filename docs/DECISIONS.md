@@ -4607,3 +4607,184 @@ No próximo H1 físico:
 - confirmar H1 correto tratado de forma idêntica ao tracking OFF.
 
 **Estado físico:** PENDENTE.
+
+
+---
+
+## D-070 — Homografia 3x3 do filtro como geometria estrutural F3
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Contexto físico
+
+O primeiro reteste após D-069 confirmou que o fail-closed geométrico passou a
+funcionar corretamente:
+
+- a UI permaneceu em `LOCK ESTRUTURAL • ALINHANDO SEGMENTOS`;
+- `alignment_ready=false`;
+- `base_core_emission_only=true`;
+- residual base-core:
+  - mediana = 9.881 px;
+  - máximo = 19.61 px;
+  - limite geométrico existente = 12 px;
+- o refinamento fino não promoveu uma pose imprecisa;
+- o tracking estrutural estava sustentado por
+  `source_type=neural_filter_pose` e depois `reason=locked_temporal`;
+- a CNN encontrou um filtro e seis hipóteses via
+  `relaxed_similarity_lmeds`, mas o snap selecionado ainda estava a
+  ~122.99 px dos anchors previstos;
+- o diagnóstico D-025 já conseguia construir homografia do mesmo filtro,
+  evidenciando que a perspectiva real não é bem representada por uma única
+  similarity/affine 2x3.
+
+O erro residual não era uma simples translação global. Uma affine aproximava o
+quadrilátero, mas não conseguia preservar a perspectiva dos quatro cantos ao
+mesmo tempo; por isso algumas máscaras ficavam próximas e outras continuavam
+visivelmente deslocadas.
+
+### Decisão
+
+A geometria estrutural do tracking F3 passa a preservar a transformação
+projectiva do filtro:
+
+```text
+CNN de pose
+  -> escolhe orientação/correspondência dos 4 cantos
+  -> filtro preto fornece os 4 cantos físicos reais
+  -> getPerspectiveTransform(CURRENT -> CANÔNICO)
+  -> homografia H_filter 3x3
+  -> inversa H_filter projeta placa + 28 máscaras no frame RAW
+  -> landmarks ON por ID refinam somente o residual em CANÔNICO
+  -> LOCK de segmentos
+  -> F3HybridCheckAnalyzer
+```
+
+A CNN continua sendo prior de correspondência. Ela não recebe autoridade
+semântica e não substitui os quatro cantos físicos do filtro.
+
+### Representação da pose
+
+`F3TrackingResult` passa a poder carregar:
+
+- `current_to_canonical`: affine 2x3 mantida para compatibilidade, continuidade
+  e telemetria histórica;
+- `current_to_canonical_homography`: homografia 3x3 quando a pose estrutural
+  projectiva está disponível.
+
+A geometria produtiva prefere a homografia 3x3. A affine de compatibilidade não
+é usada para reprojetar as 28 máscaras quando a homografia existe.
+
+### Reprojeção das máscaras
+
+Com homografia disponível:
+
+```text
+máscara canônica
+  -> inverse(H_filter)
+  -> polígono no frame RAW
+```
+
+Isso vale igualmente para:
+- contorno da placa/filtro;
+- todas as 28 máscaras;
+- frame normalizado de análise;
+- máscara espacial usada pela continuidade temporal.
+
+Nenhuma ROI é reposicionada independentemente. Todas continuam derivadas da
+mesma geometria canônica do projeto.
+
+### Refinamento luminoso projectivo
+
+Quando existem landmarks luminosos identificados por MASK_xxx:
+1. os centros atuais são projetados para o espaço canônico pela homografia;
+2. calcula-se apenas o residual fino;
+3. a correção residual é composta sobre H_filter;
+4. a transformação continua 3x3;
+5. permanecem os mesmos gates geométricos de rotação, escala, deslocamento,
+   ganho e erro residual já existentes.
+
+Modos novos de telemetria:
+- `projective_coarse_verified`;
+- `projective_similarity`;
+- `projective_translation`.
+
+D-069 continua valendo: emissão dentro da ROI não prova alinhamento.
+
+### Reacquisition enquanto o alinhamento está pendente
+
+Antes de D-070, uma pose estrutural aproximada podia ser seguida indefinidamente
+pelo LK temporal:
+
+```text
+pose aproximada
+  -> LK consegue acompanhar
+  -> locked_temporal
+  -> CNN/filtro não são tentados novamente
+```
+
+Agora, enquanto:
+
+```text
+alignment_required = true
+alignment_ready    = false
+```
+
+o runtime marca `absolute_reacquire_required=true` e:
+- não usa o cache curto como autoridade de nova aquisição;
+- não deixa o LK temporal impedir a tentativa absoluta;
+- tenta novamente CNN + filtro no próximo job pesado;
+- continua com exatamente um `F3HeavyVisionExecutor`.
+
+Depois de `alignment_ready=true`, a continuidade temporal volta a ser permitida
+entre frames para reduzir custo e manter estabilidade visual.
+
+### Telemetria adicionada
+
+Neural/filter:
+- `projective_pose_ready`;
+- `projective_reprojection_mean_px`;
+- `projective_reprojection_max_px`.
+
+Geometria live:
+- `geometry_transform_type=homography_3x3|affine_2x3`;
+- `geometry_space=canonical_projective|canonical`;
+- `absolute_reacquire_required`.
+
+### Invariantes
+
+1. Tracking continua sendo autoridade somente de geometria.
+2. CNN não classifica ON/OFF e não decide CHECK.
+3. Os quatro cantos físicos do filtro são a âncora projectiva após a CNN escolher
+   a correspondência.
+4. A homografia é única para placa + todas as máscaras.
+5. Landmarks luminosos refinam a pose, mas não decidem conformidade.
+6. D-069 permanece: emissão não equivale a centralização.
+7. D-065 permanece: `F3HybridCheckAnalyzer` é a única autoridade semântica.
+8. Power Authority e State Machine não foram alterados.
+9. Nenhum threshold semântico foi alterado.
+10. Nenhum novo worker, timer ou scheduler.
+11. O modelo ONNX existente não precisa ser retreinado.
+12. A affine 2x3 é somente compatibilidade quando a homografia 3x3 existe.
+
+### Testes adicionados
+
+- trapézio físico -> homografia -> quadrilátero canônico com erro subpixel;
+- prior neural precisa publicar pose projectiva;
+- refinamento luminoso residual preserva a homografia;
+- alinhamento pendente força reacquisition absoluto e não usa LK como atalho;
+- projeção live das máscaras usa efetivamente a inversa da homografia 3x3.
+
+### Validação física exigida
+
+No próximo H1 real:
+- confirmar `projective_pose_ready=true`;
+- confirmar `geometry_transform_type=homography_3x3`;
+- confirmar `geometry_space=canonical_projective`;
+- enquanto desalinhado, confirmar `absolute_reacquire_required=true`;
+- observar que as máscaras continuam se reancorando em vez de congelar numa
+  pose temporal ruim;
+- confirmar centralização das 28 máscaras antes de
+  `spatial_alignment_ready=true`;
+- confirmar H1 correto com a mesma decisão semântica validada em tracking OFF.
+
+**Estado físico:** PENDENTE.
