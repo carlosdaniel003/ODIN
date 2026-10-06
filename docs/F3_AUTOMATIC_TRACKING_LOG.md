@@ -2027,3 +2027,56 @@ Próxima ação:
 - executar preflight local;
 - se READY, treinar ONNX;
 - reiniciar ODIN e medir tempo até primeiro LOCK + alinhamento das 28 máscaras.
+
+
+---
+
+## 06/10/2026 — D-067: primeiro treino e correção do gate funcional
+
+Treino real:
+- projeto: `CM_500_L`;
+- 5 referências de treino;
+- H1 (`CHECK_001`) reservado integralmente para validação;
+- 60 épocas;
+- loss: 0.130792 -> 0.010281;
+- melhor validação restaurada pelo script:
+  - H1 original mean: 49.19 px;
+  - H1 augmentations mean: 62.02 px;
+  - H1 augmentations p95: 133.99 px.
+
+Resultado do gate antigo:
+- modelo NÃO promovido;
+- isso confirmou que o mecanismo fail-closed de promoção funcionou.
+
+Análise:
+- o gate antigo cobrava precisão absoluta de pose final da CNN;
+- D-067 define a CNN apenas como prior de correspondência/orientação;
+- o quadrilátero real continua vindo do detector estrutural do filtro preto;
+- portanto mean/p95 absoluto da regressão não representa sozinho a função
+  produtiva da rede.
+
+Correção:
+- manter os erros absolutos como telemetria;
+- gerar as mesmas correspondências possíveis do quadrilátero usadas pelo
+  runtime;
+- usar a geometria real do H1 para determinar a hipótese correta;
+- usar a previsão neural para determinar a hipótese que seria escolhida;
+- promover somente se:
+  - H1 original = 100% correto;
+  - augmentations H1 = 100% corretas;
+  - nenhum sample de validação ficar sem hipóteses válidas;
+  - p05 da margem vencedor x segundo colocado >= 3% da diagonal da imagem.
+
+Regressões:
+- previsão na correspondência correta deve passar;
+- previsão equivalente a rotação/correspondência de 180 graus deve falhar.
+
+Estado:
+- gate funcional IMPLEMENTADO;
+- novo treinamento/reteste local PENDENTE.
+
+Não repetir:
+- não promover modelo apenas reduzindo thresholds de erro absoluto;
+- não transformar a CNN em pose final;
+- não usar estado ON/OFF esperado para escolher orientação;
+- não remover a confirmação estrutural do filtro.
