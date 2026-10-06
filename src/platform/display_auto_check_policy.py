@@ -24,6 +24,15 @@ def _confidence(result: dict) -> float:
         return 0.0
 
 
+def _semantic_certain(result: dict) -> bool:
+    """Certeza da autoridade final; mantém compatibilidade com N1/N2."""
+    if "semantic_certain" in result:
+        return bool(result.get("semantic_certain") is True)
+    if "neural_certain" in result:
+        return bool(result.get("neural_certain") is True)
+    return str(result.get("classified") or "") != "uncertain"
+
+
 def decidir_analise_display_f3(
     analysis: dict | None,
     *,
@@ -32,13 +41,12 @@ def decidir_analise_display_f3(
     """Converte classificação óptica em OK, NG confirmado ou busca contínua.
 
     Regras operacionais:
-    - H1 convencional continua sendo referencial de entrada e nunca gera NG
-      automático;
-    - nos CHECKS já migrados para IA (H1 e BLUE na etapa N2), INCERTO nunca
-      vira OK/NG e uma divergência neural certa só pode gerar NG quando existe
-      evidência positiva de display ligado no mesmo frame;
-    - BLUE intermitente é filtrado temporalmente pelo runtime antes desta policy:
-      fase OFF/transição não chega aqui como defeito;
+    - a autoridade semântica híbrida cobre todos os CHECKS configurados;
+    - INCERTO final nunca vira OK/NG; uma divergência semanticamente certa só
+      pode gerar NG quando existe evidência positiva de display ligado no mesmo
+      frame;
+    - CHECK intermitente é filtrado temporalmente pelo runtime antes desta
+      policy: fase OFF/transição não chega aqui como defeito;
     - Depois de H1, ausência de evidência não é defeito: continua buscando.
     - POUCA LUZ em uma máscara esperada ACESA/APAGADA é inconsistência.
     - ACESO onde era esperado APAGADO é inconsistência positiva.
@@ -138,37 +146,35 @@ def decidir_analise_display_f3(
             "board_powered": bool(board_powered),
         }
 
-    # N2: nos CHECKS migrados, a CNN é a única autoridade de ON/OFF.
-    # INCERTO nunca vira NG. Divergência certa só vira NG com evidência positiva
-    # de que o display está na fase ligada; no BLUE, o debounce intermitente do
-    # runtime decide quando uma divergência certa se torna persistente.
+    # Autoridade híbrida universal: a policy consome somente o estado final.
+    # A origem CNN/física e conflitos já foram resolvidos no analyzer.
     if neural_visual_authority:
-        neural_uncertain = [
+        semantic_uncertain = [
             item
             for item in results
             if (
-                item.get("neural_certain") is False
+                not _semantic_certain(item)
                 or str(item.get("classified") or "") == "uncertain"
             )
         ]
-        if neural_uncertain or not all_confident:
+        if semantic_uncertain or not all_confident:
             return {
                 "decision": DISPLAY_AUTO_DECISION_SEARCHING,
-                "reason": "classificacao_neural_incerta",
+                "reason": "classificacao_hibrida_incerta",
                 "confirmed_ng": False,
                 "board_powered": bool(board_powered),
                 "uncertain_mask_ids": [
                     str(item.get("mask_id") or "")
-                    for item in neural_uncertain
+                    for item in semantic_uncertain
                 ],
             }
 
-        neural_mismatches = [
+        semantic_mismatches_final = [
             item
             for item in results
             if item.get("matched") is False
         ]
-        if neural_mismatches:
+        if semantic_mismatches_final:
             if not board_powered:
                 return {
                     "decision": DISPLAY_AUTO_DECISION_SEARCHING,
@@ -177,33 +183,33 @@ def decidir_analise_display_f3(
                     "board_powered": False,
                     "failed_mask_ids": [
                         str(item.get("mask_id") or "")
-                        for item in neural_mismatches
+                        for item in semantic_mismatches_final
                     ],
                 }
             return {
                 "decision": DISPLAY_AUTO_DECISION_NG,
                 "reason": (
-                    "h1_neural_divergencia_confirmada"
+                    "h1_hibrido_divergencia_confirmada"
                     if neural_reference_gate
-                    else "check_neural_divergencia_confirmada"
+                    else "check_hibrido_divergencia_confirmada"
                 ),
                 "confirmed_ng": True,
                 "board_powered": True,
                 "failed_mask_id": str(
-                    neural_mismatches[0].get("mask_id") or ""
+                    semantic_mismatches_final[0].get("mask_id") or ""
                 ),
                 "failed_mask_ids": [
                     str(item.get("mask_id") or "")
-                    for item in neural_mismatches
+                    for item in semantic_mismatches_final
                 ],
             }
 
         return {
             "decision": DISPLAY_AUTO_DECISION_SEARCHING,
             "reason": (
-                "aguardando_estado_neural_h1"
+                "aguardando_estado_hibrido_h1"
                 if neural_reference_gate
-                else "aguardando_estado_neural_check"
+                else "aguardando_estado_hibrido_check"
             ),
             "confirmed_ng": False,
             "board_powered": bool(board_powered),
