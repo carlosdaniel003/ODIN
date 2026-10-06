@@ -137,6 +137,13 @@ frame mais recente da câmera.
 Resultados de tracking ou classificação com idade operacional excessiva ou gap
 de frames acima do limite não alimentam decisão automática de CHECK.
 
+Desde D-068, enquanto a classificação semântica automática ocupa o único worker,
+o runtime pode manter **um único tracking pendente** com a mesma chave
+latest-frame-wins. Frames novos substituem esse pendente; não formam fila
+histórica. Quando a semântica termina, o executor já possui o snapshot mais
+recente possível para o próximo tracking. Tracking em execução nunca é
+duplicado e a semântica em execução não é interrompida.
+
 Ao abrir CONFIGURAR, jobs pendentes de tracking/classificação são invalidados
 antes da construção da janela para evitar que a configuração espere o pipeline
 produtivo.
