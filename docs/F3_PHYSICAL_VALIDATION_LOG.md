@@ -6607,3 +6607,129 @@ H1. A validação completa dos demais cenários de D-065 continua sendo registra
 separadamente conforme forem executados no JIG, especialmente BLUE intermitente
 correto e BLUE NG com `MASK_024` apagada.
 
+
+
+---
+
+## 06/10/2026 — Tracking ON D-070: homografia ativa, mas cantos do filtro ainda incorretos
+
+**Resultado:** FAIL FÍSICO DE ALINHAMENTO — CAUSA IDENTIFICADA; D-071
+IMPLEMENTADA E PENDENTE DE RETESTE.
+
+### Cenário
+
+- projeto: `CM_500_L`;
+- CHECK: H1;
+- rastreamento automático: ATIVO;
+- display H1 fisicamente aceso;
+- UI permaneceu em `LOCK ESTRUTURAL • ALINHANDO SEGMENTOS`;
+- as 28 máscaras continuaram visivelmente deslocadas dos segmentos reais.
+
+### Evidência objetiva do DEBUG
+
+A infraestrutura projectiva D-070 estava efetivamente ativa:
+
+```text
+source_type=neural_filter_pose
+reason=locked_neural_filter_pose
+projective_pose_ready=true
+projective_reprojection_mean_px=0.0
+projective_reprojection_max_px=0.0
+```
+
+Porém a associação filtro x prior neural continuava distante:
+
+```text
+selected_snap_error_px=120.663
+max_snap_error_px=180.0
+confidence=0.3296
+candidate_mode=relaxed_similarity_lmeds
+```
+
+A geometria live já estava no novo espaço:
+
+```text
+mask_geometry_space=canonical_projective
+spatial_alignment_required=true
+spatial_alignment_ready=false
+spatial_alignment_source=projective_filter_structural
+```
+
+A consequência física foi coerente com desalinhamento das ROIs:
+
+```text
+H1 esperado ON = 7
+live ON confirmadas = 3
+live OFF confirmadas = 23
+gate produtivo = BLOQUEADO
+energia = OFF
+```
+
+O tracking luminoso não encontrou suporte geométrico suficiente:
+
+```text
+luminous_component_count=2
+local_luminous_landmark_count=0
+validated_count=0/7
+alignment_ready=false
+reason=filter_found_without_luminous_segments
+```
+
+O diagnóstico D-025 no mesmo frame também não confirmou alinhamento real:
+
+```text
+filter_source=projective_filter_structural
+tracking_filter_points=4
+mean_error_px=47.11
+p95_error_px=289.17
+ecc=0.1249
+refinement_applied=NÃO
+```
+
+### Causa identificada
+
+A inspeção do proprietário canônico do tracking encontrou a origem do erro:
+`_detect_dark_filter_candidates()` detectava o contorno escuro, mas convertia
+esse contorno com:
+
+```text
+cv2.minAreaRect(contour)
+-> cv2.boxPoints(rect)
+-> quatro cantos
+-> homografia
+```
+
+`minAreaRect` produz o menor retângulo rotacionado que contém o objeto. Ele
+remove justamente a perspectiva/trapézio físico que a D-070 passou a querer
+preservar.
+
+Assim, `projective_reprojection=0` apenas provava que uma homografia encaixava
+perfeitamente os quatro cantos artificiais do retângulo nos quatro cantos
+canônicos; não provava alinhamento com os segmentos reais.
+
+### Alteração aplicada
+
+D-071:
+- quadriláteros físicos com quatro cantos preservam a perspectiva;
+- o contorno escuro passa por `convexHull + approxPolyDP` para recuperar os
+  quatro cantos reais;
+- `minAreaRect` permanece somente como medição/fallback estrutural;
+- fallback `min_area_rect_fallback` NÃO pode publicar homografia 3x3
+  produtiva;
+- o DEBUG passa a expor a origem dos cantos, os quatro pontos físicos, os
+  anchors neurais e o erro por canto.
+
+### Próximo reteste
+
+Testar novamente somente H1 com tracking ON.
+
+Critérios:
+1. `filter_corner_source=contour_quad`;
+2. `projective_pose_ready=true`;
+3. as quatro coordenadas em `filter_points` devem acompanhar os cantos
+   trapezoidais reais do filtro;
+4. máscaras precisam centralizar nos segmentos;
+5. somente depois disso `spatial_alignment_ready=true`;
+6. H1 deve usar a mesma autoridade híbrida já validada com tracking OFF.
+
+**Estado após correção:** PENDENTE DE RETESTE FÍSICO.
