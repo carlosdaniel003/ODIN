@@ -4470,18 +4470,33 @@ def _rescue_luminous_segment_tracking_lock(
     )
 
     base_matrix = None
+    base_projective = None
     if (
         base_result is not None
         and bool(getattr(base_result, "locked", False))
-        and getattr(base_result, "current_to_canonical", None) is not None
     ):
-        try:
-            base_matrix = np.asarray(
-                base_result.current_to_canonical,
-                dtype=np.float32,
-            ).reshape(2, 3)
-        except Exception:
-            base_matrix = None
+        if getattr(base_result, "current_to_canonical", None) is not None:
+            try:
+                base_matrix = np.asarray(
+                    base_result.current_to_canonical,
+                    dtype=np.float32,
+                ).reshape(2, 3)
+            except Exception:
+                base_matrix = None
+        if getattr(
+            base_result,
+            "current_to_canonical_homography",
+            None,
+        ) is not None:
+            try:
+                candidate_h = np.asarray(
+                    base_result.current_to_canonical_homography,
+                    dtype=np.float32,
+                ).reshape(3, 3)
+                if np.all(np.isfinite(candidate_h)):
+                    base_projective = candidate_h
+            except Exception:
+                base_projective = None
 
     pose = _find_luminous_segment_pose(
         frame,
@@ -4489,6 +4504,7 @@ def _rescue_luminous_segment_tracking_lock(
         expected_rows,
         (int(runtime.width), int(runtime.height)),
         base_matrix=base_matrix,
+        base_projective=base_projective,
     )
     attempts = [
         item for item in (pose.get("attempts") or ())
@@ -4498,7 +4514,11 @@ def _rescue_luminous_segment_tracking_lock(
         len(expected_rows) >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
     )
     alignment_ready = bool(
-        pose.get("available") and pose.get("matrix") is not None
+        pose.get("available")
+        and (
+            pose.get("projective_matrix") is not None
+            or pose.get("matrix") is not None
+        )
     )
     luminous_component_count = int(
         pose.get("luminous_component_count", 0)
@@ -4564,7 +4584,7 @@ def _rescue_luminous_segment_tracking_lock(
     luminous_emission_detected = bool(
         alignment_ready
         or (
-            base_matrix is not None
+            (base_projective is not None or base_matrix is not None)
             and validated_luminous_anchor_count
             >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
             and not luminous_scene_noisy
@@ -4578,7 +4598,7 @@ def _rescue_luminous_segment_tracking_lock(
             else deepcopy(value)
         )
         for key, value in pose.items()
-        if key != "matrix"
+        if key not in {"matrix", "projective_matrix"}
     }
     telemetry.update(
         {
@@ -4638,18 +4658,33 @@ def _rescue_luminous_segment_tracking_lock(
     if not alignment_ready:
         return None
 
+    projective_matrix = None
+    if pose.get("projective_matrix") is not None:
+        try:
+            candidate_h = np.asarray(
+                pose.get("projective_matrix"),
+                dtype=np.float32,
+            ).reshape(3, 3)
+            if np.all(np.isfinite(candidate_h)):
+                projective_matrix = candidate_h
+        except Exception:
+            projective_matrix = None
+
     try:
         fit_matrix = np.asarray(
             pose.get("matrix"), dtype=np.float32
         ).reshape(2, 3)
     except Exception:
-        return None
-    if not np.all(np.isfinite(fit_matrix)):
+        fit_matrix = None
+    if fit_matrix is None and projective_matrix is not None:
+        fit_matrix = _affine_approximation_from_projective(
+            projective_matrix,
+            fit_board,
+        )
+    if fit_matrix is None or not np.all(np.isfinite(fit_matrix)):
         return None
 
     matrix = np.asarray(fit_matrix, dtype=np.float32).reshape(2, 3)
-    if not np.all(np.isfinite(matrix)):
-        return None
 
     rotation_allowed, rotation_delta = _runtime_rotation_anchor_compatible(
         runtime,
@@ -4698,13 +4733,22 @@ def _rescue_luminous_segment_tracking_lock(
         return None
 
     try:
-        aligned = cv2.warpAffine(
-            frame,
-            matrix,
-            (int(runtime.width), int(runtime.height)),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REFLECT101,
-        )
+        if projective_matrix is not None:
+            aligned = cv2.warpPerspective(
+                frame,
+                projective_matrix,
+                (int(runtime.width), int(runtime.height)),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
+        else:
+            aligned = cv2.warpAffine(
+                frame,
+                matrix,
+                (int(runtime.width), int(runtime.height)),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
     except Exception:
         return None
 
@@ -4712,6 +4756,12 @@ def _rescue_luminous_segment_tracking_lock(
     gray = runtime._gray(frame)
     result_reference = f"luminous:{check_id}"
     runtime.last_matrix = matrix.copy()
+    runtime.last_homography = (
+        projective_matrix.copy()
+        if projective_matrix is not None
+        else None
+    )
+    runtime._force_absolute_reacquire = False
     runtime.last_verified_rotation_deg = float(
         affine_rotation_deg(matrix)
     )
@@ -4732,7 +4782,7 @@ def _rescue_luminous_segment_tracking_lock(
 
     reason = (
         "locked_luminous_segments_refined"
-        if base_matrix is not None
+        if (base_projective is not None or base_matrix is not None)
         else "locked_luminous_segments_reacquired"
     )
     result = F3TrackingResult(
@@ -4746,6 +4796,11 @@ def _rescue_luminous_segment_tracking_lock(
         scale=float(scale),
         reason=reason,
         current_to_canonical=matrix.copy(),
+        current_to_canonical_homography=(
+            projective_matrix.copy()
+            if projective_matrix is not None
+            else None
+        ),
         source_type="luminous_segment_grid",
         evidence_current=True,
         luminous_validated_mask_ids=tuple(
