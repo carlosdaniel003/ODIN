@@ -7469,18 +7469,22 @@ def _analysis_transform_for_current_check(
     app,
     result: F3TrackingResult | None,
 ):
-    """Retorna CURRENT -> espaço de análise sem gerar imagem."""
-    if (
-        result is None
-        or not result.locked
-        or result.current_to_canonical is None
-    ):
+    """Retorna CURRENT -> espaço de análise preservando perspectiva D-070."""
+    if result is None or not result.locked:
+        return None, "canonical"
+
+    current_to_canonical = (
+        result.current_to_canonical_homography
+        if result.current_to_canonical_homography is not None
+        else result.current_to_canonical
+    )
+    if current_to_canonical is None:
         return None, "canonical"
 
     runtime = get_tracking_runtime(app)
     current = _current_check(app)
     if runtime is None or not isinstance(current, dict):
-        return result.current_to_canonical, "canonical"
+        return current_to_canonical, "canonical"
 
     check_id = str(current.get("id") or "")
     reference_key = f"check:{check_id}"
@@ -7493,21 +7497,18 @@ def _analysis_transform_for_current_check(
         else None
     )
     if mapping is None:
-        return result.current_to_canonical, "canonical"
+        return current_to_canonical, "canonical"
 
-    try:
-        canonical_to_check = cv2.invertAffineTransform(
-            np.asarray(mapping, dtype=np.float32).reshape(2, 3)
-        )
-    except Exception:
-        return result.current_to_canonical, "canonical"
+    canonical_to_check = _invert_planar_transform(mapping)
+    if canonical_to_check is None:
+        return current_to_canonical, "canonical"
 
-    current_to_check = compose_affine(
+    current_to_check = _compose_planar_transform(
         canonical_to_check,
-        result.current_to_canonical,
+        current_to_canonical,
     )
     if current_to_check is None:
-        return result.current_to_canonical, "canonical"
+        return current_to_canonical, "canonical"
     return current_to_check, f"check:{check_id}"
 
 
@@ -7516,26 +7517,39 @@ def _analysis_alignment_for_current_check(
     raw_frame,
     result: F3TrackingResult | None,
 ):
-    """Gera o frame de análise somente uma vez, fora do thread Tk quando possível."""
+    """Gera frame normalizado usando affine ou homografia conforme a pose."""
     if not _valid_frame(raw_frame):
         return None, None
 
     matrix, _space = _analysis_transform_for_current_check(app, result)
-    if matrix is None:
+    transform = _as_planar_transform(matrix)
+    if transform is None:
         return None, None
 
     runtime = get_tracking_runtime(app)
     if runtime is None:
         return None, None
 
-    aligned = cv2.warpAffine(
-        raw_frame,
-        np.asarray(matrix, dtype=np.float32).reshape(2, 3),
-        (int(runtime.width), int(runtime.height)),
-        flags=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_REFLECT101,
-    )
-    return aligned, matrix
+    try:
+        if transform.shape == (3, 3):
+            aligned = cv2.warpPerspective(
+                raw_frame,
+                transform,
+                (int(runtime.width), int(runtime.height)),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
+        else:
+            aligned = cv2.warpAffine(
+                raw_frame,
+                transform,
+                (int(runtime.width), int(runtime.height)),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
+    except Exception:
+        return None, None
+    return aligned, transform
 
 
 def _update_tracking_live_geometry(
@@ -7543,11 +7557,14 @@ def _update_tracking_live_geometry(
     raw_frame,
     result: F3TrackingResult | None,
 ) -> None:
-    """Projeta contorno+ROIs para a câmera REAL, como bounding boxes móveis."""
+    """Projeta contorno+28 ROIs no RAW; D-070 preserva perspectiva do filtro."""
     if (
         result is None
         or not result.locked
-        or result.current_to_canonical is None
+        or (
+            result.current_to_canonical is None
+            and result.current_to_canonical_homography is None
+        )
         or not _valid_frame(raw_frame)
     ):
         app._display_f3_tracking_live_geometry = None
@@ -7571,18 +7588,22 @@ def _update_tracking_live_geometry(
         for mask in (project.get("masks", []) or [])
         if isinstance(mask, dict)
     ]
-    try:
-        source_to_current = cv2.invertAffineTransform(
-            np.asarray(
-                result.current_to_canonical,
-                dtype=np.float32,
-            ).reshape(2, 3)
-        )
-    except Exception:
+
+    current_to_canonical = (
+        result.current_to_canonical_homography
+        if result.current_to_canonical_homography is not None
+        else result.current_to_canonical
+    )
+    source_to_current = _invert_planar_transform(current_to_canonical)
+    if source_to_current is None:
         app._display_f3_tracking_live_geometry = None
         return
 
-    geometry_space = "canonical"
+    projective_geometry = bool(
+        _as_planar_transform(current_to_canonical) is not None
+        and _as_planar_transform(current_to_canonical).shape == (3, 3)
+    )
+    geometry_space = "canonical_projective" if projective_geometry else "canonical"
 
     current = _current_check(app)
     current_check_id = (
@@ -7639,10 +7660,21 @@ def _update_tracking_live_geometry(
         "luminous_segment_grid"
         if spatial_alignment_ready and alignment_required
         else (
-            "structural_only"
-            if alignment_required
-            else "not_required"
+            "projective_filter_structural"
+            if alignment_required and projective_geometry
+            else (
+                "structural_only"
+                if alignment_required
+                else "not_required"
+            )
         )
+    )
+
+    # D-070: LK/cached transform pode manter a visualização somente depois que
+    # o alinhamento fino foi provado. Enquanto ainda estamos ALINHANDO, o próximo
+    # job volta a tentar aquisição absoluta CNN+filtro em vez de perpetuar pose.
+    runtime._force_absolute_reacquire = bool(
+        alignment_required and not spatial_alignment_ready
     )
 
     board_current = transform_points(source_board, source_to_current)
@@ -7651,8 +7683,6 @@ def _update_tracking_live_geometry(
         transformed = transform_mask(mask, source_to_current)
         if transformed is None:
             continue
-        # A pose pode mover/rotacionar/escalar o conjunto, mas o desenho volta
-        # sempre ao formato canônico da máscara (segmento continua segmento).
         masks_current.append(
             sincronizar_formato_mascara_display(mask, transformed)
         )
@@ -7663,6 +7693,14 @@ def _update_tracking_live_geometry(
         "reference": str(result.reference or ""),
         "source_type": str(result.source_type or ""),
         "geometry_space": geometry_space,
+        "geometry_transform_type": (
+            "homography_3x3"
+            if projective_geometry
+            else "affine_2x3"
+        ),
+        "absolute_reacquire_required": bool(
+            runtime._force_absolute_reacquire
+        ),
         "check_id": current_check_id,
         "expected_on_count": int(expected_on_count),
         "alignment_required": bool(alignment_required),
@@ -7685,7 +7723,6 @@ def _update_tracking_live_geometry(
         "inliers": int(result.inliers),
         "inlier_ratio": float(result.inlier_ratio),
     }
-
 
 def _tracking_h1_power_gate(app) -> tuple[bool, str]:
     """Fail-safe independente da cadeia histórica de wrappers do F3."""
