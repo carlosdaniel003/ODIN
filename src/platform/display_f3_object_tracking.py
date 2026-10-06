@@ -6511,6 +6511,9 @@ def align_frame_for_f3(app, frame, *, frame_token=None):
         "rotation_jump_rejections": deepcopy(
             getattr(runtime, "_last_rotation_jump_rejections", [])
         ),
+        "neural_pose": deepcopy(
+            getattr(runtime, "_last_neural_pose_debug", {})
+        ),
     }
     if not bool(result.locked):
         _invalidate_spatial_authority_after_tracking_loss(
@@ -7606,6 +7609,25 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     self._display_f3_tracking_live_geometry = payload.get("geometry")
                     compute_ms = float(payload.get("elapsed_ms", 0.0) or 0.0)
                     self._display_f3_tracking_last_compute_ms = compute_ms
+                    status = getattr(
+                        self,
+                        "_display_f3_object_tracking_last_status",
+                        None,
+                    )
+                    if isinstance(status, dict):
+                        status = dict(status)
+                        status["worker_elapsed_ms"] = round(
+                            compute_ms,
+                            2,
+                        )
+                        status["worker_age_ms"] = round(
+                            float(payload.get("age_ms", 0.0) or 0.0),
+                            2,
+                        )
+                        status["worker_frame_token"] = deepcopy(
+                            payload.get("frame_token")
+                        )
+                        self._display_f3_object_tracking_last_status = status
 
                     # A câmera visível é sempre latest-frame-wins. O frame que
                     # entrou no worker pode ter segundos de idade e jamais volta
