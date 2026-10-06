@@ -1881,3 +1881,81 @@ Não repetir:
 Estado:
 - D-044 VALIDADA FISICAMENTE NO CENÁRIO BLUE COM MASK_024 APAGADA.
 
+
+
+---
+
+## 06/10/2026 — D-066 separa pose do tracking da decisão híbrida
+
+Modo:
+- tracking ON.
+
+Cenário:
+- branch de trabalho: `display-tracking-on`;
+- baseline protegido: `display-tracking-off-stable`;
+- autoridade híbrida D-065 já validada fisicamente no H1 com tracking OFF;
+- objetivo: reativar o rastreamento sem trocar o modelo de decisão que já
+  funcionou no modo fixo.
+
+Comportamento esperado:
+- tracking encontra placa/display e posição das máscaras;
+- IA Híbrida decide ON/OFF/POUCA LUZ/INCERTO;
+- a mesma policy/state machine do tracking OFF decide CHECK OK/NG/BUSCANDO.
+
+Sintoma/evidência:
+- o analyzer canônico já era composto como
+  `F3TrackedRawCheckAnalyzer → F3HybridCheckAnalyzer`;
+- porém ainda existiam guards históricos do tracking para H1/ciclo capazes de
+  bloquear registro mesmo depois da decisão semântica;
+- o wrapper RAW também preservava uma reconciliação
+  `luminous_core_mask_evidence` para caminhos sem autoridade neural/híbrida.
+
+Hipótese:
+- manter qualquer regra de decisão específica do tracking cria duas
+  interpretações do mesmo CHECK e pode fazer tracking ON se comportar diferente
+  do baseline OFF já validado.
+
+Tentativa:
+- manter LOCK, frescor, localização estrutural e reprojeção de máscaras;
+- bypassar `tracking_h1_power_guard` e `tracking_h1_cycle_guard` quando a
+  autoridade híbrida estiver ativa;
+- impedir reconciliação luminosa do tracker sob
+  `hybrid_visual_authority=true`;
+- entregar frame RAW + máscaras móveis diretamente ao
+  `F3HybridCheckAnalyzer`;
+- preservar os guards históricos somente para eventual fallback legado sem
+  autoridade híbrida.
+
+Resultado:
+- IMPLEMENTADO — PENDENTE DE RETESTE FÍSICO COM TRACKING ON.
+
+Commit(s):
+- `f4f1d8514b0288bfff77c032d2f85d1e4be97659`;
+- `f67cb67daa39be56ff1c520d2f3fb43130001ea5`;
+- `2c3b2f2f624104609c4c0bc011af104232009eb5`;
+- `b3853a5f2c0299d2bdc92c55111f60161cc3c292`.
+
+Decisão/ligação:
+- D-065;
+- D-066.
+
+Lição:
+- tracking ON e OFF não são dois classificadores;
+- a única diferença permitida é a fonte da geometria das ROIs;
+- luz usada como landmark geométrico não pode virar voto semântico.
+
+Não repetir:
+- não adicionar threshold de ON/OFF dentro do tracker;
+- não voltar a usar `luminous_core_*` para corrigir classificação híbrida;
+- não criar guard de OK/NG específico do tracking;
+- não transformar ausência de LOCK em NG: sem geometria válida o estado é
+  busca/alinhamento, não defeito.
+
+Próximo reteste:
+- ativar Rastreamento Automático;
+- confirmar LOCK da placa e movimento das 28 máscaras;
+- H1 correto deve receber o mesmo resultado híbrido do modo OFF;
+- BLUE correto deve manter o mesmo comportamento temporal;
+- BLUE com `MASK_024` fisicamente apagada deve continuar NG;
+- mover a placa dentro da faixa permitida e confirmar que somente a geometria
+  muda, não o critério de decisão.
