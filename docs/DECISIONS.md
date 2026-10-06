@@ -3943,3 +3943,149 @@ de USB, testar pelo menos:
 
 **USB/AUX neural continuam fora do escopo desta decisão.**
 
+---
+
+## D-065 — Autoridade híbrida universal por máscara substitui a migração CHECK a CHECK
+
+**Status:** Accepted
+
+### Contexto
+
+Durante o reteste posterior à N2, cinco capturas consecutivas de uma placa H1
+fisicamente correta mostraram uma assimetria clara entre as duas fontes já
+existentes no ODIN:
+
+- o aprendizado físico da **mesma máscara** classificou o H1 corretamente em
+  `28/28` nas cinco capturas;
+- a CNN permaneceu presa em `27/28` em quatro capturas e chegou a `25/28`
+  em uma captura;
+- `MASK_017`, fisicamente ACESA, oscilou em P(ON) aproximadamente entre
+  `0.721` e `0.801`, abaixo do limiar ON global `0.809613`;
+- em uma das capturas, `MASK_008`, `MASK_017` e `MASK_020` ficaram
+  simultaneamente INCERTAS para a CNN, embora a leitura física por máscara
+  continuasse coerente com o H1 correto.
+
+Isso mostrou que continuar acumulando frames OK para recalibrar um único limiar
+global a cada nova incerteza não é uma estratégia produtiva escalável.
+
+Também não é necessário aguardar vários defeitos reais para "ensinar NG". O
+modelo semântico do F3 é por estado de segmento: **ON/OFF**, enquanto NG é a
+regra determinística `observado != esperado`. Uma mesma `MASK_xxx` já pode
+possuir exemplos físicos ON em alguns CHECKS e OFF em outros CHECKS/BOARD_OFF.
+
+### Decisão
+
+O julgamento semântico do Display F3 passa a usar uma **única autoridade
+híbrida por máscara**, válida para todos os CHECKS configurados e para CHECKS
+criados futuramente.
+
+Fluxo:
+
+```text
+frame + geometria MASK_xxx
+        │
+        ├── CNN/ONNX → ON / OFF / INCERTO
+        │
+        └── aprendizado físico da MESMA máscara
+             → ON / OFF / POUCA LUZ + confiança/separação
+        │
+        ▼
+F3HybridCheckAnalyzer
+        │
+        ├── consenso forte                  → estado confirmado
+        ├── CNN INCERTA + físico local forte→ físico resolve
+        ├── discordância forte              → INCERTO
+        ├── POUCA LUZ física confiável      → POUCA LUZ
+        └── sem evidência física local forte→ CNN mantém seu estado
+        │
+        ▼
+estado semântico final por máscara
+        │
+        ▼
+expected x observed
+        │
+        ▼
+OK / NG / BUSCANDO
+```
+
+Regras obrigatórias:
+
+1. **Não existe votação majoritária para liberar OK.** Duas fontes fortes em
+   desacordo produzem `INCERTO`.
+2. A evidência física capaz de resolver a CNN precisa vir do par ON/OFF local da
+   **mesma máscara física** (`f3_check_photos_same_mask`) e satisfazer o
+   contrato de confiança já existente do classificador físico. Não foi criado
+   novo threshold arbitrário.
+3. Fallback por pool de máscaras diferentes continua podendo existir como
+   diagnóstico/compatibilidade do analisador físico, mas não recebe poder para
+   resolver uma incerteza neural dentro da fusão.
+4. A CNN continua necessária. Modelo/metadados ausentes ou inválidos permanecem
+   fail-closed; a mudança não transforma o sistema em fallback convencional.
+5. `neural_certain` preserva a verdade bruta da CNN. A decisão produtiva usa
+   `semantic_certain`, que representa a certeza **depois da fusão**.
+6. O resultado guarda telemetria separada de CNN, evidência física e resolução
+   híbrida para permitir auditoria.
+7. `conventional_visual_authority_used=false` continua verdadeiro: o
+   aprendizado same-mask não é uma segunda autoridade paralela; ele é uma
+   entrada da única autoridade híbrida.
+8. H1, BLUE, AUX, USB e qualquer CHECK futuro entram automaticamente pelo ID e
+   ordem configurados no projeto. Não existe limite `first_two_checks` nem
+   lista hardcoded de nomes.
+9. CHECK intermitente continua sendo responsabilidade do runtime temporal.
+   OFF/transição não é defeito. Na fase ON, o debounce consome o
+   `semantic_certain` final, inclusive quando a evidência física resolveu uma
+   CNN incerta.
+10. Gabarito exato, sonda positiva e reconciliações históricas permanecem
+    observadores/guards onde ainda forem necessários, mas não podem reescrever o
+    estado final de uma máscara sob autoridade híbrida.
+11. Treinamento/recalibração continuam offline. O runtime não se auto-treina com
+    decisões próprias.
+12. Coleta automática futura de exemplos físicos confirmados é permitida como
+    dataset de engenharia, mas não faz parte desta decisão e não pode promover
+    pesos/thresholds automaticamente em produção.
+
+### Compatibilidade
+
+O identificador histórico `f3_h1_neural_segment_detector` permanece publicado
+em `reference_authority` para não quebrar o pipeline de calibração H1 e DEBUGs
+já coletados. A autoridade produtiva atual é publicada separadamente como:
+
+```text
+semantic_authority = f3_hybrid_same_mask_neural_authority
+hybrid_check_scope = all_configured_checks_hybrid_v1
+```
+
+Os aliases `F3NeuralCheckAnalyzer`,
+`instalar_autoridade_neural_h1_blue_display_f3()` e
+`instalar_autoridade_neural_h1_display_f3()` permanecem somente por
+compatibilidade. O proprietário canônico passa a ser
+`F3HybridCheckAnalyzer` + `instalar_autoridade_hibrida_display_f3()`.
+
+### Decisões anteriores afetadas
+
+D-059 a D-064 continuam preservadas como histórico da evolução neural, mas a
+restrição de escopo "H1 primeiro, depois BLUE, depois USB/AUX" fica
+**superseded** por D-065 após autorização explícita do usuário para aplicar a
+nova autoridade a todos os CHECKS.
+
+A recomendação de N2.1 de continuar recalibrando o H1 com os cinco novos frames
+também fica superseded neste ponto. Esses frames serviram como evidência para a
+mudança arquitetural, não como autorização para baixar/expandir o threshold
+global novamente.
+
+### Validação exigida
+
+A mudança só será considerada fisicamente validada depois de testar no JIG:
+
+- H1 correto repetidamente, incluindo o caso antes preso em `MASK_017`;
+- BLUE correto em múltiplas fases ON/OFF;
+- BLUE NG com `MASK_024` apagada;
+- USB correto e um caso divergente quando disponível;
+- AUX correto e um caso divergente quando disponível;
+- um CHECK adicional criado pelo projeto, provando que entra no mesmo contrato
+  sem alteração de código;
+- ausência de falso OK quando CNN e físico forte discordarem;
+- ausência de falso NG durante a fase OFF do BLUE.
+
+Até essa validação, o estado é **IMPLEMENTADO / PENDENTE DE RETESTE FÍSICO**.
+
