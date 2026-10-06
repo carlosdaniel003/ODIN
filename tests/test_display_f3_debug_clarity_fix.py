@@ -196,7 +196,7 @@ class DisplayF3DebugClarityFixTests(unittest.TestCase):
         self.assertIn("gap=+0.0800", block)
         self.assertIn("midpoint=0.5600", block)
         self.assertIn(
-            "AUTORIDADE CONVENCIONAL DE ON/OFF USADA: NÃO",
+            "AUTORIDADE CONVENCIONAL PARALELA USADA: NÃO",
             block,
         )
 
