@@ -2080,3 +2080,67 @@ Não repetir:
 - não transformar a CNN em pose final;
 - não usar estado ON/OFF esperado para escolher orientação;
 - não remover a confirmação estrutural do filtro.
+
+
+---
+
+## 06/10/2026 — D-068: pipeline tracking/semântica latest-frame-wins
+
+Modo:
+- tracking ON;
+- projeto `CM_500_L`;
+- H1 correto fisicamente presente.
+
+Evidência do reteste:
+- LOCK obtido e máscaras visualmente centralizadas;
+- tracking: frame 565;
+- câmera no clique: frame 578;
+- câmera medida: ~14.83 FPS;
+- último frame de decisão automática: 447;
+- CNN de pose: 4.671 ms;
+- tracking worker: 385.45 ms;
+- tracking result age: 387.15 ms;
+- CNN não encontrou filtro estrutural naquele frame
+  (`neural_pose_filter_not_found`);
+- refinamento luminoso fechou a geometria com 5/7 landmarks e erro mediano
+  ~0.48 px;
+- posteriormente energia foi confirmada com 7 máscaras ON e 19 OFF e o H1
+  recebeu aprovação.
+
+Diagnóstico:
+- D-067 resolveu a precisão geométrica;
+- a CNN não é o gargalo;
+- o atraso relevante aparece na cadeia serializada
+  tracking -> semântica -> próximo tracking;
+- o executor único deve ser preservado.
+
+Implementação D-068:
+- medir separadamente align, projeção geométrica e warp de análise;
+- publicar tempos/idade completos da semântica;
+- incluir espera real de fila na idade operacional do resultado semântico;
+- enquanto a semântica está ativa, manter no máximo um tracking HIGH pendente;
+- substituir esse pendente por frames mais novos via mesma chave latest-frame;
+- quando a semântica termina, o worker começa imediatamente o tracking mais
+  recente;
+- nenhum novo worker, timer ou scheduler;
+- nenhuma alteração em ON/OFF, Hybrid, power, debounce ou state machine.
+
+Testes dedicados:
+- idade semântica inclui fila + compute;
+- tracking publica tempos por estágio;
+- semântica ativa pré-enfileira um tracking;
+- frame novo substitui somente tracking pendente;
+- mesmo frame não duplica pendente;
+- tracking já executando nunca é duplicado.
+
+Resultado:
+- IMPLEMENTADO;
+- testes focados D-068 PASS no CI;
+- RETESTE FÍSICO PENDENTE.
+
+Não repetir:
+- não criar executor paralelo;
+- não cancelar compute semântico em execução;
+- não acumular fila histórica;
+- não misturar RAW de um frame com geometria de outro;
+- não otimizar thresholds sem medir os novos estágios primeiro.
