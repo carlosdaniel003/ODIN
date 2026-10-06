@@ -790,11 +790,14 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             )
 
             for expected_index, check in enumerate(checks[2:], start=2):
-                states = check.get("mask_states", {})
-                expected_states = [
-                    str(states.get("MASK_001") or "off"),
-                    str(states.get("MASK_002") or "off"),
-                ]
+                self.assertTrue(
+                    repository.salvar_estados_check(
+                        "DISPLAY A",
+                        check["id"],
+                        {"MASK_001": "on", "MASK_002": "off"},
+                    )
+                )
+                expected_states = ["on", "off"]
                 analyzer.neural_detector.predict = Mock(
                     return_value=_inference(expected_states)
                 )
