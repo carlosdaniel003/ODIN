@@ -986,6 +986,70 @@ def _best_board_correspondence(
     return best
 
 
+def _projective_filter_pose_from_affine_hint(
+    current_board,
+    canonical_board,
+    hint_matrix,
+) -> dict | None:
+    """Converte a correspondência já escolhida pela CNN em homografia exata.
+
+    A CNN/affine escolhe QUAL canto corresponde a qual canto. Depois disso os
+    quatro cantos físicos do filtro são autoridade geométrica para a perspectiva.
+    """
+    match = _best_board_correspondence(
+        current_board,
+        canonical_board,
+        hint_matrix=hint_matrix,
+    )
+    if match is None:
+        return None
+    _error, current_ordered, canonical_ordered = match
+    try:
+        current = np.asarray(
+            current_ordered,
+            dtype=np.float32,
+        ).reshape(4, 2)
+        canonical = np.asarray(
+            canonical_ordered,
+            dtype=np.float32,
+        ).reshape(4, 2)
+        homography = cv2.getPerspectiveTransform(
+            current,
+            canonical,
+        ).astype(np.float32)
+        projected = cv2.perspectiveTransform(
+            current.reshape(-1, 1, 2),
+            homography,
+        ).reshape(-1, 2)
+    except Exception:
+        return None
+    if not np.all(np.isfinite(homography)):
+        return None
+    errors = np.linalg.norm(projected - canonical, axis=1)
+    return {
+        "homography": homography,
+        "current_points": current.tolist(),
+        "canonical_points": canonical.tolist(),
+        "mean_reprojection_px": float(np.mean(errors)),
+        "max_reprojection_px": float(np.max(errors)),
+    }
+
+
+def _affine_approximation_from_projective(
+    current_to_canonical,
+    canonical_board,
+) -> np.ndarray | None:
+    """Produz affine de compatibilidade; a geometria fina continua 3x3."""
+    inverse = _invert_planar_transform(current_to_canonical)
+    board = _normalize_points(canonical_board, minimum=4)
+    if inverse is None or len(board) != 4:
+        return None
+    current = transform_points(board, inverse)
+    if len(current) != 4:
+        return None
+    return _estimate_affine_partial(current, board)
+
+
 def estimate_reference_to_canonical(
     project: dict,
     store: F3TrackingConfigStore,
@@ -5745,10 +5809,16 @@ class F3DisplayObjectTracker:
                 }
             )
             if local_best is not None and local_error < best_error:
+                projective = _projective_filter_pose_from_affine_hint(
+                    points,
+                    canonical_list,
+                    local_best,
+                )
                 best_error = local_error
                 best = {
                     "matrix": local_best,
                     "filter": filter_candidate,
+                    "projective": projective,
                 }
 
         debug["attempts"] = attempts
@@ -5794,6 +5864,21 @@ class F3DisplayObjectTracker:
             0.0,
             min(1.0, 1.0 - (best_error / max(1.0, max_snap_error))),
         )
+        projective = (
+            best.get("projective")
+            if isinstance(best, dict)
+            and isinstance(best.get("projective"), dict)
+            else None
+        )
+        projective_h = (
+            np.asarray(
+                projective.get("homography"),
+                dtype=np.float32,
+            ).reshape(3, 3)
+            if isinstance(projective, dict)
+            and projective.get("homography") is not None
+            else None
+        )
         debug.update(
             {
                 "available": True,
@@ -5801,6 +5886,23 @@ class F3DisplayObjectTracker:
                 "rotation_deg": round(float(rotation), 3),
                 "scale": round(float(scale), 5),
                 "confidence": round(float(confidence), 4),
+                "projective_pose_ready": bool(projective_h is not None),
+                "projective_reprojection_mean_px": (
+                    round(
+                        float(projective.get("mean_reprojection_px", 0.0)),
+                        4,
+                    )
+                    if isinstance(projective, dict)
+                    else None
+                ),
+                "projective_reprojection_max_px": (
+                    round(
+                        float(projective.get("max_reprojection_px", 0.0)),
+                        4,
+                    )
+                    if isinstance(projective, dict)
+                    else None
+                ),
             }
         )
         self._last_neural_pose_debug = debug
@@ -5816,6 +5918,14 @@ class F3DisplayObjectTracker:
             "source_type": "neural_filter_pose",
             "fallback": "neural_filter_pose",
             "neural_snap_error_px": float(best_error),
+            "homography": (
+                projective_h.copy()
+                if projective_h is not None
+                else None
+            ),
+            "filter_points": deepcopy(
+                (best.get("filter") or {}).get("points") or []
+            ),
         }
 
     def candidate_for_reference(
