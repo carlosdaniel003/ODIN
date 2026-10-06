@@ -2104,18 +2104,15 @@ def _detect_expected_on_luminous_landmarks(
 
     try:
         threshold = float(threshold_v)
-        current_to_fit_matrix = np.asarray(
-            current_to_fit,
+        fit_to_current = _invert_planar_transform(current_to_fit)
+        if fit_to_current is None:
+            raise ValueError("current_to_fit_invalid")
+        predicted = np.asarray(
+            transform_points(
+                [row["center"] for row in expected_rows],
+                fit_to_current,
+            ),
             dtype=np.float32,
-        ).reshape(2, 3)
-        fit_to_current = cv2.invertAffineTransform(current_to_fit_matrix)
-        expected = np.asarray(
-            [row["center"] for row in expected_rows],
-            dtype=np.float32,
-        ).reshape(-1, 1, 2)
-        predicted = cv2.transform(
-            expected,
-            fit_to_current,
         ).reshape(-1, 2)
         projected_masks = [
             transform_mask(row.get("mask"), fit_to_current)
@@ -2446,11 +2443,9 @@ def _validate_luminous_pose_core_support(
         }
     try:
         threshold = float(threshold_v)
-        current_to_fit_matrix = np.asarray(
-            current_to_fit,
-            dtype=np.float32,
-        ).reshape(2, 3)
-        fit_to_current = cv2.invertAffineTransform(current_to_fit_matrix)
+        fit_to_current = _invert_planar_transform(current_to_fit)
+        if fit_to_current is None:
+            raise ValueError("current_to_fit_invalid")
         value = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[:, :, 2]
     except (TypeError, ValueError, cv2.error):
         return {
@@ -3045,6 +3040,358 @@ def _fit_id_anchored_luminous_pose(
         "fine_alignment_gain_px": float(gain),
         "fine_fit_mode": fit_mode,
         "score": float(score),
+    }
+
+
+def _fit_id_anchored_luminous_projective_pose(
+    canonical_board,
+    expected_rows,
+    landmark_details,
+    coarse_homography,
+    diagnostics: dict | None = None,
+) -> dict | None:
+    """Refina H_filter com correção residual no espaço canônico.
+
+    A perspectiva vem dos quatro cantos físicos do filtro. Os segmentos
+    luminosos aplicam apenas uma correção fina em CANÔNICO, preservando a
+    homografia em vez de voltar a aproximar toda a placa por uma affine 2x3.
+    """
+    diag = diagnostics if isinstance(diagnostics, dict) else None
+    if diag is not None:
+        diag.clear()
+
+    coarse = _as_planar_transform(coarse_homography)
+    if coarse is None or coarse.shape != (3, 3):
+        if diag is not None:
+            diag["failure_stage"] = "coarse_projective_invalid"
+        return None
+
+    by_id = {
+        str(row.get("mask_id") or ""): row
+        for row in (expected_rows or ())
+        if isinstance(row, dict) and str(row.get("mask_id") or "")
+    }
+    source_points = []
+    target_points = []
+    matched_ids = []
+    rejected_ids = []
+    seen: set[str] = set()
+    for detail in landmark_details or ():
+        if not isinstance(detail, dict):
+            continue
+        mask_id = str(detail.get("mask_id") or "")
+        row = by_id.get(mask_id)
+        center = detail.get("center")
+        if (
+            not mask_id
+            or mask_id in seen
+            or row is None
+            or not isinstance(center, (list, tuple))
+            or len(center) < 2
+        ):
+            continue
+        if detail.get("projected_mask_support") is False:
+            rejected_ids.append(mask_id)
+            continue
+        if detail.get("median_prediction_error_px") is not None:
+            try:
+                anchor_error = float(detail.get("median_prediction_error_px"))
+            except (TypeError, ValueError):
+                anchor_error = float("inf")
+            if (
+                not math.isfinite(anchor_error)
+                or anchor_error
+                > F3_TRACKING_LUMINOUS_FINE_MAX_ANCHOR_ERROR_PX
+            ):
+                rejected_ids.append(mask_id)
+                continue
+        try:
+            source_points.append([float(center[0]), float(center[1])])
+            target = row.get("center") or ()
+            target_points.append([float(target[0]), float(target[1])])
+        except (TypeError, ValueError, IndexError):
+            continue
+        seen.add(mask_id)
+        matched_ids.append(mask_id)
+
+    required = int(F3_TRACKING_LUMINOUS_FINE_MIN_ANCHORS)
+    anchor_count = len(source_points)
+    if diag is not None:
+        diag.update(
+            {
+                "expected_on_count": int(len(by_id)),
+                "observed_component_count": int(anchor_count),
+                "required_match_count": required,
+                "best_coarse_match_count": int(anchor_count),
+                "best_final_match_count": 0,
+                "failure_stage": "not_started",
+                "matched_mask_ids": list(matched_ids),
+                "rejected_mask_ids": list(rejected_ids),
+                "fit_mode": "projective_residual",
+            }
+        )
+    if anchor_count < required:
+        if diag is not None:
+            diag["failure_stage"] = "id_anchors_insufficient"
+        return None
+
+    source = np.asarray(source_points, dtype=np.float32).reshape(-1, 2)
+    target = np.asarray(target_points, dtype=np.float32).reshape(-1, 2)
+    try:
+        coarse_projected = cv2.perspectiveTransform(
+            source.reshape(-1, 1, 2),
+            coarse,
+        ).reshape(-1, 2)
+    except Exception:
+        if diag is not None:
+            diag["failure_stage"] = "coarse_projection_failed"
+        return None
+
+    coarse_errors = np.linalg.norm(coarse_projected - target, axis=1)
+    coarse_median = float(np.median(coarse_errors))
+    if coarse_median <= F3_TRACKING_LUMINOUS_FINE_ALREADY_ALIGNED_PX:
+        affine = _affine_approximation_from_projective(
+            coarse,
+            canonical_board,
+        )
+        if affine is None:
+            if diag is not None:
+                diag["failure_stage"] = "projective_affine_compat_failed"
+            return None
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "",
+                    "best_final_match_count": int(anchor_count),
+                    "fit_mode": "projective_coarse_verified",
+                    "coarse_median_error_px": round(coarse_median, 3),
+                    "refined_median_error_px": round(coarse_median, 3),
+                    "gain_px": 0.0,
+                }
+            )
+        return {
+            "matrix": affine,
+            "projective_matrix": coarse.copy(),
+            "matched_mask_ids": list(matched_ids),
+            "missing_expected_on_mask_ids": [
+                mask_id for mask_id in by_id if mask_id not in seen
+            ],
+            "matched_count": int(anchor_count),
+            "expected_on_count": int(len(by_id)),
+            "match_ratio": float(anchor_count / max(1, len(by_id))),
+            "median_error_px": coarse_median,
+            "coarse_median_error_px": coarse_median,
+            "fine_alignment_gain_px": 0.0,
+            "fine_fit_mode": "projective_coarse_verified",
+            "score": float(anchor_count * 4.0 - coarse_median * 0.15),
+        }
+
+    residual = target - coarse_projected
+    consensus_gate = float(F3_TRACKING_LUMINOUS_FINE_TRANSLATION_CONSENSUS_PX)
+    best_indices: list[int] = []
+    best_spread = float("inf")
+    for anchor_residual in residual:
+        distances = np.linalg.norm(residual - anchor_residual, axis=1)
+        indices = np.flatnonzero(distances <= consensus_gate).tolist()
+        if not indices:
+            continue
+        local_spread = float(
+            np.median(distances[np.asarray(indices, dtype=np.int32)])
+        )
+        if (
+            len(indices) > len(best_indices)
+            or (
+                len(indices) == len(best_indices)
+                and local_spread < best_spread
+            )
+        ):
+            best_indices = [int(index) for index in indices]
+            best_spread = local_spread
+
+    if len(best_indices) < required:
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "translation_consensus_insufficient",
+                    "translation_consensus_count": int(len(best_indices)),
+                    "translation_consensus_required": required,
+                    "coarse_median_error_px": round(coarse_median, 3),
+                }
+            )
+        return None
+
+    if len(best_indices) < anchor_count:
+        keep = set(best_indices)
+        rejected_ids.extend(
+            matched_ids[index]
+            for index in range(anchor_count)
+            if index not in keep
+        )
+        source = source[best_indices]
+        target = target[best_indices]
+        coarse_projected = coarse_projected[best_indices]
+        coarse_errors = coarse_errors[best_indices]
+        matched_ids = [matched_ids[index] for index in best_indices]
+        seen = set(matched_ids)
+        anchor_count = len(best_indices)
+        coarse_median = float(np.median(coarse_errors))
+        residual = target - coarse_projected
+
+    board = np.asarray(
+        _quad_from_points(canonical_board),
+        dtype=np.float32,
+    ).reshape(-1, 2)
+    if len(board) != 4:
+        if diag is not None:
+            diag["failure_stage"] = "invalid_board_geometry"
+        return None
+    board_diagonal = max(
+        1.0,
+        float(np.linalg.norm(np.max(board, axis=0) - np.min(board, axis=0))),
+    )
+
+    correction_affine = _estimate_affine_partial(
+        coarse_projected.tolist(),
+        target.tolist(),
+    )
+    fit_mode = "projective_similarity"
+    if correction_affine is None:
+        correction = np.median(residual, axis=0)
+        correction_affine = np.asarray(
+            [
+                [1.0, 0.0, float(correction[0])],
+                [0.0, 1.0, float(correction[1])],
+            ],
+            dtype=np.float32,
+        )
+        fit_mode = "projective_translation"
+
+    correction_scale = affine_scale(correction_affine)
+    correction_rotation = abs(affine_rotation_deg(correction_affine))
+    correction_shift = math.hypot(
+        float(correction_affine[0, 2]),
+        float(correction_affine[1, 2]),
+    )
+    correction_shift_fraction = correction_shift / board_diagonal
+    if not (
+        correction_rotation <= F3_TRACKING_LUMINOUS_MAX_ROTATION_DELTA_DEG
+        and F3_TRACKING_LUMINOUS_MIN_SCALE_RATIO_TO_COARSE
+        <= correction_scale
+        <= F3_TRACKING_LUMINOUS_MAX_SCALE_RATIO_TO_COARSE
+        and correction_shift_fraction
+        <= F3_TRACKING_LUMINOUS_MAX_CENTER_SHIFT_FRACTION
+    ):
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "fine_pose_outside_structural_guard",
+                    "fit_mode": fit_mode,
+                    "correction_rotation_deg": round(correction_rotation, 3),
+                    "correction_scale": round(correction_scale, 5),
+                    "correction_shift_px": round(correction_shift, 3),
+                }
+            )
+        return None
+
+    correction_h = _planar_to_homography(correction_affine)
+    refined = (
+        correction_h @ coarse
+        if correction_h is not None
+        else None
+    )
+    if refined is None or not np.all(np.isfinite(refined)):
+        if diag is not None:
+            diag["failure_stage"] = "refined_projection_failed"
+        return None
+
+    try:
+        refined_projected = cv2.perspectiveTransform(
+            source.reshape(-1, 1, 2),
+            refined.astype(np.float32),
+        ).reshape(-1, 2)
+    except Exception:
+        if diag is not None:
+            diag["failure_stage"] = "refined_projection_failed"
+        return None
+
+    refined_errors = np.linalg.norm(refined_projected - target, axis=1)
+    refined_median = float(np.median(refined_errors))
+    if (
+        not math.isfinite(refined_median)
+        or refined_median > F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX
+    ):
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "fine_residual_too_high",
+                    "fit_mode": fit_mode,
+                    "coarse_median_error_px": round(coarse_median, 3),
+                    "refined_median_error_px": round(refined_median, 3),
+                }
+            )
+        return None
+
+    gain = coarse_median - refined_median
+    minimum_gain = max(
+        F3_TRACKING_LUMINOUS_FINE_MIN_GAIN_PX,
+        coarse_median * 0.08,
+    )
+    if gain < minimum_gain:
+        if diag is not None:
+            diag.update(
+                {
+                    "failure_stage": "fine_gain_insufficient",
+                    "fit_mode": fit_mode,
+                    "coarse_median_error_px": round(coarse_median, 3),
+                    "refined_median_error_px": round(refined_median, 3),
+                    "gain_px": round(gain, 3),
+                }
+            )
+        return None
+
+    affine = _affine_approximation_from_projective(
+        refined,
+        canonical_board,
+    )
+    if affine is None:
+        if diag is not None:
+            diag["failure_stage"] = "projective_affine_compat_failed"
+        return None
+
+    if diag is not None:
+        diag.update(
+            {
+                "failure_stage": "",
+                "best_final_match_count": int(anchor_count),
+                "matched_mask_ids": list(matched_ids),
+                "rejected_mask_ids": list(dict.fromkeys(rejected_ids)),
+                "fit_mode": fit_mode,
+                "coarse_median_error_px": round(coarse_median, 3),
+                "refined_median_error_px": round(refined_median, 3),
+                "gain_px": round(gain, 3),
+                "translation_consensus_count": int(anchor_count),
+            }
+        )
+
+    return {
+        "matrix": affine,
+        "projective_matrix": refined.astype(np.float32),
+        "matched_mask_ids": list(matched_ids),
+        "missing_expected_on_mask_ids": [
+            mask_id for mask_id in by_id if mask_id not in seen
+        ],
+        "matched_count": int(anchor_count),
+        "expected_on_count": int(len(by_id)),
+        "match_ratio": float(anchor_count / max(1, len(by_id))),
+        "median_error_px": refined_median,
+        "coarse_median_error_px": coarse_median,
+        "fine_alignment_gain_px": gain,
+        "fine_fit_mode": fit_mode,
+        "score": float(
+            anchor_count * 4.0
+            + min(20.0, max(0.0, gain))
+            - refined_median * 0.15
+        ),
     }
 
 
