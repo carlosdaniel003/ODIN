@@ -6290,3 +6290,129 @@ USB neural                        NÃO
 AUX neural                        NÃO
 ```
 
+---
+
+## 06/10/2026 — N2.1 bloqueio de reteste: H1 correto voltou a ficar 27/28 por MASK_017 INCERTA
+
+**Resultado:** FAIL FÍSICO DE REPETIBILIDADE DO H1 NEURAL — CAUSA IDENTIFICADA NA CALIBRAÇÃO DE CERTEZA; BLUE AINDA NÃO RETESTADO.
+
+### Cenário
+
+Ao iniciar o reteste físico da Etapa N2, o fluxo não chegou ao BLUE porque o
+H1 correto deixou de avançar. A tela produtiva permaneceu em:
+
+```text
+H1 INDETERMINADO
+27/28 CONFORMES
+1 INCERTO
+AUTO • H1 • leitura neural incerta • continuando busca
+```
+
+O DEBUG confirma presença e energia válidas:
+
+```text
+ESTADO DA PLACA: PRESENTE • CONFIRMADA
+ENERGIA DO DISPLAY: CONFIRMADA
+GATE PRODUTIVO: LIBERADO
+```
+
+Portanto o bloqueio não veio de presença, energia, rearme ou sequência.
+
+### Evidência neural
+
+A única máscara neural incerta foi `MASK_017`, configurada como `on` no H1:
+
+```text
+MASK_017
+expected=on
+classified=uncertain
+P(ON)=0.769281
+P(OFF)=0.230719
+neural_certain=false
+```
+
+O artefato ativo ainda usa:
+
+```text
+OFF <= P(ON) 0.660738
+ON  >= P(ON) 0.809613
+gap = 0.148875
+physical_h1_calibration_frame_count = 10
+```
+
+Logo `0.769281` cai corretamente na faixa INCERTO do contrato atual.
+
+No mesmo frame, os diagnósticos físicos/convencionais continuam coerentes com
+um H1 correto: a autoridade de energia confirmou os 7 segmentos esperados ON e
+o aprendizado same-mask diagnóstico classificou o H1 em 28/28. Esses sinais
+não podem reclassificar a CNN, mas provam que não há evidência de segmento
+fisicamente apagado neste caso.
+
+### Causa
+
+Este FAIL repete a classe de problema já tratada em D-063: a distribuição live
+da `MASK_017` correta voltou a ultrapassar a variabilidade coberta pelos frames
+físicos usados na calibração anterior.
+
+Não há motivo para alterar o ONNX nem retornar ao classificador convencional.
+
+Para este novo frame:
+
+```text
+max OFF P(ON) no frame = 0.539925  (MASK_010)
+min ON  P(ON) no frame = 0.769281  (MASK_017)
+gap live do frame      = +0.229356
+```
+
+Considerando os extremos físicos já acumulados no metadata:
+
+```text
+max OFF físico existente = 0.660738
+novo min ON físico        = 0.769281
+novo gap físico esperado  = +0.108543
+```
+
+As classes continuam separáveis. Portanto o caminho canônico é **incorporar
+este novo snapshot ao conjunto físico multi-frame existente**, usando o
+recalibrador D-063. O próprio pipeline preserva os 10 frames anteriores, elimina
+duplicatas por hash e acrescenta o novo frame; não é necessário retreinar a CNN.
+
+### Alteração de runtime
+
+Nenhuma alteração algorítmica foi aplicada ao runtime neste FAIL.
+
+Em particular, não foi criado:
+
+- threshold manual;
+- exceção específica para `MASK_017`;
+- fallback convencional;
+- novo debounce;
+- nova autoridade visual.
+
+O mecanismo de recalibração já existente em
+`display_f3_neural_physical_calibration.py` é o proprietário correto desta
+correção.
+
+### Próximo reteste
+
+1. adicionar este DEBUG H1 ao metadata físico atual com
+   `--recalibrate-physical-h1`;
+2. confirmar no console que o ONNX foi preservado e que a calibração combinada
+   continua com gap positivo;
+3. reiniciar/recarregar o ODIN para o detector reler o metadata;
+4. usar frames H1 novos, não o frame incorporado à calibração;
+5. confirmar repetibilidade do H1 antes de retomar o reteste do BLUE neural.
+
+Estado da Etapa N2 após este FAIL:
+
+```text
+H1 neural implementado                  SIM
+H1 neural repetibilidade neste reteste  FAIL
+causa identificada                      SIM — calibração física
+recalibração necessária                 SIM
+BLUE neural implementado                SIM
+BLUE neural retestado após N2.0         NÃO
+USB neural                              NÃO
+AUX neural                              NÃO
+```
+
