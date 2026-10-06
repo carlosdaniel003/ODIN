@@ -511,14 +511,92 @@ def canonical_board_points(project: dict, store: F3TrackingConfigStore) -> list[
     return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
 
+def _as_planar_transform(matrix):
+    """Normaliza affine 2x3 ou homografia 3x3 sem mudar sua natureza."""
+    try:
+        value = np.asarray(matrix, dtype=np.float32)
+    except Exception:
+        return None
+    if value.size == 6:
+        value = value.reshape(2, 3)
+    elif value.size == 9:
+        value = value.reshape(3, 3)
+    else:
+        return None
+    if not np.all(np.isfinite(value)):
+        return None
+    return value
+
+
+def _planar_to_homography(matrix) -> np.ndarray | None:
+    value = _as_planar_transform(matrix)
+    if value is None:
+        return None
+    if value.shape == (3, 3):
+        return value.astype(np.float32)
+    return np.asarray(
+        [
+            [value[0, 0], value[0, 1], value[0, 2]],
+            [value[1, 0], value[1, 1], value[1, 2]],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+
+def _invert_planar_transform(matrix):
+    value = _as_planar_transform(matrix)
+    if value is None:
+        return None
+    try:
+        if value.shape == (2, 3):
+            return cv2.invertAffineTransform(value).astype(np.float32)
+        inverse = np.linalg.inv(value).astype(np.float32)
+    except Exception:
+        return None
+    if not np.all(np.isfinite(inverse)):
+        return None
+    return inverse
+
+
+def _compose_planar_transform(first, second) -> np.ndarray | None:
+    """Compõe FIRST(SECOND(p)); preserva homografia quando qualquer lado é 3x3."""
+    first_h = _planar_to_homography(first)
+    second_h = _planar_to_homography(second)
+    if first_h is None or second_h is None:
+        return None
+    result = first_h @ second_h
+    if not np.all(np.isfinite(result)):
+        return None
+    if (
+        _as_planar_transform(first).shape == (2, 3)
+        and _as_planar_transform(second).shape == (2, 3)
+    ):
+        return result[:2, :].astype(np.float32)
+    return result.astype(np.float32)
+
+
 def transform_points(points, matrix) -> list[list[float]]:
     source = _normalize_points(points, minimum=1)
     if not source:
         return []
+    transform = _as_planar_transform(matrix)
+    if transform is None:
+        return []
     try:
-        affine = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
         values = np.asarray(source, dtype=np.float32).reshape(-1, 1, 2)
-        transformed = cv2.transform(values, affine).reshape(-1, 2)
+        if transform.shape == (3, 3):
+            transformed = cv2.perspectiveTransform(
+                values,
+                transform,
+            ).reshape(-1, 2)
+        else:
+            transformed = cv2.transform(
+                values,
+                transform,
+            ).reshape(-1, 2)
+        if not np.all(np.isfinite(transformed)):
+            return []
         return [[float(x), float(y)] for x, y in transformed]
     except Exception:
         return []
@@ -698,26 +776,46 @@ def transform_mask(mask: dict, matrix) -> dict | None:
     mask_id = str(source.get("id") or "")
     if not mask_id:
         return None
-    try:
-        affine = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
-    except Exception:
+
+    transform = _as_planar_transform(matrix)
+    if transform is None:
         return None
 
     if kind == "circle":
-        point = affine @ np.asarray(
-            [float(source.get("cx", 0)), float(source.get("cy", 0)), 1.0],
-            dtype=np.float32,
+        try:
+            cx = float(source.get("cx", 0))
+            cy = float(source.get("cy", 0))
+            radius = max(1.0, float(source.get("radius", 1)))
+        except (TypeError, ValueError):
+            return None
+        probes = transform_points(
+            [
+                [cx, cy],
+                [cx + radius, cy],
+                [cx, cy + radius],
+            ],
+            transform,
+        )
+        if len(probes) != 3:
+            return None
+        center = np.asarray(probes[0], dtype=np.float32)
+        local_radius = float(
+            0.5
+            * (
+                np.linalg.norm(np.asarray(probes[1]) - center)
+                + np.linalg.norm(np.asarray(probes[2]) - center)
+            )
         )
         return {
             "id": mask_id,
             "type": "circle",
-            "cx": float(point[0]),
-            "cy": float(point[1]),
-            "radius": max(1.0, float(source.get("radius", 1)) * affine_scale(affine)),
+            "cx": float(center[0]),
+            "cy": float(center[1]),
+            "radius": max(1.0, local_radius),
         }
 
     points = pontos_mascara_display(source)
-    transformed = transform_points(points, affine)
+    transformed = transform_points(points, transform)
     if len(transformed) < 3:
         return None
     return {
@@ -725,7 +823,6 @@ def transform_mask(mask: dict, matrix) -> dict | None:
         "type": "polygon",
         "points": transformed,
     }
-
 
 def _mask_center(mask: dict) -> tuple[float, float] | None:
     if not isinstance(mask, dict):
@@ -4216,6 +4313,7 @@ class F3TrackingResult:
     scale: float = 1.0
     reason: str = ""
     current_to_canonical: object | None = None
+    current_to_canonical_homography: object | None = None
     source_type: str = ""
     evidence_current: bool = False
     luminous_validated_mask_ids: tuple[str, ...] = ()
@@ -4256,6 +4354,8 @@ class F3DisplayObjectTracker:
         mas não precisa reler as mesmas fotos nem recalcular o banco estrutural.
         """
         self.last_matrix: np.ndarray | None = None
+        self.last_homography: np.ndarray | None = None
+        self._force_absolute_reacquire = False
         self.last_compute_s = 0.0
         self.last_result: F3TrackingResult | None = None
         self.last_frame_id = None
