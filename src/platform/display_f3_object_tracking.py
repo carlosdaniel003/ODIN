@@ -1039,7 +1039,11 @@ def _affine_approximation_from_projective(
     current_to_canonical,
     canonical_board,
 ) -> np.ndarray | None:
-    """Produz affine de compatibilidade; a geometria fina continua 3x3."""
+    """Produz affine apenas para compatibilidade/telemetria.
+
+    Não aplica o gate de reprojeção da pose produtiva: uma homografia válida é
+    naturalmente impossível de reproduzir exatamente com similarity 2x3.
+    """
     inverse = _invert_planar_transform(current_to_canonical)
     board = _normalize_points(canonical_board, minimum=4)
     if inverse is None or len(board) != 4:
@@ -1047,7 +1051,24 @@ def _affine_approximation_from_projective(
     current = transform_points(board, inverse)
     if len(current) != 4:
         return None
-    return _estimate_affine_partial(current, board)
+    try:
+        matrix, _inliers = cv2.estimateAffinePartial2D(
+            np.asarray(current, dtype=np.float32).reshape(-1, 1, 2),
+            np.asarray(board, dtype=np.float32).reshape(-1, 1, 2),
+            method=cv2.LMEDS,
+            refineIters=20,
+        )
+    except Exception:
+        return None
+    if matrix is None:
+        return None
+    matrix = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+    if not np.all(np.isfinite(matrix)):
+        return None
+    scale = affine_scale(matrix)
+    if not (F3_TRACKING_MIN_SCALE <= scale <= F3_TRACKING_MAX_SCALE):
+        return None
+    return matrix
 
 
 def estimate_reference_to_canonical(
