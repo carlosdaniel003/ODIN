@@ -47,7 +47,7 @@ from src.platform.display_f3_neural_tracking import (
 )
 from src.platform.display_f3_object_tracking import (
     F3DisplayObjectTracker,
-    _filter_board_matrix_candidates,
+    _neural_filter_board_matrix_candidates,
 )
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
@@ -543,7 +543,7 @@ def _candidate_projected_current_anchors(
     current_quad: np.ndarray,
     canonical_anchors: np.ndarray,
 ) -> list[np.ndarray]:
-    matrices = _filter_board_matrix_candidates(
+    matrices, _candidate_mode = _neural_filter_board_matrix_candidates(
         np.asarray(current_quad, dtype=np.float32).reshape(-1, 2).tolist(),
         np.asarray(canonical_anchors, dtype=np.float32).reshape(-1, 2).tolist(),
     )
