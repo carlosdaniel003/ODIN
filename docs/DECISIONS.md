@@ -4337,3 +4337,128 @@ Antes de considerar D-067 fisicamente validada:
 - confirmar que modelo ausente continua usando o tracking legado.
 
 **Estado físico:** PENDENTE.
+
+
+---
+
+## D-068 — Pipeline F3 latest-frame-wins entre semântica e tracking
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Contexto
+
+Após D-067, o primeiro reteste físico com tracking ON mostrou:
+
+- LOCK correto e máscaras visualmente centralizadas;
+- CNN de pose em ~4.67 ms;
+- worker de tracking em ~385.45 ms;
+- câmera em ~14.83 FPS;
+- frame da câmera no clique: 578;
+- frame do tracking: 565;
+- último frame semântico aplicado: 447.
+
+A geometria deixou de ser o principal problema. O atraso percebido passou a estar
+na serialização:
+
+```text
+tracking HIGH
+  -> semântica HIGH
+  -> somente depois novo tracking
+```
+
+Como tracking e semântica compartilham corretamente o único
+`F3HeavyVisionExecutor`, criar outro worker violaria D-014/D-015 e as regras de
+performance.
+
+### Decisão
+
+Preservar exatamente um worker pesado e transformar a passagem
+semântica -> próximo tracking em um pipeline latest-frame-wins:
+
+```text
+worker ativo: semântica do snapshot N
+
+fila pendente:
+  no máximo 1 tracking
+  sempre do frame mais recente
+
+novo frame chega:
+  substitui somente o tracking pendente anterior
+
+semântica termina:
+  executor inicia imediatamente o tracking mais recente
+```
+
+### Invariantes
+
+1. Continua existindo exatamente um `F3HeavyVisionExecutor`.
+2. Continua existindo no máximo um job pesado ativo.
+3. Não existe fila histórica de frames de tracking.
+4. O tracking pendente usa a mesma chave `latest-frame` e
+   `replace_pending=True`.
+5. Tracking em execução nunca é duplicado.
+6. A semântica em execução nunca é cancelada no meio.
+7. RAW + geometria consumidos pela semântica continuam pertencendo ao mesmo
+   snapshot de tracking.
+8. O frame visível continua sempre latest-frame-wins.
+9. D-066 permanece intacta: tracking só fornece geometria.
+10. D-065 permanece intacta: `F3HybridCheckAnalyzer` continua sendo a única
+    autoridade ON/OFF/INCERTO e CHECK OK/NG.
+11. Nenhum threshold semântico, debounce ou regra da state machine é alterado.
+
+### Telemetria adicionada
+
+Tracking:
+- `worker_stage_elapsed_ms.align`;
+- `worker_stage_elapsed_ms.geometry_projection`;
+- `worker_stage_elapsed_ms.analysis_warp`;
+- `worker_elapsed_ms`;
+- `worker_age_ms`.
+
+Semântica:
+- `semantic_pipeline.source_age_ms`;
+- `semantic_pipeline.queue_wait_ms`;
+- `semantic_pipeline.semantic_elapsed_ms`;
+- `semantic_pipeline.queue_age_ms`;
+- `semantic_pipeline.total_age_ms`;
+- `semantic_pipeline.frame_gap`;
+- `semantic_pipeline.same_context`;
+- `semantic_pipeline.normal_fresh`;
+- `semantic_pipeline.accepted_for_runtime`.
+
+Backpressure:
+- `pipeline_prefetch.submissions`;
+- `pipeline_prefetch.replacements`;
+- `pipeline_prefetch.queued_frame_token`;
+- snapshot de `heavy_executor.stats()`.
+
+### Correção de idade semântica
+
+A idade operacional de um resultado semântico passa a incluir:
+
+```text
+idade do tracking que originou o snapshot
++ espera real na fila única
++ compute semântico
+```
+
+Antes, a espera na fila não entrava integralmente no `age_ms`. D-068 corrige
+essa métrica para que a política de frescor possa rejeitar resultados realmente
+antigos sem alterar a classificação semântica.
+
+### Validação exigida
+
+No próximo reteste físico H1:
+
+- confirmar alinhamento das 28 máscaras;
+- medir `worker_stage_elapsed_ms`;
+- medir `semantic_pipeline.semantic_elapsed_ms`;
+- medir `semantic_pipeline.queue_wait_ms`;
+- comparar `camera_frame_token` x `semantic_pipeline.frame_token`;
+- confirmar que `pipeline_prefetch.replacements` cresce quando vários frames
+  chegam durante uma semântica longa;
+- confirmar que `heavy_executor.active_jobs <= 1`;
+- confirmar ausência de fila histórica;
+- confirmar H1 OK idêntico ao tracking OFF.
+
+**Estado físico:** PENDENTE.
