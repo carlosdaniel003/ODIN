@@ -1339,11 +1339,58 @@ def build_tracking_mask(
 
 
 
+def _ordered_projective_quad(points) -> list[list[float]]:
+    """Ordena um quadrilátero real sem retangularizar sua perspectiva."""
+    normalized = _normalize_points(points, minimum=4)
+    if len(normalized) != 4:
+        return []
+    ordered = canonical_pose_anchors(normalized)
+    if ordered is None:
+        return []
+    try:
+        contour = np.asarray(
+            ordered,
+            dtype=np.float32,
+        ).reshape(-1, 1, 2)
+        if not cv2.isContourConvex(contour):
+            return []
+        if abs(float(cv2.contourArea(contour))) <= 4.0:
+            return []
+        points_array = contour.reshape(-1, 2)
+        edges = [
+            float(
+                np.linalg.norm(
+                    points_array[(index + 1) % 4] - points_array[index]
+                )
+            )
+            for index in range(4)
+        ]
+        if min(edges) <= 2.0:
+            return []
+    except Exception:
+        return []
+    return [
+        [float(point[0]), float(point[1])]
+        for point in np.asarray(ordered, dtype=np.float32).reshape(-1, 2)
+    ]
+
+
 def _quad_from_points(points) -> list[list[float]]:
-    """Reduz um contorno salvo ao retângulo orientado usado como filtro."""
+    """Obtém quadrilátero preservando perspectiva quando já há 4 cantos.
+
+    D-071: quatro cantos físicos não podem passar por minAreaRect antes da
+    homografia. Contornos com mais vértices continuam usando o retângulo
+    orientado apenas como fallback/medida estrutural.
+    """
     normalized = _normalize_points(points, minimum=3)
     if len(normalized) < 3:
         return []
+
+    if len(normalized) == 4:
+        exact = _ordered_projective_quad(normalized)
+        if exact:
+            return exact
+
     try:
         rect = cv2.minAreaRect(
             np.asarray(normalized, dtype=np.float32).reshape(-1, 1, 2)
@@ -1351,10 +1398,79 @@ def _quad_from_points(points) -> list[list[float]]:
         box = cv2.boxPoints(rect)
     except Exception:
         return []
-    return [
-        [float(point[0]), float(point[1])]
-        for point in np.asarray(box, dtype=np.float32).reshape(-1, 2)
-    ]
+    return _ordered_projective_quad(
+        np.asarray(box, dtype=np.float32).reshape(-1, 2).tolist()
+    )
+
+
+def _perspective_quad_from_contour(contour) -> list[list[float]]:
+    """Extrai os quatro cantos perspectivados do contorno físico do filtro.
+
+    O convex hull remove recortes locais causados por LEDs/reflexos, enquanto
+    approxPolyDP preserva as inclinações reais das quatro bordas. Se não
+    houver um quadrilátero convexo confiável, o chamador pode usar
+    minAreaRect como fallback não-projectivo.
+    """
+    try:
+        data = np.asarray(contour, dtype=np.float32).reshape(-1, 1, 2)
+        if len(data) < 4:
+            return []
+        hull = cv2.convexHull(data)
+        perimeter = float(cv2.arcLength(hull, True))
+        hull_area = abs(float(cv2.contourArea(hull)))
+    except Exception:
+        return []
+    if perimeter <= 1.0 or hull_area <= 4.0:
+        return []
+
+    best = None
+    for epsilon_fraction in (
+        0.004,
+        0.006,
+        0.008,
+        0.012,
+        0.016,
+        0.022,
+        0.030,
+        0.040,
+        0.050,
+    ):
+        try:
+            approx = cv2.approxPolyDP(
+                hull,
+                perimeter * float(epsilon_fraction),
+                True,
+            )
+        except Exception:
+            continue
+        if len(approx) != 4:
+            continue
+        ordered = _ordered_projective_quad(
+            np.asarray(approx, dtype=np.float32).reshape(-1, 2).tolist()
+        )
+        if len(ordered) != 4:
+            continue
+        try:
+            quad_area = abs(
+                float(
+                    cv2.contourArea(
+                        np.asarray(
+                            ordered,
+                            dtype=np.float32,
+                        ).reshape(-1, 1, 2)
+                    )
+                )
+            )
+        except Exception:
+            continue
+        coverage = quad_area / max(1.0, hull_area)
+        if coverage < F3_TRACKING_FILTER_MIN_RECTANGULARITY:
+            continue
+        rank = (float(coverage), -float(epsilon_fraction))
+        if best is None or rank > best[0]:
+            best = (rank, ordered)
+
+    return deepcopy(best[1]) if best is not None else []
 
 
 def _quad_metrics(points) -> tuple[float, float, float]:
@@ -1579,10 +1695,26 @@ def _detect_dark_filter_candidates(
             continue
 
         box = cv2.boxPoints(rect).astype(np.float32)
+        contour_quad = _perspective_quad_from_contour(contour)
+        if len(contour_quad) == 4:
+            geometry_points = np.asarray(
+                contour_quad,
+                dtype=np.float32,
+            ).reshape(-1, 2)
+            corner_source = "contour_quad"
+        else:
+            geometry_points = np.asarray(
+                _quad_from_points(box.tolist()),
+                dtype=np.float32,
+            ).reshape(-1, 2)
+            corner_source = "min_area_rect_fallback"
+        if len(geometry_points) != 4:
+            continue
+
         region = np.zeros_like(gray, dtype=np.uint8)
         cv2.fillConvexPoly(
             region,
-            np.rint(box).astype(np.int32),
+            np.rint(geometry_points).astype(np.int32),
             255,
             lineType=cv2.LINE_AA,
         )
@@ -1604,11 +1736,17 @@ def _detect_dark_filter_candidates(
         inv_scale = 1.0 / max(1e-9, search_scale)
         points = [
             [float(point[0]) * inv_scale, float(point[1]) * inv_scale]
+            for point in geometry_points
+        ]
+        rect_points = [
+            [float(point[0]) * inv_scale, float(point[1]) * inv_scale]
             for point in box
         ]
         candidates.append(
             {
                 "points": points,
+                "rect_points": rect_points,
+                "corner_source": corner_source,
                 "score": float(score),
                 "area_factor": float(area_factor),
                 "aspect_score": float(aspect_score),
@@ -6296,11 +6434,16 @@ class F3DisplayObjectTracker:
                         dtype=np.float32,
                     ).reshape(2, 3)
 
+            corner_source = str(
+                filter_candidate.get("corner_source")
+                or "provided_quad"
+            )
             attempts.append(
                 {
                     "filter_source": str(
                         filter_candidate.get("source") or ""
                     ),
+                    "filter_corner_source": corner_source,
                     "filter_score": round(
                         float(filter_candidate.get("score", 0.0) or 0.0),
                         4,
@@ -6315,10 +6458,17 @@ class F3DisplayObjectTracker:
                 }
             )
             if local_best is not None and local_error < best_error:
-                projective = _projective_filter_pose_from_affine_hint(
-                    points,
-                    canonical_list,
-                    local_best,
+                # D-071: minAreaRect continua útil como fallback estrutural,
+                # mas seus quatro cantos retangulares não representam a
+                # perspectiva física real exigida por uma homografia.
+                projective = (
+                    _projective_filter_pose_from_affine_hint(
+                        points,
+                        canonical_list,
+                        local_best,
+                    )
+                    if corner_source != "min_area_rect_fallback"
+                    else None
                 )
                 best_error = local_error
                 best = {
@@ -6385,6 +6535,41 @@ class F3DisplayObjectTracker:
             and projective.get("homography") is not None
             else None
         )
+        selected_filter = (
+            best.get("filter")
+            if isinstance(best, dict)
+            and isinstance(best.get("filter"), dict)
+            else {}
+        )
+        selected_points = _normalize_points(
+            selected_filter.get("points"),
+            minimum=4,
+        )
+        ordered_projective_points = (
+            _normalize_points(
+                projective.get("current_points"),
+                minimum=4,
+            )
+            if isinstance(projective, dict)
+            else []
+        )
+        corner_errors_to_neural = []
+        if len(ordered_projective_points) == 4:
+            try:
+                corner_errors_to_neural = np.linalg.norm(
+                    np.asarray(
+                        ordered_projective_points,
+                        dtype=np.float32,
+                    ).reshape(-1, 2)
+                    - np.asarray(
+                        neural_anchors,
+                        dtype=np.float32,
+                    ).reshape(-1, 2),
+                    axis=1,
+                ).tolist()
+            except Exception:
+                corner_errors_to_neural = []
+
         debug.update(
             {
                 "available": True,
@@ -6392,6 +6577,35 @@ class F3DisplayObjectTracker:
                 "rotation_deg": round(float(rotation), 3),
                 "scale": round(float(scale), 5),
                 "confidence": round(float(confidence), 4),
+                "filter_corner_source": str(
+                    selected_filter.get("corner_source")
+                    or "provided_quad"
+                ),
+                "filter_points": [
+                    [round(float(point[0]), 3), round(float(point[1]), 3)]
+                    for point in selected_points
+                ],
+                "neural_anchor_points": [
+                    [round(float(point[0]), 3), round(float(point[1]), 3)]
+                    for point in np.asarray(
+                        neural_anchors,
+                        dtype=np.float32,
+                    ).reshape(-1, 2)
+                ],
+                "filter_corner_errors_to_neural_px": [
+                    round(float(value), 3)
+                    for value in corner_errors_to_neural
+                ],
+                "filter_corner_error_mean_px": (
+                    round(float(np.mean(corner_errors_to_neural)), 3)
+                    if corner_errors_to_neural
+                    else None
+                ),
+                "filter_corner_error_max_px": (
+                    round(float(np.max(corner_errors_to_neural)), 3)
+                    if corner_errors_to_neural
+                    else None
+                ),
                 "projective_pose_ready": bool(projective_h is not None),
                 "projective_reprojection_mean_px": (
                     round(
@@ -6430,7 +6644,11 @@ class F3DisplayObjectTracker:
                 else None
             ),
             "filter_points": deepcopy(
-                (best.get("filter") or {}).get("points") or []
+                selected_filter.get("points") or []
+            ),
+            "filter_corner_source": str(
+                selected_filter.get("corner_source")
+                or "provided_quad"
             ),
         }
 
