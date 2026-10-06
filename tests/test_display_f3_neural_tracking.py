@@ -411,6 +411,109 @@ class DisplayF3NeuralTrackingTests(unittest.TestCase):
             {"projective_similarity", "projective_translation"},
         )
 
+    def test_live_geometry_projects_masks_with_projective_filter_pose(self):
+        canonical_board = [
+            [0.0, 0.0],
+            [600.0, 0.0],
+            [600.0, 200.0],
+            [0.0, 200.0],
+        ]
+        current_board = np.asarray(
+            [
+                [100.0, 100.0],
+                [700.0, 70.0],
+                [620.0, 350.0],
+                [150.0, 290.0],
+            ],
+            dtype=np.float32,
+        )
+        canonical = np.asarray(canonical_board, dtype=np.float32)
+        homography = cv2.getPerspectiveTransform(current_board, canonical)
+        affine = tracking._affine_approximation_from_projective(
+            homography,
+            canonical_board,
+        )
+        masks = [
+            {
+                "id": f"MASK_{index:03d}",
+                "type": "polygon",
+                "points": [
+                    [100.0 + index * 40.0, 60.0],
+                    [120.0 + index * 40.0, 60.0],
+                    [120.0 + index * 40.0, 90.0],
+                    [100.0 + index * 40.0, 90.0],
+                ],
+            }
+            for index in range(1, 4)
+        ]
+        project = {
+            "name": "CM_500_L",
+            "masks": masks,
+            "checks": [],
+        }
+        repository = SimpleNamespace(
+            obter_projeto_ativo=lambda: "CM_500_L",
+            carregar_projeto=lambda _name: project,
+        )
+        runtime = SimpleNamespace(
+            store=SimpleNamespace(),
+            _force_absolute_reacquire=False,
+        )
+        app = SimpleNamespace(display_project_repository=repository)
+        result = tracking.F3TrackingResult(
+            True,
+            np.zeros((480, 800, 3), dtype=np.uint8),
+            reference="neural_pose:CM_500_L",
+            current_to_canonical=affine,
+            current_to_canonical_homography=homography,
+            source_type="neural_filter_pose",
+            evidence_current=True,
+        )
+        current = {
+            "id": "CHECK_001",
+            "mask_states": {
+                "MASK_001": "on",
+                "MASK_002": "on",
+                "MASK_003": "on",
+            },
+        }
+
+        with (
+            patch.object(tracking, "get_tracking_runtime", return_value=runtime),
+            patch.object(
+                tracking,
+                "canonical_board_points",
+                return_value=canonical_board,
+            ),
+            patch.object(tracking, "_current_check", return_value=current),
+        ):
+            tracking._update_tracking_live_geometry(
+                app,
+                np.zeros((480, 800, 3), dtype=np.uint8),
+                result,
+            )
+
+        geometry = app._display_f3_tracking_live_geometry
+        self.assertEqual("homography_3x3", geometry["geometry_transform_type"])
+        self.assertEqual("canonical_projective", geometry["geometry_space"])
+        self.assertFalse(geometry["spatial_alignment_ready"])
+        self.assertTrue(geometry["absolute_reacquire_required"])
+        self.assertTrue(runtime._force_absolute_reacquire)
+
+        inverse = np.linalg.inv(homography).astype(np.float32)
+        expected = tracking.transform_points(
+            masks[0]["points"],
+            inverse,
+        )
+        actual = geometry["masks"][0]["points"]
+        self.assertTrue(
+            np.allclose(
+                np.asarray(actual, dtype=np.float32),
+                np.asarray(expected, dtype=np.float32),
+                atol=1e-3,
+            )
+        )
+
     def test_alignment_pending_forces_absolute_neural_reacquisition(self):
         runtime = tracking.F3DisplayObjectTracker(SimpleNamespace())
         runtime.ready = True
