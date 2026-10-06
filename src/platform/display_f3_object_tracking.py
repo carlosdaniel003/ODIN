@@ -5180,11 +5180,15 @@ class F3DisplayObjectTracker:
         """Máscara da placa no frame anterior, excluindo as ROIs do display."""
         if self.last_matrix is None or not self.canonical_board:
             return None
-        try:
-            canonical_to_previous = cv2.invertAffineTransform(
-                np.asarray(self.last_matrix, dtype=np.float32).reshape(2, 3)
-            )
-        except Exception:
+        current_to_canonical = (
+            self.last_homography
+            if self.last_homography is not None
+            else self.last_matrix
+        )
+        canonical_to_previous = _invert_planar_transform(
+            current_to_canonical
+        )
+        if canonical_to_previous is None:
             return None
 
         board_previous = transform_points(
@@ -5427,9 +5431,19 @@ class F3DisplayObjectTracker:
             if self.last_result is not None
             else "temporal"
         )
+        homography = (
+            _compose_planar_transform(self.last_homography, motion)
+            if self.last_homography is not None
+            else None
+        )
         return {
             "reference": self._last_reference,
             "matrix": matrix.astype(np.float32),
+            "homography": (
+                np.asarray(homography, dtype=np.float32).reshape(3, 3)
+                if homography is not None
+                else None
+            ),
             "matches": int(len(previous_good)),
             "inliers": inliers,
             "ratio": ratio,
@@ -5453,13 +5467,22 @@ class F3DisplayObjectTracker:
         if now - float(self.last_verified_s or 0.0) > F3_TRACKING_LOCK_GRACE_S:
             return None
 
-        aligned = cv2.warpAffine(
-            frame,
-            self.last_matrix,
-            (self.width, self.height),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REFLECT101,
-        )
+        if self.last_homography is not None:
+            aligned = cv2.warpPerspective(
+                frame,
+                self.last_homography,
+                (self.width, self.height),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
+        else:
+            aligned = cv2.warpAffine(
+                frame,
+                self.last_matrix,
+                (self.width, self.height),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
         return F3TrackingResult(
             True,
             aligned,
@@ -5471,6 +5494,11 @@ class F3DisplayObjectTracker:
             scale=float(self.last_result.scale),
             reason="lock_held",
             current_to_canonical=self.last_matrix.copy(),
+            current_to_canonical_homography=(
+                self.last_homography.copy()
+                if self.last_homography is not None
+                else None
+            ),
             source_type=str(self.last_result.source_type or ""),
             evidence_current=False,
         )
@@ -6066,19 +6094,32 @@ class F3DisplayObjectTracker:
             return self.last_result
 
         now = time.monotonic()
+        force_absolute_reacquire = bool(
+            getattr(self, "_force_absolute_reacquire", False)
+        )
         if (
-            self.last_matrix is not None
+            not force_absolute_reacquire
+            and self.last_matrix is not None
             and self.last_result is not None
             and self.last_result.locked
             and now - self.last_compute_s < F3_TRACKING_REFRESH_S
         ):
-            aligned = cv2.warpAffine(
-                frame,
-                self.last_matrix,
-                (self.width, self.height),
-                flags=cv2.INTER_LINEAR,
-                borderMode=cv2.BORDER_REFLECT101,
-            )
+            if self.last_homography is not None:
+                aligned = cv2.warpPerspective(
+                    frame,
+                    self.last_homography,
+                    (self.width, self.height),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REFLECT101,
+                )
+            else:
+                aligned = cv2.warpAffine(
+                    frame,
+                    self.last_matrix,
+                    (self.width, self.height),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_REFLECT101,
+                )
             result = F3TrackingResult(
                 True,
                 aligned,
@@ -6090,6 +6131,11 @@ class F3DisplayObjectTracker:
                 scale=self.last_result.scale,
                 reason="cached_transform",
                 current_to_canonical=self.last_matrix.copy(),
+                current_to_canonical_homography=(
+                    self.last_homography.copy()
+                    if self.last_homography is not None
+                    else None
+                ),
                 source_type=self.last_result.source_type,
                 evidence_current=bool(self.last_result.evidence_current),
             )
@@ -6106,7 +6152,7 @@ class F3DisplayObjectTracker:
         # Depois do primeiro LOCK, continuidade óptica é o caminho nominal mais
         # barato. Não faz sentido pagar ORB full-HD antes de tentar acompanhar a
         # pose que já foi confirmada no frame anterior.
-        if self.last_matrix is not None:
+        if self.last_matrix is not None and not force_absolute_reacquire:
             gray = self._gray(frame)
             if gray is not None:
                 temporal = self._temporal_candidate(gray)
@@ -6163,6 +6209,7 @@ class F3DisplayObjectTracker:
                     self.last_compute_s = now
                     return held
                 self.last_matrix = None
+                self.last_homography = None
                 self.last_gray = None
                 self.last_verified_s = 0.0
                 self.consecutive_misses = 0
@@ -6295,6 +6342,7 @@ class F3DisplayObjectTracker:
                 return held
 
             self.last_matrix = None
+            self.last_homography = None
             self.last_gray = None
             self.last_verified_s = 0.0
             self.consecutive_misses = 0
@@ -6331,6 +6379,17 @@ class F3DisplayObjectTracker:
             best["matrix"],
             dtype=np.float32,
         ).reshape(2, 3)
+        homography = None
+        if best.get("homography") is not None:
+            try:
+                candidate_h = np.asarray(
+                    best.get("homography"),
+                    dtype=np.float32,
+                ).reshape(3, 3)
+                if np.all(np.isfinite(candidate_h)):
+                    homography = candidate_h
+            except Exception:
+                homography = None
         continuous, _closeness = self._matrix_continuity(matrix)
         if self.last_matrix is not None and continuous:
             fallback = str(best.get("fallback") or "")
@@ -6354,6 +6413,11 @@ class F3DisplayObjectTracker:
             gray = self._gray(frame)
 
         self.last_matrix = matrix
+        self.last_homography = (
+            homography.copy()
+            if homography is not None
+            else None
+        )
         self.last_verified_rotation_deg = float(
             affine_rotation_deg(matrix)
         )
@@ -6368,13 +6432,22 @@ class F3DisplayObjectTracker:
         self.last_verified_s = now
         self.consecutive_misses = 0
 
-        aligned = cv2.warpAffine(
-            frame,
-            matrix,
-            (self.width, self.height),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REFLECT101,
-        )
+        if homography is not None:
+            aligned = cv2.warpPerspective(
+                frame,
+                homography,
+                (self.width, self.height),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
+        else:
+            aligned = cv2.warpAffine(
+                frame,
+                matrix,
+                (self.width, self.height),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT101,
+            )
         fallback = str(best.get("fallback") or "")
         if fallback == "neural_filter_pose":
             lock_reason = "locked_neural_filter_pose"
@@ -6400,6 +6473,11 @@ class F3DisplayObjectTracker:
             scale=float(affine_scale(matrix)),
             reason=lock_reason,
             current_to_canonical=matrix.copy(),
+            current_to_canonical_homography=(
+                homography.copy()
+                if homography is not None
+                else None
+            ),
             source_type=str(best.get("source_type") or ""),
             evidence_current=True,
         )
