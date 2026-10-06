@@ -897,7 +897,11 @@ class DisplayAutomaticCheckF3Mixin:
                 for item in rows
                 if neural_visual_authority
                 and (
-                    item.get("neural_certain") is False
+                    (
+                        item.get("semantic_certain") is False
+                        if "semantic_certain" in item
+                        else item.get("neural_certain") is False
+                    )
                     or str(item.get("classified") or "").strip().lower()
                     == "uncertain"
                 )
@@ -1167,12 +1171,18 @@ class DisplayAutomaticCheckF3Mixin:
                     continue
                 classified = str(item.get("classified") or "")
 
-                # D-060/N2: INCERTO neural não é acerto nem defeito. Ele mantém
-                # a evidência anterior, mas não incrementa nem zera o contador.
+                # Autoridade híbrida: INCERTO final não é acerto nem defeito.
+                # Uma incerteza bruta da CNN já resolvida por evidência física
+                # local pode participar normalmente da fase ON.
+                semantic_certain = (
+                    item.get("semantic_certain") is True
+                    if "semantic_certain" in item
+                    else item.get("neural_certain") is not False
+                )
                 if (
                     neural_visual_authority
                     and (
-                        item.get("neural_certain") is False
+                        not semantic_certain
                         or classified == "uncertain"
                         or item.get("matched") is None
                     )
@@ -1622,10 +1632,9 @@ class DisplayAutomaticCheckF3Mixin:
         )
 
         # O gate histórico "primeiro segmento ON" pertence ao classificador
-        # convencional. Quando H1 está sob autoridade neural, energia/presença
-        # já foram resolvidas pelas autoridades operacionais antes deste ponto;
-        # a CNN deve publicar sua própria decisão (inclusive INCERTO) sem ser
-        # escondida por uma segunda trava óptica legada.
+        # convencional. Quando o primeiro CHECK está sob autoridade híbrida,
+        # energia/presença já foram resolvidas pelas autoridades operacionais;
+        # o estado semântico final deve ser publicado sem segunda trava legada.
         reference_judgement_ready = bool(
             True
             if neural_reference_authority
@@ -1635,7 +1644,7 @@ class DisplayAutomaticCheckF3Mixin:
             reference_power_evidence
         )
         analysis["reference_judgement_owner"] = (
-            "neural_visual_authority"
+            "hybrid_visual_authority"
             if neural_reference_authority
             else "legacy_first_expected_on_gate"
         )
