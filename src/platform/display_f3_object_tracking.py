@@ -5772,6 +5772,35 @@ def tracking_enabled(app) -> bool:
     return enabled
 
 
+def _hybrid_semantic_authority_active(app) -> bool:
+    """Indica que tracking fornece geometria, mas não possui decisão semântica.
+
+    A autoridade híbrida D-065 deve decidir ON/OFF/INCERTO e CHECK OK/NG da
+    mesma forma com tracking OFF ou ON. O tracking pode exigir LOCK/frescor para
+    saber onde estão placa e máscaras, mas não instala uma segunda regra de
+    aprovação, reprovação ou avanço da sequência.
+    """
+    analysis = getattr(app, "_display_auto_last_analysis", None)
+    if isinstance(analysis, dict) and (
+        analysis.get("hybrid_visual_authority") is True
+        or str(analysis.get("semantic_authority") or "")
+        == "f3_hybrid_same_mask_neural_authority"
+    ):
+        return True
+
+    owner = getattr(app, "_display_f3_check_analyzer_authority", None)
+    analyzer = getattr(owner, "analyzer", None)
+    if analyzer is None:
+        analyzer = getattr(app, "_display_auto_analyzer", None)
+    semantic = getattr(analyzer, "semantic", None)
+    if semantic is not None and semantic.__class__.__name__ == "F3HybridCheckAnalyzer":
+        return True
+    return bool(
+        analyzer is not None
+        and analyzer.__class__.__name__ == "F3HybridCheckAnalyzer"
+    )
+
+
 def set_tracking_enabled(app, enabled: bool) -> bool:
     runtime = get_tracking_runtime(app)
     if runtime is None:
@@ -8095,7 +8124,13 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
         previous_register = sequence.registrar_resultado_check
 
         def guarded_register(self_sequence, aprovado: bool = True):
-            if not tracking_enabled(app):
+            if (
+                not tracking_enabled(app)
+                or _hybrid_semantic_authority_active(app)
+            ):
+                # D-066: com a autoridade híbrida ativa, tracking localiza e
+                # projeta a geometria. A decisão/registro usa exatamente a mesma
+                # state machine do caminho tracking OFF.
                 return previous_register(aprovado)
 
             snapshot = self_sequence.snapshot()
@@ -8261,7 +8296,12 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
             automatic = bool(
                 getattr(self, "_display_f3_auto_decision_in_progress", False)
             )
-            if tracking_enabled(self) and automatic:
+            tracking_owns_only_geometry = _hybrid_semantic_authority_active(self)
+            if (
+                tracking_enabled(self)
+                and automatic
+                and not tracking_owns_only_geometry
+            ):
                 runtime = getattr(self, "display_check_runtime", None)
                 snapshot = runtime.snapshot() if runtime is not None else {}
                 try:
