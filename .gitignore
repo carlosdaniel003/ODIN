@@ -47,3 +47,4 @@ data/logs/
 
 # Modelos locais gerados pelo treinamento neural F3
 data/models/f3_neural/
+data/models/f3_tracking/
