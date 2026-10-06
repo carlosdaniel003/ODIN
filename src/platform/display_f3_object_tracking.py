@@ -1228,6 +1228,75 @@ def _filter_board_matrix_candidates(current_board, canonical_board) -> list[np.n
     return matrices
 
 
+def _neural_filter_board_matrix_candidates(
+    current_board,
+    canonical_board,
+) -> tuple[list[np.ndarray], str]:
+    """Hipóteses de orientação para o snap neural, sem afrouxar o tracking geral.
+
+    O detector do filtro pode devolver um trapézio levemente perspectivado.
+    Nessa situação o gerador estrutural estrito pode produzir zero afinidades
+    parciais, embora o filtro e a predição neural sejam válidos. Para D-069,
+    somente o snap neural recebe um fallback LMEDS mais tolerante; a própria
+    distância até os quatro anchors previstos pela CNN continua sendo o gate.
+    """
+    strict = _filter_board_matrix_candidates(
+        current_board,
+        canonical_board,
+    )
+    if strict:
+        return strict, "strict_similarity"
+
+    current = _quad_from_points(current_board)
+    canonical = _quad_from_points(canonical_board)
+    if len(current) != 4 or len(canonical) != 4:
+        return [], "invalid_quad"
+
+    cur = np.asarray(current, dtype=np.float32)
+    can = np.asarray(canonical, dtype=np.float32)
+    matrices: list[np.ndarray] = []
+    signatures: set[tuple] = set()
+
+    for reverse in (False, True):
+        ordered = cur[::-1].copy() if reverse else cur.copy()
+        for shift in range(4):
+            candidate = np.roll(ordered, shift, axis=0)
+            try:
+                matrix, _inliers = cv2.estimateAffinePartial2D(
+                    candidate.reshape(-1, 1, 2),
+                    can.reshape(-1, 1, 2),
+                    method=cv2.LMEDS,
+                    refineIters=20,
+                )
+            except Exception:
+                matrix = None
+            if matrix is None:
+                continue
+
+            matrix = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+            if not np.all(np.isfinite(matrix)):
+                continue
+            scale = affine_scale(matrix)
+            if not (
+                F3_TRACKING_REFERENCE_SCALE_MIN
+                <= scale
+                <= F3_TRACKING_REFERENCE_SCALE_MAX
+            ):
+                continue
+
+            key = tuple(matrix.round(4).reshape(-1).tolist())
+            if key in signatures:
+                continue
+            signatures.add(key)
+            matrices.append(matrix)
+
+    return matrices, (
+        "relaxed_similarity_lmeds"
+        if matrices
+        else "relaxed_similarity_unavailable"
+    )
+
+
 def _detect_dark_filter_candidates(
     frame,
     canonical_board,
@@ -2062,6 +2131,12 @@ def _detect_expected_on_luminous_landmarks(
             float(np.median(cluster[:, 1])),
         ]
         centers.append(center)
+        center_residual_px = float(
+            np.linalg.norm(
+                np.asarray(center, dtype=np.float32)
+                - predicted[expected_index]
+            )
+        )
         details.append(
             {
                 "mask_id": str(row.get("mask_id") or ""),
@@ -2074,6 +2149,7 @@ def _detect_expected_on_luminous_landmarks(
                     round(float(predicted[expected_index][1]), 3),
                 ],
                 "hot_pixel_count": int(len(selected_indices)),
+                "center_residual_px": round(center_residual_px, 3),
                 "median_prediction_error_px": round(
                     median_prediction_error,
                     3,
@@ -2095,6 +2171,90 @@ def _detect_expected_on_luminous_landmarks(
         "threshold_v": round(float(threshold), 3),
         "assignment_gate_px": round(float(assignment_gate), 3),
         "hot_pixel_count": int(len(hot_x)),
+    }
+
+
+def _base_core_alignment_residual(
+    landmark_details,
+    validated_mask_ids,
+) -> dict:
+    """Separa 'há luz dentro da ROI' de 'a ROI está geometricamente centrada'."""
+    validated = {
+        str(mask_id)
+        for mask_id in (validated_mask_ids or ())
+        if str(mask_id)
+    }
+    errors: list[float] = []
+    by_mask: dict[str, float] = {}
+
+    for detail in landmark_details or ():
+        if not isinstance(detail, dict):
+            continue
+        mask_id = str(detail.get("mask_id") or "")
+        if not mask_id or mask_id not in validated:
+            continue
+
+        error = detail.get("center_residual_px")
+        if error is None:
+            center = detail.get("center")
+            predicted = detail.get("predicted_center")
+            if (
+                isinstance(center, (list, tuple))
+                and len(center) >= 2
+                and isinstance(predicted, (list, tuple))
+                and len(predicted) >= 2
+            ):
+                try:
+                    error = float(
+                        np.linalg.norm(
+                            np.asarray(center[:2], dtype=np.float32)
+                            - np.asarray(predicted[:2], dtype=np.float32)
+                        )
+                    )
+                except Exception:
+                    error = None
+        try:
+            error = float(error)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(error):
+            continue
+        errors.append(error)
+        by_mask[mask_id] = error
+
+    count = len(errors)
+    median_error = (
+        float(np.median(np.asarray(errors, dtype=np.float32)))
+        if errors
+        else float("inf")
+    )
+    max_error = max(errors) if errors else float("inf")
+    limit = float(F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX)
+    precise = bool(
+        count >= F3_TRACKING_LUMINOUS_FINE_MIN_ANCHORS
+        and median_error <= limit
+        and max_error <= limit
+    )
+    return {
+        "available": bool(
+            count >= F3_TRACKING_LUMINOUS_FINE_MIN_ANCHORS
+        ),
+        "precise": precise,
+        "anchor_count": int(count),
+        "required_anchor_count": int(
+            F3_TRACKING_LUMINOUS_FINE_MIN_ANCHORS
+        ),
+        "median_error_px": (
+            round(median_error, 3) if math.isfinite(median_error) else None
+        ),
+        "max_error_px": (
+            round(max_error, 3) if math.isfinite(max_error) else None
+        ),
+        "maximum_allowed_px": limit,
+        "errors_by_mask": {
+            key: round(float(value), 3)
+            for key, value in by_mask.items()
+        },
     }
 
 
@@ -3344,23 +3504,6 @@ def _find_luminous_segment_pose(
                     if str(mask_id)
                 ]
                 validated_set = set(validated_ids)
-                local_errors = []
-                for detail in local_landmarks.get("details") or ():
-                    if not isinstance(detail, dict):
-                        continue
-                    if str(detail.get("mask_id") or "") not in validated_set:
-                        continue
-                    try:
-                        local_errors.append(
-                            float(detail.get("median_prediction_error_px"))
-                        )
-                    except (TypeError, ValueError):
-                        continue
-                median_error = (
-                    float(np.median(local_errors))
-                    if local_errors
-                    else 0.0
-                )
                 validated_count = int(
                     base_core_validation.get("validated_count", 0) or 0
                 )
@@ -3371,50 +3514,97 @@ def _find_luminous_segment_pose(
                 required_count = int(
                     base_core_validation.get("required_count", 0) or 0
                 )
-                fit_diagnostics = {
-                    "expected_on_count": expected_count,
-                    "observed_component_count": int(
-                        len(local_landmarks.get("centers") or [])
-                    ),
-                    "required_match_count": required_count,
-                    "best_coarse_match_count": validated_count,
-                    "best_final_match_count": validated_count,
-                    "failure_stage": "",
-                    "refinement_failure_stage": previous_failure,
-                    "fit_mode": "base_core_verified",
-                    "matched_mask_ids": list(validated_ids),
-                    "base_core_validation": deepcopy(
-                        base_core_validation
-                    ),
-                }
-                fit = {
-                    "matrix": normalized_base_matrix.copy(),
-                    "matched_mask_ids": list(validated_ids),
-                    "missing_expected_on_mask_ids": [
-                        str(row.get("mask_id") or "")
-                        for row in expected_rows
-                        if str(row.get("mask_id") or "")
-                        and str(row.get("mask_id") or "")
-                        not in validated_set
-                    ],
-                    "matched_count": validated_count,
-                    "expected_on_count": expected_count,
-                    "match_ratio": (
-                        validated_count / max(1, expected_count)
-                    ),
-                    "median_error_px": median_error,
-                    "coarse_median_error_px": median_error,
-                    "fine_alignment_gain_px": 0.0,
-                    "fine_fit_mode": "base_core_verified",
-                    "score": (
-                        validated_count * 4.0
-                        - median_error * 0.15
-                    ),
-                    "core_validated_mask_ids": list(validated_ids),
-                    "core_validated_count": validated_count,
-                    "core_required_count": required_count,
-                }
-                fit_landmark_source = "expected_on_core_validated_base"
+                alignment_residual = _base_core_alignment_residual(
+                    local_landmarks.get("details") or (),
+                    validated_ids,
+                )
+
+                # D-069: núcleo luminoso prova emissão, não centralização.
+                # Só reutilizamos a matriz estrutural como alinhamento pronto
+                # quando os centros luminosos também confirmam precisão
+                # geométrica dentro do MESMO limite residual já existente.
+                if bool(alignment_residual.get("precise")):
+                    median_error = float(
+                        alignment_residual.get("median_error_px", 0.0)
+                        or 0.0
+                    )
+                    fit_diagnostics = {
+                        "expected_on_count": expected_count,
+                        "observed_component_count": int(
+                            len(local_landmarks.get("centers") or [])
+                        ),
+                        "required_match_count": required_count,
+                        "best_coarse_match_count": validated_count,
+                        "best_final_match_count": validated_count,
+                        "failure_stage": "",
+                        "refinement_failure_stage": previous_failure,
+                        "fit_mode": "base_core_verified",
+                        "matched_mask_ids": list(validated_ids),
+                        "base_core_validation": deepcopy(
+                            base_core_validation
+                        ),
+                        "base_alignment_residual": deepcopy(
+                            alignment_residual
+                        ),
+                    }
+                    fit = {
+                        "matrix": normalized_base_matrix.copy(),
+                        "matched_mask_ids": list(validated_ids),
+                        "missing_expected_on_mask_ids": [
+                            str(row.get("mask_id") or "")
+                            for row in expected_rows
+                            if str(row.get("mask_id") or "")
+                            and str(row.get("mask_id") or "")
+                            not in validated_set
+                        ],
+                        "matched_count": validated_count,
+                        "expected_on_count": expected_count,
+                        "match_ratio": (
+                            validated_count / max(1, expected_count)
+                        ),
+                        "median_error_px": median_error,
+                        "coarse_median_error_px": median_error,
+                        "fine_alignment_gain_px": 0.0,
+                        "fine_fit_mode": "base_core_verified",
+                        "score": (
+                            validated_count * 4.0
+                            - median_error * 0.15
+                        ),
+                        "core_validated_mask_ids": list(validated_ids),
+                        "core_validated_count": validated_count,
+                        "core_required_count": required_count,
+                    }
+                    fit_landmark_source = "expected_on_core_validated_base"
+                else:
+                    fit = None
+                    fit_landmark_source = (
+                        "expected_on_core_emission_only"
+                    )
+                    fit_diagnostics = {
+                        **deepcopy(fit_diagnostics),
+                        "expected_on_count": expected_count,
+                        "observed_component_count": int(
+                            len(local_landmarks.get("centers") or [])
+                        ),
+                        "required_match_count": required_count,
+                        "best_coarse_match_count": validated_count,
+                        "best_final_match_count": 0,
+                        "failure_stage": (
+                            "base_core_alignment_residual_too_high"
+                            if bool(alignment_residual.get("available"))
+                            else "base_core_alignment_landmarks_insufficient"
+                        ),
+                        "refinement_failure_stage": previous_failure,
+                        "fit_mode": "base_core_emission_only",
+                        "matched_mask_ids": list(validated_ids),
+                        "base_core_validation": deepcopy(
+                            base_core_validation
+                        ),
+                        "base_alignment_residual": deepcopy(
+                            alignment_residual
+                        ),
+                        "base_core_emission_only": True,
+                    }
 
         attempt["fit_landmark_source"] = fit_landmark_source
         attempt["local_luminous_landmark_count"] = int(
@@ -5402,9 +5592,11 @@ class F3DisplayObjectTracker:
 
         for filter_candidate in filter_candidates:
             points = filter_candidate.get("points") or []
-            matrices = _filter_board_matrix_candidates(
-                points,
-                canonical_list,
+            matrices, candidate_mode = (
+                _neural_filter_board_matrix_candidates(
+                    points,
+                    canonical_list,
+                )
             )
             local_best = None
             local_error = float("inf")
@@ -5449,6 +5641,7 @@ class F3DisplayObjectTracker:
                         else None
                     ),
                     "pose_candidates": int(len(matrices)),
+                    "candidate_mode": str(candidate_mode or ""),
                 }
             )
             if local_best is not None and local_error < best_error:
