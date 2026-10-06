@@ -42,6 +42,10 @@ from src.platform.display_f3_h1_registration import (
 from src.platform.display_f3_mask_editor_reference import (
     DisplayMaskEditorReferenceStore,
 )
+from src.platform.display_f3_neural_tracking import (
+    F3NeuralPoseDetector,
+    canonical_pose_anchors,
+)
 from src.platform.display_mask_geometry import (
     bbox_mascara_display,
     converter_mascara_legada_para_editor,
@@ -4037,6 +4041,7 @@ class F3DisplayObjectTracker:
         self.check_store = DisplayCheckPresenceReferenceStore(repository)
         self.project_presence_store = DisplayProjectPresenceReferenceStore(repository)
         self.mask_reference_store = DisplayMaskEditorReferenceStore(repository)
+        self.neural_pose_detector = F3NeuralPoseDetector(repository)
         self.reset()
 
     def reset(self) -> None:
@@ -4069,6 +4074,7 @@ class F3DisplayObjectTracker:
         self.last_verified_s = 0.0
         self.last_verified_rotation_deg: float | None = None
         self._last_rotation_jump_rejections: list[dict] = []
+        self._last_neural_pose_debug: dict = {}
         self.consecutive_misses = 0
 
     @staticmethod
@@ -5312,6 +5318,212 @@ class F3DisplayObjectTracker:
             min_inlier_ratio=F3_TRACKING_AKAZE_MIN_INLIER_RATIO,
             fallback="akaze_reacquire",
         )
+
+    def _neural_filter_pose_candidate(self, frame) -> dict | None:
+        """Aquisição rápida: CNN dá orientação; filtro escuro fixa a geometria.
+
+        A rede nunca vira autoridade semântica e sua regressão não é usada como
+        pose final diretamente. Ela apenas escolhe, entre as correspondências
+        geométricas possíveis do quadrilátero detectado, aquela compatível com
+        a orientação aprendida das referências configuradas do projeto.
+        """
+        detector = getattr(self, "neural_pose_detector", None)
+        if detector is None or not self.project or not self.canonical_board:
+            self._last_neural_pose_debug = {
+                "available": False,
+                "reason": "neural_pose_detector_unavailable",
+            }
+            return None
+
+        prediction = detector.predict(
+            frame,
+            project_name=self.project,
+            canonical_board=self.canonical_board,
+        )
+        debug = {
+            "available": bool(prediction.get("ready")),
+            "reason": str(prediction.get("reason") or ""),
+            "inference_ms": prediction.get("inference_ms"),
+            "anchor_fit_mean_px": prediction.get("anchor_fit_mean_px"),
+            "anchor_fit_max_px": prediction.get("anchor_fit_max_px"),
+            "model_validation_mean_px": prediction.get(
+                "model_validation_mean_px"
+            ),
+            "model_validation_p95_px": prediction.get(
+                "model_validation_p95_px"
+            ),
+        }
+        if not bool(prediction.get("ready")):
+            self._last_neural_pose_debug = debug
+            return None
+
+        neural_anchors = prediction.get("current_anchors")
+        canonical_anchors = canonical_pose_anchors(self.canonical_board)
+        if (
+            not isinstance(neural_anchors, np.ndarray)
+            or canonical_anchors is None
+        ):
+            debug["available"] = False
+            debug["reason"] = "neural_pose_anchors_invalid"
+            self._last_neural_pose_debug = debug
+            return None
+
+        filter_candidates = _detect_dark_filter_candidates(
+            frame,
+            self.canonical_board,
+            (self.width, self.height),
+        )
+        debug["filter_candidate_count"] = int(len(filter_candidates))
+        if not filter_candidates:
+            debug["available"] = False
+            debug["reason"] = "neural_pose_filter_not_found"
+            self._last_neural_pose_debug = debug
+            return None
+
+        validation = (
+            prediction.get("validation")
+            if isinstance(prediction.get("validation"), dict)
+            else {}
+        )
+        try:
+            max_snap_error = float(
+                validation.get("runtime_max_snap_error_px", 140.0)
+            )
+        except (TypeError, ValueError):
+            max_snap_error = 140.0
+        max_snap_error = min(220.0, max(60.0, max_snap_error))
+
+        best = None
+        best_error = float("inf")
+        attempts = []
+        canonical_list = canonical_anchors.astype(
+            np.float32
+        ).reshape(-1, 2).tolist()
+
+        for filter_candidate in filter_candidates:
+            points = filter_candidate.get("points") or []
+            matrices = _filter_board_matrix_candidates(
+                points,
+                canonical_list,
+            )
+            local_best = None
+            local_error = float("inf")
+            for matrix in matrices:
+                try:
+                    inverse = cv2.invertAffineTransform(
+                        np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+                    )
+                    projected_current = np.asarray(
+                        transform_points(canonical_list, inverse),
+                        dtype=np.float32,
+                    ).reshape(-1, 2)
+                except Exception:
+                    continue
+                if projected_current.shape != neural_anchors.shape:
+                    continue
+                errors = np.linalg.norm(
+                    projected_current
+                    - np.asarray(neural_anchors, dtype=np.float32),
+                    axis=1,
+                )
+                mean_error = float(np.mean(errors))
+                if mean_error < local_error:
+                    local_error = mean_error
+                    local_best = np.asarray(
+                        matrix,
+                        dtype=np.float32,
+                    ).reshape(2, 3)
+
+            attempts.append(
+                {
+                    "filter_source": str(
+                        filter_candidate.get("source") or ""
+                    ),
+                    "filter_score": round(
+                        float(filter_candidate.get("score", 0.0) or 0.0),
+                        4,
+                    ),
+                    "snap_error_px": (
+                        round(local_error, 3)
+                        if math.isfinite(local_error)
+                        else None
+                    ),
+                    "pose_candidates": int(len(matrices)),
+                }
+            )
+            if local_best is not None and local_error < best_error:
+                best_error = local_error
+                best = {
+                    "matrix": local_best,
+                    "filter": filter_candidate,
+                }
+
+        debug["attempts"] = attempts
+        debug["max_snap_error_px"] = round(max_snap_error, 3)
+        debug["selected_snap_error_px"] = (
+            round(best_error, 3)
+            if math.isfinite(best_error)
+            else None
+        )
+        if best is None or best_error > max_snap_error:
+            debug["available"] = False
+            debug["reason"] = "neural_pose_filter_snap_rejected"
+            self._last_neural_pose_debug = debug
+            return None
+
+        matrix = np.asarray(
+            best["matrix"],
+            dtype=np.float32,
+        ).reshape(2, 3)
+        scale = affine_scale(matrix)
+        rotation = affine_rotation_deg(matrix)
+        if not (F3_TRACKING_MIN_SCALE <= scale <= F3_TRACKING_MAX_SCALE):
+            debug["available"] = False
+            debug["reason"] = "neural_pose_scale_rejected"
+            self._last_neural_pose_debug = debug
+            return None
+        if abs(float(matrix[0, 2])) > (
+            self.width * F3_TRACKING_MAX_TRANSLATION_FRACTION
+        ):
+            debug["available"] = False
+            debug["reason"] = "neural_pose_translation_x_rejected"
+            self._last_neural_pose_debug = debug
+            return None
+        if abs(float(matrix[1, 2])) > (
+            self.height * F3_TRACKING_MAX_TRANSLATION_FRACTION
+        ):
+            debug["available"] = False
+            debug["reason"] = "neural_pose_translation_y_rejected"
+            self._last_neural_pose_debug = debug
+            return None
+
+        confidence = max(
+            0.0,
+            min(1.0, 1.0 - (best_error / max(1.0, max_snap_error))),
+        )
+        debug.update(
+            {
+                "available": True,
+                "reason": "neural_filter_pose_ready",
+                "rotation_deg": round(float(rotation), 3),
+                "scale": round(float(scale), 5),
+                "confidence": round(float(confidence), 4),
+            }
+        )
+        self._last_neural_pose_debug = debug
+        return {
+            "reference": f"neural_pose:{self.project}",
+            "matrix": matrix,
+            "matches": 4,
+            "inliers": 4,
+            "ratio": confidence,
+            "rotation_deg": float(rotation),
+            "scale": float(scale),
+            "score": 40.0 + confidence * 10.0,
+            "source_type": "neural_filter_pose",
+            "fallback": "neural_filter_pose",
+            "neural_snap_error_px": float(best_error),
+        }
 
     def candidate_for_reference(
         self,
