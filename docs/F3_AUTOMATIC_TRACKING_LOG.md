@@ -2218,3 +2218,100 @@ Não repetir:
 - não relaxar o gerador estrutural global;
 - não retreinar CNN para corrigir um problema de associação do filtro;
 - não alterar Hybrid/energia/state machine para compensar geometria ruim.
+
+
+---
+
+## 06/10/2026 — D-070: homografia 3x3 do filtro + reacquisition absoluto
+
+Reteste de origem:
+- projeto `CM_500_L`;
+- CHECK H1;
+- D-069 funcionou: não houve falso LOCK ESTÁVEL;
+- UI: `LOCK ESTRUTURAL • ALINHANDO SEGMENTOS`;
+- H1 fisicamente emitindo, mas máscaras ainda deslocadas.
+
+Evidência:
+- tracking frame 334:
+  - `source_type=neural_filter_pose`;
+  - `reason=locked_temporal`;
+  - rotação ~0.123°;
+  - escala ~0.92758;
+- neural:
+  - filtro detectado = 1;
+  - candidatos = 6;
+  - modo = `relaxed_similarity_lmeds`;
+  - snap = 122.99 px;
+  - max snap = 180 px;
+  - confiança ~0.3167;
+- D-069:
+  - `base_core_emission_only=true`;
+  - residual mediano = 9.881 px;
+  - residual máximo = 19.61 px;
+  - limite = 12 px;
+  - `alignment_ready=false`;
+- refinamento luminoso:
+  - 7 ON esperados;
+  - 3 landmarks locais;
+  - 0 matches finais;
+  - `base_core_alignment_residual_too_high`;
+- D-025 no mesmo frame:
+  - homografia de filtro disponível;
+  - erro médio base ~13.87 px;
+  - p95 ~72.20 px;
+  - ECC corretamente não promovido.
+
+Diagnóstico:
+- o sistema já sabia quando NÃO estava alinhado;
+- faltava uma representação geométrica capaz de modelar o trapézio/perspectiva
+  do filtro;
+- o LK temporal podia perpetuar indefinidamente a aproximação affine inicial.
+
+Implementação:
+- suporte interno a transformação planar 2x3 ou 3x3;
+- CNN continua escolhendo a correspondência/orientação dos cantos;
+- os quatro pontos físicos do filtro geram
+  `cv2.getPerspectiveTransform(current, canonical)`;
+- a homografia CURRENT -> CANÔNICO é preservada no resultado e no estado do
+  tracker;
+- placa e 28 máscaras usam a inversa dessa homografia para voltar ao RAW;
+- frame de análise usa `warpPerspective` quando H existe;
+- continuidade temporal compõe o movimento LK sobre H sem descartá-la;
+- refinamento luminoso por IDs corrige somente o residual no espaço canônico;
+- enquanto `alignment_ready=false`, cache/LK não impedem nova aquisição
+  absoluta CNN + filtro;
+- quando o lock luminoso fica pronto, reacquisition forçado é desligado.
+
+Telemetria:
+- `projective_pose_ready`;
+- `projective_reprojection_mean_px`;
+- `projective_reprojection_max_px`;
+- `geometry_transform_type`;
+- `geometry_space`;
+- `absolute_reacquire_required`;
+- modos de refinamento fino `projective_coarse_verified`,
+  `projective_similarity` e `projective_translation`.
+
+Testes focados:
+- transformação projectiva de quadrilátero;
+- homografia do prior neural;
+- refinamento projectivo por landmarks;
+- reacquisition absoluto enquanto alinhamento pendente;
+- projeção real das máscaras pela inversa H;
+- compile, neural, D-025, luminous, sync, ROI parity, D-042 e strict mask PASS.
+
+CI amplo:
+- o bloco histórico `Run F3 object tracking tests` permanece vermelho com o
+  mesmo conjunto de falhas já existente antes de D-070;
+- nenhum novo fail focado foi introduzido pela D-070.
+
+Resultado:
+- IMPLEMENTADO;
+- RETESTE FÍSICO PENDENTE.
+
+Não repetir:
+- não voltar a projetar as ROIs pela affine quando a homografia existir;
+- não deixar `locked_temporal` perpetuar pose estrutural ainda não validada;
+- não relaxar o gate de 12 px para esconder erro;
+- não retreinar a CNN para compensar perspectiva;
+- não transferir autoridade semântica para tracking/homografia.
