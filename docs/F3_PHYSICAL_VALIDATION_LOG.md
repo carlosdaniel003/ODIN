@@ -6416,3 +6416,138 @@ USB neural                              NÃO
 AUX neural                              NÃO
 ```
 
+---
+
+## 06/10/2026 — N2.2 cinco H1 confirmam necessidade de fusão híbrida universal
+
+**Resultado:** MUDANÇA ARQUITETURAL APROVADA E IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.
+
+### Evidência coletada
+
+Após o bloqueio N2.1, foram coletadas cinco novas análises H1 consecutivas da
+mesma condição fisicamente correta.
+
+Em todas elas:
+
+```text
+ESTADO DA PLACA: PRESENTE • CONFIRMADA
+ENERGIA DO DISPLAY: CONFIRMADA
+MÁSCARAS LIVE ON CONFIRMADAS: 7
+FONTE: same_physical_mask_on_off_learning
+APRENDIZADO FÍSICO SAME-MASK H1: 28/28
+```
+
+A CNN, porém, não apresentou a mesma repetibilidade:
+
+```text
+captura 1 → 27/28 | MASK_017 P(ON)=0.769281
+captura 2 → 27/28 | MASK_017 P(ON)=0.796248
+captura 3 → 27/28 | MASK_017 P(ON)=0.801410
+captura 4 → 25/28 | MASK_017 P(ON)=0.721180
+captura 5 → 27/28 | MASK_017 P(ON)=0.801258
+```
+
+Na captura 4, três segmentos esperados ON ficaram INCERTOS apesar de a leitura
+física continuar coerente com H1:
+
+```text
+MASK_008 P(ON)=0.786192
+MASK_017 P(ON)=0.721180
+MASK_020 P(ON)=0.764196
+```
+
+Essa repetição descartou a hipótese de que o problema deveria ser tratado apenas
+adicionando mais cinco frames à calibração do limiar global.
+
+### Decisão aprovada pelo usuário
+
+Foi autorizada a mudança "tudo ou nada":
+
+```text
+H1          → autoridade híbrida
+BLUE        → autoridade híbrida
+AUX         → autoridade híbrida
+USB         → autoridade híbrida
+CHECK futuro→ autoridade híbrida automaticamente
+```
+
+A unidade semântica deixa de ser "CNN isolada por CHECK" e passa a ser a
+`MASK_xxx` observada por duas fontes internas da mesma autoridade:
+
+1. CNN/ONNX;
+2. aprendizado físico ON/OFF da mesma máscara.
+
+### Contrato implementado
+
+```text
+CNN certa + físico forte concordam
+→ estado confirmado
+
+CNN incerta + físico local forte
+→ físico resolve a máscara
+
+CNN certa + físico forte discordam
+→ INCERTO
+
+físico local confiável = POUCA LUZ
+→ POUCA LUZ
+
+sem físico local forte
+→ CNN preserva sua decisão
+```
+
+A evidência física usada para resolver a CNN precisa ser
+`f3_check_photos_same_mask`. Pool de outras máscaras não ganha autoridade de
+resolução.
+
+O runtime intermitente passa a observar a certeza semântica final. Assim, uma
+CNN incerta resolvida fisicamente para OFF durante uma fase ON válida do BLUE
+pode acumular o debounce de defeito; uma incerteza final continua sem
+incrementar nem zerar o contador.
+
+### Aprendizado de NG
+
+Não foi introduzido treinamento online nem requisito de coletar cinco NG por
+defeito. O classificador aprende/observa estados físicos ON/OFF; NG continua
+sendo derivado deterministicamente por:
+
+```text
+estado_observado != estado_esperado
+```
+
+Exemplo já existente no projeto: uma máscara pode estar ON em um CHECK e OFF em
+outro, fornecendo exemplos dos dois estados físicos sem precisar fabricar uma
+placa defeituosa.
+
+### Alterações de código
+
+- `F3HybridCheckAnalyzer` passa a ser o proprietário semântico canônico;
+- todos os CHECKS configurados entram no mesmo escopo dinâmico;
+- `semantic_certain` representa certeza após a fusão;
+- `neural_certain` permanece como telemetria bruta da CNN;
+- a sonda exata fica observadora em qualquer CHECK;
+- o DEBUG passa a expor CNN, evidência same-mask, resoluções e conflitos;
+- aliases neurais antigos permanecem somente por compatibilidade.
+
+A decisão normativa correspondente é **D-065**.
+
+### Relação com N2.1
+
+A instrução anterior de recalibrar estes novos frames no threshold H1 fica
+**superseded**. Não executar essa recalibração agora. Os cinco frames foram
+usados para demonstrar que continuar expandindo um threshold global não resolve
+a arquitetura de forma sustentável.
+
+### Próximo reteste físico
+
+Primeiro lote de validação da autoridade híbrida:
+
+1. H1 correto deve voltar a avançar sem depender de nova recalibração;
+2. repetir H1 várias vezes e observar no DEBUG quais máscaras foram resolvidas
+   pelo físico;
+3. BLUE correto deve atravessar ON/OFF normalmente;
+4. BLUE com `MASK_024` realmente apagada deve acumular 3 fases ON e fechar NG;
+5. o fluxo não pode avançar para USB nesse NG.
+
+Somente após esse lote deve-se declarar D-065 validada fisicamente.
+
