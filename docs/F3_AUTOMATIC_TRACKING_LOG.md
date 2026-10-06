@@ -1959,3 +1959,71 @@ Próximo reteste:
 - BLUE com `MASK_024` fisicamente apagada deve continuar NG;
 - mover a placa dentro da faixa permitida e confirmar que somente a geometria
   muda, não o critério de decisão.
+
+
+---
+
+## 06/10/2026 — D-067: aquisição neural de pose para reduzir atraso do LOCK
+
+Modo:
+- tracking ON;
+- branch `display-tracking-on`.
+
+Evidência física:
+- tela permaneceu em `PROCURANDO PLACA • object_not_locked`;
+- câmera ao vivo: frame 1489;
+- object tracking: frame 1330;
+- câmera medida: ~15 FPS;
+- rescue estrutural: H1=false, board_off=false;
+- filtro preto: 1 candidato válido;
+- D-025/ECC: alinhamento melhorou de mean_error 29.74 px para 17.93 px;
+- luminous global: 4 componentes, 0 hipótese válida, incluindo componente
+  espúrio muito afastado da região real do display.
+
+Diagnóstico:
+- existe atraso grande entre latest-frame e o frame processado pelo worker;
+- o stack absoluto ORB -> AKAZE -> templates em 1920x1080 é caro durante a
+  primeira aquisição;
+- o retângulo preto já é encontrado rapidamente, mas possui ambiguidade de
+  correspondência/orientação;
+- quando uma pose válida aparece, o acompanhamento das máscaras é visualmente
+  correto.
+
+Tentativa D-067:
+- criar CNN pequena dedicada somente a pose;
+- usar todas as fotos/geometrias configuradas do F3 como dataset;
+- reservar primeiro CHECK para validação;
+- inferência 192x108;
+- CNN prevê quatro âncoras aproximadas;
+- detector do filtro fornece o quadrilátero real;
+- prior neural escolhe qual correspondência do quadrilátero é geometricamente
+  compatível;
+- somente então publicar CURRENT -> CANÔNICO;
+- depois do primeiro LOCK, tentar fluxo óptico antes de ORB;
+- manter ORB/AKAZE/template como fallback;
+- preservar D-066: nenhuma decisão semântica passa pelo tracking.
+
+Telemetria adicionada:
+- `neural_pose.inference_ms`;
+- `neural_pose.selected_snap_error_px`;
+- `neural_pose.filter_candidate_count`;
+- `worker_elapsed_ms`;
+- `worker_age_ms`;
+- motivo explícito de aceitação/rejeição do prior neural.
+
+Resultado:
+- IMPLEMENTADO EM CÓDIGO;
+- MODELO LOCAL AINDA PRECISA SER TREINADO NO COMPUTADOR/JIG;
+- RETESTE FÍSICO PENDENTE.
+
+Não repetir:
+- não usar expected ON/OFF como objetivo do alinhamento;
+- não aceitar saída neural sem suporte estrutural do filtro;
+- não remover fallback legado antes da validação física;
+- não executar treino no runtime produtivo;
+- não criar novo worker para a CNN.
+
+Próxima ação:
+- executar preflight local;
+- se READY, treinar ONNX;
+- reiniciar ODIN e medir tempo até primeiro LOCK + alinhamento das 28 máscaras.
