@@ -2144,3 +2144,77 @@ Não repetir:
 - não acumular fila histórica;
 - não misturar RAW de um frame com geometria de outro;
 - não otimizar thresholds sem medir os novos estágios primeiro.
+
+
+---
+
+## 06/10/2026 — D-069: bloquear falso alinhamento base-core
+
+Evidência física:
+- tracking ON;
+- H1 aceso;
+- UI publicou LOCK ESTÁVEL;
+- máscaras visivelmente deslocadas;
+- energia ficou bloqueada com apenas 2 live ON para 7 esperadas;
+- D-025: mean_error ~21.47 px / p95 ~71.10 px;
+- luminous tracking:
+  - 7/7 cores confirmados;
+  - `fine_fit_mode=base_core_verified`;
+  - `median_error_px=26.769`;
+  - `fine_alignment_gain_px=0`;
+- fine fit real:
+  - `fine_gain_insufficient`;
+  - coarse median = 5.368 px;
+  - refined median = 5.434 px;
+  - gain = -0.066 px;
+- neural pose:
+  - inference ~2.55 ms;
+  - filtro detectado;
+  - `pose_candidates=0`;
+  - `neural_pose_filter_snap_rejected`.
+
+Diagnóstico:
+- `base_core_verified` confundia "há luz dentro da ROI" com "ROI centralizada";
+- o fallback podia publicar a pose estrutural aproximada como lock luminoso;
+- o snap neural também perdia filtros trapezoidais válidos porque dependia
+  somente do gerador estrutural estrito.
+
+Implementação:
+- landmark passa a publicar residual real centro observado x centro projetado;
+- base-core só vira alinhamento pronto quando pelo menos 3 landmarks por ID
+  existem e TODOS ficam dentro do limite geométrico residual já existente;
+- caso contrário, core luminoso permanece apenas evidência de emissão:
+  `base_core_emission_only`;
+- sem alinhamento fino válido, o resultado luminoso não substitui o lock
+  estrutural e `spatial_alignment_ready` permanece falso;
+- snap neural tenta primeiro hipóteses estritas;
+- se houver zero hipóteses, usa fallback LMEDS exclusivo do prior neural;
+- o snap por anchors da CNN continua sendo o gate final dessa hipótese;
+- treinamento/validação D-067 usa o mesmo gerador runtime.
+
+Regressões novas:
+- quadrilátero trapezoidal com zero hipóteses estritas precisa gerar hipóteses
+  neurais LMEDS;
+- runtime neural precisa consumir essas hipóteses;
+- um único anchor acima do limite residual impede `precise=true`;
+- todos os anchors dentro do limite permitem preservar a pose-base.
+
+CI:
+- compilação PASS;
+- testes de tracking neural PASS;
+- regressões luminosas PASS;
+- pipeline latency PASS;
+- demais gates focados anteriores PASS;
+- workflow amplo continua vermelho apenas no bloco histórico
+  `Run F3 object tracking tests`, já conhecido.
+
+Resultado:
+- IMPLEMENTADO;
+- RETESTE FÍSICO PENDENTE.
+
+Não repetir:
+- não usar presença de luz dentro da máscara como prova de centralização;
+- não aumentar padding para mascarar erro geométrico;
+- não relaxar o gerador estrutural global;
+- não retreinar CNN para corrigir um problema de associação do filtro;
+- não alterar Hybrid/energia/state machine para compensar geometria ruim.
