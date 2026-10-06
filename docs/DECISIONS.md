@@ -4462,3 +4462,148 @@ No próximo reteste físico H1:
 - confirmar H1 OK idêntico ao tracking OFF.
 
 **Estado físico:** PENDENTE.
+
+
+---
+
+## D-069 — Núcleo luminoso prova emissão, não alinhamento
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Contexto físico
+
+No reteste H1 com tracking ON:
+- a UI publicou `LOCK ESTÁVEL`;
+- as máscaras estavam visivelmente deslocadas;
+- somente 2 máscaras live foram confirmadas ON, embora H1 exija 7;
+- o tracking publicou `source_type=luminous_segment_grid`;
+- o refinamento luminoso reportou `median_error_px=26.769`;
+- o ajuste fino por IDs falhou com:
+  - `failure_stage=fine_gain_insufficient`;
+  - `coarse_median_error_px=5.368`;
+  - `refined_median_error_px=5.434`;
+  - `gain_px=-0.066`;
+- apesar disso, `base_core_verified` promoveu a matriz estrutural sem movimento
+  para `alignment_ready=true`;
+- a CNN encontrou um candidato de filtro, mas o gerador estrutural estrito
+  produziu `pose_candidates=0`, causando
+  `neural_pose_filter_snap_rejected`.
+
+### Problema
+
+`base_core_verified` respondia a duas perguntas diferentes com a mesma
+evidência:
+
+1. existe emissão física dentro das ROIs projetadas?
+2. as ROIs estão suficientemente centralizadas?
+
+A primeira pode ser verdadeira mesmo com erro geométrico ainda perceptível.
+Portanto, luz dentro do núcleo exato não pode, sozinha, transformar uma pose
+estrutural aproximada em alinhamento pronto.
+
+Separadamente, o snap neural dependia do mesmo gerador de afinidade parcial
+estrito usado pelo tracking estrutural. Um quadrilátero preto válido, mas
+levemente trapezoidal por perspectiva, podia gerar zero hipóteses e impedir a
+CNN de cumprir seu papel de prior de correspondência.
+
+### Decisão
+
+#### 1. Separar emissão de alinhamento
+
+`base_core_validation` continua válido para provar que há emissão física, mas
+só preserva a matriz-base como alinhamento pronto quando há pelo menos o quorum
+mínimo de landmarks identificados por ID e os centros observados também
+confirmam precisão geométrica.
+
+O residual usado é:
+
+```text
+distância euclidiana(
+  centro luminoso observado,
+  centro da máscara projetado pela pose-base
+)
+```
+
+Para não criar um novo threshold arbitrário, D-069 reutiliza o limite geométrico
+já existente `F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX` também como teto
+individual no fallback `base_core_verified`.
+
+Assim:
+
+```text
+core luminoso confirmado
+  + centros precisos
+      -> base_core_verified
+      -> alignment_ready=true
+
+core luminoso confirmado
+  + residual de centro alto/insuficiente
+      -> emissão confirmável
+      -> base_core_emission_only
+      -> alignment_ready=false
+      -> manter LOCK ESTRUTURAL / ALINHANDO SEGMENTOS
+```
+
+#### 2. Recuperar hipóteses do snap neural sem afrouxar o tracking geral
+
+O gerador estrutural estrito permanece inalterado.
+
+Somente o snap neural recebe um fallback de orientação usando
+`cv2.estimateAffinePartial2D(..., method=LMEDS)` quando o gerador estrito
+retorna zero hipóteses.
+
+A hipótese relaxada:
+- continua limitada pela faixa de escala já existente;
+- não ganha autoridade sozinha;
+- continua sendo comparada contra os 4 anchors previstos pela CNN;
+- continua sujeita a `runtime_max_snap_error_px`;
+- não altera ON/OFF, energia, Hybrid ou state machine.
+
+O gate offline D-067 passa a usar o mesmo gerador de hipóteses do runtime para
+não haver divergência treino/runtime.
+
+### Telemetria adicionada
+
+Landmarks luminosos:
+- `center_residual_px` por máscara.
+
+Fallback base-core:
+- `base_alignment_residual.available`;
+- `base_alignment_residual.precise`;
+- `base_alignment_residual.anchor_count`;
+- `base_alignment_residual.median_error_px`;
+- `base_alignment_residual.max_error_px`;
+- `base_alignment_residual.maximum_allowed_px`;
+- `base_alignment_residual.errors_by_mask`;
+- `base_core_emission_only=true` quando houver luz sem precisão suficiente.
+
+Snap neural:
+- `candidate_mode=strict_similarity`;
+- ou `candidate_mode=relaxed_similarity_lmeds`.
+
+### Invariantes
+
+1. D-066 permanece: tracking é autoridade somente geométrica.
+2. D-065 permanece: Hybrid decide ON/OFF/INCERTO e CHECK.
+3. Core luminoso não reclassifica estado semântico.
+4. CNN nunca cria LOCK sem filtro estrutural detectado.
+5. O fallback LMEDS existe somente para escolher correspondência do filtro
+   neural; não substitui o tracking estrutural geral.
+6. Nenhum novo worker, timer ou scheduler.
+7. Nenhum threshold semântico foi alterado.
+8. Nenhum modelo precisa ser retreinado.
+
+### Validação exigida
+
+No próximo H1 físico:
+- confirmar que o caso antes desalinhado não exibe `LOCK ESTÁVEL` enquanto o
+  residual geométrico estiver acima do limite;
+- nesse estado, a UI deve permanecer `LOCK ESTRUTURAL • ALINHANDO SEGMENTOS`;
+- confirmar `base_core_emission_only=true` se houver emissão sem alinhamento;
+- confirmar que o snap neural, quando o filtro for detectado, publica
+  `pose_candidates>0` com `candidate_mode`;
+- confirmar as 28 máscaras centralizadas antes de
+  `spatial_alignment_ready=true`;
+- confirmar H1 correto tratado de forma idêntica ao tracking OFF.
+
+**Estado físico:** PENDENTE.
