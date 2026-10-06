@@ -570,6 +570,56 @@ homografia entre frames.
 Esse comportamento altera somente a geometria. D-065/D-066 continuam definindo
 que ON/OFF/INCERTO e CHECK OK/NG pertencem ao analyzer híbrido e à state
 machine, não ao tracker.
+
+### Fonte dos quatro cantos físicos — D-071
+
+A homografia produtiva exige quatro cantos perspectivados do filtro físico. Um
+`minAreaRect` não é equivalente: ele transforma um trapézio real em um
+retângulo rotacionado e, portanto, remove a própria perspectiva que a homografia
+precisa modelar.
+
+O caminho estrutural atual é:
+
+```text
+frame RAW
+  -> candidato escuro
+  -> contorno físico
+  -> convexHull
+  -> approxPolyDP
+  -> quadrilátero convexo de 4 cantos
+  -> ordenação dos cantos sem alterar coordenadas
+  -> CNN escolhe correspondência/orientação
+  -> homografia CURRENT -> CANÔNICO
+  -> inverse(H)
+  -> placa + 28 máscaras
+```
+
+`minAreaRect` continua permitido para medir área, aspect ratio,
+rectangularidade e para fallback estrutural affine. Quando esse fallback é
+necessário, ele é marcado como:
+
+```text
+filter_corner_source=min_area_rect_fallback
+projective_pose_ready=false
+```
+
+Ou seja, quatro cantos artificiais do retângulo orientado nunca recebem
+autoridade para criar uma homografia produtiva.
+
+Quando o quadrilátero físico é extraído:
+
+```text
+filter_corner_source=contour_quad
+projective_pose_ready=true
+```
+
+O DEBUG preserva os quatro `filter_points`, os quatro
+`neural_anchor_points` e o erro por canto entre ambos. Isso separa claramente
+falha de detecção do filtro, erro do prior neural e erro de correspondência.
+
+D-069 continua sendo o gate final do alinhamento luminoso: homografia válida
+não equivale a segmentos centralizados. D-065/D-066 continuam inalteradas e o
+tracking não ganha autoridade ON/OFF ou CHECK.
 ## 14. Direção canônica do Display F3 — autoridade híbrida Edge AI por máscara
 
 D-059 iniciou a migração neural. D-065 consolidou o estado atual: o julgamento
