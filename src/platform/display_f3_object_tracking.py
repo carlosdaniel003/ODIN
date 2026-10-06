@@ -5655,7 +5655,11 @@ class F3DisplayObjectTracker:
             return F3TrackingResult(False, frame, reason=self.reason)
         if frame.shape[:2] != (self.height, self.width):
             return F3TrackingResult(False, frame, reason="resolution_mismatch")
-        if frame_id is not None and frame_id == self.last_frame_id and self.last_result is not None:
+        if (
+            frame_id is not None
+            and frame_id == self.last_frame_id
+            and self.last_result is not None
+        ):
             return self.last_result
 
         now = time.monotonic()
@@ -5690,36 +5694,45 @@ class F3DisplayObjectTracker:
             self.last_frame_id = frame_id
             return result
 
-        gray = self._gray(frame)
         self._last_rotation_jump_rejections = []
-        if gray is None:
-            self.consecutive_misses += 1
-            held = self._held_lock_result(frame, now)
-            if held is not None:
-                self.last_result = held
-                self.last_frame_id = frame_id
-                self.last_compute_s = now
-                return held
-            self.last_matrix = None
-            self.last_gray = None
-            self.last_verified_s = 0.0
-            self.consecutive_misses = 0
-            self._last_reference = ""
-            result = F3TrackingResult(
-                False,
-                frame,
-                reason="gray_prepare_failed",
-                evidence_current=False,
-            )
-            self.last_result = result
-            self.last_frame_id = frame_id
-            return result
+        candidates = []
+        gray = None
+        orb_available = False
+        akaze_available = False
+
+        # Depois do primeiro LOCK, continuidade óptica é o caminho nominal mais
+        # barato. Não faz sentido pagar ORB full-HD antes de tentar acompanhar a
+        # pose que já foi confirmada no frame anterior.
+        if self.last_matrix is not None:
+            gray = self._gray(frame)
+            if gray is not None:
+                temporal = self._temporal_candidate(gray)
+                if temporal is not None:
+                    candidates.append(temporal)
+
+        # D-067: aquisição/reacquisition começa pelo prior neural de GEOMETRIA.
+        # A CNN só desambigua a pose; o quadrilátero final vem do filtro
+        # estrutural detectado no frame. Se o modelo não existir/falhar, o
+        # pipeline legado abaixo permanece integralmente disponível.
+        if not candidates:
+            neural = self._neural_filter_pose_candidate(frame)
+            if neural is not None:
+                neural_candidates = self._filter_abrupt_rotation_candidates(
+                    [neural],
+                    source="neural_filter_pose",
+                )
+                if neural_candidates:
+                    candidates = neural_candidates
 
         all_reference_keys = list(self._available_reference_keys())
         preferred_keys = []
         for key in preferred_reference_keys or ():
             name = str(key or "")
-            if name and name in all_reference_keys and name not in preferred_keys:
+            if (
+                name
+                and name in all_reference_keys
+                and name not in preferred_keys
+            ):
                 preferred_keys.append(name)
         remaining_keys = [
             key for key in all_reference_keys if key not in preferred_keys
@@ -5733,50 +5746,78 @@ class F3DisplayObjectTracker:
             else [all_reference_keys]
         )
 
-        orb = cv2.ORB_create(
-            nfeatures=F3_TRACKING_ORB_FEATURES,
-            scaleFactor=1.2,
-            nlevels=8,
-            edgeThreshold=12,
-            fastThreshold=7,
-        )
-        current_kp, current_desc = orb.detectAndCompute(gray, None)
-        orb_available = bool(
-            current_desc is not None
-            and len(current_kp) >= F3_TRACKING_MIN_MATCHES
-        )
-
-        candidates = []
-        if orb_available:
-            for group in reference_groups:
-                if not group:
-                    continue
-                group_candidates = []
-                for key in group:
-                    if not self._ensure_reference(key):
-                        continue
-                    candidate = self._candidate(current_kp, current_desc, key)
-                    if candidate is not None:
-                        group_candidates.append(candidate)
-                group_candidates = self._filter_abrupt_rotation_candidates(
-                    group_candidates,
-                    source="orb",
+        # Fallback absoluto legado. O grayscale/CLAHE full-HD só é calculado se
+        # temporal + neural não resolverem a pose.
+        if not candidates:
+            if gray is None:
+                gray = self._gray(frame)
+            if gray is None:
+                self.consecutive_misses += 1
+                held = self._held_lock_result(frame, now)
+                if held is not None:
+                    self.last_result = held
+                    self.last_frame_id = frame_id
+                    self.last_compute_s = now
+                    return held
+                self.last_matrix = None
+                self.last_gray = None
+                self.last_verified_s = 0.0
+                self.consecutive_misses = 0
+                self._last_reference = ""
+                result = F3TrackingResult(
+                    False,
+                    frame,
+                    reason="gray_prepare_failed",
+                    evidence_current=False,
                 )
-                if group_candidates:
-                    candidates = group_candidates
-                    break
+                self.last_result = result
+                self.last_frame_id = frame_id
+                return result
 
-        # Quando nenhuma referência absoluta vence, tente continuidade óptica
-        # entre o último frame confirmado e o atual, restrita ao contorno da placa.
-        if not candidates:
-            temporal = self._temporal_candidate(gray)
-            if temporal is not None:
-                candidates.append(temporal)
+            orb = cv2.ORB_create(
+                nfeatures=F3_TRACKING_ORB_FEATURES,
+                scaleFactor=1.2,
+                nlevels=8,
+                edgeThreshold=12,
+                fastThreshold=7,
+            )
+            try:
+                current_kp, current_desc = orb.detectAndCompute(gray, None)
+            except Exception:
+                current_kp, current_desc = [], None
+            orb_available = bool(
+                current_desc is not None
+                and len(current_kp) >= F3_TRACKING_MIN_MATCHES
+            )
 
-        # Se ORB e continuidade temporal falharem, faça uma reacquisition
-        # absoluta com AKAZE. É deliberadamente tardia para preservar FPS.
-        akaze_available = False
+            if orb_available:
+                for group in reference_groups:
+                    if not group:
+                        continue
+                    group_candidates = []
+                    for key in group:
+                        if not self._ensure_reference(key):
+                            continue
+                        candidate = self._candidate(
+                            current_kp,
+                            current_desc,
+                            key,
+                        )
+                        if candidate is not None:
+                            group_candidates.append(candidate)
+                    group_candidates = self._filter_abrupt_rotation_candidates(
+                        group_candidates,
+                        source="orb",
+                    )
+                    if group_candidates:
+                        candidates = group_candidates
+                        break
+
+        # Reacquisition absoluta mais cara somente quando os caminhos rápidos
+        # não produziram pose.
         if not candidates:
+            if gray is None:
+                gray = self._gray(frame)
             try:
                 akaze = cv2.AKAZE_create(
                     threshold=F3_TRACKING_AKAZE_THRESHOLD,
@@ -5813,11 +5854,9 @@ class F3DisplayObjectTracker:
                         candidates = group_candidates
                         break
 
-        # Câmera e suporte são fixos: se o PCB tiver poucos corners ORB, use as
-        # bordas do contorno desenhado como fallback de translação. O contorno
-        # retangular é angularmente ambíguo; a pose aceita precisa permanecer
-        # coerente com a última orientação verificada da placa.
         if not candidates:
+            if gray is None:
+                gray = self._gray(frame)
             try:
                 current_edges = cv2.Canny(gray, 45, 135)
             except Exception:
@@ -5829,7 +5868,10 @@ class F3DisplayObjectTracker:
                 for key in group:
                     if not self._ensure_reference(key):
                         continue
-                    candidate = self._template_candidate(current_edges, key)
+                    candidate = self._template_candidate(
+                        current_edges,
+                        key,
+                    )
                     if candidate is not None:
                         group_candidates.append(candidate)
                 group_candidates = self._filter_abrupt_rotation_candidates(
@@ -5854,13 +5896,25 @@ class F3DisplayObjectTracker:
             self.last_verified_s = 0.0
             self.consecutive_misses = 0
             self._last_reference = ""
+            neural_reason = str(
+                (self._last_neural_pose_debug or {}).get("reason") or ""
+            )
             result = F3TrackingResult(
                 False,
                 frame,
                 reason=(
                     "current_features_insufficient"
                     if not orb_available and not akaze_available
-                    else "object_not_locked"
+                    else (
+                        neural_reason
+                        if neural_reason
+                        and neural_reason
+                        not in {
+                            "neural_tracking_model_missing",
+                            "neural_tracking_model_not_validated",
+                        }
+                        else "object_not_locked"
+                    )
                 ),
                 evidence_current=False,
             )
@@ -5870,18 +5924,31 @@ class F3DisplayObjectTracker:
             return result
 
         best = max(candidates, key=self._candidate_rank)
-        matrix = best["matrix"]
+        matrix = np.asarray(
+            best["matrix"],
+            dtype=np.float32,
+        ).reshape(2, 3)
         continuous, _closeness = self._matrix_continuity(matrix)
         if self.last_matrix is not None and continuous:
+            fallback = str(best.get("fallback") or "")
             alpha = (
                 0.72
-                if str(best.get("fallback") or "") == "temporal_flow"
-                else 0.54
+                if fallback == "temporal_flow"
+                else (
+                    0.82
+                    if fallback == "neural_filter_pose"
+                    else 0.54
+                )
             )
             matrix = (
                 (1.0 - alpha) * self.last_matrix.astype(np.float32)
                 + alpha * matrix.astype(np.float32)
             ).astype(np.float32)
+
+        # O próximo frame pode usar LK; calcule a mesma representação somente
+        # depois de a aquisição neural ter evitado ORB/AKAZE neste frame.
+        if gray is None:
+            gray = self._gray(frame)
 
         self.last_matrix = matrix
         self.last_verified_rotation_deg = float(
@@ -5890,7 +5957,11 @@ class F3DisplayObjectTracker:
         self._last_reference = str(best["reference"])
         self.last_compute_s = now
         self.last_frame_id = frame_id
-        self.last_gray = gray.copy()
+        self.last_gray = (
+            gray.copy()
+            if isinstance(gray, np.ndarray)
+            else None
+        )
         self.last_verified_s = now
         self.consecutive_misses = 0
 
@@ -5901,6 +5972,20 @@ class F3DisplayObjectTracker:
             flags=cv2.INTER_LINEAR,
             borderMode=cv2.BORDER_REFLECT101,
         )
+        fallback = str(best.get("fallback") or "")
+        if fallback == "neural_filter_pose":
+            lock_reason = "locked_neural_filter_pose"
+        elif fallback == "edge_template":
+            lock_reason = "locked_template"
+        elif fallback == "adaptive_edge_template":
+            lock_reason = "locked_adaptive_template"
+        elif fallback == "akaze_reacquire":
+            lock_reason = "locked_akaze"
+        elif fallback == "temporal_flow":
+            lock_reason = "locked_temporal"
+        else:
+            lock_reason = "locked"
+
         result = F3TrackingResult(
             True,
             aligned,
@@ -5908,25 +5993,9 @@ class F3DisplayObjectTracker:
             matches=int(best["matches"]),
             inliers=int(best["inliers"]),
             inlier_ratio=float(best["ratio"]),
-            rotation_deg=float(best["rotation_deg"]),
-            scale=float(best["scale"]),
-            reason=(
-                "locked_template"
-                if str(best.get("fallback") or "") == "edge_template"
-                else (
-                    "locked_adaptive_template"
-                    if str(best.get("fallback") or "") == "adaptive_edge_template"
-                    else (
-                        "locked_akaze"
-                        if str(best.get("fallback") or "") == "akaze_reacquire"
-                        else (
-                            "locked_temporal"
-                            if str(best.get("fallback") or "") == "temporal_flow"
-                            else "locked"
-                        )
-                    )
-                )
-            ),
+            rotation_deg=float(affine_rotation_deg(matrix)),
+            scale=float(affine_scale(matrix)),
+            reason=lock_reason,
             current_to_canonical=matrix.copy(),
             source_type=str(best.get("source_type") or ""),
             evidence_current=True,
