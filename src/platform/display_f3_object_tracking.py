@@ -3782,6 +3782,7 @@ def _find_luminous_segment_pose(
     canonical_resolution,
     *,
     base_matrix=None,
+    base_projective=None,
 ) -> dict:
     """Filtro preto -> emissão -> encaixe dos ON esperados -> pose dinâmica."""
     if not _valid_frame(frame):
@@ -3803,20 +3804,28 @@ def _find_luminous_segment_pose(
         }
 
     filter_candidates: list[dict] = []
-    if base_matrix is not None:
-        try:
-            inverse = cv2.invertAffineTransform(
-                np.asarray(base_matrix, dtype=np.float32).reshape(2, 3)
-            )
-            projected = transform_points(canonical_board, inverse)
-        except Exception:
-            projected = []
+    base_transform = (
+        base_projective
+        if base_projective is not None
+        else base_matrix
+    )
+    if base_transform is not None:
+        inverse = _invert_planar_transform(base_transform)
+        projected = (
+            transform_points(canonical_board, inverse)
+            if inverse is not None
+            else []
+        )
         if len(projected) >= 3:
             filter_candidates.append(
                 {
                     "points": projected,
                     "score": 100.0,
-                    "source": "tracked_filter",
+                    "source": (
+                        "tracked_filter_projective"
+                        if base_projective is not None
+                        else "tracked_filter"
+                    ),
                 }
             )
     else:
@@ -3860,6 +3869,7 @@ def _find_luminous_segment_pose(
         }
         coarse_matrices = []
         normalized_base_matrix = None
+        normalized_base_projective = None
         if base_matrix is not None:
             try:
                 normalized_base_matrix = np.asarray(
@@ -3869,6 +3879,21 @@ def _find_luminous_segment_pose(
                 coarse_matrices.append(normalized_base_matrix)
             except Exception:
                 normalized_base_matrix = None
+        if base_projective is not None:
+            try:
+                candidate_h = np.asarray(
+                    base_projective,
+                    dtype=np.float32,
+                ).reshape(3, 3)
+                if np.all(np.isfinite(candidate_h)):
+                    normalized_base_projective = candidate_h
+            except Exception:
+                normalized_base_projective = None
+        normalized_base_transform = (
+            normalized_base_projective
+            if normalized_base_projective is not None
+            else normalized_base_matrix
+        )
         coarse_matrices.extend(
             _filter_board_matrix_candidates(
                 filter_points,
@@ -3897,9 +3922,9 @@ def _find_luminous_segment_pose(
             # Sem lock estrutural, o grid global ainda pode reacquirir a pose.
             # Com lock estrutural, ele é apenas diagnóstico: não conhece IDs e
             # pode casar um segmento vizinho com a máscara errada.
-            if normalized_base_matrix is None:
+            if normalized_base_transform is None:
                 fit = global_fit
-        elif normalized_base_matrix is None:
+        elif normalized_base_transform is None:
             attempt["fit_diagnostics"] = {}
             attempt["fit"] = False
             attempts.append(attempt)
@@ -3918,13 +3943,13 @@ def _find_luminous_segment_pose(
         # lock luminoso atual, sem deslocar/rotacionar o grid.
         base_core_validation: dict = {}
         if (
-            normalized_base_matrix is not None
+            normalized_base_transform is not None
             and luminous.get("threshold_v") is not None
         ):
             base_core_validation = _validate_luminous_pose_core_support(
                 frame,
                 expected_rows,
-                normalized_base_matrix,
+                normalized_base_transform,
                 luminous.get("threshold_v"),
             )
             attempt["base_core_validation"] = deepcopy(
@@ -3935,7 +3960,7 @@ def _find_luminous_segment_pose(
                 frame,
                 filter_points,
                 expected_rows,
-                normalized_base_matrix,
+                normalized_base_transform,
                 luminous.get("threshold_v"),
             )
             attempt["global_fit_diagnostics"] = deepcopy(fit_diagnostics)
@@ -3944,13 +3969,22 @@ def _find_luminous_segment_pose(
             )
             if bool(local_landmarks.get("available")):
                 fine_fit_diagnostics: dict = {}
-                fine_fit = _fit_id_anchored_luminous_pose(
-                    canonical_board,
-                    expected_rows,
-                    local_landmarks.get("details") or [],
-                    normalized_base_matrix,
-                    diagnostics=fine_fit_diagnostics,
-                )
+                if normalized_base_projective is not None:
+                    fine_fit = _fit_id_anchored_luminous_projective_pose(
+                        canonical_board,
+                        expected_rows,
+                        local_landmarks.get("details") or [],
+                        normalized_base_projective,
+                        diagnostics=fine_fit_diagnostics,
+                    )
+                else:
+                    fine_fit = _fit_id_anchored_luminous_pose(
+                        canonical_board,
+                        expected_rows,
+                        local_landmarks.get("details") or [],
+                        normalized_base_matrix,
+                        diagnostics=fine_fit_diagnostics,
+                    )
                 attempt["fine_fit_diagnostics"] = deepcopy(
                     fine_fit_diagnostics
                 )
@@ -3958,7 +3992,11 @@ def _find_luminous_segment_pose(
                     core_validation = _validate_luminous_pose_core_support(
                         frame,
                         expected_rows,
-                        fine_fit.get("matrix"),
+                        (
+                            fine_fit.get("projective_matrix")
+                            if fine_fit.get("projective_matrix") is not None
+                            else fine_fit.get("matrix")
+                        ),
                         luminous.get("threshold_v"),
                     )
                     attempt["fine_core_validation"] = deepcopy(
@@ -4055,8 +4093,24 @@ def _find_luminous_segment_pose(
                             alignment_residual
                         ),
                     }
-                    fit = {
-                        "matrix": normalized_base_matrix.copy(),
+                    compatibility_affine = (
+                        normalized_base_matrix.copy()
+                        if normalized_base_matrix is not None
+                        else _affine_approximation_from_projective(
+                            normalized_base_projective,
+                            canonical_board,
+                        )
+                    )
+                    if compatibility_affine is None:
+                        fit = None
+                    else:
+                        fit = {
+                            "matrix": compatibility_affine,
+                            "projective_matrix": (
+                                normalized_base_projective.copy()
+                                if normalized_base_projective is not None
+                                else None
+                            ),
                         "matched_mask_ids": list(validated_ids),
                         "missing_expected_on_mask_ids": [
                             str(row.get("mask_id") or "")
@@ -4080,9 +4134,10 @@ def _find_luminous_segment_pose(
                         ),
                         "core_validated_mask_ids": list(validated_ids),
                         "core_validated_count": validated_count,
-                        "core_required_count": required_count,
-                    }
-                    fit_landmark_source = "expected_on_core_validated_base"
+                            "core_required_count": required_count,
+                        }
+                    if fit is not None:
+                        fit_landmark_source = "expected_on_core_validated_base"
                 else:
                     fit = None
                     fit_landmark_source = (
