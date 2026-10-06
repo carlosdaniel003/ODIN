@@ -47,15 +47,22 @@ from src.platform.display_f3_neural_tracking import (
 )
 from src.platform.display_f3_object_tracking import (
     F3DisplayObjectTracker,
+    _filter_board_matrix_candidates,
 )
 from src.platform.display_project_repository import (
     DisplayProjectRepository,
 )
 
 
-F3_TRACKING_REQUIRED_ORIGINAL_MEAN_ERROR_PX = 20.0
-F3_TRACKING_REQUIRED_AUGMENTED_MEAN_ERROR_PX = 45.0
-F3_TRACKING_REQUIRED_AUGMENTED_P95_ERROR_PX = 90.0
+# Erro absoluto permanece como telemetria, não como autoridade de promoção.
+F3_TRACKING_TELEMETRY_ORIGINAL_MEAN_ERROR_PX = 20.0
+F3_TRACKING_TELEMETRY_AUGMENTED_MEAN_ERROR_PX = 45.0
+F3_TRACKING_TELEMETRY_AUGMENTED_P95_ERROR_PX = 90.0
+
+# D-067: a CNN é prior de correspondência/orientação, não pose final.
+F3_TRACKING_REQUIRED_ORIGINAL_SELECTION_ACCURACY = 1.0
+F3_TRACKING_REQUIRED_AUGMENTED_SELECTION_ACCURACY = 1.0
+F3_TRACKING_REQUIRED_P05_SELECTION_MARGIN_DIAGONAL_FRACTION = 0.03
 
 
 def _load_torch():
@@ -532,6 +539,188 @@ def _evaluate(
     }
 
 
+def _candidate_projected_current_anchors(
+    current_quad: np.ndarray,
+    canonical_anchors: np.ndarray,
+) -> list[np.ndarray]:
+    matrices = _filter_board_matrix_candidates(
+        np.asarray(current_quad, dtype=np.float32).reshape(-1, 2).tolist(),
+        np.asarray(canonical_anchors, dtype=np.float32).reshape(-1, 2).tolist(),
+    )
+    projected: list[np.ndarray] = []
+    canonical = np.asarray(
+        canonical_anchors,
+        dtype=np.float32,
+    ).reshape(-1, 2)
+    for matrix in matrices:
+        try:
+            inverse = cv2.invertAffineTransform(
+                np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+            )
+            current = _transform_points(canonical, inverse)
+        except Exception:
+            continue
+        if current.shape == (4, 2) and np.all(np.isfinite(current)):
+            projected.append(
+                np.ascontiguousarray(current, dtype=np.float32)
+            )
+    return projected
+
+
+def _orientation_selection_metrics(
+    predictions: np.ndarray,
+    targets: np.ndarray,
+    *,
+    canonical_anchors: np.ndarray,
+    master_width: int,
+    master_height: int,
+) -> dict:
+    """Avalia exatamente o papel produtivo da CNN D-067.
+
+    O alvo fornece a posição geométrica verdadeira do filtro. A partir dela são
+    geradas as mesmas correspondências possíveis do runtime. O target determina
+    qual hipótese é geometricamente correta; a previsão neural determina qual
+    hipótese seria escolhida em produção.
+    """
+    scale = np.asarray(
+        [float(master_width), float(master_height)],
+        dtype=np.float32,
+    )
+    predicted_px = (
+        np.asarray(predictions, dtype=np.float32).reshape(-1, 4, 2)
+        * scale
+    )
+    target_px = (
+        np.asarray(targets, dtype=np.float32).reshape(-1, 4, 2)
+        * scale
+    )
+    canonical = np.asarray(
+        canonical_anchors,
+        dtype=np.float32,
+    ).reshape(4, 2)
+
+    samples: list[dict] = []
+    correct_count = 0
+    invalid_count = 0
+    predicted_margins: list[float] = []
+    winner_errors: list[float] = []
+    second_errors: list[float] = []
+
+    for index, (predicted, expected) in enumerate(
+        zip(predicted_px, target_px)
+    ):
+        candidates = _candidate_projected_current_anchors(
+            expected,
+            canonical,
+        )
+        if len(candidates) < 2:
+            invalid_count += 1
+            samples.append(
+                {
+                    "index": int(index),
+                    "valid": False,
+                    "reason": "orientation_candidates_insufficient",
+                    "candidate_count": int(len(candidates)),
+                }
+            )
+            continue
+
+        target_errors = np.asarray(
+            [
+                float(
+                    np.mean(
+                        np.linalg.norm(
+                            candidate - expected,
+                            axis=1,
+                        )
+                    )
+                )
+                for candidate in candidates
+            ],
+            dtype=np.float64,
+        )
+        prediction_errors = np.asarray(
+            [
+                float(
+                    np.mean(
+                        np.linalg.norm(
+                            candidate - predicted,
+                            axis=1,
+                        )
+                    )
+                )
+                for candidate in candidates
+            ],
+            dtype=np.float64,
+        )
+
+        correct_index = int(np.argmin(target_errors))
+        selected_index = int(np.argmin(prediction_errors))
+        order = np.argsort(prediction_errors)
+        best_error = float(prediction_errors[order[0]])
+        second_error = float(prediction_errors[order[1]])
+        margin = max(0.0, second_error - best_error)
+        correct = bool(selected_index == correct_index)
+        if correct:
+            correct_count += 1
+        predicted_margins.append(margin)
+        winner_errors.append(best_error)
+        second_errors.append(second_error)
+
+        samples.append(
+            {
+                "index": int(index),
+                "valid": True,
+                "candidate_count": int(len(candidates)),
+                "correct_candidate_index": correct_index,
+                "selected_candidate_index": selected_index,
+                "correct": correct,
+                "selected_error_px": round(best_error, 4),
+                "second_best_error_px": round(second_error, 4),
+                "selection_margin_px": round(margin, 4),
+                "target_best_error_px": round(
+                    float(target_errors[correct_index]),
+                    4,
+                ),
+            }
+        )
+
+    valid_count = len(samples) - invalid_count
+    accuracy = (
+        float(correct_count) / float(valid_count)
+        if valid_count > 0
+        else 0.0
+    )
+    margins = np.asarray(predicted_margins, dtype=np.float64)
+    winners = np.asarray(winner_errors, dtype=np.float64)
+    seconds = np.asarray(second_errors, dtype=np.float64)
+
+    return {
+        "sample_count": int(len(samples)),
+        "valid_sample_count": int(valid_count),
+        "invalid_sample_count": int(invalid_count),
+        "correct_count": int(correct_count),
+        "wrong_count": int(max(0, valid_count - correct_count)),
+        "accuracy": float(accuracy),
+        "mean_selection_margin_px": (
+            float(np.mean(margins)) if margins.size else 0.0
+        ),
+        "p05_selection_margin_px": (
+            float(np.percentile(margins, 5.0)) if margins.size else 0.0
+        ),
+        "min_selection_margin_px": (
+            float(np.min(margins)) if margins.size else 0.0
+        ),
+        "mean_selected_error_px": (
+            float(np.mean(winners)) if winners.size else 0.0
+        ),
+        "mean_second_best_error_px": (
+            float(np.mean(seconds)) if seconds.size else 0.0
+        ),
+        "samples": samples,
+    }
+
+
 def _export_onnx(torch, model, destination: Path) -> None:
     dummy = torch.zeros(
         (
@@ -719,20 +908,87 @@ def main() -> int:
         master_height=int(report["master_resolution"]["height"]),
     )
 
-    accepted = bool(
-        original["mean_anchor_error_px"]
-        <= F3_TRACKING_REQUIRED_ORIGINAL_MEAN_ERROR_PX
-        and augmented["mean_anchor_error_px"]
-        <= F3_TRACKING_REQUIRED_AUGMENTED_MEAN_ERROR_PX
-        and augmented["p95_anchor_error_px"]
-        <= F3_TRACKING_REQUIRED_AUGMENTED_P95_ERROR_PX
+    canonical_validation_anchors = np.asarray(
+        report["canonical_anchors"],
+        dtype=np.float32,
+    ).reshape(4, 2)
+    original_selection = _orientation_selection_metrics(
+        original["predictions"],
+        original_targets,
+        canonical_anchors=canonical_validation_anchors,
+        master_width=int(report["master_resolution"]["width"]),
+        master_height=int(report["master_resolution"]["height"]),
     )
+    augmented_selection = _orientation_selection_metrics(
+        augmented["predictions"],
+        augmented_targets,
+        canonical_anchors=canonical_validation_anchors,
+        master_width=int(report["master_resolution"]["width"]),
+        master_height=int(report["master_resolution"]["height"]),
+    )
+
+    frame_diagonal_px = float(
+        np.hypot(
+            float(report["master_resolution"]["width"]),
+            float(report["master_resolution"]["height"]),
+        )
+    )
+    required_margin_px = (
+        frame_diagonal_px
+        * F3_TRACKING_REQUIRED_P05_SELECTION_MARGIN_DIAGONAL_FRACTION
+    )
+
+    original_selection_ok = bool(
+        int(original_selection["valid_sample_count"]) > 0
+        and int(original_selection["invalid_sample_count"]) == 0
+        and float(original_selection["accuracy"])
+        >= F3_TRACKING_REQUIRED_ORIGINAL_SELECTION_ACCURACY
+    )
+    augmented_selection_ok = bool(
+        int(augmented_selection["valid_sample_count"]) > 0
+        and int(augmented_selection["invalid_sample_count"]) == 0
+        and float(augmented_selection["accuracy"])
+        >= F3_TRACKING_REQUIRED_AUGMENTED_SELECTION_ACCURACY
+        and float(augmented_selection["p05_selection_margin_px"])
+        >= required_margin_px
+    )
+    accepted = bool(
+        original_selection_ok
+        and augmented_selection_ok
+    )
+
+    print()
+    print("VALIDAÇÃO DE CORRESPONDÊNCIA/ORIENTAÇÃO D-067")
+    print(
+        "H1 original: "
+        f"{original_selection['correct_count']}/"
+        f"{original_selection['valid_sample_count']} correto(s) | "
+        f"accuracy={original_selection['accuracy'] * 100.0:.2f}% | "
+        f"margin={original_selection['min_selection_margin_px']:.2f}px"
+    )
+    print(
+        "H1 augmentations: "
+        f"{augmented_selection['correct_count']}/"
+        f"{augmented_selection['valid_sample_count']} correto(s) | "
+        f"accuracy={augmented_selection['accuracy'] * 100.0:.2f}% | "
+        f"p05_margin={augmented_selection['p05_selection_margin_px']:.2f}px "
+        f"(mínimo exigido={required_margin_px:.2f}px)"
+    )
+    print(
+        "Telemetria de regressão: "
+        f"original_mean={original['mean_anchor_error_px']:.2f}px | "
+        f"aug_mean={augmented['mean_anchor_error_px']:.2f}px | "
+        f"aug_p95={augmented['p95_anchor_error_px']:.2f}px"
+    )
+
     if not accepted:
         raise RuntimeError(
-            "Modelo de pose NÃO promovido: "
-            f"original_mean={original['mean_anchor_error_px']:.2f}px; "
-            f"aug_mean={augmented['mean_anchor_error_px']:.2f}px; "
-            f"aug_p95={augmented['p95_anchor_error_px']:.2f}px."
+            "Modelo de pose NÃO promovido: gate de correspondência/orientação "
+            "D-067 reprovado. "
+            f"original_accuracy={original_selection['accuracy'] * 100.0:.2f}%; "
+            f"aug_accuracy={augmented_selection['accuracy'] * 100.0:.2f}%; "
+            f"aug_p05_margin={augmented_selection['p05_selection_margin_px']:.2f}px; "
+            f"required_margin={required_margin_px:.2f}px."
         )
 
     project_name = str(report["project_name"])
@@ -832,15 +1088,30 @@ def main() -> int:
                 "augmented_max_anchor_error_px": float(
                     augmented["max_anchor_error_px"]
                 ),
-                "required_original_mean_error_px": (
-                    F3_TRACKING_REQUIRED_ORIGINAL_MEAN_ERROR_PX
+                "telemetry_original_mean_error_target_px": (
+                    F3_TRACKING_TELEMETRY_ORIGINAL_MEAN_ERROR_PX
                 ),
-                "required_augmented_mean_error_px": (
-                    F3_TRACKING_REQUIRED_AUGMENTED_MEAN_ERROR_PX
+                "telemetry_augmented_mean_error_target_px": (
+                    F3_TRACKING_TELEMETRY_AUGMENTED_MEAN_ERROR_PX
                 ),
-                "required_augmented_p95_error_px": (
-                    F3_TRACKING_REQUIRED_AUGMENTED_P95_ERROR_PX
+                "telemetry_augmented_p95_error_target_px": (
+                    F3_TRACKING_TELEMETRY_AUGMENTED_P95_ERROR_PX
                 ),
+                "selection_gate": {
+                    "authority": "orientation_correspondence",
+                    "original": original_selection,
+                    "augmented": augmented_selection,
+                    "required_original_accuracy": (
+                        F3_TRACKING_REQUIRED_ORIGINAL_SELECTION_ACCURACY
+                    ),
+                    "required_augmented_accuracy": (
+                        F3_TRACKING_REQUIRED_AUGMENTED_SELECTION_ACCURACY
+                    ),
+                    "required_p05_margin_diagonal_fraction": (
+                        F3_TRACKING_REQUIRED_P05_SELECTION_MARGIN_DIAGONAL_FRACTION
+                    ),
+                    "required_p05_margin_px": float(required_margin_px),
+                },
                 "runtime_max_snap_error_px": runtime_max_snap_error_px,
                 "onnx_vs_torch_max_abs_diff": max_diff,
             },
@@ -881,7 +1152,13 @@ def main() -> int:
     print(f"ONNX: {output}")
     print(f"METADADOS: {metadata_path}")
     print(
-        "Validação: "
+        "Validação de orientação: "
+        f"H1={original_selection['accuracy'] * 100.0:.2f}% | "
+        f"aug={augmented_selection['accuracy'] * 100.0:.2f}% | "
+        f"aug p05 margin={augmented_selection['p05_selection_margin_px']:.2f}px"
+    )
+    print(
+        "Telemetria de regressão: "
         f"original mean={original['mean_anchor_error_px']:.2f}px | "
         f"aug mean={augmented['mean_anchor_error_px']:.2f}px | "
         f"aug p95={augmented['p95_anchor_error_px']:.2f}px"
