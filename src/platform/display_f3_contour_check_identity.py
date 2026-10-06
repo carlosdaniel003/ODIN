@@ -888,13 +888,19 @@ class F3TrackedRawCheckAnalyzer:
                     geometry.get("geometry_space") or "tracking_live"
                 ),
             )
-            # Tracking continua fornecendo apenas a geometria. Quando o CHECK
-            # atual já está sob autoridade neural, a evidência luminosa histórica
-            # não pode reclassificar ON/OFF nem transformar a CNN em mais um voto.
-            if not bool(
+            # D-066: tracking fornece somente geometria/pose. Quando a
+            # autoridade híbrida universal está ativa, nenhuma evidência
+            # luminosa do tracker pode reclassificar ON/OFF/INCERTO nem alterar
+            # a conformidade decidida por CNN + aprendizado físico same-mask.
+            hybrid_semantic_authority = bool(
                 isinstance(result, dict)
-                and result.get("neural_visual_authority") is True
-            ):
+                and (
+                    result.get("hybrid_visual_authority") is True
+                    or str(result.get("semantic_authority") or "")
+                    == "f3_hybrid_same_mask_neural_authority"
+                )
+            )
+            if not hybrid_semantic_authority:
                 result = _apply_luminous_core_mask_evidence(
                     result,
                     geometry,
@@ -903,7 +909,7 @@ class F3TrackedRawCheckAnalyzer:
             elif isinstance(result, dict):
                 result["luminous_core_reconciliation_skipped"] = True
                 result["luminous_core_reconciliation_reason"] = (
-                    "neural_visual_authority"
+                    "hybrid_semantic_authority"
                 )
             if isinstance(result, dict):
                 result["analysis_frame_source"] = (
