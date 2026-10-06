@@ -136,6 +136,8 @@ class DisplayF3NeuralTrackingTests(unittest.TestCase):
             matrix,
         ).reshape(-1, 2)
         self.assertTrue(np.allclose(projected, canonical, atol=2.0))
+        self.assertIsNotNone(candidate.get("homography"))
+        self.assertTrue(runtime._last_neural_pose_debug["projective_pose_ready"])
 
     def test_neural_snap_recovers_pose_when_strict_quad_fit_returns_zero(self):
         canonical = np.asarray(
@@ -297,6 +299,190 @@ class DisplayF3NeuralTrackingTests(unittest.TestCase):
             residual["max_error_px"],
             tracking.F3_TRACKING_LUMINOUS_FINE_MAX_MEDIAN_ERROR_PX,
         )
+
+    def test_projective_filter_pose_maps_trapezoid_to_canonical_quad(self):
+        canonical = np.asarray(
+            [
+                [0.0, 0.0],
+                [600.0, 0.0],
+                [600.0, 200.0],
+                [0.0, 200.0],
+            ],
+            dtype=np.float32,
+        )
+        current = np.asarray(
+            [
+                [100.0, 100.0],
+                [700.0, 70.0],
+                [620.0, 350.0],
+                [150.0, 290.0],
+            ],
+            dtype=np.float32,
+        )
+        hint, _inliers = cv2.estimateAffinePartial2D(
+            current.reshape(-1, 1, 2),
+            canonical.reshape(-1, 1, 2),
+            method=cv2.LMEDS,
+        )
+
+        pose = tracking._projective_filter_pose_from_affine_hint(
+            current.tolist(),
+            canonical.tolist(),
+            hint,
+        )
+
+        self.assertIsNotNone(pose)
+        homography = np.asarray(
+            pose["homography"],
+            dtype=np.float32,
+        ).reshape(3, 3)
+        projected = cv2.perspectiveTransform(
+            current.reshape(-1, 1, 2),
+            homography,
+        ).reshape(-1, 2)
+        self.assertTrue(np.allclose(projected, canonical, atol=1e-3))
+        self.assertLess(pose["max_reprojection_px"], 0.01)
+
+    def test_projective_luminous_residual_preserves_homography(self):
+        canonical_board = [
+            [0.0, 0.0],
+            [600.0, 0.0],
+            [600.0, 200.0],
+            [0.0, 200.0],
+        ]
+        current_board = np.asarray(
+            [
+                [100.0, 100.0],
+                [700.0, 70.0],
+                [620.0, 350.0],
+                [150.0, 290.0],
+            ],
+            dtype=np.float32,
+        )
+        canonical = np.asarray(canonical_board, dtype=np.float32)
+        true_h = cv2.getPerspectiveTransform(current_board, canonical)
+        offset = np.asarray(
+            [
+                [1.0, 0.0, 8.0],
+                [0.0, 1.0, 5.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+        coarse_h = offset @ true_h
+
+        expected_rows = [
+            {"mask_id": "MASK_001", "center": [120.0, 70.0]},
+            {"mask_id": "MASK_002", "center": [300.0, 120.0]},
+            {"mask_id": "MASK_003", "center": [500.0, 160.0]},
+        ]
+        inverse_true = np.linalg.inv(true_h).astype(np.float32)
+        current_centers = cv2.perspectiveTransform(
+            np.asarray(
+                [row["center"] for row in expected_rows],
+                dtype=np.float32,
+            ).reshape(-1, 1, 2),
+            inverse_true,
+        ).reshape(-1, 2)
+        details = [
+            {
+                "mask_id": row["mask_id"],
+                "center": current_centers[index].tolist(),
+                "projected_mask_support": True,
+            }
+            for index, row in enumerate(expected_rows)
+        ]
+        diagnostics = {}
+
+        fit = tracking._fit_id_anchored_luminous_projective_pose(
+            canonical_board,
+            expected_rows,
+            details,
+            coarse_h,
+            diagnostics=diagnostics,
+        )
+
+        self.assertIsNotNone(fit, diagnostics)
+        self.assertIsNotNone(fit.get("projective_matrix"))
+        self.assertLess(fit["median_error_px"], 0.5)
+        self.assertGreater(fit["fine_alignment_gain_px"], 5.0)
+        self.assertIn(
+            fit["fine_fit_mode"],
+            {"projective_similarity", "projective_translation"},
+        )
+
+    def test_alignment_pending_forces_absolute_neural_reacquisition(self):
+        runtime = tracking.F3DisplayObjectTracker(SimpleNamespace())
+        runtime.ready = True
+        runtime.reason = "ready"
+        runtime.width = 640
+        runtime.height = 480
+        runtime.canonical_board = [
+            [0.0, 0.0],
+            [639.0, 0.0],
+            [639.0, 300.0],
+            [0.0, 300.0],
+        ]
+        runtime.canonical_masks = []
+        runtime.last_matrix = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+        runtime.last_homography = np.eye(3, dtype=np.float32)
+        runtime.last_result = tracking.F3TrackingResult(
+            True,
+            np.zeros((480, 640, 3), dtype=np.uint8),
+            reference="neural_pose:CM_500_L",
+            current_to_canonical=runtime.last_matrix.copy(),
+            current_to_canonical_homography=runtime.last_homography.copy(),
+            source_type="neural_filter_pose",
+            evidence_current=True,
+        )
+        runtime.last_compute_s = tracking.time.monotonic()
+        runtime.last_verified_rotation_deg = 0.0
+        runtime._last_reference = "neural_pose:CM_500_L"
+        runtime._force_absolute_reacquire = True
+
+        candidate = {
+            "reference": "neural_pose:CM_500_L",
+            "matrix": runtime.last_matrix.copy(),
+            "homography": runtime.last_homography.copy(),
+            "matches": 4,
+            "inliers": 4,
+            "ratio": 0.9,
+            "rotation_deg": 0.0,
+            "scale": 1.0,
+            "score": 49.0,
+            "source_type": "neural_filter_pose",
+            "fallback": "neural_filter_pose",
+        }
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        with (
+            patch.object(
+                runtime,
+                "_temporal_candidate",
+                side_effect=AssertionError(
+                    "LK não deve prender pose enquanto alinhamento está pendente"
+                ),
+            ),
+            patch.object(
+                runtime,
+                "_neural_filter_pose_candidate",
+                return_value=candidate,
+            ) as neural,
+            patch.object(
+                runtime,
+                "_available_reference_keys",
+                return_value=[],
+            ),
+        ):
+            result = runtime.align(frame, frame_id=101)
+
+        neural.assert_called_once()
+        self.assertTrue(result.locked)
+        self.assertEqual("locked_neural_filter_pose", result.reason)
+        self.assertIsNotNone(result.current_to_canonical_homography)
 
     def test_align_attempts_neural_before_orb_when_pose_is_absent(self):
         source = inspect.getsource(
