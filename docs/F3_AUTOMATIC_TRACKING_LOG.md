@@ -2315,3 +2315,91 @@ Não repetir:
 - não relaxar o gate de 12 px para esconder erro;
 - não retreinar a CNN para compensar perspectiva;
 - não transferir autoridade semântica para tracking/homografia.
+
+
+---
+
+## 06/10/2026 — D-071: preservar cantos físicos perspectivados do filtro
+
+Reteste de origem:
+- projeto `CM_500_L`;
+- H1 fisicamente aceso;
+- D-070 ativo;
+- UI corretamente fail-closed em
+  `LOCK ESTRUTURAL • ALINHANDO SEGMENTOS`;
+- máscaras ainda deslocadas dos segmentos reais.
+
+Evidência:
+- `projective_pose_ready=true`;
+- `selected_snap_error_px=120.663`;
+- `confidence=0.3296`;
+- `mask_geometry_space=canonical_projective`;
+- `spatial_alignment_ready=false`;
+- 7 ON esperados, apenas 3 live ON confirmados;
+- tracking luminoso:
+  - 2 componentes;
+  - 0 landmarks locais;
+  - 0/7 cores validados;
+- D-025:
+  - mean error = 47.11 px;
+  - p95 = 289.17 px;
+  - ECC = 0.1249;
+  - sem refinamento promovido.
+
+Diagnóstico:
+- D-070 transportava corretamente uma homografia 3x3 até as 28 máscaras;
+- a falha estava ANTES da homografia;
+- o detector escuro descartava a perspectiva real ao converter o contorno para
+  `minAreaRect + boxPoints`;
+- portanto a homografia era exata para quatro cantos artificiais.
+
+Implementação D-071:
+- `_quad_from_points()` preserva um quadrilátero real de quatro pontos;
+- nova extração de cantos:
+  `convexHull -> approxPolyDP -> quadrilátero convexo`;
+- o detector continua usando `minAreaRect` para área/aspect/score;
+- quando o quadrilátero real existe:
+  `corner_source=contour_quad`;
+- se a extração falhar:
+  `corner_source=min_area_rect_fallback`;
+- fallback retangular pode sustentar pose affine estrutural, mas não publica
+  homografia projectiva produtiva;
+- telemetria neural passa a incluir:
+  - `filter_corner_source`;
+  - `filter_points`;
+  - `neural_anchor_points`;
+  - `filter_corner_errors_to_neural_px`;
+  - `filter_corner_error_mean_px`;
+  - `filter_corner_error_max_px`.
+
+Regressões novas:
+- quadrilátero trapezoidal não pode ser retangularizado;
+- detector sintético precisa recuperar os cantos físicos do trapézio;
+- fallback `minAreaRect` não pode publicar homografia;
+- DEBUG precisa expor quatro cantos e erro contra anchors neurais.
+
+CI do commit D-071:
+- compile F3 isolation modules PASS;
+- F3 neural geometry tracking PASS;
+- pipeline latency PASS;
+- D-025 homography PASS;
+- D-025 diagnostic presentation PASS;
+- luminous F3 tracking PASS;
+- live visual sync/startup PASS;
+- ROI geometry parity PASS;
+- D-042 semantic presence PASS;
+- strict mask/segregation PASS;
+- bloco amplo histórico `Run F3 object tracking tests` continua com exatamente
+  os mesmos 7 FAIL + 1 ERROR do baseline D-070, sem nova regressão D-071.
+
+Resultado:
+- IMPLEMENTADO;
+- RETESTE FÍSICO PENDENTE.
+
+Não repetir:
+- não usar `projective_reprojection=0` como prova de que o filtro físico foi
+  localizado corretamente;
+- não alimentar homografia com `boxPoints(minAreaRect)`;
+- não reduzir/aumentar thresholds para compensar canto físico errado;
+- não retreinar CNN para corrigir geometria perdida pelo OpenCV;
+- não mover autoridade semântica para o tracker.
