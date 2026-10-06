@@ -1,21 +1,23 @@
 from __future__ import annotations
 
-"""Autoridade neural incremental do Display F3.
+"""Autoridade semântica híbrida do Display F3.
 
-Etapa N2:
-- H1 e BLUE usam a mesma CNN local de estado ON/OFF por segmento;
-- USB/AUX continuam delegados ao analisador convencional atual;
-- o modelo ONNX é carregado uma única vez e reutilizado;
-- as 28 ROIs são inferidas em um único batch;
-- ausência/erro do modelo é fail-closed nos CHECKS já migrados, sem fallback
-  convencional de ON/OFF.
+Etapa H1/BLUE/USB/AUX + CHECKS futuros:
+- todos os CHECKS configurados usam a mesma CNN local ON/OFF por segmento;
+- a evidência física ON/OFF da MESMA máscara, aprendida das fotos reais dos
+  CHECKS/BOARD_OFF, participa da mesma autoridade final;
+- CNN INCERTA pode ser resolvida por evidência física local forte;
+- discordância forte CNN x mesma máscara vira INCERTO, nunca OK por votação;
+- não existe fallback produtivo paralelo: a fusão ocorre dentro de uma única
+  autoridade semântica;
+- o modelo ONNX é carregado uma única vez e as ROIs são inferidas em batch.
 
-BLUE continua intermitente. A CNN classifica cada frame, enquanto o runtime
-temporal decide se o frame pertence à fase ON, OFF ou transição. Somente a fase
-ON pode validar conformidade ou acumular uma divergência neural certa.
+CHECKS intermitentes continuam sendo responsabilidade do runtime temporal:
+fase OFF/transição não é defeito; somente fase ON pode validar conformidade ou
+acumular divergência persistente.
 
-A rede decide apenas estado visual de segmento. Sequência, presença, energia,
-rearme e UI continuam com as autoridades canônicas já existentes.
+A autoridade híbrida decide apenas estado visual de segmento. Sequência,
+presença, energia, rearme e UI continuam com seus proprietários canônicos.
 """
 
 from copy import deepcopy
@@ -44,6 +46,8 @@ from src.platform.display_f3_neural_dataset import (
     f3_neural_model_path_for_repository,
 )
 from src.platform.display_f3_same_mask_reference_fix import (
+    F3_CHECK_PHOTO_MIN_CONFIDENCE,
+    F3_SAME_MASK_REFERENCE_SOURCE,
     F3SameMaskReferenceAnalyzer,
 )
 from src.platform.display_project_repository import (
@@ -57,13 +61,16 @@ from src.platform.display_visual_rotation import preparar_check_visual_display
 
 
 # Identificador histórico preservado para compatibilidade com a calibração
-# física H1 e DEBUGs já coletados. A instância agora é compartilhada por H1/BLUE.
+# física H1 e DEBUGs já coletados. A CNN continua publicando esta proveniência
+# bruta, enquanto a autoridade final passa a ser híbrida.
 F3_H1_NEURAL_AUTHORITY = "f3_h1_neural_segment_detector"
+F3_HYBRID_AUTHORITY = "f3_hybrid_same_mask_neural_authority"
 F3_H1_NEURAL_MODEL_TYPE = "f3_segment_on_off_cnn"
 F3_NEURAL_UNCERTAIN_STATE = "uncertain"
 F3_NEURAL_MODEL_REFRESH_S = 1.0
-F3_NEURAL_MIGRATED_CHECK_COUNT = 2
-F3_NEURAL_CHECK_SCOPE = "first_two_checks_n2"
+F3_HYBRID_CHECK_SCOPE = "all_configured_checks_hybrid_v1"
+# Alias de telemetria para consumidores que ainda leem o nome histórico.
+F3_NEURAL_CHECK_SCOPE = F3_HYBRID_CHECK_SCOPE
 
 
 def _strict_probability(value) -> float | None:
@@ -845,8 +852,8 @@ class F3NeuralSegmentDetector:
         }
 
 
-class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
-    """CNN para H1 + BLUE; CHECKS seguintes permanecem convencionais."""
+class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
+    """Autoridade única CNN + evidência física local para todos os CHECKS."""
 
     def __init__(self, repository) -> None:
         super().__init__(repository)
@@ -861,7 +868,7 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
         project_name: str,
         check_id: str,
     ) -> int | None:
-        """Retorna o índice do CHECK migrado para IA nesta etapa N2."""
+        """Retorna o índice de qualquer CHECK configurado no projeto."""
         try:
             checks = self.repository.listar_checks(project_name)
         except Exception:
@@ -870,9 +877,7 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             return None
 
         requested = str(check_id or "").strip()
-        for index, check in enumerate(
-            checks[:F3_NEURAL_MIGRATED_CHECK_COUNT]
-        ):
+        for index, check in enumerate(checks):
             if (
                 isinstance(check, dict)
                 and str(check.get("id") or "").strip() == requested
@@ -922,14 +927,10 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             check_id,
         )
         if neural_check_index is None:
-            return super().analyze(
-                frame=frame,
+            return self._not_ready_neural(
+                "check_fora_do_projeto",
                 project_name=project_name,
                 check_id=check_id,
-                visual_rotation=visual_rotation,
-                mask_geometry_override=mask_geometry_override,
-                mask_geometry_resolution=mask_geometry_resolution,
-                mask_geometry_source=mask_geometry_source,
             )
 
         if frame is None or getattr(frame, "size", 0) == 0:
@@ -1176,51 +1177,192 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 neural_model=deepcopy(inference),
             )
 
+        physical_analysis = super().analyze(
+            frame=frame,
+            project_name=project_name,
+            check_id=check_id,
+            visual_rotation=visual_rotation,
+            mask_geometry_override=mask_geometry_override,
+            mask_geometry_resolution=mask_geometry_resolution,
+            mask_geometry_source=mask_geometry_source,
+        )
+        physical_ready = bool(
+            isinstance(physical_analysis, dict)
+            and physical_analysis.get("ready") is True
+        )
+        physical_by_id = {
+            str(item.get("mask_id") or ""): item
+            for item in (
+                physical_analysis.get("mask_results", [])
+                if isinstance(physical_analysis, dict)
+                else []
+            )
+            if isinstance(item, dict)
+            and str(item.get("mask_id") or "")
+        }
+
         results = []
         for row, observation in zip(rows, observations):
-            state = str(
+            neural_state = str(
                 observation.get("state")
                 or F3_NEURAL_UNCERTAIN_STATE
             )
-            certain = bool(
+            neural_certain = bool(
                 observation.get("certain")
             )
+            neural_confidence = float(
+                observation.get("confidence", 0.0)
+                or 0.0
+            )
             expected = str(row["expected"])
+            mask_id = str(row["mask_id"])
+
+            physical = physical_by_id.get(mask_id)
+            physical_state = ""
+            physical_confidence = 0.0
+            physical_reference_source = ""
+            physical_reference_separation = None
+            physical_local_authoritative = False
+            if isinstance(physical, dict):
+                physical_state = str(
+                    physical.get("classified") or ""
+                ).strip().lower()
+                try:
+                    physical_confidence = float(
+                        physical.get("confidence", 0.0)
+                        or 0.0
+                    )
+                except (TypeError, ValueError):
+                    physical_confidence = 0.0
+                physical_reference_source = str(
+                    physical.get("reference_source") or ""
+                )
+                physical_reference_separation = (
+                    physical.get("reference_separation")
+                )
+                physical_local_authoritative = bool(
+                    physical_reference_source
+                    == F3_SAME_MASK_REFERENCE_SOURCE
+                    and physical_confidence
+                    >= F3_CHECK_PHOTO_MIN_CONFIDENCE
+                    and physical_state
+                    in (
+                        DISPLAY_CHECK_STATE_ON,
+                        DISPLAY_CHECK_STATE_OFF,
+                        "low_light",
+                    )
+                )
+
+            final_state = neural_state
+            semantic_certain = bool(neural_certain)
+            hybrid_resolution = "neural_only"
+            final_confidence = neural_confidence
+
+            if (
+                physical_local_authoritative
+                and physical_state == "low_light"
+            ):
+                final_state = "low_light"
+                semantic_certain = True
+                final_confidence = physical_confidence
+                hybrid_resolution = "physical_low_light"
+            elif physical_local_authoritative:
+                if not neural_certain:
+                    final_state = physical_state
+                    semantic_certain = True
+                    final_confidence = physical_confidence
+                    hybrid_resolution = (
+                        "physical_resolved_neural_uncertain"
+                    )
+                elif neural_state == physical_state:
+                    final_state = neural_state
+                    semantic_certain = True
+                    final_confidence = min(
+                        1.0,
+                        max(
+                            neural_confidence,
+                            physical_confidence,
+                        ),
+                    )
+                    hybrid_resolution = "neural_physical_consensus"
+                else:
+                    # Duas fontes fortes discordando nunca liberam OK nem
+                    # fabricam NG: o estado final é INCERTO e continua buscando.
+                    final_state = F3_NEURAL_UNCERTAIN_STATE
+                    semantic_certain = False
+                    final_confidence = max(
+                        neural_confidence,
+                        physical_confidence,
+                    )
+                    hybrid_resolution = "strong_source_conflict"
+            elif not neural_certain:
+                final_state = F3_NEURAL_UNCERTAIN_STATE
+                semantic_certain = False
+                hybrid_resolution = "neural_uncertain_without_local_physical"
+
             matched = (
-                bool(state == expected)
-                if certain
+                bool(final_state == expected)
+                if semantic_certain
+                and final_state
+                in (
+                    DISPLAY_CHECK_STATE_ON,
+                    DISPLAY_CHECK_STATE_OFF,
+                    "low_light",
+                )
                 else None
             )
             result = {
-                "mask_id": str(row["mask_id"]),
+                "mask_id": mask_id,
                 "expected": expected,
                 "expected_label": DISPLAY_AUTO_CLASS_LABELS[
                     expected
                 ],
-                "classified": state,
+                "classified": final_state,
                 "classified_label": (
-                    DISPLAY_AUTO_CLASS_LABELS[state]
-                    if state in DISPLAY_AUTO_CLASS_LABELS
+                    DISPLAY_AUTO_CLASS_LABELS[final_state]
+                    if final_state in DISPLAY_AUTO_CLASS_LABELS
                     else "INCERTO"
                 ),
                 "matched": matched,
                 "raw_matched": matched,
-                "confidence": float(
-                    observation.get("confidence", 0.0)
-                    or 0.0
-                ),
-                "neural_certain": certain,
+                "confidence": float(final_confidence),
+                "semantic_certain": bool(semantic_certain),
+                "hybrid_resolution": hybrid_resolution,
+                "neural_classified": neural_state,
+                "neural_confidence": neural_confidence,
+                "neural_certain": neural_certain,
                 "neural_probabilities": deepcopy(
                     observation.get("probabilities") or {}
                 ),
                 "neural_logits": list(
                     observation.get("logits") or ()
                 ),
-                "classification_source": F3_H1_NEURAL_AUTHORITY,
-                "reference_source": F3_H1_NEURAL_AUTHORITY,
+                "physical_evidence_available": bool(
+                    isinstance(physical, dict)
+                ),
+                "physical_local_authoritative": bool(
+                    physical_local_authoritative
+                ),
+                "physical_classified": physical_state,
+                "physical_confidence": float(
+                    physical_confidence
+                ),
+                "physical_reference_source": (
+                    physical_reference_source
+                ),
+                "physical_reference_separation": (
+                    physical_reference_separation
+                ),
+                "physical_distances": deepcopy(
+                    physical.get("distances") or {}
+                    if isinstance(physical, dict)
+                    else {}
+                ),
+                "classification_source": F3_HYBRID_AUTHORITY,
+                "reference_source": F3_HYBRID_AUTHORITY,
                 "luminous_core_confirmed": bool(
-                    certain
-                    and state == DISPLAY_CHECK_STATE_ON
+                    semantic_certain
+                    and final_state == DISPLAY_CHECK_STATE_ON
                 ),
             }
             results.append(result)
@@ -1228,7 +1370,7 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
         uncertain_count = sum(
             1
             for item in results
-            if not bool(item.get("neural_certain"))
+            if not bool(item.get("semantic_certain"))
         )
         matched_count = sum(
             1
@@ -1241,17 +1383,12 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             and matched_count == len(results)
         )
 
-        reason_prefix = (
-            "h1"
-            if neural_check_index == 0
-            else "blue"
-        )
         if uncertain_count:
-            reason = f"{reason_prefix}_neural_incerto"
+            reason = "check_hibrido_incerto"
         elif approved:
-            reason = f"{reason_prefix}_neural_conforme"
+            reason = "check_hibrido_conforme"
         else:
-            reason = f"{reason_prefix}_neural_divergente"
+            reason = "check_hibrido_divergente"
 
         metadata = self.presence_store.get(
             project_name,
@@ -1283,13 +1420,30 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 if states.get(str(mask.get("id")))
                 == DISPLAY_CHECK_STATE_IGNORE
             ),
+            # Mantém o ID neural histórico para a calibração física H1 já
+            # existente; semantic_authority identifica o proprietário atual.
             "reference_authority": F3_H1_NEURAL_AUTHORITY,
+            "semantic_authority": F3_HYBRID_AUTHORITY,
+            "hybrid_visual_authority": True,
+            "hybrid_check_scope": F3_HYBRID_CHECK_SCOPE,
+            "physical_same_mask_evidence_ready": bool(physical_ready),
+            "physical_same_mask_evidence_reason": str(
+                (
+                    physical_analysis.get("reason")
+                    if isinstance(physical_analysis, dict)
+                    else ""
+                )
+                or ""
+            ),
+            "physical_same_mask_authoritative_count": sum(
+                1
+                for item in results
+                if item.get("physical_local_authoritative") is True
+            ),
             "neural_visual_authority": True,
             "neural_check_scope": F3_NEURAL_CHECK_SCOPE,
             "neural_check_index": int(neural_check_index),
-            "neural_stage": (
-                "N1" if neural_check_index == 0 else "N2"
-            ),
+            "neural_stage": "HYBRID_ALL_CHECKS_V1",
             "neural_batch_size": len(results),
             "neural_model": {
                 key: deepcopy(value)
@@ -1297,6 +1451,33 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 if key != "observations"
             },
             "conventional_visual_authority_used": False,
+            "physical_same_mask_analysis": {
+                "ready": bool(physical_ready),
+                "reason": str(
+                    (
+                        physical_analysis.get("reason")
+                        if isinstance(physical_analysis, dict)
+                        else ""
+                    )
+                    or ""
+                ),
+                "matched_mask_count": int(
+                    (
+                        physical_analysis.get("matched_mask_count", 0)
+                        if isinstance(physical_analysis, dict)
+                        else 0
+                    )
+                    or 0
+                ),
+                "active_mask_count": int(
+                    (
+                        physical_analysis.get("active_mask_count", 0)
+                        if isinstance(physical_analysis, dict)
+                        else 0
+                    )
+                    or 0
+                ),
+            },
             "presence_reference": presence,
             "live_geometry_override": bool(
                 use_geometry_override
@@ -1309,24 +1490,24 @@ class F3NeuralCheckAnalyzer(F3SameMaskReferenceAnalyzer):
         }
 
 
-# Compatibilidade de import para extensões externas antigas. Internamente, o
-# proprietário canônico é F3NeuralCheckAnalyzer.
-F3H1NeuralAnalyzer = F3NeuralCheckAnalyzer
+# Compatibilidade de import para extensões externas antigas.
+F3NeuralCheckAnalyzer = F3HybridCheckAnalyzer
+F3H1NeuralAnalyzer = F3HybridCheckAnalyzer
 
 
 _INSTALLED = False
 
 
-def instalar_autoridade_neural_h1_blue_display_f3() -> None:
-    """Torna a CNN a única autoridade semântica de H1 e BLUE."""
+def instalar_autoridade_hibrida_display_f3() -> None:
+    """Instala CNN + mesma máscara física em todos os CHECKS configurados."""
     global _INSTALLED
 
     # Reaplicado mesmo depois do guard, pois instaladores históricos alteram os
-    # aliases durante o bootstrap. A autoridade neural deve ficar literalmente
-    # por último para os CHECKS já migrados.
-    runtime_module.DisplayAutomaticCheckAnalyzer = F3NeuralCheckAnalyzer
-    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3NeuralCheckAnalyzer
+    # aliases durante o bootstrap. A autoridade híbrida deve ficar por último.
+    runtime_module.DisplayAutomaticCheckAnalyzer = F3HybridCheckAnalyzer
+    live_runtime_module.DisplayAutomaticCheckAnalyzer = F3HybridCheckAnalyzer
     runtime_module._display_f3_neural_authority = True
+    runtime_module._display_f3_hybrid_authority = True
     # Marcadores nominais preservados somente para compatibilidade de telemetria.
     runtime_module._display_f3_h1_neural_authority = True
     runtime_module._display_f3_blue_neural_authority = True
@@ -1336,6 +1517,11 @@ def instalar_autoridade_neural_h1_blue_display_f3() -> None:
     _INSTALLED = True
 
 
+def instalar_autoridade_neural_h1_blue_display_f3() -> None:
+    """Compatibilidade: delega para a autoridade híbrida universal."""
+    instalar_autoridade_hibrida_display_f3()
+
+
 def instalar_autoridade_neural_h1_display_f3() -> None:
-    """Compatibilidade: delega para a autoridade neural N2 canônica."""
-    instalar_autoridade_neural_h1_blue_display_f3()
+    """Compatibilidade: delega para a autoridade híbrida universal."""
+    instalar_autoridade_hibrida_display_f3()
