@@ -4089,3 +4089,100 @@ A mudança só será considerada fisicamente validada depois de testar no JIG:
 
 Até essa validação, o estado é **IMPLEMENTADO / PENDENTE DE RETESTE FÍSICO**.
 
+
+
+---
+
+## D-066 — Tracking F3 ativo é autoridade de geometria, não de decisão semântica
+
+**Status:** Accepted
+
+### Contexto
+
+A autoridade híbrida D-065 foi validada fisicamente no H1 com o Rastreamento
+Automático desativado. Nesse modo, a decisão ON/OFF/POUCA LUZ/INCERTO por
+`MASK_xxx` e a decisão CHECK OK/NG/BUSCANDO pertencem ao
+`F3HybridCheckAnalyzer` e à state machine canônica.
+
+Ao reativar o Rastreamento Automático, o requisito de produto é preservar essa
+mesma decisão já validada. O tracking deve resolver apenas a variação espacial:
+onde está a placa/display e onde cada máscara canônica deve ser aplicada no frame
+atual.
+
+O código histórico ainda possuía guards específicos do tracking capazes de
+interferir no registro do H1/ciclo e uma reconciliação luminosa capaz de alterar
+classificação semântica em caminhos legados. Essas regras não podem formar uma
+segunda autoridade quando D-065 está ativa.
+
+### Decisão
+
+Com a autoridade híbrida instalada, o contrato é:
+
+```text
+TRACKING OFF
+frame
+→ geometria fixa do Projeto Display
+→ F3HybridCheckAnalyzer
+→ F3StateMachineAuthority
+
+TRACKING ON
+frame
+→ F3TrackingAuthority
+→ localizar placa/filtro
+→ estimar pose/frescor
+→ reprojetar máscaras canônicas
+→ F3HybridCheckAnalyzer
+→ F3StateMachineAuthority
+```
+
+Regras obrigatórias:
+
+1. Tracking pode localizar placa/filtro, estimar pose, publicar LOCK/frescor e
+   reprojetar contorno + máscaras canônicas.
+2. Segmentos luminosos podem continuar sendo usados como **landmarks de
+   geometria**, sem transformar essa emissão em estado semântico.
+3. Tracking não pode escrever/reconciliar ON/OFF/POUCA LUZ/INCERTO quando
+   `hybrid_visual_authority=true`.
+4. Evidência `luminous_core_*` do tracking não pode alterar a classificação
+   final produzida pela autoridade híbrida.
+5. Tracking não pode instalar uma segunda regra de H1, OK, NG ou avanço de
+   CHECK quando a autoridade híbrida estiver ativa.
+6. Os guards históricos `tracking_h1_power_guard` e
+   `tracking_h1_cycle_guard` permanecem apenas como compatibilidade para um
+   eventual caminho legado sem autoridade híbrida; eles são bypassados no
+   runtime híbrido.
+7. A ausência de LOCK ou evidência geométrica atual pode bloquear a **execução
+   da análise**, porque as ROIs ainda não possuem posição confiável. Esse
+   bloqueio é geométrico e não constitui decisão semântica.
+8. O mesmo `F3HybridCheckAnalyzer` deve receber:
+   - máscaras fixas quando tracking está OFF;
+   - as mesmas máscaras canônicas reprojetadas quando tracking está ON.
+9. A mesma `F3StateMachineAuthority` registra o resultado nos dois modos.
+10. Nenhum novo threshold, classificador, timer, worker, scheduler ou autoridade
+    de decisão é criado por esta separação.
+
+### Implementação
+
+- `display_f3_object_tracking.py` identifica quando a autoridade híbrida está
+  ativa e delega o registro diretamente à mesma state machine do caminho OFF;
+- `F3TrackedRawCheckAnalyzer` continua adaptando frame RAW + geometria móvel,
+  mas não aplica reconciliação luminosa quando a semântica é híbrida;
+- regressões garantem que a geometria móvel é entregue ao analyzer e que a
+  evidência luminosa do tracker não é chamada para reclassificar segmentos.
+
+### Consequência
+
+A diferença funcional entre os modos fica limitada a **onde estão as ROIs**:
+
+```text
+OFF = geometria fixa
+ON  = geometria rastreada
+
+ON/OFF do segmento = mesma autoridade híbrida
+CHECK OK/NG        = mesma policy/state machine
+```
+
+Assim, ativar o Rastreamento Automático não cria outro modelo de inspeção nem
+muda o critério que já funcionou com tracking desativado.
+
+**Validação física:** PENDENTE DE RETESTE COM TRACKING ON.
