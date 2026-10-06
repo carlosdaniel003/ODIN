@@ -12,6 +12,9 @@ import numpy as np
 
 import src.platform.display_f3_neural_tracking as neural_tracking
 import src.platform.display_f3_object_tracking as tracking
+from scripts.treinar_f3_tracking_neural import (
+    _orientation_selection_metrics,
+)
 
 
 class DisplayF3NeuralTrackingTests(unittest.TestCase):
@@ -145,6 +148,79 @@ class DisplayF3NeuralTrackingTests(unittest.TestCase):
         self.assertLess(neural_pos, akaze_pos)
         self.assertIn("locked_neural_filter_pose", source)
         self.assertIn("_temporal_candidate", source)
+
+    def test_training_gate_accepts_correct_filter_correspondence(self):
+        canonical = np.asarray(
+            [
+                [100.0, 90.0],
+                [540.0, 90.0],
+                [540.0, 300.0],
+                [100.0, 300.0],
+            ],
+            dtype=np.float32,
+        )
+        current = canonical + np.asarray(
+            [24.0, 17.0],
+            dtype=np.float32,
+        )
+        predictions = (
+            current
+            / np.asarray([640.0, 480.0], dtype=np.float32)
+        ).reshape(1, 8)
+        targets = predictions.copy()
+
+        metrics = _orientation_selection_metrics(
+            predictions,
+            targets,
+            canonical_anchors=canonical,
+            master_width=640,
+            master_height=480,
+        )
+
+        self.assertEqual(1, metrics["valid_sample_count"])
+        self.assertEqual(1, metrics["correct_count"])
+        self.assertEqual(0, metrics["wrong_count"])
+        self.assertEqual(1.0, metrics["accuracy"])
+        self.assertGreater(
+            metrics["min_selection_margin_px"],
+            50.0,
+        )
+
+    def test_training_gate_rejects_180_degree_correspondence(self):
+        canonical = np.asarray(
+            [
+                [100.0, 90.0],
+                [540.0, 90.0],
+                [540.0, 300.0],
+                [100.0, 300.0],
+            ],
+            dtype=np.float32,
+        )
+        current = canonical + np.asarray(
+            [24.0, 17.0],
+            dtype=np.float32,
+        )
+        target = (
+            current
+            / np.asarray([640.0, 480.0], dtype=np.float32)
+        ).reshape(1, 8)
+        wrong_prediction = (
+            np.roll(current, 2, axis=0)
+            / np.asarray([640.0, 480.0], dtype=np.float32)
+        ).reshape(1, 8)
+
+        metrics = _orientation_selection_metrics(
+            wrong_prediction,
+            target,
+            canonical_anchors=canonical,
+            master_width=640,
+            master_height=480,
+        )
+
+        self.assertEqual(1, metrics["valid_sample_count"])
+        self.assertEqual(0, metrics["correct_count"])
+        self.assertEqual(1, metrics["wrong_count"])
+        self.assertEqual(0.0, metrics["accuracy"])
 
 
 if __name__ == "__main__":
