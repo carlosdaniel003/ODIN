@@ -324,17 +324,33 @@ não substituem o contorno live.
 
 ## 5.2 Aprendizado semântico do F3
 
-O F3 possui armazenamento de aprendizado próprio em `odin_display_learning.json`.
+O F3 mantém referências ópticas e fotografias reais dos CHECKS, mas o runtime
+produtivo atual usa uma autoridade híbrida por `MASK_xxx`.
 
-Os estados disponíveis são:
+Para cada máscara ativa, duas fontes são observadas no mesmo frame/geometria:
 
-- **ACESO**;
-- **APAGADO**;
-- **POUCA LUZ**.
+- **CNN/ONNX**, que produz ON, OFF ou INCERTO com probabilidades;
+- **aprendizado físico da mesma máscara**, construído das fotografias reais dos
+  CHECKS e da referência BOARD_OFF, que produz ON, OFF ou POUCA LUZ.
 
-ACESO e APAGADO formam o par necessário para a classificação semântica normal. POUCA LUZ é opcional. Assim como no conjunto de referências do F2, cada estado suporta até **3 referências ativas**, com escopo por projeto ou global.
+`F3HybridCheckAnalyzer` é a única autoridade semântica final. Uma CNN incerta
+pode ser resolvida por evidência física local confiável da mesma máscara; duas
+fontes fortes em desacordo resultam em INCERTO. O classificador físico não roda
+como segunda autoridade paralela nem como fallback silencioso.
 
-No runtime final da branch `display`, a decisão semântica oficial das máscaras volta ao `DisplayAutomaticCheckAnalyzer`, baseado no classificador aprendido de ACESO/APAGADO e, quando disponível, POUCA LUZ. As fotografias completas dos CHECKS continuam importantes, mas possuem funções físicas, de sonda positiva e de diagnóstico; elas não substituem sozinhas toda a semântica do classificador de máscara.
+Esse contrato vale para todos os CHECKS configurados — H1, BLUE, AUX, USB e
+CHECKS adicionais criados no projeto — sem lista hardcoded de nomes.
+
+NG não é uma classe treinada. O sistema primeiro estima o estado físico do
+segmento e depois compara deterministicamente:
+
+```text
+observado == esperado → conforme
+observado != esperado → divergência
+```
+
+Treino e recalibração da CNN continuam offline; o runtime não aprende
+automaticamente com as próprias decisões.
 
 ## 5.3 Referências físicas e visuais do F3
 
