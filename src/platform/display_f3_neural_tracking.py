@@ -25,6 +25,8 @@ F3_NEURAL_TRACKING_MODEL_TYPE = "f3_display_pose_regressor"
 F3_NEURAL_TRACKING_INPUT_WIDTH = 192
 F3_NEURAL_TRACKING_INPUT_HEIGHT = 108
 F3_NEURAL_TRACKING_MODEL_REFRESH_S = 1.0
+F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED = -0.35
+F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED = 1.35
 
 
 def _slug(value: str) -> str:
@@ -371,11 +373,29 @@ class F3NeuralPoseDetector:
             }
 
         normalized = output.reshape(4, 2)
-        # A rede exportada já usa sigmoid, mas este guard impede que um artefato
-        # incompatível projete pontos absurdos.
+        # O contorno físico pode tocar/sair levemente do frame quando a placa
+        # muda de pose. O modelo D-067 é treinado explicitamente para essa faixa
+        # estendida; ainda rejeitamos qualquer artefato que projete pontos
+        # absurdamente distantes da imagem.
+        try:
+            output_min = float(
+                self._metadata.get(
+                    "output_min_normalized",
+                    F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED,
+                )
+            )
+            output_max = float(
+                self._metadata.get(
+                    "output_max_normalized",
+                    F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED,
+                )
+            )
+        except (TypeError, ValueError):
+            output_min = F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED
+            output_max = F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED
         if (
-            float(np.min(normalized)) < -0.05
-            or float(np.max(normalized)) > 1.05
+            float(np.min(normalized)) < output_min - 0.02
+            or float(np.max(normalized)) > output_max + 0.02
         ):
             return {
                 **status,
