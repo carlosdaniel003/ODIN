@@ -37,6 +37,8 @@ from src.platform.display_f3_neural_tracking import (
     F3_NEURAL_TRACKING_INPUT_HEIGHT,
     F3_NEURAL_TRACKING_INPUT_WIDTH,
     F3_NEURAL_TRACKING_MODEL_TYPE,
+    F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED,
+    F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED,
     F3_NEURAL_TRACKING_SCHEMA_VERSION,
     canonical_pose_anchor_digest,
     canonical_pose_anchors,
@@ -132,18 +134,49 @@ def _reference_rows(
 
     rows: list[dict] = []
     invalid: list[str] = []
+    diagnostics: list[dict] = []
     for key, spec in tracker.reference_specs.items():
         if not isinstance(spec, dict):
             continue
+        ref_key = str(key)
         path = Path(str(spec.get("path") or ""))
         image = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if (
-            image is None
-            or getattr(image, "size", 0) == 0
-            or image.shape[:2] != (tracker.height, tracker.width)
-        ):
-            invalid.append(str(key))
+        diagnostic = {
+            "key": ref_key,
+            "path": str(path),
+            "status": "invalid",
+            "reason": "",
+        }
+        if image is None or getattr(image, "size", 0) == 0:
+            invalid.append(ref_key)
+            diagnostic["reason"] = "image_missing_or_unreadable"
+            diagnostics.append(diagnostic)
             continue
+
+        source_height, source_width = image.shape[:2]
+        diagnostic["source_resolution"] = {
+            "width": int(source_width),
+            "height": int(source_height),
+        }
+
+        # Referências atuais já são salvas na resolução mestre. Este resize
+        # preserva compatibilidade com arquivos antigos sem transformar a
+        # geometria: board/masks/reference_to_canonical já vivem no espaço
+        # mestre do Projeto Display.
+        if image.shape[:2] != (tracker.height, tracker.width):
+            image = cv2.resize(
+                image,
+                (int(tracker.width), int(tracker.height)),
+                interpolation=(
+                    cv2.INTER_AREA
+                    if source_width > tracker.width
+                    or source_height > tracker.height
+                    else cv2.INTER_LINEAR
+                ),
+            )
+            diagnostic["normalized_to_master_resolution"] = True
+        else:
+            diagnostic["normalized_to_master_resolution"] = False
 
         try:
             reference_to_canonical = np.asarray(
@@ -158,7 +191,42 @@ def _reference_rows(
                 canonical_to_reference,
             )
         except Exception:
-            invalid.append(str(key))
+            invalid.append(ref_key)
+            diagnostic["reason"] = "reference_transform_invalid"
+            diagnostics.append(diagnostic)
+            continue
+
+        normalized_anchors = reference_anchors / np.asarray(
+            [float(tracker.width), float(tracker.height)],
+            dtype=np.float32,
+        )
+        diagnostic["normalized_anchor_min"] = round(
+            float(np.min(normalized_anchors)),
+            6,
+        )
+        diagnostic["normalized_anchor_max"] = round(
+            float(np.max(normalized_anchors)),
+            6,
+        )
+        diagnostic["reference_anchors"] = np.round(
+            reference_anchors,
+            3,
+        ).tolist()
+
+        if not np.all(np.isfinite(normalized_anchors)):
+            invalid.append(ref_key)
+            diagnostic["reason"] = "reference_anchors_non_finite"
+            diagnostics.append(diagnostic)
+            continue
+        if (
+            float(np.min(normalized_anchors))
+            < F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED
+            or float(np.max(normalized_anchors))
+            > F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED
+        ):
+            invalid.append(ref_key)
+            diagnostic["reason"] = "reference_anchors_too_far_outside_frame"
+            diagnostics.append(diagnostic)
             continue
 
         small = cv2.resize(
@@ -169,27 +237,20 @@ def _reference_rows(
             ),
             interpolation=cv2.INTER_AREA,
         )
-        scale = np.asarray(
+        small_anchors = normalized_anchors * np.asarray(
             [
-                F3_NEURAL_TRACKING_INPUT_WIDTH / float(tracker.width),
-                F3_NEURAL_TRACKING_INPUT_HEIGHT / float(tracker.height),
+                float(F3_NEURAL_TRACKING_INPUT_WIDTH),
+                float(F3_NEURAL_TRACKING_INPUT_HEIGHT),
             ],
             dtype=np.float32,
         )
-        small_anchors = reference_anchors * scale
-        if (
-            not np.all(np.isfinite(small_anchors))
-            or np.min(small_anchors[:, 0]) < 0
-            or np.max(small_anchors[:, 0]) >= F3_NEURAL_TRACKING_INPUT_WIDTH
-            or np.min(small_anchors[:, 1]) < 0
-            or np.max(small_anchors[:, 1]) >= F3_NEURAL_TRACKING_INPUT_HEIGHT
-        ):
-            invalid.append(str(key))
-            continue
 
+        diagnostic["status"] = "accepted"
+        diagnostic["reason"] = "reference_ready"
+        diagnostics.append(diagnostic)
         rows.append(
             {
-                "key": str(key),
+                "key": ref_key,
                 "source_type": str(spec.get("source_type") or ""),
                 "check_id": str(spec.get("check_id") or ""),
                 "path": str(path),
@@ -243,6 +304,11 @@ def _reference_rows(
         "validation_key": validation_key,
         "training_keys": [row["key"] for row in train_rows],
         "invalid_reference_keys": invalid,
+        "reference_diagnostics": diagnostics,
+        "accepted_output_range_normalized": [
+            F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED,
+            F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED,
+        ],
     }
     return report, rows
 
@@ -294,12 +360,18 @@ def _augment(
     matrix[1, 2] += rng.uniform(-height * ty_limit, height * ty_limit)
 
     moved_anchors = _transform_points(anchors, matrix)
-    # Evita ensinar poses parcialmente fora do campo de visão.
+    # O contorno pode ficar parcialmente fora do frame; isso é válido e é
+    # justamente um caso que o tracking precisa extrapolar. Só descartamos a
+    # augmentation quando ela sai da faixa explicitamente suportada pelo modelo.
+    min_x = F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED * width
+    max_x = F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED * width
+    min_y = F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED * height
+    max_y = F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED * height
     if (
-        np.min(moved_anchors[:, 0]) < 1.0
-        or np.max(moved_anchors[:, 0]) > width - 2.0
-        or np.min(moved_anchors[:, 1]) < 1.0
-        or np.max(moved_anchors[:, 1]) > height - 2.0
+        np.min(moved_anchors[:, 0]) < min_x
+        or np.max(moved_anchors[:, 0]) > max_x
+        or np.min(moved_anchors[:, 1]) < min_y
+        or np.max(moved_anchors[:, 1]) > max_y
     ):
         matrix = np.asarray(
             [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -348,11 +420,22 @@ def _build_model(nn):
                 nn.ReLU(inplace=True),
                 nn.Dropout(p=0.10),
                 nn.Linear(256, 8),
-                nn.Sigmoid(),
+                nn.Tanh(),
             )
 
         def forward(self, x):
-            return self.head(self.features(x))
+            normalized = self.head(self.features(x))
+            # [-1, +1] -> [-0.35, +1.35]. Isso permite representar o mesmo
+            # canto físico quando ele fica pouco além da borda da câmera.
+            half_range = (
+                F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED
+                - F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED
+            ) / 2.0
+            center = (
+                F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED
+                + F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED
+            ) / 2.0
+            return normalized * half_range + center
 
     return TinyF3PoseCNN()
 
@@ -705,6 +788,12 @@ def main() -> int:
             "input_width": F3_NEURAL_TRACKING_INPUT_WIDTH,
             "input_height": F3_NEURAL_TRACKING_INPUT_HEIGHT,
             "output": "four_ordered_canonical_anchors_in_current_frame",
+            "output_min_normalized": (
+                F3_NEURAL_TRACKING_OUTPUT_MIN_NORMALIZED
+            ),
+            "output_max_normalized": (
+                F3_NEURAL_TRACKING_OUTPUT_MAX_NORMALIZED
+            ),
             "canonical_anchor_digest": str(
                 report["canonical_anchor_digest"]
             ),
