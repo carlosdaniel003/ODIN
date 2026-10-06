@@ -813,6 +813,42 @@ existe LOCK/frescor geométrico suficiente para saber onde as ROIs estão. O
 processamento usa o mesmo job de tracking no `F3HeavyVisionExecutor`, sem criar
 outro loop ou worker.
 
+### 5.16.1 Aquisição neural de pose
+
+Quando existe um modelo local de pose validado para o Projeto Display, a primeira
+aquisição não começa mais pagando ORB/AKAZE em Full HD. O caminho rápido é:
+
+```text
+frame RAW
+  -> Tiny CNN local (192x108)
+  -> quatro âncoras aproximadas do contorno canônico
+  -> detector estrutural do filtro preto
+  -> CNN escolhe somente a correspondência/orientação do quadrilátero
+  -> pose CURRENT -> CANÔNICO
+  -> refino luminoso já existente
+  -> máscaras reprojetadas
+  -> F3HybridCheckAnalyzer
+```
+
+A saída bruta da CNN **não vira LOCK diretamente**. O retângulo/filtro detectado
+no frame fornece a geometria final; o prior neural apenas remove a ambiguidade de
+orientação/correspondência. Isso impede que a rede de tracking invente geometria
+sem suporte óptico estrutural.
+
+Se o ONNX de pose estiver ausente, incompatível ou não validado, o runtime cai
+automaticamente para ORB -> fluxo temporal -> AKAZE -> template, preservando o
+tracking anterior.
+
+O treino é offline e usa somente as fotos + contornos já configurados no F3:
+
+```bash
+python scripts/treinar_f3_tracking_neural.py --preflight
+python scripts/treinar_f3_tracking_neural.py
+```
+
+O artefato local fica em `data/models/f3_tracking/` (ou junto à configuração
+do JIG fora do layout do repositório) e é consumido em produção pelo OpenCV DNN.
+
 
 ---
 
