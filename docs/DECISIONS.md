@@ -4301,10 +4301,34 @@ rápidos falham.
 
 ### Validação exigida
 
+O primeiro treino real do projeto `CM_500_L` mostrou que o regressor aprendeu
+a pose, mas não atingiu os thresholds antigos de regressão absoluta:
+
+- H1 original: mean = 49.19 px;
+- H1 aumentado: mean = 62.02 px;
+- H1 aumentado: p95 = 133.99 px.
+
+Esses thresholds eram incompatíveis com o papel definido nesta própria decisão:
+a CNN **não fornece a pose final**. O filtro estrutural fornece o quadrilátero
+real e a CNN escolhe somente sua correspondência/orientação.
+
+Portanto, o gate de promoção foi corrigido sem simplesmente relaxar erro de
+pixels:
+
+1. o H1 original, mantido totalmente fora do treino, precisa selecionar a
+   correspondência correta;
+2. 100% das augmentations de H1 precisam selecionar a correspondência correta;
+3. o p05 da margem entre a hipótese vencedora e a segunda melhor precisa ser no
+   mínimo 3% da diagonal da resolução mestre;
+4. erro absoluto mean/p95 permanece como telemetria;
+5. a pose neural continua sem poder virar LOCK sem quadrilátero estrutural
+   detectado no frame.
+
 Antes de considerar D-067 fisicamente validada:
 
 - executar `--preflight`;
-- treinar e promover o ONNX somente se os thresholds de validação passarem;
+- treinar e promover o ONNX somente se o gate de
+  correspondência/orientação passar;
 - medir `worker_elapsed_ms` e `worker_age_ms`;
 - confirmar LOCK inicial rápido em H1;
 - deslocar/rotacionar levemente a placa e confirmar reacquisition;
