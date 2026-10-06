@@ -6551,3 +6551,59 @@ Primeiro lote de validação da autoridade híbrida:
 
 Somente após esse lote deve-se declarar D-065 validada fisicamente.
 
+---
+
+## 06/10/2026 — D-065 autoridade híbrida aprovada no reteste físico H1
+
+**Resultado:** PASS FÍSICO DO H1 COM A AUTORIDADE HÍBRIDA.
+
+Após a implementação de D-065, o usuário executou o reteste físico solicitado
+com a nova versão e confirmou que o comportamento ficou correto.
+
+O objetivo específico deste lote era validar que o H1 fisicamente correto
+voltasse a avançar sem nova recalibração global da CNN, permitindo que a
+evidência física confiável da mesma máscara resolvesse uma eventual incerteza
+neural dentro da autoridade híbrida.
+
+Resultado confirmado pelo usuário:
+
+```text
+H1 correto com autoridade híbrida        PASS
+nova recalibração global necessária      NÃO
+fluxo produtivo voltou a funcionar       SIM
+comportamento observado                  CORRETO
+```
+
+Este PASS confirma fisicamente o primeiro ponto crítico da D-065: uma máscara
+que esteja correta no JIG não precisa permanecer bloqueada apenas porque a CNN
+isolada caiu na faixa INCERTO, desde que exista evidência física local forte da
+mesma `MASK_xxx`.
+
+A arquitetura continua obedecendo às proteções definidas em D-065:
+
+- CNN e same-mask continuam sendo fontes internas da mesma autoridade;
+- conflito forte continua resultando em `INCERTO`;
+- não foi criado threshold manual novo;
+- não foi executada a recalibração dos cinco DEBUGs H1 anteriormente proposta;
+- não existe auto-treinamento em produção;
+- `semantic_certain` continua sendo a certeza produtiva final;
+- `neural_certain` permanece como telemetria da CNN bruta.
+
+### Estado da validação D-065 após este reteste
+
+```text
+H1 híbrido implementado                  SIM
+H1 híbrido retestado fisicamente         PASS
+H1 bloqueado pela MASK_017               RESOLVIDO
+recalibração adicional do H1             NÃO
+BLUE híbrido implementado                SIM
+AUX híbrido implementado                 SIM
+USB híbrido implementado                 SIM
+CHECKS futuros no escopo híbrido         SIM
+```
+
+Este registro encerra o problema físico que motivou a mudança de arquitetura no
+H1. A validação completa dos demais cenários de D-065 continua sendo registrada
+separadamente conforme forem executados no JIG, especialmente BLUE intermitente
+correto e BLUE NG com `MASK_024` apagada.
+
