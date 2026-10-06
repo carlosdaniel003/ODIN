@@ -4788,3 +4788,193 @@ No próximo H1 real:
 - confirmar H1 correto com a mesma decisão semântica validada em tracking OFF.
 
 **Estado físico:** PENDENTE.
+
+
+---
+
+## D-071 — Homografia produtiva exige cantos físicos perspectivados
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Contexto
+
+O primeiro reteste físico após D-070 confirmou simultaneamente duas coisas:
+
+1. a infraestrutura projectiva 3x3 chegou corretamente ao runtime e às 28
+   máscaras;
+2. a geometria ainda permanecia fisicamente desalinhada dos segmentos.
+
+No H1 real:
+
+```text
+projective_pose_ready=true
+projective_reprojection_mean_px=0.0
+projective_reprojection_max_px=0.0
+
+selected_snap_error_px=120.663
+max_snap_error_px=180.0
+confidence=0.3296
+
+spatial_alignment_ready=false
+mask_geometry_space=canonical_projective
+```
+
+O diagnóstico D-025 do mesmo frame mediu:
+
+```text
+mean_error_px=47.11
+p95_error_px=289.17
+ecc=0.1249
+```
+
+E o tracking luminoso não encontrou suporte espacial válido:
+
+```text
+expected_on_count=7
+validated_count=0
+local_luminous_landmark_count=0
+matched_count=0
+```
+
+### Causa
+
+A homografia estava matematicamente correta para os pontos recebidos, mas esses
+pontos não representavam os quatro cantos perspectivados reais do filtro.
+
+O detector estrutural fazia:
+
+```text
+contorno escuro
+-> cv2.minAreaRect(contour)
+-> cv2.boxPoints(rect)
+-> 4 pontos
+-> homografia
+```
+
+`minAreaRect` gera o menor retângulo rotacionado que contém o contorno.
+Consequentemente, um trapézio físico produzido pela perspectiva da câmera era
+retangularizado antes da homografia.
+
+Além disso, a própria primitiva `_quad_from_points()` aplicava novamente
+`minAreaRect` mesmo quando já recebia quatro cantos reais.
+
+Assim, reprojeção projectiva igual a zero respondia apenas:
+
+> os quatro pontos artificiais escolhidos podem ser mapeados exatamente para os
+> quatro pontos canônicos.
+
+Ela não provava que esses pontos coincidiam com o filtro físico real.
+
+### Decisão
+
+A fonte produtiva dos quatro cantos passa a preservar perspectiva real:
+
+```text
+frame RAW
+  -> região escura candidata
+  -> contorno físico
+  -> convexHull
+  -> approxPolyDP
+  -> quadrilátero convexo real
+  -> ordenar quatro cantos sem retangularizar
+  -> CNN seleciona correspondência/orientação
+  -> getPerspectiveTransform(CURRENT -> CANÔNICO)
+  -> homografia 3x3
+  -> inverse(H)
+  -> placa + 28 máscaras
+```
+
+A CNN continua sendo somente prior de correspondência. Os quatro cantos do
+contorno físico são a geometria utilizada pela homografia.
+
+### Papel de minAreaRect
+
+`minAreaRect` permanece permitido para:
+- estimar tamanho/área do candidato;
+- aspect ratio;
+- rectangularidade;
+- ranking estrutural;
+- fallback affine quando não há quadrilátero físico confiável.
+
+Ele não pode fornecer os quatro cantos de uma homografia 3x3 produtiva.
+
+Quando a extração física falhar:
+
+```text
+filter_corner_source=min_area_rect_fallback
+projective_pose_ready=false
+```
+
+O fallback pode sustentar uma pose estrutural affine compatível com o caminho
+histórico, mas o sistema continua fail-closed para alinhamento fino.
+
+### Primitivas
+
+`_ordered_projective_quad()`:
+- exige exatamente quatro pontos;
+- preserva as coordenadas reais;
+- apenas normaliza ordem/orientação;
+- rejeita quadrilátero degenerado ou não convexo.
+
+`_perspective_quad_from_contour()`:
+- usa `convexHull` para estabilizar pequenas concavidades locais;
+- usa `approxPolyDP` para extrair quatro vértices físicos;
+- reutiliza o contrato geométrico existente de cobertura/retangularidade;
+- não cria threshold semântico.
+
+`_quad_from_points()`:
+- quatro cantos válidos permanecem quatro cantos reais;
+- somente entradas que não representam um quadrilátero explícito podem recorrer
+  ao retângulo orientado.
+
+### Telemetria
+
+O prior neural passa a expor:
+
+- `filter_corner_source`;
+- `filter_points`;
+- `neural_anchor_points`;
+- `filter_corner_errors_to_neural_px`;
+- `filter_corner_error_mean_px`;
+- `filter_corner_error_max_px`;
+- `projective_pose_ready`.
+
+Isso permite diferenciar:
+- CNN imprecisa;
+- filtro físico mal extraído;
+- correspondência errada;
+- homografia válida sobre pontos errados.
+
+### Invariantes
+
+1. D-065 permanece: Hybrid é a única autoridade semântica.
+2. D-066 permanece: tracking decide somente geometria.
+3. D-069 permanece: emissão não prova centralização.
+4. D-070 permanece: homografia é preservada até placa + 28 máscaras.
+5. `minAreaRect` não recebe autoridade projectiva.
+6. CNN não decide ON/OFF nem CHECK.
+7. Nenhum threshold semântico foi alterado.
+8. Nenhum novo worker, timer, scheduler ou fila.
+9. Nenhum retreinamento da CNN é necessário.
+10. Falta de quadrilátero físico confiável permanece fail-closed.
+
+### Regressões
+
+Foram adicionadas provas automatizadas de que:
+- um trapézio explícito não é convertido em retângulo;
+- um filtro escuro trapezoidal sintético produz
+  `filter_corner_source=contour_quad`;
+- fallback `min_area_rect_fallback` não publica homografia;
+- o DEBUG expõe pontos físicos, anchors neurais e erros por canto.
+
+### Validação física exigida
+
+No próximo H1 real com tracking ON:
+- `filter_corner_source=contour_quad`;
+- `projective_pose_ready=true`;
+- `filter_points` deve acompanhar os quatro cantos físicos do filtro;
+- as 28 máscaras devem se centralizar nos segmentos;
+- somente então `spatial_alignment_ready=true`;
+- a decisão H1 continua pertencendo ao Hybrid já validado com tracking OFF.
+
+**Estado físico:** PENDENTE DE RETESTE.
