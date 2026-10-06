@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 import src.platform.display_f3_object_tracking as tracking
+import src.platform.display_f3_contour_check_identity as contour_identity
 import src.platform.display_f3_tracking_orientation_ui as tracking_ui
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
 import src.platform.display_f3_power_authority_v2 as power_v2
@@ -907,6 +908,86 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("_display_f3_power_authority_status", source)
         self.assertIn("tracking_h1_power_guard", source)
         self.assertIn("tracking_h1_cycle_guard", source)
+        self.assertIn("_hybrid_semantic_authority_active(self)", source)
+        self.assertIn("and not tracking_owns_only_geometry", source)
+
+        final_source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("_hybrid_semantic_authority_active(app)", final_source)
+        self.assertIn("return previous_register(aprovado)", final_source)
+
+    def test_tracking_hibrido_entrega_geometria_sem_reclassificar_segmentos(self):
+        repository = SimpleNamespace()
+        app = SimpleNamespace(_display_f3_check_geometry_refinement=None)
+        analyzer = contour_identity.F3TrackedRawCheckAnalyzer(repository, app)
+
+        class _HybridSemantic:
+            def __init__(self):
+                self.kwargs = None
+
+            def analyze(self, **kwargs):
+                self.kwargs = kwargs
+                return {
+                    "ready": True,
+                    "approved": True,
+                    "hybrid_visual_authority": True,
+                    "neural_visual_authority": True,
+                    "semantic_authority": "f3_hybrid_same_mask_neural_authority",
+                    "mask_results": [
+                        {
+                            "mask_id": "MASK_001",
+                            "expected": "on",
+                            "classified": "on",
+                            "matched": True,
+                        }
+                    ],
+                }
+
+        semantic = _HybridSemantic()
+        analyzer.semantic = semantic
+        raw = np.zeros((32, 48, 3), dtype=np.uint8)
+        geometry = {
+            "locked": True,
+            "reference": "check:CHECK_001",
+            "geometry_space": "tracking_live",
+            "resolution": (48, 32),
+            "masks": [
+                {
+                    "id": "MASK_001",
+                    "type": "circle",
+                    "cx": 20,
+                    "cy": 16,
+                    "radius": 5,
+                }
+            ],
+            "luminous_core_validated_mask_ids": ["MASK_001"],
+        }
+
+        with patch.object(
+            contour_identity,
+            "_apply_luminous_core_mask_evidence",
+        ) as reconcile:
+            result = analyzer.analyze_tracking_snapshot(
+                analysis_frame=raw,
+                raw_frame=raw,
+                tracking_geometry=geometry,
+                project_name="DISPLAY A",
+                check_id="CHECK_001",
+                visual_rotation=0,
+            )
+
+        reconcile.assert_not_called()
+        self.assertIs(raw, semantic.kwargs["frame"])
+        self.assertEqual(
+            geometry["masks"],
+            semantic.kwargs["mask_geometry_override"],
+        )
+        self.assertEqual(
+            "hybrid_semantic_authority",
+            result["luminous_core_reconciliation_reason"],
+        )
+        self.assertEqual("on", result["mask_results"][0]["classified"])
 
     def test_edge_template_fallback_recovers_board_translation(self):
         with tempfile.TemporaryDirectory() as directory:
