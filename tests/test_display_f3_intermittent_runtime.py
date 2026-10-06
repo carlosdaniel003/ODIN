@@ -45,10 +45,13 @@ def _analysis(
     if neural:
         analysis.update(
             neural_visual_authority=True,
-            neural_check_scope="first_two_checks_n2",
+            hybrid_visual_authority=True,
+            neural_check_scope="all_configured_checks_hybrid_v1",
+            hybrid_check_scope="all_configured_checks_hybrid_v1",
         )
         for item in rows:
             item["neural_certain"] = True
+            item["semantic_certain"] = True
     if physical_support:
         analysis.update(
             intermittent_power_support_confirmed_mask_ids=tuple(
@@ -305,6 +308,7 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
             raw_matched=None,
             confidence=0.55,
             neural_certain=False,
+            semantic_certain=False,
         )
 
         state = None
@@ -318,6 +322,35 @@ class DisplayF3IntermittentRuntimeTests(unittest.TestCase):
         self.assertEqual(0, state["failure_counts"].get("MASK_024", 0))
         self.assertNotIn("MASK_024", state["candidate_failed_ids"])
         self.assertNotIn("MASK_024", state["persistent_failed_ids"])
+
+    def test_blue_hibrido_fisico_pode_resolver_cnn_incerta_e_acumular_ng(self):
+        runtime = self._runtime()
+        analysis = _analysis(neural=True)
+        mask_024 = next(
+            item
+            for item in analysis["mask_results"]
+            if item["mask_id"] == "MASK_024"
+        )
+        mask_024.update(
+            classified="off",
+            matched=False,
+            raw_matched=False,
+            confidence=0.98,
+            neural_certain=False,
+            semantic_certain=True,
+            hybrid_resolution="physical_resolved_neural_uncertain",
+        )
+
+        state = None
+        for _ in range(3):
+            state = runtime._display_auto_observe_intermittent_phase(
+                {"intermittent": True},
+                analysis,
+            )
+
+        self.assertEqual("on", state["phase"])
+        self.assertEqual(3, state["failure_counts"]["MASK_024"])
+        self.assertIn("MASK_024", state["persistent_failed_ids"])
 
     def test_defeito_real_sem_suporte_fisico_continua_persistente(self):
         runtime = self._runtime()
