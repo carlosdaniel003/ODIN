@@ -101,6 +101,7 @@ jobs:
             tests/test_display_f3_runtime_authorities.py \
             tests/test_display_f3_object_tracking_isolation.py \
             tests/test_display_f3_neural_tracking.py \
+            tests/test_display_f3_pipeline_latency.py \
             tests/test_display_f3_h1_registration.py \
             tests/test_display_f3_status_layout_fix.py \
             tests/test_display_f3_tracking_ui_contract.py \
@@ -110,6 +111,12 @@ jobs:
         run: |
           python -m unittest \
             tests.test_display_f3_neural_tracking \
+            -v
+
+      - name: Run F3 pipeline latency tests
+        run: |
+          python -m unittest \
+            tests.test_display_f3_pipeline_latency \
             -v
 
       - name: Run D-025 homography H1 experiment tests
