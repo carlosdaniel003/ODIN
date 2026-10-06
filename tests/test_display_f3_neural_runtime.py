@@ -23,6 +23,7 @@ from src.platform.display_f3_neural_dataset import (
     f3_neural_model_path_for_repository,
 )
 from src.platform.display_f3_neural_runtime import (
+    F3HybridCheckAnalyzer,
     F3NeuralCheckAnalyzer,
     F3NeuralSegmentDetector,
 )
@@ -30,6 +31,7 @@ from src.platform.display_f3_runtime_authorities import (
     F3CheckAnalyzerAuthority,
 )
 from src.platform.display_f3_same_mask_reference_fix import (
+    F3_SAME_MASK_REFERENCE_SOURCE,
     F3SameMaskReferenceAnalyzer,
 )
 from src.platform.display_project_repository import (
@@ -111,6 +113,32 @@ def _ready_model_status():
         "on_min_on_probability": 0.80,
         "off_max_on_probability": 0.20,
         "load_count": 1,
+    }
+
+
+def _physical_analysis(states, *, confidence: float = 0.98):
+    rows = []
+    for index, state in enumerate(states, start=1):
+        rows.append(
+            {
+                "mask_id": f"MASK_{index:03d}",
+                "classified": state,
+                "confidence": confidence,
+                "reference_source": F3_SAME_MASK_REFERENCE_SOURCE,
+                "reference_separation": 0.95,
+                "distances": {
+                    "on": 5.0 if state == "on" else 900.0,
+                    "off": 900.0 if state == "on" else 5.0,
+                },
+            }
+        )
+    return {
+        "ready": True,
+        "approved": True,
+        "reason": "physical_test_ready",
+        "mask_results": rows,
+        "matched_mask_count": len(rows),
+        "active_mask_count": len(rows),
     }
 
 
@@ -533,7 +561,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             )
             loader.assert_not_called()
 
-    def test_first_check_uses_neural_batch_as_only_visual_authority(self):
+    def test_first_check_uses_hybrid_authority_with_neural_when_physical_unavailable(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, h1, _blue = _repository(
                 Path(temp)
@@ -562,6 +590,8 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertEqual(2, result["matched_mask_count"])
             self.assertEqual(0, result["uncertain_mask_count"])
             self.assertTrue(result["neural_visual_authority"])
+            self.assertTrue(result["hybrid_visual_authority"])
+            self.assertFalse(result["physical_same_mask_evidence_ready"])
             self.assertFalse(
                 result["conventional_visual_authority_used"]
             )
@@ -712,30 +742,24 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertTrue(result["neural_visual_authority"])
             conventional.assert_not_called()
 
-    def test_blue_uses_neural_batch_as_only_visual_authority(self):
+    def test_blue_uses_neural_and_same_mask_inside_one_hybrid_authority(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, _h1, blue = _repository(
                 Path(temp)
             )
-            analyzer = F3NeuralCheckAnalyzer(
-                repository
-            )
+            analyzer = F3HybridCheckAnalyzer(repository)
             analyzer.neural_detector.prepare = Mock(
                 return_value=_ready_model_status()
             )
             analyzer.neural_detector.predict = Mock(
-                return_value=_inference(
-                    ["off", "on"]
-                )
+                return_value=_inference(["off", "on"])
             )
 
             with patch.object(
                 F3SameMaskReferenceAnalyzer,
                 "analyze",
-                side_effect=AssertionError(
-                    "BLUE neural must not call conventional analyzer"
-                ),
-            ) as conventional:
+                return_value=_physical_analysis(["off", "on"]),
+            ) as physical:
                 result = analyzer.analyze(
                     _frame(),
                     "DISPLAY A",
@@ -744,45 +768,158 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
 
             self.assertTrue(result["ready"])
             self.assertTrue(result["approved"])
-            self.assertTrue(result["neural_visual_authority"])
+            self.assertTrue(result["hybrid_visual_authority"])
+            self.assertTrue(result["physical_same_mask_evidence_ready"])
+            self.assertEqual(2, result["physical_same_mask_authoritative_count"])
             self.assertEqual(1, result["neural_check_index"])
-            self.assertEqual("N2", result["neural_stage"])
+            self.assertEqual("HYBRID_ALL_CHECKS_V1", result["neural_stage"])
             self.assertEqual(
-                neural_module.F3_NEURAL_CHECK_SCOPE,
-                result["neural_check_scope"],
+                neural_module.F3_HYBRID_CHECK_SCOPE,
+                result["hybrid_check_scope"],
             )
-            self.assertFalse(
-                result["conventional_visual_authority_used"]
-            )
-            conventional.assert_not_called()
+            self.assertFalse(result["conventional_visual_authority_used"])
+            physical.assert_called_once()
 
-    def test_usb_still_delegates_to_conventional_analyzer(self):
+    def test_usb_and_aux_are_also_hybrid_without_hardcoded_migration_limit(self):
         with tempfile.TemporaryDirectory() as temp:
-            repository, _h1, _blue = _repository(
-                Path(temp)
+            repository, _h1, _blue = _repository(Path(temp))
+            checks = repository.listar_checks("DISPLAY A")
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
             )
-            usb = repository.listar_checks("DISPLAY A")[2]
-            analyzer = F3NeuralCheckAnalyzer(
-                repository
+
+            for expected_index, check in enumerate(checks[2:], start=2):
+                states = check.get("mask_states", {})
+                expected_states = [
+                    str(states.get("MASK_001") or "off"),
+                    str(states.get("MASK_002") or "off"),
+                ]
+                analyzer.neural_detector.predict = Mock(
+                    return_value=_inference(expected_states)
+                )
+                with patch.object(
+                    F3SameMaskReferenceAnalyzer,
+                    "analyze",
+                    return_value=_physical_analysis(expected_states),
+                ):
+                    result = analyzer.analyze(
+                        _frame(),
+                        "DISPLAY A",
+                        check["id"],
+                    )
+
+                self.assertTrue(result["hybrid_visual_authority"])
+                self.assertEqual(expected_index, result["neural_check_index"])
+                self.assertEqual(
+                    neural_module.F3_HYBRID_CHECK_SCOPE,
+                    result["hybrid_check_scope"],
+                )
+
+    def test_future_check_enters_hybrid_scope_automatically(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, _blue = _repository(Path(temp))
+            new_id = repository.adicionar_check("DISPLAY A", "NOVO")
+            self.assertIsNotNone(new_id)
+            self.assertTrue(
+                repository.salvar_estados_check(
+                    "DISPLAY A",
+                    new_id,
+                    {"MASK_001": "on", "MASK_002": "off"},
+                )
             )
-            expected = {
-                "ready": True,
-                "approved": True,
-                "source": "conventional-usb",
-            }
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["on", "off"])
+            )
             with patch.object(
                 F3SameMaskReferenceAnalyzer,
                 "analyze",
-                return_value=expected,
-            ) as conventional:
+                return_value=_physical_analysis(["on", "off"]),
+            ):
                 result = analyzer.analyze(
                     _frame(),
                     "DISPLAY A",
-                    usb["id"],
+                    new_id,
                 )
 
-            self.assertIs(expected, result)
-            conventional.assert_called_once()
+            self.assertTrue(result["approved"])
+            self.assertEqual(4, result["neural_check_index"])
+            self.assertEqual(
+                "all_configured_checks_hybrid_v1",
+                result["hybrid_check_scope"],
+            )
+
+    def test_same_mask_resolves_neural_uncertain_without_retraining(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["uncertain", "off"])
+            )
+            with patch.object(
+                F3SameMaskReferenceAnalyzer,
+                "analyze",
+                return_value=_physical_analysis(["on", "off"]),
+            ):
+                result = analyzer.analyze(
+                    _frame(),
+                    "DISPLAY A",
+                    h1["id"],
+                )
+
+            by_id = {
+                item["mask_id"]: item
+                for item in result["mask_results"]
+            }
+            resolved = by_id["MASK_001"]
+            self.assertFalse(resolved["neural_certain"])
+            self.assertTrue(resolved["semantic_certain"])
+            self.assertEqual("on", resolved["classified"])
+            self.assertTrue(resolved["matched"])
+            self.assertEqual(
+                "physical_resolved_neural_uncertain",
+                resolved["hybrid_resolution"],
+            )
+            self.assertTrue(result["approved"])
+            self.assertEqual(0, result["uncertain_mask_count"])
+
+    def test_strong_neural_physical_conflict_becomes_uncertain_not_ok_or_ng(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["on", "off"])
+            )
+            with patch.object(
+                F3SameMaskReferenceAnalyzer,
+                "analyze",
+                return_value=_physical_analysis(["off", "off"]),
+            ):
+                result = analyzer.analyze(
+                    _frame(),
+                    "DISPLAY A",
+                    h1["id"],
+                )
+
+            conflict = result["mask_results"][0]
+            self.assertEqual("uncertain", conflict["classified"])
+            self.assertFalse(conflict["semantic_certain"])
+            self.assertIsNone(conflict["matched"])
+            self.assertEqual(
+                "strong_source_conflict",
+                conflict["hybrid_resolution"],
+            )
+            self.assertFalse(result["approved"])
 
     def test_neural_h1_divergence_can_emit_ng_but_uncertain_cannot(self):
         divergent = {
@@ -815,7 +952,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         )
         self.assertEqual("ng", decision["decision"])
         self.assertEqual(
-            "h1_neural_divergencia_confirmada",
+            "h1_hibrido_divergencia_confirmada",
             decision["reason"],
         )
         self.assertEqual(
@@ -846,7 +983,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             decision["decision"],
         )
         self.assertEqual(
-            "classificacao_neural_incerta",
+            "classificacao_hibrida_incerta",
             decision["reason"],
         )
 
@@ -881,7 +1018,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         )
         self.assertEqual("ng", decision["decision"])
         self.assertEqual(
-            "check_neural_divergencia_confirmada",
+            "check_hibrido_divergencia_confirmada",
             decision["reason"],
         )
         self.assertEqual(
@@ -909,7 +1046,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         )
         self.assertEqual("searching", decision["decision"])
         self.assertEqual(
-            "classificacao_neural_incerta",
+            "classificacao_hibrida_incerta",
             decision["reason"],
         )
 
@@ -925,7 +1062,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
 
             self.assertIsInstance(
                 owner.analyzer.semantic,
-                F3NeuralCheckAnalyzer,
+                F3HybridCheckAnalyzer,
             )
 
     def test_exact_probe_is_observer_only_for_migrated_blue(self):
@@ -962,7 +1099,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         self.assertFalse(result["advanced"])
         self.assertTrue(result["observer_only"])
         self.assertEqual(
-            "neural_check_owns_check_decision",
+            "hybrid_check_owns_check_decision",
             result["reason"],
         )
 
@@ -996,7 +1133,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             DesktopProductionApp.__init__
         )
         neural_position = source.index(
-            "instalar_autoridade_neural_h1_blue_display_f3()"
+            "instalar_autoridade_hibrida_display_f3()"
         )
         photo_position = source.index(
             "instalar_aprendizado_foto_check_display_f3()"
