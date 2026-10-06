@@ -103,6 +103,10 @@ def _neural_diagnostics(analysis: dict | None) -> dict:
     model = dict(model) if isinstance(model, dict) else {}
 
     uncertain_ids = []
+    semantic_uncertain_ids = []
+    physical_resolved_ids = []
+    source_conflict_ids = []
+    physical_authoritative_ids = []
     raw_mismatch_ids = []
     raw_matches = 0
     expected_on_probabilities = []
@@ -113,8 +117,25 @@ def _neural_diagnostics(analysis: dict | None) -> dict:
         expected = str(item.get("expected") or "").strip().lower()
         classified = str(item.get("classified") or "").strip().lower()
         certain = bool(item.get("neural_certain") is True)
-        if not certain or classified == "uncertain":
+        semantic_certain = (
+            bool(item.get("semantic_certain") is True)
+            if "semantic_certain" in item
+            else certain
+        )
+        if not certain:
             uncertain_ids.append(mask_id)
+        if not semantic_certain or classified == "uncertain":
+            semantic_uncertain_ids.append(mask_id)
+
+        hybrid_resolution = str(
+            item.get("hybrid_resolution") or ""
+        )
+        if hybrid_resolution == "physical_resolved_neural_uncertain":
+            physical_resolved_ids.append(mask_id)
+        elif hybrid_resolution == "strong_source_conflict":
+            source_conflict_ids.append(mask_id)
+        if item.get("physical_local_authoritative") is True:
+            physical_authoritative_ids.append(mask_id)
 
         probabilities = item.get("neural_probabilities")
         probabilities = probabilities if isinstance(probabilities, dict) else {}
@@ -166,8 +187,22 @@ def _neural_diagnostics(analysis: dict | None) -> dict:
         "approved": analysis.get("approved"),
         "active_mask_count": len(rows),
         "matched_mask_count": int(analysis.get("matched_mask_count", 0) or 0),
-        "uncertain_count": len(uncertain_ids),
-        "uncertain_mask_ids": tuple(uncertain_ids),
+        "uncertain_count": len(semantic_uncertain_ids),
+        "uncertain_mask_ids": tuple(semantic_uncertain_ids),
+        "raw_neural_uncertain_count": len(uncertain_ids),
+        "raw_neural_uncertain_mask_ids": tuple(uncertain_ids),
+        "physical_resolved_mask_ids": tuple(physical_resolved_ids),
+        "source_conflict_mask_ids": tuple(source_conflict_ids),
+        "physical_authoritative_mask_ids": tuple(physical_authoritative_ids),
+        "hybrid_visual_authority": bool(
+            analysis.get("hybrid_visual_authority") is True
+        ),
+        "semantic_authority": str(
+            analysis.get("semantic_authority") or ""
+        ),
+        "hybrid_check_scope": str(
+            analysis.get("hybrid_check_scope") or ""
+        ),
         "raw_argmax_match_count": int(raw_matches),
         "raw_argmax_mismatch_ids": tuple(raw_mismatch_ids),
         "expected_on_p_on": on_stats,
@@ -350,7 +385,8 @@ def _report_summary_block(snapshot: dict) -> str:
             [
                 (
                     "AUTORIDADE VISUAL PRODUTIVA: "
-                    f"IA NEURAL {neural_check_name} (CNN/ONNX)"
+                    f"HÍBRIDA {neural_check_name} "
+                    "(CNN/ONNX + MESMA MÁSCARA FÍSICA)"
                 ),
                 (
                     "MODELO IA: "
@@ -368,13 +404,24 @@ def _report_summary_block(snapshot: dict) -> str:
                     "entre os dois = INCERTO"
                 ),
                 (
-                    "DECISÃO IA: "
+                    "DECISÃO HÍBRIDA: "
                     f"reason={neural.get('reason') or '--'} • "
                     f"matched={neural.get('matched_mask_count', 0)}/{active} • "
-                    f"incertos={neural.get('uncertain_count', 0)}/{active}"
+                    f"incertos_finais={neural.get('uncertain_count', 0)}/{active}"
                 ),
                 (
-                    "DIREÇÃO BRUTA IA (DIAGNÓSTICO; NÃO DECIDE): "
+                    "FUSÃO POR MÁSCARA: "
+                    "físicas_autoritativas="
+                    f"{len(tuple(neural.get('physical_authoritative_mask_ids') or ()))}"
+                    " • CNN_incertas="
+                    f"{neural.get('raw_neural_uncertain_count', 0)}"
+                    " • resolvidas_pelo_físico="
+                    f"{','.join(tuple(neural.get('physical_resolved_mask_ids') or ())) or 'nenhuma'}"
+                    " • conflitos_fortes="
+                    f"{','.join(tuple(neural.get('source_conflict_mask_ids') or ())) or 'nenhum'}"
+                ),
+                (
+                    "DIREÇÃO BRUTA CNN (DIAGNÓSTICO; NÃO DECIDE SOZINHA): "
                     f"argmax={raw_matches}/{active} compatíveis"
                     + (
                         f" • divergentes={','.join(mismatch_ids)}"
@@ -400,8 +447,9 @@ def _report_summary_block(snapshot: dict) -> str:
                     f"midpoint={_fmt_probability(midpoint)}"
                 ),
                 (
-                    "AUTORIDADE CONVENCIONAL DE ON/OFF USADA: "
+                    "AUTORIDADE CONVENCIONAL PARALELA USADA: "
                     + ("SIM" if neural.get("conventional_visual_authority_used") else "NÃO")
+                    + " • evidência same-mask participa DENTRO da fusão"
                 ),
                 f"MODELO IA PATH: {neural.get('model_path') or '--'}",
             ]
