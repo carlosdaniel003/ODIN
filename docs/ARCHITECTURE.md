@@ -539,6 +539,37 @@ Segmentos apagados não participam da aquisição da pose. Um segmento ON ausent
 ou uma emissão extra pode permanecer como outlier durante o encaixe; a
 conformidade continua pertencendo ao analyzer, não ao tracker. O refinamento
 não cria nova autoridade, scheduler ou worker.
+
+### Geometria projectiva produtiva do tracking F3 — D-070
+
+Quando o detector neural + filtro estrutural obtêm um quadrilátero físico de
+quatro cantos, a geometria produtiva preserva uma homografia 3x3
+CURRENT -> CANÔNICO. A CNN escolhe a correspondência/orientação; os cantos reais
+do filtro definem a perspectiva.
+
+```text
+CNN pose prior
+  -> correspondência dos 4 cantos
+  -> filtro físico
+  -> H_filter 3x3
+  -> inverse(H_filter)
+  -> placa + 28 máscaras no RAW
+  -> refinamento luminoso residual
+```
+
+A antiga affine 2x3 permanece como representação de compatibilidade para
+consumidores históricos, mas não é autoridade de reprojeção quando a homografia
+está disponível.
+
+Enquanto o CHECK exige alinhamento luminoso e
+`spatial_alignment_ready=false`, o tracker não permite que cache/LK temporal
+encerre a busca: o próximo job pesado volta ao caminho absoluto CNN + filtro.
+Após confirmação do alinhamento, o fluxo temporal pode novamente propagar a
+homografia entre frames.
+
+Esse comportamento altera somente a geometria. D-065/D-066 continuam definindo
+que ON/OFF/INCERTO e CHECK OK/NG pertencem ao analyzer híbrido e à state
+machine, não ao tracker.
 ## 14. Direção canônica do Display F3 — autoridade híbrida Edge AI por máscara
 
 D-059 iniciou a migração neural. D-065 consolidou o estado atual: o julgamento
