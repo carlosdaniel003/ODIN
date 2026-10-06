@@ -776,18 +776,42 @@ participam mais do runtime.
 ```text
 frame RAW
   -> contorno/filtro atual
-  -> detectar somente emissão dentro do filtro
-  -> encaixar o padrão ON esperado
-  -> pose corrente
+  -> localizar placa/display
+  -> refinar pose dos segmentos
   -> reprojetar as 28 máscaras
-  -> classificar ON/OFF/POUCA LUZ
+  -> F3HybridCheckAnalyzer
+       -> CNN/ONNX + aprendizado físico same-mask
+       -> ON / OFF / POUCA LUZ / INCERTO
+       -> comparação expected x observed
+       -> CHECK OK / NG / BUSCANDO
 ```
 
 O refinamento não procura segmentos apagados. Um ON esperado ausente ou uma
 emissão extra não derruba automaticamente a pose quando os demais landmarks
-sustentam o encaixe; o analyzer canônico continua responsável por decidir a
-conformidade das 28 máscaras. O processamento usa o mesmo job de tracking no
-`F3HeavyVisionExecutor`, sem criar outro loop ou worker.
+sustentam o encaixe.
+
+Com a autoridade híbrida D-065, **tracking ON e tracking OFF usam exatamente a
+mesma autoridade semântica e a mesma state machine de decisão**. A diferença é
+somente a origem da geometria:
+
+```text
+TRACKING OFF
+  -> máscaras fixas do Projeto Display
+  -> F3HybridCheckAnalyzer
+  -> decisão produtiva
+
+TRACKING ON
+  -> máscaras canônicas reprojetadas pela pose rastreada
+  -> F3HybridCheckAnalyzer
+  -> a mesma decisão produtiva
+```
+
+O tracking não pode reclassificar ON/OFF, transformar evidência luminosa de pose
+em conformidade, criar uma segunda regra de H1 ou vetar/aprovar CHECK depois que
+a autoridade híbrida decidiu. Ele pode apenas impedir análise quando ainda não
+existe LOCK/frescor geométrico suficiente para saber onde as ROIs estão. O
+processamento usa o mesmo job de tracking no `F3HeavyVisionExecutor`, sem criar
+outro loop ou worker.
 
 
 ---
