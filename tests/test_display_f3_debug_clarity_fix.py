@@ -185,7 +185,7 @@ class DisplayF3DebugClarityFixTests(unittest.TestCase):
         block = _report_summary_block(snapshot)
 
         self.assertIn(
-            "AUTORIDADE VISUAL PRODUTIVA: IA NEURAL H1",
+            "AUTORIDADE VISUAL PRODUTIVA: HÍBRIDA H1",
             block,
         )
         self.assertIn("inference_count=355", block)
@@ -216,8 +216,8 @@ class DisplayF3DebugClarityFixTests(unittest.TestCase):
             check_id="CHECK_002",
             check_name="BLUE",
             reason="blue_neural_incerto",
-            neural_stage="N2",
-            neural_check_scope="first_two_checks_n2",
+            neural_stage="HYBRID_ALL_CHECKS_V1",
+            neural_check_scope="all_configured_checks_hybrid_v1",
         )
         snapshot["operational_summary"] = (
             construir_resumo_operacional_debug_f3(snapshot)
@@ -226,11 +226,11 @@ class DisplayF3DebugClarityFixTests(unittest.TestCase):
         block = _report_summary_block(snapshot)
 
         self.assertIn(
-            "AUTORIDADE VISUAL PRODUTIVA: IA NEURAL BLUE",
+            "AUTORIDADE VISUAL PRODUTIVA: HÍBRIDA BLUE",
             block,
         )
         self.assertNotIn(
-            "AUTORIDADE VISUAL PRODUTIVA: IA NEURAL H1",
+            "AUTORIDADE VISUAL PRODUTIVA: HÍBRIDA H1",
             block,
         )
 
