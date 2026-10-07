@@ -221,6 +221,16 @@ jobs:
             tests.test_display_f3_runtime_coordinator.DisplayF3RuntimeCoordinatorTests.test_semantic_concluido_e_drenado_mesmo_com_frame_repetido \
             -v
 
+      - name: Run D-072 atomic NG snapshot regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_ng_preserva_frame_exato_antes_de_registrar_resultado \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_snapshot_tracking_preserva_geometria_do_mesmo_frame_ng \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_freeze_ng_prefere_contexto_atomico_ao_ultimo_overlay_live \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_repaint_pos_freeze_pinta_mask_024_vermelha_no_frame_terminal \
+            tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_ng_congelado_preserva_geometria_do_snapshot_e_nao_a_live \
+            -v
+
       - name: Run ROI geometry parity tests
         run: |
           python -m unittest \
