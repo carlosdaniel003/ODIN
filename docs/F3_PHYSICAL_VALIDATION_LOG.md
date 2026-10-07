@@ -6733,3 +6733,157 @@ Critérios:
 6. H1 deve usar a mesma autoridade híbrida já validada com tracking OFF.
 
 **Estado após correção:** PENDENTE DE RETESTE FÍSICO.
+
+
+---
+
+## 07/10/2026 — D-071 PASS funcional; NG correto com freeze visual desalinhado
+
+**Modo:** tracking ON  
+**Projeto:** `CM_500_L`  
+**CHECKS observados:** H1 -> BLUE
+
+### Resultado físico
+
+A D-071 resolveu o problema principal de alinhamento/decisão:
+
+- H1 foi localizado com as máscaras sobre os segmentos reais;
+- H1 correto foi aprovado;
+- a sequência avançou para BLUE;
+- BLUE defeituoso foi identificado corretamente;
+- a placa foi reprovada em BLUE por uma única falha persistente:
+  `MASK_024`;
+- resultado produtivo: **27/28 conformes -> NG correto**.
+
+Portanto, a geometria D-071 e a decisão híbrida D-065/D-066 funcionaram no
+ciclo real até a reprovação.
+
+### Falha visual observada depois do NG
+
+No instante em que o NG foi apresentado:
+
+- o frame foi congelado corretamente como evidência terminal;
+- porém as máscaras desenhadas sobre a câmera se deslocaram dos segmentos reais;
+- o VISOR DO DISPLAY também deixou de refletir exatamente a classificação
+  semântica que fechou o NG.
+
+A decisão produtiva permaneceu correta; o defeito ficou restrito à
+**apresentação terminal congelada**.
+
+### Evidência objetiva do DEBUG
+
+Snapshot terminal:
+
+```text
+frame_id=1481
+frame_source=ng_evidence_frozen
+live_camera_ignored=SIM
+CHECK=BLUE
+```
+
+Resultado produtivo preservado:
+
+```text
+last_auto_analysis.ready=true
+last_auto_analysis.approved=false
+reason=check_hibrido_divergente
+matched=27/28
+effective_confirmed_failed_mask_ids=[MASK_024]
+spatial_alignment_required=true
+spatial_alignment_ready=true
+spatial_alignment_source=luminous_segment_grid
+tracking_geometry_reference=luminous:CHECK_002
+tracking_snapshot_explicit=true
+```
+
+A análise BLUE também mostrou `MASK_024` esperada ON e observada OFF.
+
+Entretanto o estado visual congelado reportou várias máscaras como falha,
+apesar de a análise produtiva ter confirmado somente `MASK_024`. Isso provou
+que o renderer terminal estava misturando dados de snapshots diferentes.
+
+### Causa identificada
+
+O pipeline assíncrono mantinha RAW + geometria juntos durante tracking/análise,
+mas o payload semântico descartava esses dois elementos antes do registro do
+resultado.
+
+No NG:
+
+1. o analyzer decidia usando `raw_frame + tracking_geometry` do mesmo job;
+2. o runtime guardava como evidência o `analysis_frame` alinhado/canônico;
+3. a geometria exata daquele job não era preservada;
+4. `freeze_ng_evidence()` copiava o último overlay live disponível;
+5. esse overlay podia pertencer a outro frame;
+6. se o contexto já tinha `live_luminous_only=true`, o repaint terminal ainda
+   preservava classificações visuais antigas.
+
+Resultado: decisão correta, mas frame/geometria/classificações da apresentação
+terminal não eram atômicos.
+
+### Correção aplicada — D-072
+
+O NG passa a preservar como uma unidade:
+
+```text
+frame_token
++ raw_frame
++ tracking_geometry
++ analysis
++ logical_context
++ visual_rotation
+```
+
+Regras implementadas:
+
+- o semantic payload transporta RAW + geometria do mesmo tracking snapshot;
+- o auto-check congela o RAW, não o frame interno alinhado;
+- o frame_id vem do mesmo `frame_token`;
+- a geometria rastreada é persistida junto da evidência NG;
+- o overlay terminal é reconstruído explicitamente com essa geometria;
+- `freeze_ng_evidence()` recebe o contexto geométrico exato em vez de usar o
+  último repaint live;
+- câmera e visor recebem sempre as
+  `effective_classifications` da análise que decidiu o NG;
+- somente `effective_confirmed_failed_mask_ids` recebe vermelho;
+- DEBUG do NG usa a geometria congelada, não a geometria live posterior;
+- câmera física continua livre para detectar EMPTY/rearme.
+
+### CI D-072
+
+PASS antes do bloco histórico conhecido:
+
+- compile F3;
+- neural geometry tracking;
+- pipeline latency;
+- D-025;
+- luminous tracking;
+- live visual sync;
+- **D-072 atomic NG snapshot regressions**;
+- ROI geometry parity;
+- D-042 presence;
+- strict mask/segregation.
+
+Os mesmos **7 FAIL + 1 ERROR históricos** do bloco amplo de object tracking
+permanecem inalterados em relação ao baseline D-071.
+
+### Estado
+
+- D-071: **PASS FÍSICO para alinhamento + H1 + BLUE NG**;
+- D-072: **IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO DO FREEZE NG**.
+
+### Próximo reteste
+
+Repetir somente:
+
+```text
+H1 correto
+-> avança BLUE
+-> BLUE com MASK_024 apagada
+-> 27/28
+-> PLACA NG
+-> frame congela
+-> as 28 ROIs permanecem exatamente sobre os segmentos do frame congelado
+-> somente MASK_024 fica vermelha
+-> visor preserva os mesmos estados do snapshot
+```
