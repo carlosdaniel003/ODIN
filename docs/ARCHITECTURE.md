@@ -620,6 +620,33 @@ falha de detecção do filtro, erro do prior neural e erro de correspondência.
 D-069 continua sendo o gate final do alinhamento luminoso: homografia válida
 não equivale a segmentos centralizados. D-065/D-066 continuam inalteradas e o
 tracking não ganha autoridade ON/OFF ou CHECK.
+
+### Evidência terminal NG atômica — D-072
+
+Com tracking ON, o mesmo snapshot precisa sobreviver até a UI terminal:
+
+```text
+tracking snapshot N
+  -> raw_frame N
+  -> geometry N
+  -> semantic analysis N
+  -> NG
+  -> frozen terminal N
+```
+
+A câmera congelada usa o RAW do snapshot que decidiu o NG. As ROIs usam a
+geometria rastreada daquele mesmo snapshot. As cores usam
+`effective_classifications` da mesma análise, e somente
+`effective_confirmed_failed_mask_ids` recebe vermelho.
+
+O último overlay live não é autoridade de evidência terminal porque latest-frame
+pode já estar em N+1 quando o debounce confirma o resultado N. A câmera física
+continua capturando normalmente em background para a autoridade de presença
+confirmar EMPTY/rearme; apenas a apresentação terminal permanece no snapshot N.
+
+Esse contrato não cria nova autoridade de decisão. Ele apenas transporta até a
+UI os mesmos frame/geometria/semântica que já pertenciam à decisão produtiva.
+
 ## 14. Direção canônica do Display F3 — autoridade híbrida Edge AI por máscara
 
 D-059 iniciou a migração neural. D-065 consolidou o estado atual: o julgamento
