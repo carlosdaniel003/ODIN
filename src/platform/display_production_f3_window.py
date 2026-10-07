@@ -1224,17 +1224,26 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._display_frozen_ng_visual_debug = debug
         return debug
 
-    def freeze_ng_evidence(self, confirmed_failed_mask_ids=()) -> None:
-        """Mantém câmera, visor, CHECK e status no frame que fechou o NG."""
-        # Capture ANTES de levantar o latch. A partir daqui qualquer setter
-        # diagnóstico vira no-op até EMPTY ser confirmado.
+    def freeze_ng_evidence(
+        self,
+        confirmed_failed_mask_ids=(),
+        *,
+        overlay_context: dict | None = None,
+    ) -> None:
+        """Mantém câmera, visor, CHECK e status no snapshot que fechou o NG."""
+        # Capture ANTES de levantar o latch. D-072 permite fornecer o contexto
+        # geométrico exato do mesmo frame que decidiu o NG; assim o freeze não
+        # depende do último repaint live, que pode já pertencer a outro frame.
         self._display_frozen_analysis_statuses = self._capture_analysis_statuses()
         self._display_frozen_check_snapshot = deepcopy(
             getattr(self, "_check_snapshot", None)
         )
-        self._display_frozen_overlay_context = deepcopy(
-            getattr(self, "_display_last_overlay_context", None)
+        overlay_source = (
+            overlay_context
+            if isinstance(overlay_context, dict)
+            else getattr(self, "_display_last_overlay_context", None)
         )
+        self._display_frozen_overlay_context = deepcopy(overlay_source)
         self._display_ng_evidence_frozen = True
         self._display_readout_frozen = True
         self._display_frozen_readout_context = deepcopy(
