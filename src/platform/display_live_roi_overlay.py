@@ -14,6 +14,7 @@ from src.platform.display_project_repository import (
 from src.platform.display_visual_rotation import (
     preparar_check_visual_display,
     preparar_frame_visual_display,
+    preparar_pontos_visuais_display,
 )
 
 
@@ -396,11 +397,13 @@ def montar_contexto_overlay_snapshot_display_f3(
     check_id: str,
     analysis: dict | None,
     visual_rotation: int,
+    tracking_geometry: dict | None = None,
 ) -> dict | None:
-    """Monta o mesmo contexto de máscaras/cores usado pela câmera F3 ao vivo.
+    """Monta contexto visual determinístico para um snapshot F3.
 
-    É propositalmente stateless: DEBUG e evidência NG podem reconstruir o overlay
-    do frame congelado mesmo depois que o runtime interno já voltou ao H1.
+    Quando D-072 fornece geometria rastreada, frame, máscaras e classificação
+    permanecem no mesmo espaço temporal do resultado. Sem geometria explícita,
+    preserva o comportamento fixo/canônico usado pelo tracking OFF e pelo DEBUG.
     """
     if repository is None or not project_name or not check_id:
         return None
@@ -432,21 +435,77 @@ def montar_contexto_overlay_snapshot_display_f3(
         if isinstance(check.get("mask_states"), dict)
         else {}
     )
-    effective_masks = mascaras_geometria_runtime_fixa_display(project)
-    active_masks = [
-        deepcopy(mask)
-        for mask in effective_masks
-        if isinstance(mask, dict)
-        and states.get(str(mask.get("id")))
+    expected_states = {
+        str(mask_id): str(state or "").strip().lower()
+        for mask_id, state in states.items()
+        if str(state or "").strip().lower()
         in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
-    ]
+    }
+    rotation = _normalizar_rotacao(visual_rotation)
 
-    _, visual_resolution, visual_masks = preparar_check_visual_display(
-        None,
-        resolution,
-        active_masks,
-        _normalizar_rotacao(visual_rotation),
+    effective_masks = mascaras_geometria_runtime_fixa_display(project)
+    readout_mask_ids = tuple(
+        str(mask.get("id") or "")
+        for mask in effective_masks
+        if isinstance(mask, dict) and str(mask.get("id") or "")
     )
+
+    geometry = (
+        tracking_geometry
+        if isinstance(tracking_geometry, dict)
+        and bool(tracking_geometry.get("locked"))
+        else None
+    )
+    tracking_snapshot_used = False
+    visual_board = []
+    if isinstance(geometry, dict):
+        raw_resolution = geometry.get("resolution")
+        if (
+            isinstance(raw_resolution, (list, tuple))
+            and len(raw_resolution) >= 2
+        ):
+            raw_resolution = (
+                max(1, int(raw_resolution[0])),
+                max(1, int(raw_resolution[1])),
+            )
+        else:
+            raw_resolution = resolution
+
+        tracked_masks = [
+            deepcopy(mask)
+            for mask in (geometry.get("masks") or ())
+            if isinstance(mask, dict)
+        ]
+        if tracked_masks:
+            _, visual_resolution, visual_masks = preparar_check_visual_display(
+                None,
+                raw_resolution,
+                tracked_masks,
+                rotation,
+            )
+            visual_board = preparar_pontos_visuais_display(
+                geometry.get("board_points") or (),
+                int(raw_resolution[0]),
+                int(raw_resolution[1]),
+                rotation,
+            )
+            tracking_snapshot_used = True
+
+    if not tracking_snapshot_used:
+        active_masks = [
+            deepcopy(mask)
+            for mask in effective_masks
+            if isinstance(mask, dict)
+            and states.get(str(mask.get("id")))
+            in (DISPLAY_CHECK_STATE_ON, DISPLAY_CHECK_STATE_OFF)
+        ]
+        _, visual_resolution, visual_masks = preparar_check_visual_display(
+            None,
+            resolution,
+            active_masks,
+            rotation,
+        )
+
     classifications = {}
     if isinstance(analysis, dict):
         effective = analysis.get("effective_classifications")
@@ -464,14 +523,10 @@ def montar_contexto_overlay_snapshot_display_f3(
                 if mask_id:
                     classifications[mask_id] = str(
                         item.get("classified") or "unknown"
-                    )
+                    ).strip().lower()
 
-    return {
-        "resolution": tuple(visual_resolution),
-        "masks": tuple(deepcopy(visual_masks)),
-        "classifications": classifications,
-        "effective_classifications": dict(classifications),
-        "failed_mask_ids": tuple(
+    failed = (
+        tuple(
             sorted(
                 str(mask_id)
                 for mask_id in (
@@ -479,26 +534,28 @@ def montar_contexto_overlay_snapshot_display_f3(
                 )
                 if str(mask_id)
             )
-        ) if isinstance(analysis, dict) else (),
-        "effective_failed_mask_ids": tuple(
+        )
+        if isinstance(analysis, dict)
+        else ()
+    )
+    confirmed = (
+        tuple(
             sorted(
                 str(mask_id)
                 for mask_id in (
-                    (analysis or {}).get("effective_failed_mask_ids") or ()
+                    (analysis or {}).get(
+                        "effective_confirmed_failed_mask_ids"
+                    )
+                    or ()
                 )
                 if str(mask_id)
             )
-        ) if isinstance(analysis, dict) else (),
-        "effective_confirmed_failed_mask_ids": tuple(
-            sorted(
-                str(mask_id)
-                for mask_id in (
-                    (analysis or {}).get("effective_confirmed_failed_mask_ids") or ()
-                )
-                if str(mask_id)
-            )
-        ) if isinstance(analysis, dict) else (),
-        "effective_validating_mask_ids": tuple(
+        )
+        if isinstance(analysis, dict)
+        else ()
+    )
+    validating = (
+        tuple(
             sorted(
                 str(mask_id)
                 for mask_id in (
@@ -506,7 +563,29 @@ def montar_contexto_overlay_snapshot_display_f3(
                 )
                 if str(mask_id)
             )
-        ) if isinstance(analysis, dict) else (),
+        )
+        if isinstance(analysis, dict)
+        else ()
+    )
+    on_ids = tuple(
+        sorted(
+            mask_id
+            for mask_id, state in classifications.items()
+            if state == DISPLAY_CHECK_STATE_ON
+        )
+    )
+
+    return {
+        "resolution": tuple(visual_resolution),
+        "masks": tuple(deepcopy(visual_masks)),
+        "board_points": tuple(deepcopy(visual_board)),
+        "classifications": classifications,
+        "effective_classifications": dict(classifications),
+        "expected_states": expected_states,
+        "failed_mask_ids": failed,
+        "effective_failed_mask_ids": failed,
+        "effective_confirmed_failed_mask_ids": confirmed,
+        "effective_validating_mask_ids": validating,
         "ui_mask_authority": (
             str((analysis or {}).get("ui_mask_authority") or "")
             if isinstance(analysis, dict)
@@ -514,9 +593,35 @@ def montar_contexto_overlay_snapshot_display_f3(
         ),
         "project_name": str(project_name),
         "check_id": str(check_id),
-        "visual_rotation": _normalizar_rotacao(visual_rotation),
+        "visual_rotation": rotation,
+        "intermittent": bool(check.get("intermittent", False)),
+        "readout_mask_ids": readout_mask_ids,
+        "tracking_active": bool(tracking_snapshot_used),
+        "tracking_locked": bool(tracking_snapshot_used),
+        "tracking_reference": (
+            str(geometry.get("reference") or "")
+            if tracking_snapshot_used
+            else ""
+        ),
+        "tracking_space": (
+            str(geometry.get("geometry_space") or "")
+            if tracking_snapshot_used
+            else ""
+        ),
+        "snapshot_geometry_source": (
+            "tracking_geometry_snapshot"
+            if tracking_snapshot_used
+            else "fixed_project_geometry"
+        ),
+        # A evidência terminal não volta a amostrar brilho. As cores abaixo vêm
+        # diretamente da mesma análise que decidiu o NG.
+        "live_luminous_only": bool(classifications),
+        "live_visual_sample_ready": bool(classifications),
+        "live_visual_classifications": dict(classifications),
+        "live_visual_mask_ids": on_ids,
+        "luminous_mask_ids": on_ids,
+        "has_any_on": bool(on_ids),
     }
-
 
 def _scaled_polygon(mask: dict, sx: float, sy: float):
     kind = str(mask.get("type") or "").lower()
