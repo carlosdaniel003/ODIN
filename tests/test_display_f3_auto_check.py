@@ -17,6 +17,7 @@ from src.platform.display_auto_check_analyzer import (
     avaliar_match_check_display,
     display_mask_to_analysis_selection,
 )
+from src.platform.display_auto_check_policy import decidir_analise_display_f3
 from src.platform.display_auto_check_runtime import DisplayAutomaticCheckF3Mixin
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_project_repository import DisplayProjectRepository
