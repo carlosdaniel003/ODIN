@@ -23,12 +23,18 @@ class DisplayF3PipelineLatencyTests(unittest.TestCase):
                 }
 
         frame = np.zeros((20, 30, 3), dtype=np.uint8)
+        raw_frame = np.full((20, 30, 3), 37, dtype=np.uint8)
+        geometry = {
+            "locked": True,
+            "resolution": (30, 20),
+            "masks": [{"id": "MASK_001", "type": "circle", "cx": 9, "cy": 8}],
+        }
         submitted_at = time.perf_counter() - 0.05
         payload = tracking._run_live_semantic_job(
             _Analyzer(),
             frame,
-            frame,
-            {"locked": True},
+            raw_frame,
+            geometry,
             {"project_name": "DISPLAY A", "check_id": "CHECK_001"},
             0,
             3,
@@ -43,6 +49,13 @@ class DisplayF3PipelineLatencyTests(unittest.TestCase):
         self.assertGreaterEqual(
             payload["age_ms"],
             300.0 + payload["queue_age_ms"] - 1.0,
+        )
+        np.testing.assert_array_equal(payload["raw_frame"], raw_frame)
+        self.assertEqual(9, payload["tracking_geometry"]["masks"][0]["cx"])
+        geometry["masks"][0]["cx"] = 999
+        self.assertEqual(
+            9,
+            payload["tracking_geometry"]["masks"][0]["cx"],
         )
 
     def test_tracking_worker_reports_stage_timings(self):
