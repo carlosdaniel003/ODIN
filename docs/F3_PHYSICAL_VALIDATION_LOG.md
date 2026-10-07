@@ -7030,3 +7030,79 @@ Rastreamento Automático = LIGADO
 Se H1 alinhar e avançar, continuar no mesmo ciclo para o reteste D-072:
 BLUE com `MASK_024` apagada -> 27/28 -> NG -> freeze alinhado -> somente
 `MASK_024` vermelha.
+
+---
+
+## 07/10/2026 — Tracking OFF: BLUE 27/28 correto, VISOR mapeava a falha no slot físico errado
+
+**Cenário:** projeto `CM_500_L`, Produção Display F3, Rastreamento Automático
+DESLIGADO, CHECK BLUE, visual 180°.
+
+**Resultado:** PARTIAL PASS / FAIL DE APRESENTAÇÃO.
+
+### O que funcionou
+
+- placa presente e energia confirmada;
+- análise produtiva BLUE encontrou `27/28`;
+- `MASK_024` foi a única divergência confirmada;
+- câmera congelada destacou a máscara física correspondente à falha;
+- classificação por `MASK_ID` do VISOR e da câmera era a mesma.
+
+### Falha observada
+
+No `VISOR DO DISPLAY`, o vermelho apareceu em outra barra física do 88:88.
+Ou seja, o estado `MASK_024=OFF/NG` estava correto, mas a máscara foi associada
+ao slot A..G errado no desenho do visor.
+
+### Evidência objetiva do DEBUG
+
+- `object_tracking=null`, confirmando tracking OFF;
+- `last_auto_analysis.ready=true`;
+- `last_auto_analysis.approved=false`;
+- motivo `check_hibrido_divergente`;
+- BLUE `27/28`;
+- `effective_failed_mask_ids=[MASK_024]`;
+- `effective_confirmed_failed_mask_ids=[MASK_024]`;
+- câmera e visor receberam a mesma classificação final por ID.
+
+### Causa identificada
+
+O snapshot terminal de tracking OFF não carregava
+`readout_slot_mask_ids`. O renderer do VISOR então usava seu fallback por
+ordem numérica dos IDs. Essa ordem não representa a topologia física A..G dos
+quatro displays de sete segmentos.
+
+### Alteração aplicada — D-074
+
+- snapshot terminal tracking OFF agora deriva os 28 slots da geometria fixa do
+  projeto após a mesma rotação visual da câmera;
+- o mapa é entregue ao VISOR como `readout_slot_mask_ids`;
+- tracking ON permanece intocado;
+- nenhuma regra de classificação, Hybrid, energia ou debounce foi alterada.
+
+### Garantia adicional solicitada: qualquer segmento pode gerar NG
+
+Foi adicionada regressão exaustiva para `MASK_001..MASK_028`.
+
+Para cada uma das 28 máscaras o teste cria uma única divergência e exige NG:
+
+```text
+expected ON  + observed OFF -> NG após persistência
+expected OFF + observed ON  -> NG após persistência
+```
+
+O teste usa o mesmo contrato intermitente de produção com 3 amostras na fase
+ON, publica a máscara alvo como única falha confirmada e exige decisão final
+`ng`.
+
+**CI D-074:** PASS.
+
+O workflow amplo ainda termina no bloco histórico de object tracking com os
+mesmos 7 FAIL + 1 ERROR do baseline, não relacionados a esta alteração.
+
+**Estado:** D-074 IMPLEMENTADA / PENDENTE DE RETESTE FÍSICO.
+
+**Próximo reteste:** repetir a placa real em BLUE com tracking OFF. A
+`MASK_024` deve continuar sendo a única falha, mas agora o vermelho do VISOR
+deve ocupar exatamente a mesma barra física indicada pela câmera.
+

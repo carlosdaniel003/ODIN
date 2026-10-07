@@ -5244,3 +5244,130 @@ Próximo teste deve repetir H1 com tracking ON e confirmar primeiro:
 4. H1 correto avança para BLUE.
 
 Somente depois disso o reteste físico D-072 de BLUE/NG volta a ser válido.
+
+---
+
+## D-074 — VISOR terminal com tracking OFF usa topologia física das mesmas máscaras da câmera
+
+**Status:** Accepted / Implemented / Physical retest pending
+
+### Escopo
+
+Somente **Display F3 com Rastreamento Automático DESLIGADO**.
+
+O caminho com Rastreamento Automático LIGADO não é alterado por esta decisão.
+
+### Evidência física
+
+No BLUE terminal NG do projeto `CM_500_L`, a câmera congelada mostrou a
+`MASK_024` como única falha confirmada e a análise produtiva registrou
+`27/28`. O VISOR DO DISPLAY recebeu a mesma classificação por `MASK_ID`, mas
+pintou o vermelho em outra barra física do desenho 88:88.
+
+O DEBUG confirmou simultaneamente:
+
+- `object_tracking=null`;
+- `effective_failed_mask_ids=(MASK_024)`;
+- `effective_confirmed_failed_mask_ids=(MASK_024)`;
+- câmera e visor com o mesmo mapa de classificações;
+- snapshot terminal fixo sem `readout_slot_mask_ids`.
+
+### Causa
+
+A classificação estava correta. O defeito era exclusivamente de apresentação.
+
+O snapshot terminal do tracking OFF preservava:
+
+```text
+MASK_ID -> ON/OFF/NG
+```
+
+mas não preservava:
+
+```text
+posição física da máscara -> slot A/B/C/D/E/F/G do VISOR
+```
+
+Sem os 28 slots físicos, `DisplayProductionF3Window` caía no fallback
+numérico `MASK_001..MASK_028`. Os números dos IDs não representam a posição
+A..G dos quatro dígitos, portanto uma máscara horizontal podia aparecer em uma
+barra vertical no VISOR.
+
+### Decisão
+
+Para snapshot terminal com tracking OFF:
+
+1. carregar a geometria fixa canônica do Projeto Display;
+2. aplicar a mesma `visual_rotation` usada pela câmera;
+3. derivar os 28 slots físicos com
+   `mapear_slots_sete_segmentos_display(..., digit_count=4)`;
+4. publicar `readout_slot_mask_ids` junto do snapshot;
+5. o VISOR consome esse mapa sem reordenar os IDs numericamente.
+
+Invariante:
+
+```text
+mesma máscara física da câmera
++ mesmo MASK_ID
++ mesma classificação
++ mesma rotação visual
+= mesmo segmento A..G no VISOR
+```
+
+Para snapshot com tracking ON, D-074 publica slots vazios e preserva o contrato
+anterior. Nenhuma lógica de tracking foi alterada.
+
+### Universalidade do NG por segmento
+
+A decisão produtiva continua genérica por `MASK_ID`; não existe caso especial
+para `MASK_024`.
+
+Foi adicionada regressão exaustiva que percorre `MASK_001..MASK_028`.
+Para cada máscara, isoladamente, o teste força:
+
+- expected ON -> classified OFF; ou
+- expected OFF -> classified ON.
+
+No CHECK intermitente, a divergência precisa persistir pelo contrato atual de
+3 amostras da fase ON. Depois disso, cada uma das 28 máscaras deve aparecer
+como única `effective_confirmed_failed_mask_ids` e a policy deve devolver NG.
+
+### Validação automatizada
+
+PASS no bloco dedicado D-074:
+
+- snapshot NG tracking OFF preserva os slots físicos do VISOR em 0° e 180°;
+- o mapa do VISOR é derivado da geometria, não da ordem numérica dos IDs;
+- tracking ON continua sem receber esse novo mapa;
+- todas as 28 máscaras confirmam NG individualmente;
+- os dois sentidos de divergência são cobertos;
+- debounce intermitente de 3 amostras é respeitado.
+
+Também PASS:
+
+- compilação F3;
+- neural geometry tracking;
+- pipeline latency;
+- D-025;
+- luminous tracking;
+- live visual sync;
+- D-072;
+- ROI geometry parity;
+- D-042;
+- strict mask/segregation.
+
+O bloco histórico `F3 object tracking tests` permanece com os mesmos
+7 FAIL + 1 ERROR já existentes no baseline, sem nova regressão D-074.
+
+### Reteste físico esperado
+
+Com Rastreamento Automático DESLIGADO:
+
+1. repetir BLUE na placa real com `MASK_024` apagada;
+2. confirmar `27/28 -> NG`;
+3. a mesma barra física `MASK_024` que está vermelha na câmera deve ficar
+   vermelha no VISOR;
+4. nenhuma outra barra do VISOR deve receber o vermelho;
+5. repetir os demais CHECKS normalmente para confirmar que a mudança foi apenas
+   de apresentação.
+
