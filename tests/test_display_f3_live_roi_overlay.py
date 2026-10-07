@@ -494,6 +494,127 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             window._display_readout_context["validating_mask_ids"],
         )
 
+    def test_snapshot_tracking_preserva_geometria_do_mesmo_frame_ng(self):
+        project = {
+            "name": "DISPLAY",
+            "master_resolution": (180, 80),
+            "masks": [
+                {
+                    "id": "MASK_024",
+                    "type": "circle",
+                    "cx": 30,
+                    "cy": 40,
+                    "radius": 10,
+                }
+            ],
+            "checks": [
+                {
+                    "id": "CHECK_002",
+                    "name": "BLUE",
+                    "intermittent": True,
+                    "mask_states": {"MASK_024": "on"},
+                }
+            ],
+        }
+
+        class _Repository:
+            @staticmethod
+            def carregar_projeto(_name):
+                return project
+
+        geometry = {
+            "locked": True,
+            "resolution": (180, 80),
+            "reference": "luminous:CHECK_002",
+            "geometry_space": "canonical_projective",
+            "board_points": (
+                (80.0, 10.0),
+                (170.0, 10.0),
+                (170.0, 70.0),
+                (80.0, 70.0),
+            ),
+            "masks": (
+                {
+                    "id": "MASK_024",
+                    "type": "circle",
+                    "cx": 120,
+                    "cy": 40,
+                    "radius": 10,
+                },
+            ),
+        }
+        analysis = {
+            "effective_classifications": {"MASK_024": "off"},
+            "effective_failed_mask_ids": ("MASK_024",),
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+            "effective_validating_mask_ids": (),
+            "ui_mask_authority": "effective_mask_results_v1",
+        }
+
+        context = overlay_module.montar_contexto_overlay_snapshot_display_f3(
+            _Repository(),
+            "DISPLAY",
+            "CHECK_002",
+            analysis,
+            0,
+            tracking_geometry=geometry,
+        )
+
+        self.assertEqual(
+            "tracking_geometry_snapshot",
+            context["snapshot_geometry_source"],
+        )
+        self.assertTrue(context["tracking_active"])
+        self.assertEqual(120, int(context["masks"][0]["cx"]))
+        self.assertNotEqual(30, int(context["masks"][0]["cx"]))
+        self.assertEqual("off", context["effective_classifications"]["MASK_024"])
+        self.assertEqual(
+            ("MASK_024",),
+            context["effective_confirmed_failed_mask_ids"],
+        )
+
+    def test_freeze_ng_prefere_contexto_atomico_ao_ultimo_overlay_live(self):
+        window = DisplayProductionF3Window.__new__(
+            DisplayProductionF3Window
+        )
+        window._display_readout_context = {
+            "failed_mask_ids": set(),
+            "classifications": {"MASK_024": "off"},
+        }
+        window._display_last_overlay_context = {
+            "snapshot_geometry_source": "stale_live_overlay",
+            "masks": ({"id": "STALE"},),
+            "effective_confirmed_failed_mask_ids": (),
+        }
+        atomic = {
+            "snapshot_geometry_source": "tracking_geometry_snapshot",
+            "masks": ({"id": "MASK_024"},),
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+        }
+        window._check_snapshot = {}
+        window._display_frozen_ng_visual_debug = {}
+        window.display_readout_canvas = None
+        window._capture_analysis_statuses = lambda: {}
+        window._set_segregation_action_enabled = lambda _enabled: None
+        window.restore_frozen_analysis_statuses = lambda: None
+        window._redraw_display_readout = lambda: None
+
+        window.freeze_ng_evidence(
+            confirmed_failed_mask_ids=("MASK_024",),
+            overlay_context=atomic,
+        )
+
+        self.assertEqual(
+            "tracking_geometry_snapshot",
+            window._display_frozen_overlay_context[
+                "snapshot_geometry_source"
+            ],
+        )
+        self.assertEqual(
+            "MASK_024",
+            window._display_frozen_overlay_context["masks"][0]["id"],
+        )
+
     def test_freeze_ng_reafirma_falha_confirmada_no_contexto_do_visor(self):
         window = DisplayProductionF3Window.__new__(
             DisplayProductionF3Window
@@ -571,11 +692,13 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
                     ),
                     "live_luminous_only": True,
                     "live_visual_sample_ready": True,
-                    "live_visual_mask_ids": ("MASK_001",),
+                    # Simula o repaint live anterior ao debounce final:
+                    # as cores abaixo são deliberadamente antigas/incorretas.
+                    "live_visual_mask_ids": ("MASK_024", "MASK_028"),
                     "live_visual_classifications": {
-                        "MASK_001": "on",
-                        "MASK_024": "off",
-                        "MASK_028": "off",
+                        "MASK_001": "off",
+                        "MASK_024": "on",
+                        "MASK_028": "on",
                     },
                     "board_points": (),
                     "check_id": "CHECK_002",
@@ -594,7 +717,15 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         analysis = {
             "project_name": "DISPLAY",
             "check_id": "CHECK_002",
+            "effective_classifications": {
+                "MASK_001": "on",
+                "MASK_024": "off",
+                "MASK_028": "off",
+            },
+            "effective_failed_mask_ids": ("MASK_024",),
             "effective_confirmed_failed_mask_ids": ("MASK_024",),
+            "effective_validating_mask_ids": (),
+            "ui_mask_authority": "effective_mask_results_v1",
         }
 
         rendered = owner._repaint_frozen_ng_evidence_display_f3(
