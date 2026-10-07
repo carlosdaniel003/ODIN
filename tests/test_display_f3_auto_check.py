@@ -1035,100 +1035,110 @@ class DisplayF3AutoCheckTests(unittest.TestCase):
             "intermittent": True,
         }
 
+        # 28 máscaras x 2 sentidos = 56 cenários independentes.
+        # Cada MASK_ID precisa poder ser NG tanto por faltar luz quanto por
+        # acender indevidamente, sem qualquer caso especial para MASK_024.
         for target_index in range(1, 29):
             target_id = f"MASK_{target_index:03d}"
-            rows = []
-            for index in range(1, 29):
-                mask_id = f"MASK_{index:03d}"
-                # Mantém muitos segmentos ON para que uma única falha ON->OFF
-                # continue dentro da fase acesa do CHECK intermitente.
-                expected = "on" if index <= 20 else "off"
-                classified = expected
-                if mask_id == target_id:
-                    classified = "off" if expected == "on" else "on"
-                rows.append(
-                    {
-                        "mask_id": mask_id,
-                        "expected": expected,
-                        "classified": classified,
-                        "matched": classified == expected,
-                        "raw_matched": classified == expected,
-                        "confidence": 0.99,
-                        "semantic_certain": True,
-                        "neural_certain": True,
+            for target_expected in ("on", "off"):
+                with self.subTest(
+                    target_id=target_id,
+                    expected=target_expected,
+                ):
+                    rows = []
+                    for index in range(1, 29):
+                        mask_id = f"MASK_{index:03d}"
+                        # Base com muitos segmentos ON para manter a fase acesa
+                        # do CHECK intermitente mesmo quando o alvo é ON->OFF.
+                        expected = "on" if index <= 20 else "off"
+                        if mask_id == target_id:
+                            expected = target_expected
+                        classified = expected
+                        if mask_id == target_id:
+                            classified = (
+                                "off" if expected == "on" else "on"
+                            )
+                        rows.append(
+                            {
+                                "mask_id": mask_id,
+                                "expected": expected,
+                                "classified": classified,
+                                "matched": classified == expected,
+                                "raw_matched": classified == expected,
+                                "confidence": 0.99,
+                                "semantic_certain": True,
+                                "neural_certain": True,
+                            }
+                        )
+
+                    app = DisplayAutomaticCheckF3Mixin.__new__(
+                        DisplayAutomaticCheckF3Mixin
+                    )
+                    app._display_auto_intermittent_phase = "unknown"
+                    app._display_auto_intermittent_on_samples = 0
+                    app._display_auto_intermittent_failure_counts = {}
+                    app._display_auto_intermittent_persistent_failed_ids = set()
+                    app._display_auto_intermittent_exact_veto_ids = set()
+                    app._display_auto_intermittent_physical_support_veto_ids = set()
+                    app._display_auto_intermittent_candidate_failed_ids = set()
+                    app._display_auto_intermittent_last_phase_analysis = None
+
+                    analysis = {
+                        "ready": True,
+                        "approved": False,
+                        "reason": "check_hibrido_divergente",
+                        "neural_visual_authority": True,
+                        "hybrid_visual_authority": True,
+                        "mask_results": rows,
+                        "active_mask_count": 28,
+                        "matched_mask_count": 27,
                     }
-                )
 
-            app = DisplayAutomaticCheckF3Mixin.__new__(
-                DisplayAutomaticCheckF3Mixin
-            )
-            app._display_auto_intermittent_phase = "unknown"
-            app._display_auto_intermittent_on_samples = 0
-            app._display_auto_intermittent_failure_counts = {}
-            app._display_auto_intermittent_persistent_failed_ids = set()
-            app._display_auto_intermittent_exact_veto_ids = set()
-            app._display_auto_intermittent_physical_support_veto_ids = set()
-            app._display_auto_intermittent_candidate_failed_ids = set()
-            app._display_auto_intermittent_last_phase_analysis = None
+                    phase = None
+                    for _sample in range(
+                        app.DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES
+                    ):
+                        phase = app._display_auto_observe_intermittent_phase(
+                            context,
+                            analysis,
+                        )
 
-            analysis = {
-                "ready": True,
-                "approved": False,
-                "reason": "check_hibrido_divergente",
-                "neural_visual_authority": True,
-                "hybrid_visual_authority": True,
-                "mask_results": rows,
-                "active_mask_count": 28,
-                "matched_mask_count": 27,
-            }
+                    self.assertEqual("on", phase["phase"])
+                    self.assertEqual(
+                        (target_id,),
+                        tuple(phase["persistent_failed_ids"]),
+                    )
 
-            phase = None
-            for _sample in range(
-                app.DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES
-            ):
-                phase = app._display_auto_observe_intermittent_phase(
-                    context,
-                    analysis,
-                )
+                    analysis["intermittent_phase"] = "on"
+                    analysis["intermittent_phase_evidence"] = dict(phase)
+                    analysis["intermittent_persistent_failed_ids"] = (
+                        tuple(phase["persistent_failed_ids"])
+                    )
+                    published = (
+                        app._display_auto_publish_effective_ui_authority(
+                            analysis,
+                            judgement_ready=True,
+                        )
+                    )
+                    self.assertEqual(
+                        (target_id,),
+                        tuple(published["effective_failed_mask_ids"]),
+                    )
+                    self.assertEqual(
+                        (target_id,),
+                        tuple(
+                            published[
+                                "effective_confirmed_failed_mask_ids"
+                            ]
+                        ),
+                    )
 
-            self.assertEqual(
-                "on",
-                phase["phase"],
-                msg=target_id,
-            )
-            self.assertEqual(
-                (target_id,),
-                tuple(phase["persistent_failed_ids"]),
-                msg=target_id,
-            )
-
-            analysis["intermittent_phase"] = "on"
-            analysis["intermittent_phase_evidence"] = dict(phase)
-            analysis["intermittent_persistent_failed_ids"] = (
-                tuple(phase["persistent_failed_ids"])
-            )
-            published = app._display_auto_publish_effective_ui_authority(
-                analysis,
-                judgement_ready=True,
-            )
-            self.assertEqual(
-                (target_id,),
-                tuple(published["effective_failed_mask_ids"]),
-                msg=target_id,
-            )
-            self.assertEqual(
-                (target_id,),
-                tuple(published["effective_confirmed_failed_mask_ids"]),
-                msg=target_id,
-            )
-
-            decision = decidir_analise_display_f3(published)
-            self.assertEqual("ng", decision["decision"], msg=target_id)
-            self.assertEqual(
-                [target_id],
-                decision["failed_mask_ids"],
-                msg=target_id,
-            )
+                    decision = decidir_analise_display_f3(published)
+                    self.assertEqual("ng", decision["decision"])
+                    self.assertEqual(
+                        [target_id],
+                        decision["failed_mask_ids"],
+                    )
 
     def test_auto_mixin_is_before_f3_runtime_and_does_not_replace_trigger_methods(self):
         mro = DesktopProductionApp.__mro__
