@@ -2403,3 +2403,116 @@ Não repetir:
 - não reduzir/aumentar thresholds para compensar canto físico errado;
 - não retreinar CNN para corrigir geometria perdida pelo OpenCV;
 - não mover autoridade semântica para o tracker.
+
+
+---
+
+## 07/10/2026 — D-072: snapshot atômico para NG com tracking ON
+
+Modo:
+- tracking ON;
+- projeto `CM_500_L`;
+- sequência real H1 -> BLUE.
+
+Resultado físico de origem:
+- H1 alinhou e foi aprovado;
+- BLUE foi alcançado;
+- BLUE defeituoso com `MASK_024` apagada foi corretamente reconhecido como
+  27/28 e gerou NG;
+- no momento da apresentação do NG, o frame congelou mas as máscaras saíram dos
+  segmentos físicos e o visor passou a refletir classificações visuais antigas.
+
+Evidência:
+- frame terminal: `ng_evidence_frozen`, id 1481;
+- análise produtiva:
+  - `approved=false`;
+  - `reason=check_hibrido_divergente`;
+  - 27/28 conformes;
+  - falha persistente única = `MASK_024`;
+- alinhamento produtivo da análise:
+  - `spatial_alignment_required=true`;
+  - `spatial_alignment_ready=true`;
+  - `spatial_alignment_source=luminous_segment_grid`;
+  - `tracking_geometry_reference=luminous:CHECK_002`;
+  - `tracking_snapshot_explicit=true`;
+- estado visual congelado divergiu da análise e listou várias máscaras como
+  falha.
+
+Diagnóstico:
+- o worker de tracking já criava `raw_frame + geometry + analysis_frame` no
+  mesmo snapshot;
+- o semantic worker consumia corretamente `raw_frame + geometry`;
+- porém devolvia ao auto-check apenas `analysis_frame + analysis + context`;
+- portanto o NG armazenava o frame interno alinhado/canônico e perdia a
+  geometria RAW que realmente sustentou a decisão;
+- a janela congelava `_display_last_overlay_context`, que podia pertencer a
+  outro repaint/latest-frame;
+- o repaint terminal só substituía classificações se
+  `live_luminous_only=false`, permitindo semântica visual stale.
+
+Implementação:
+- `_run_live_semantic_job()` devolve também `raw_frame` e
+  `tracking_geometry`;
+- o precomputed payload transporta os dois sem reconsultar estado live;
+- o auto-check congela o RAW do payload;
+- `frame_id` é derivado do `frame_token` do próprio snapshot;
+- nova evidência pendente:
+  `_display_f3_pending_ng_tracking_geometry`;
+- `montar_contexto_overlay_snapshot_display_f3()` aceita geometria rastreada
+  explícita e projeta essa geometria para a rotação visual sem consultar o
+  tracker live;
+- `freeze_ng_evidence()` aceita `overlay_context` explícito;
+- o terminal renderer sempre substitui o espelho anterior pelas
+  `effective_classifications` da análise final;
+- o snapshot NG persiste `tracking_geometry` e `overlay_context`;
+- DEBUG técnico prefere a geometria da evidência congelada à geometria live.
+
+Contrato D-072:
+
+~~~text
+TRACKING/SEMANTIC SNAPSHOT N
+  raw_frame N
+  geometry N
+  analysis N
+  frame_token N
+        |
+        +-> NG confirmado
+               |
+               v
+        FROZEN NG SNAPSHOT N
+          câmera = raw_frame N
+          ROIs   = geometry N
+          cores  = analysis N
+          vermelho = confirmed_failed N
+~~~
+
+A câmera física pode continuar avançando somente para presença/EMPTY, mas nada
+do frame N+1 pode alterar a evidência visual terminal N.
+
+Regressões:
+- semantic payload preserva RAW e cópia independente da geometria;
+- auto-check exige RAW antes do registro NG;
+- snapshot overlay rastreado ignora geometria fixa quando existe geometria
+  explícita do frame;
+- freeze prefere contexto atômico ao último overlay live;
+- repaint terminal substitui classificação live stale pela análise final;
+- DEBUG congelado prefere geometria da evidência à geometria live.
+
+CI:
+- passo dedicado `Run D-072 atomic NG snapshot regressions`: PASS;
+- todos os gates focados anteriores até strict mask/segregation: PASS;
+- bloco amplo histórico permanece com os mesmos 7 FAIL + 1 ERROR já existentes.
+
+Resultado:
+- IMPLEMENTADO;
+- RETESTE FÍSICO PENDENTE.
+
+Não repetir:
+- não reconstruir evidência NG usando `camera_frame_atual`;
+- não usar `analysis_frame` alinhado como frame visual terminal quando tracking
+  ON dispõe do RAW correspondente;
+- não usar `_display_last_overlay_context` como autoridade da geometria do NG;
+- não manter `live_visual_classifications` antigas depois que a análise
+  terminal foi confirmada;
+- não parar a aquisição da câmera: EMPTY/rearme continuam live;
+- não alterar D-065/D-066 para resolver problema de apresentação.
