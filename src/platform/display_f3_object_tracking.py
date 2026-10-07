@@ -6438,6 +6438,58 @@ class F3DisplayObjectTracker:
                 filter_candidate.get("corner_source")
                 or "provided_quad"
             )
+
+            # D-073: o gate precisa validar a MESMA geometria que será
+            # publicada. Antes daqui o snap era medido apenas na aproximação
+            # afim; em perspectiva forte ela podia passar enquanto os quatro
+            # cantos usados pela homografia divergiam centenas de pixels do
+            # prior neural.
+            projective = (
+                _projective_filter_pose_from_affine_hint(
+                    points,
+                    canonical_list,
+                    local_best,
+                )
+                if local_best is not None
+                and corner_source != "min_area_rect_fallback"
+                else None
+            )
+            projective_corner_errors = []
+            geometry_error = local_error
+            geometry_snap_source = "affine"
+            if isinstance(projective, dict):
+                try:
+                    projective_points = np.asarray(
+                        projective.get("current_points"),
+                        dtype=np.float32,
+                    ).reshape(-1, 2)
+                    neural_points = np.asarray(
+                        neural_anchors,
+                        dtype=np.float32,
+                    ).reshape(-1, 2)
+                    if (
+                        projective_points.shape == (4, 2)
+                        and neural_points.shape == (4, 2)
+                    ):
+                        projective_corner_errors = np.linalg.norm(
+                            projective_points - neural_points,
+                            axis=1,
+                        ).tolist()
+                        geometry_error = float(
+                            np.mean(projective_corner_errors)
+                        )
+                        geometry_snap_source = "projective_corners"
+                    else:
+                        geometry_error = float("inf")
+                        geometry_snap_source = (
+                            "projective_corner_validation_unavailable"
+                        )
+                except Exception:
+                    geometry_error = float("inf")
+                    geometry_snap_source = (
+                        "projective_corner_validation_unavailable"
+                    )
+
             attempts.append(
                 {
                     "filter_source": str(
@@ -6449,44 +6501,70 @@ class F3DisplayObjectTracker:
                         4,
                     ),
                     "snap_error_px": (
+                        round(geometry_error, 3)
+                        if math.isfinite(geometry_error)
+                        else None
+                    ),
+                    "affine_snap_error_px": (
                         round(local_error, 3)
                         if math.isfinite(local_error)
                         else None
                     ),
+                    "projective_snap_error_px": (
+                        round(float(np.mean(projective_corner_errors)), 3)
+                        if projective_corner_errors
+                        else None
+                    ),
+                    "projective_corner_error_max_px": (
+                        round(float(np.max(projective_corner_errors)), 3)
+                        if projective_corner_errors
+                        else None
+                    ),
+                    "snap_source": geometry_snap_source,
                     "pose_candidates": int(len(matrices)),
                     "candidate_mode": str(candidate_mode or ""),
                 }
             )
-            if local_best is not None and local_error < best_error:
-                # D-071: minAreaRect continua útil como fallback estrutural,
-                # mas seus quatro cantos retangulares não representam a
-                # perspectiva física real exigida por uma homografia.
-                projective = (
-                    _projective_filter_pose_from_affine_hint(
-                        points,
-                        canonical_list,
-                        local_best,
-                    )
-                    if corner_source != "min_area_rect_fallback"
-                    else None
-                )
-                best_error = local_error
+            if local_best is not None and (
+                best is None or geometry_error < best_error
+            ):
+                best_error = geometry_error
                 best = {
                     "matrix": local_best,
                     "filter": filter_candidate,
                     "projective": projective,
+                    "affine_snap_error": local_error,
+                    "geometry_snap_source": geometry_snap_source,
+                    "projective_corner_errors": projective_corner_errors,
                 }
 
         debug["attempts"] = attempts
         debug["max_snap_error_px"] = round(max_snap_error, 3)
+        debug["selected_affine_snap_error_px"] = (
+            round(float(best.get("affine_snap_error")), 3)
+            if isinstance(best, dict)
+            and best.get("affine_snap_error") is not None
+            and math.isfinite(float(best.get("affine_snap_error")))
+            else None
+        )
         debug["selected_snap_error_px"] = (
             round(best_error, 3)
             if math.isfinite(best_error)
             else None
         )
+        debug["selected_snap_source"] = (
+            str(best.get("geometry_snap_source") or "")
+            if isinstance(best, dict)
+            else ""
+        )
         if best is None or best_error > max_snap_error:
             debug["available"] = False
-            debug["reason"] = "neural_pose_filter_snap_rejected"
+            debug["reason"] = (
+                "neural_pose_projective_snap_rejected"
+                if isinstance(best, dict)
+                and best.get("geometry_snap_source") == "projective_corners"
+                else "neural_pose_filter_snap_rejected"
+            )
             self._last_neural_pose_debug = debug
             return None
 
@@ -6545,30 +6623,14 @@ class F3DisplayObjectTracker:
             selected_filter.get("points"),
             minimum=4,
         )
-        ordered_projective_points = (
-            _normalize_points(
-                projective.get("current_points"),
-                minimum=4,
+        corner_errors_to_neural = [
+            float(value)
+            for value in (
+                best.get("projective_corner_errors", [])
+                if isinstance(best, dict)
+                else []
             )
-            if isinstance(projective, dict)
-            else []
-        )
-        corner_errors_to_neural = []
-        if len(ordered_projective_points) == 4:
-            try:
-                corner_errors_to_neural = np.linalg.norm(
-                    np.asarray(
-                        ordered_projective_points,
-                        dtype=np.float32,
-                    ).reshape(-1, 2)
-                    - np.asarray(
-                        neural_anchors,
-                        dtype=np.float32,
-                    ).reshape(-1, 2),
-                    axis=1,
-                ).tolist()
-            except Exception:
-                corner_errors_to_neural = []
+        ]
 
         debug.update(
             {

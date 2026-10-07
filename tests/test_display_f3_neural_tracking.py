@@ -538,6 +538,99 @@ class DisplayF3NeuralTrackingTests(unittest.TestCase):
         self.assertEqual(4, len(debug["filter_corner_errors_to_neural_px"]))
         self.assertIsNotNone(debug["filter_corner_error_mean_px"])
         self.assertIsNotNone(debug["filter_corner_error_max_px"])
+    def test_projective_pose_rejects_geometry_that_only_affine_snap_accepts(self):
+        repository = SimpleNamespace()
+        runtime = tracking.F3DisplayObjectTracker(repository)
+        runtime.project = "CM_500_L"
+        runtime.width = 800
+        runtime.height = 700
+        runtime.ready = True
+        runtime.canonical_board = [
+            [0.0, 0.0],
+            [600.0, 0.0],
+            [600.0, 200.0],
+            [0.0, 200.0],
+        ]
+        neural_anchors = neural_tracking.canonical_pose_anchors(
+            runtime.canonical_board
+        )
+        physical_quad = np.asarray(
+            [
+                [0.0, 0.0],
+                [600.0, 0.0],
+                [600.0, 600.0],
+                [0.0, 600.0],
+            ],
+            dtype=np.float32,
+        )
+        runtime.neural_pose_detector = SimpleNamespace(
+            predict=lambda *args, **kwargs: {
+                "ready": True,
+                "reason": "neural_tracking_pose_prior_ready",
+                "current_anchors": neural_anchors.copy(),
+                "anchor_fit_mean_px": 2.0,
+                "anchor_fit_max_px": 4.0,
+                "inference_ms": 2.0,
+                "validation": {"runtime_max_snap_error_px": 180.0},
+            }
+        )
+        identity = np.asarray(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        )
+
+        with (
+            patch.object(
+                tracking,
+                "_detect_dark_filter_candidates",
+                return_value=[
+                    {
+                        "points": physical_quad.tolist(),
+                        "score": 3.2,
+                        "source": "dark_filter_detector",
+                        "corner_source": "contour_quad",
+                    }
+                ],
+            ),
+            patch.object(
+                tracking,
+                "_neural_filter_board_matrix_candidates",
+                return_value=([identity], "forced_affine"),
+            ),
+        ):
+            candidate = runtime._neural_filter_pose_candidate(
+                np.zeros((700, 800, 3), dtype=np.uint8)
+            )
+
+        self.assertIsNone(candidate)
+        debug = runtime._last_neural_pose_debug
+        self.assertFalse(debug["available"])
+        self.assertEqual(
+            "neural_pose_projective_snap_rejected",
+            debug["reason"],
+        )
+        self.assertEqual(
+            "projective_corners",
+            debug["selected_snap_source"],
+        )
+        self.assertAlmostEqual(
+            0.0,
+            debug["selected_affine_snap_error_px"],
+            places=3,
+        )
+        self.assertGreater(
+            debug["selected_snap_error_px"],
+            debug["max_snap_error_px"],
+        )
+        self.assertGreater(
+            debug["attempts"][0]["projective_snap_error_px"],
+            debug["max_snap_error_px"],
+        )
+        self.assertEqual(
+            "projective_corners",
+            debug["attempts"][0]["snap_source"],
+        )
+
     def test_projective_luminous_residual_preserves_homography(self):
         canonical_board = [
             [0.0, 0.0],
