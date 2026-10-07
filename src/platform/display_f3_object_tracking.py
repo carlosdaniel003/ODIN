@@ -8356,6 +8356,12 @@ def _run_live_semantic_job(
         "queue_age_ms": round(queue_age_ms, 2),
         "queue_wait_ms": round(queue_wait_ms, 2),
         "analysis_frame": analysis_frame,
+        # D-072: o frame RAW e a geometria abaixo pertencem exatamente ao
+        # mesmo snapshot usado pelo analyzer. Eles seguem juntos até um
+        # eventual freeze de NG; nunca são reconstruídos a partir do estado
+        # live depois que a decisão foi tomada.
+        "raw_frame": raw_frame,
+        "tracking_geometry": deepcopy(tracking_geometry),
         "context": deepcopy(context),
         "analysis": analysis,
     }
@@ -8886,6 +8892,10 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
         if isinstance(ready_semantic, dict):
             self._display_auto_precomputed_payload = {
                 "frame_token": ready_semantic.get("frame_token"),
+                "raw_frame": ready_semantic.get("raw_frame"),
+                "tracking_geometry": deepcopy(
+                    ready_semantic.get("tracking_geometry")
+                ),
                 "context": deepcopy(ready_semantic.get("context") or {}),
                 "analysis": deepcopy(ready_semantic.get("analysis") or {}),
             }
