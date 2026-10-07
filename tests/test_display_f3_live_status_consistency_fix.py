@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 
-import src.platform.display_f3_power_authority as power_module
 from src.platform.display_f3_live_status_consistency_fix import (
     F3_INITIAL_FRAME_PLACEHOLDER,
     F3_LEGACY_REFERENCE_PLACEHOLDER,
@@ -34,136 +33,124 @@ class _App:
     def __init__(self):
         self._display_f3_waiting_empty_rearm = False
         self._display_f3_waiting_new_board_after_empty = False
-        self._display_f3_power_authority_status = None
-        self._display_f3_operational_state = None
+        self._display_auto_last_analysis = None
 
     @staticmethod
     def _display_auto_current_context():
         return {
             "project_name": "CM-550-L",
-            "check_id": "CHECK_001",
-            "check_name": "H1",
+            "check_id": "CHECK_002",
+            "check_name": "BLUE",
         }
 
 
 class DisplayF3LiveStatusConsistencyFixTests(unittest.TestCase):
-    def test_placeholder_inicial_nao_diz_que_faltam_referencias(self):
+    def test_placeholder_inicial_agora_e_divergencia(self):
         window = _Window()
         changed = corrigir_placeholder_inicial_f3(window)
 
         self.assertTrue(changed)
-        self.assertEqual(F3_INITIAL_FRAME_PLACEHOLDER, window.visual_analysis_state_label.text)
-        self.assertNotIn("referências do projeto", window.visual_analysis_state_label.text)
-
-    def test_gate_off_publica_placa_desligada_em_vez_do_placeholder(self):
-        app = _App()
-        app._display_f3_power_authority_status = {
-            "board_present": True,
-            "presence": {
-                "board_present": True,
-                "empty_confirmed": False,
-            },
-            "energy": {
-                "energy_state": power_module.F3_POWER_STATE_OFF,
-                "off_confirmed": True,
-                "expected_on_mask_count": 7,
-                "off_votes": 7,
-                "powered_votes": 0,
-            },
-            "decision_allowed": False,
-            "reason": "todos_segmentos_esperados_acesos_estao_apagados",
-        }
-
-        result = resolver_status_visual_runtime_f3(
-            app,
-            F3_LEGACY_REFERENCE_PLACEHOLDER,
+        self.assertEqual(
+            F3_INITIAL_FRAME_PLACEHOLDER,
+            window.visual_analysis_state_label.text,
+        )
+        self.assertTrue(
+            window.visual_analysis_state_label.text.startswith("DIVERGÊNCIA")
+        )
+        self.assertNotIn(
+            "ANÁLISE VISUAL",
+            window.visual_analysis_state_label.text,
         )
 
-        self.assertIsNotNone(result)
-        self.assertIn("PLACA DESLIGADA NO SUPORTE", result[0])
-        self.assertNotIn("aguardando referências", result[0])
-
-    def test_empty_confirmado_publica_placa_fora_do_suporte(self):
+    def test_divergencia_confirmada_e_publicada_em_qualquer_check(self):
         app = _App()
-        app._display_f3_power_authority_status = {
-            "board_present": False,
-            "empty_confirmed": True,
-            "presence": {
-                "board_present": False,
-                "empty_confirmed": True,
-            },
-            "energy": None,
-            "decision_allowed": False,
+        app._display_auto_last_analysis = {
+            "ready": True,
+            "approved": False,
+            "check_id": "CHECK_002",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                }
+            ],
+            "effective_classifications": {"MASK_024": "off"},
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
         }
 
-        result = resolver_status_visual_runtime_f3(app, F3_INITIAL_FRAME_PLACEHOLDER)
+        result = resolver_status_visual_runtime_f3(app)
 
-        self.assertIsNotNone(result)
-        self.assertEqual("ANÁLISE VISUAL: PLACA FORA DO SUPORTE", result[0])
+        self.assertEqual(
+            "DIVERGÊNCIA • MASK_024 • ESPERADO: ACESO • DETECTADO: APAGADO",
+            result[0],
+        )
 
-    def test_powered_so_substitui_placeholder_e_preserva_status_global_valido(self):
+    def test_sem_divergencia_mostra_check_conforme(self):
         app = _App()
-        app._display_f3_power_authority_status = {
-            "board_present": True,
-            "presence": {"board_present": True},
-            "energy": {
-                "energy_state": power_module.F3_POWER_STATE_POWERED,
-                "powered_confirmed": True,
-            },
-            "decision_allowed": True,
+        app._display_auto_last_analysis = {
+            "ready": True,
+            "approved": True,
+            "check_id": "CHECK_002",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "on",
+                    "matched": True,
+                }
+            ],
         }
 
-        from_placeholder = resolver_status_visual_runtime_f3(
-            app,
-            F3_LEGACY_REFERENCE_PLACEHOLDER,
-        )
-        existing_global = resolver_status_visual_runtime_f3(
-            app,
-            "ANÁLISE VISUAL: CHECK H1 • 98%",
+        result = resolver_status_visual_runtime_f3(app)
+
+        self.assertEqual(
+            "DIVERGÊNCIA • NENHUMA • CHECK BLUE CONFORME",
+            result[0],
         )
 
-        self.assertIsNotNone(from_placeholder)
-        self.assertIn("analisando H1", from_placeholder[0])
-        self.assertIsNone(existing_global)
-
-    def test_rearme_tem_prioridade_e_nao_e_sobrescrito(self):
+    def test_rearme_exibe_estado_da_divergencia_sem_matching_visual(self):
         app = _App()
         app._display_f3_waiting_empty_rearm = True
-        app._display_f3_power_authority_status = {
-            "board_present": True,
-            "energy": {"energy_state": power_module.F3_POWER_STATE_OFF},
-        }
 
-        result = resolver_status_visual_runtime_f3(
-            app,
-            F3_LEGACY_REFERENCE_PLACEHOLDER,
+        waiting_remove = resolver_status_visual_runtime_f3(app)
+        self.assertEqual(
+            "DIVERGÊNCIA • NENHUMA • AGUARDANDO RETIRADA DA PLACA",
+            waiting_remove[0],
         )
 
-        self.assertIsNone(result)
+        app._display_f3_waiting_empty_rearm = False
+        app._display_f3_waiting_new_board_after_empty = True
+        waiting_new = resolver_status_visual_runtime_f3(app)
+        self.assertEqual(
+            "DIVERGÊNCIA • NENHUMA • AGUARDANDO NOVA PLACA",
+            waiting_new[0],
+        )
 
-    def test_fallback_operacional_so_age_se_referencias_estao_configuradas(self):
+    def test_analise_stale_do_check_anterior_nao_vaza_para_blue(self):
         app = _App()
-        app._display_f3_operational_state = {
-            "kind": "off",
-            "board_references_complete": True,
+        app._display_auto_last_analysis = {
+            "ready": True,
+            "approved": False,
+            "check_id": "CHECK_001",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_004",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                }
+            ],
+            "effective_confirmed_failed_mask_ids": ("MASK_004",),
         }
-        configured = resolver_status_visual_runtime_f3(
-            app,
-            F3_LEGACY_REFERENCE_PLACEHOLDER,
-        )
 
-        app._display_f3_operational_state = {
-            "kind": "off",
-            "board_references_complete": False,
-        }
-        missing = resolver_status_visual_runtime_f3(
-            app,
-            F3_LEGACY_REFERENCE_PLACEHOLDER,
-        )
+        result = resolver_status_visual_runtime_f3(app)
 
-        self.assertIsNotNone(configured)
-        self.assertIn("PLACA DESLIGADA", configured[0])
-        self.assertIsNone(missing)
+        self.assertEqual(
+            "DIVERGÊNCIA • NENHUMA • AGUARDANDO BLUE",
+            result[0],
+        )
 
 
 if __name__ == "__main__":

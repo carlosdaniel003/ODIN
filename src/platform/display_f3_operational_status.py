@@ -22,6 +22,188 @@ F3_OPERATIONAL_STATUS_COLORS = {
     "unavailable": "#94A3B8",
 }
 
+F3_DIVERGENCE_STATUS_COLORS = {
+    "confirmed": "#FCA5A5",
+    "validating": "#FDE68A",
+    "conform": "#86EFAC",
+    "waiting": "#94A3B8",
+}
+F3_DIVERGENCE_STATE_LABELS = {
+    "on": "ACESO",
+    "off": "APAGADO",
+    "low_light": "POUCA LUZ",
+    "uncertain": "INCERTO",
+    "unknown": "INDETERMINADO",
+    "ignore": "IGNORADO",
+}
+
+
+def _divergence_state_label(value) -> str:
+    key = str(value or "").strip().lower()
+    return F3_DIVERGENCE_STATE_LABELS.get(
+        key,
+        key.upper() if key else "INDETERMINADO",
+    )
+
+
+def formatar_status_divergencia_f3(
+    analysis: dict | None,
+    context: dict | None = None,
+    *,
+    waiting_reason: str = "",
+) -> dict:
+    """Formata a faixa operacional de divergência sem criar nova autoridade.
+
+    Consome exclusivamente a análise semântica já calculada pelo CHECK atual.
+    Não lê câmera, não compara referências e não altera OK/NG/debounce.
+    """
+    ctx = context if isinstance(context, dict) else {}
+    check_id = str(ctx.get("check_id") or "").strip()
+    check_name = str(
+        ctx.get("check_name")
+        or check_id
+        or "CHECK"
+    ).strip().upper()
+
+    if waiting_reason:
+        return {
+            "text": f"DIVERGÊNCIA • NENHUMA • {str(waiting_reason).strip().upper()}",
+            "color": F3_DIVERGENCE_STATUS_COLORS["waiting"],
+            "kind": "waiting",
+            "mask_id": "",
+        }
+
+    data = analysis if isinstance(analysis, dict) else {}
+    analysis_check_id = str(data.get("check_id") or "").strip()
+    if not data or (
+        check_id
+        and analysis_check_id
+        and analysis_check_id != check_id
+    ):
+        return {
+            "text": f"DIVERGÊNCIA • NENHUMA • AGUARDANDO {check_name}",
+            "color": F3_DIVERGENCE_STATUS_COLORS["waiting"],
+            "kind": "waiting",
+            "mask_id": "",
+        }
+
+    rows = [
+        item
+        for item in (data.get("mask_results") or ())
+        if isinstance(item, dict) and str(item.get("mask_id") or "")
+    ]
+    by_id = {
+        str(item.get("mask_id")): item
+        for item in rows
+    }
+    effective = (
+        {
+            str(mask_id): str(state or "").strip().lower()
+            for mask_id, state in data.get(
+                "effective_classifications",
+                {},
+            ).items()
+        }
+        if isinstance(data.get("effective_classifications"), dict)
+        else {}
+    )
+
+    def ids_from(field: str) -> list[str]:
+        return [
+            str(mask_id)
+            for mask_id in (data.get(field) or ())
+            if str(mask_id)
+        ]
+
+    confirmed = ids_from("effective_confirmed_failed_mask_ids")
+    validating = ids_from("effective_validating_mask_ids")
+    failed = ids_from("effective_failed_mask_ids")
+    if not failed:
+        failed = [
+            str(item.get("mask_id"))
+            for item in rows
+            if item.get("matched") is False
+        ]
+
+    uncertain = ids_from("effective_uncertain_mask_ids")
+    if not uncertain:
+        uncertain = [
+            str(item.get("mask_id"))
+            for item in rows
+            if (
+                item.get("semantic_certain") is False
+                or str(item.get("classified") or "").strip().lower()
+                == "uncertain"
+            )
+        ]
+
+    categories = (
+        ("confirmed", confirmed),
+        ("validating", validating),
+        ("validating", failed),
+        ("uncertain", uncertain),
+    )
+    for kind, mask_ids in categories:
+        unique_ids = []
+        for mask_id in mask_ids:
+            if mask_id not in unique_ids:
+                unique_ids.append(mask_id)
+        if not unique_ids:
+            continue
+
+        mask_id = unique_ids[0]
+        row = by_id.get(mask_id, {})
+        expected = str(row.get("expected") or "").strip().lower()
+        detected = str(
+            effective.get(mask_id)
+            or row.get("classified")
+            or ""
+        ).strip().lower()
+
+        text = (
+            f"DIVERGÊNCIA • {mask_id} "
+            f"• ESPERADO: {_divergence_state_label(expected)} "
+            f"• DETECTADO: {_divergence_state_label(detected)}"
+        )
+        if kind == "validating":
+            text += " • VALIDANDO"
+        elif kind == "uncertain":
+            text += " • AGUARDANDO CERTEZA"
+        if len(unique_ids) > 1:
+            text += f" • +{len(unique_ids) - 1}"
+
+        return {
+            "text": text,
+            "color": F3_DIVERGENCE_STATUS_COLORS[
+                "confirmed" if kind == "confirmed" else "validating"
+            ],
+            "kind": kind,
+            "mask_id": mask_id,
+            "expected": expected,
+            "detected": detected,
+            "count": len(unique_ids),
+        }
+
+    if data.get("approved") is True:
+        text_value = f"DIVERGÊNCIA • NENHUMA • CHECK {check_name} CONFORME"
+        kind = "conform"
+        color = F3_DIVERGENCE_STATUS_COLORS["conform"]
+    elif bool(data.get("ready")):
+        text_value = f"DIVERGÊNCIA • NENHUMA • ANALISANDO {check_name}"
+        kind = "waiting"
+        color = F3_DIVERGENCE_STATUS_COLORS["waiting"]
+    else:
+        text_value = f"DIVERGÊNCIA • NENHUMA • AGUARDANDO LEITURA DE {check_name}"
+        kind = "waiting"
+        color = F3_DIVERGENCE_STATUS_COLORS["waiting"]
+
+    return {
+        "text": text_value,
+        "color": color,
+        "kind": kind,
+        "mask_id": "",
+    }
+
 
 def _score_candidate(matcher, current_small, metadata: dict | None) -> dict | None:
     if not isinstance(metadata, dict):
@@ -374,7 +556,7 @@ def _install_single_status_window() -> None:
 
         self.visual_analysis_state_label = tk.Label(
             status_box,
-            text="ANÁLISE VISUAL: aguardando referências do projeto",
+            text="DIVERGÊNCIA • NENHUMA • AGUARDANDO PRIMEIRA LEITURA",
             font=("DejaVu Sans", 9, "bold"),
             bg=self.PREVIEW_PANEL,
             fg=F3_OPERATIONAL_STATUS_COLORS["unavailable"],
@@ -440,16 +622,19 @@ def _install_operational_auto_gate() -> None:
         except Exception:
             pass
 
-        # Status paralelo e estritamente informativo. Usa somente as duas fotos
-        # de presença do Projeto Display (e a ROI, quando configurada). O valor
-        # não entra em nenhuma condição de aprovação, reprovação ou transição.
-        visual_state = _build_visual_analysis_state(self, frame, str(project_name))
+        # D-075: esta faixa não executa mais matching visual global no hot path.
+        # Ela apresenta somente a divergência da análise semântica já existente.
+        # O diagnóstico visual legado continua disponível no DEBUG TÉCNICO.
+        divergence_state = formatar_status_divergencia_f3(
+            getattr(self, "_display_auto_last_analysis", None),
+            context,
+        )
         try:
             window.set_visual_analysis_status(
-                str(visual_state.get("text") or "ANÁLISE VISUAL: identificando..."),
+                str(divergence_state.get("text") or "DIVERGÊNCIA • NENHUMA"),
                 str(
-                    visual_state.get("color")
-                    or F3_OPERATIONAL_STATUS_COLORS["unknown"]
+                    divergence_state.get("color")
+                    or F3_DIVERGENCE_STATUS_COLORS["waiting"]
                 ),
             )
         except Exception:

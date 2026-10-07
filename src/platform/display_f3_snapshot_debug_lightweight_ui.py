@@ -54,7 +54,7 @@ STATUS_TITLES = {
     "preview_status": "PREVIEW",
     "operational_reference_state_label": "ESTADO OPERACIONAL",
     "mask_analysis_state_label": "MÁSCARAS",
-    "visual_analysis_state_label": "ANÁLISE VISUAL",
+    "visual_analysis_state_label": "DIVERGÊNCIA",
     "visual_reference_state_label": "REFERÊNCIA VISUAL",
     "board_reference_state_label": "PRESENÇA DA PLACA",
 }

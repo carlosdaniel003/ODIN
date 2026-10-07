@@ -914,6 +914,24 @@ class DisplayProductionF3Mixin:
             except Exception:
                 pass
 
+        terminal_divergence_status = None
+        if janela is not None and isinstance(analysis, dict):
+            try:
+                from src.platform.display_f3_operational_status import (
+                    formatar_status_divergencia_f3,
+                )
+
+                terminal_divergence_status = formatar_status_divergencia_f3(
+                    analysis,
+                    context if isinstance(context, dict) else None,
+                )
+                janela.set_visual_analysis_status(
+                    str(terminal_divergence_status.get("text") or ""),
+                    str(terminal_divergence_status.get("color") or "#FCA5A5"),
+                )
+            except Exception:
+                terminal_divergence_status = None
+
         state = getattr(self, "_display_f3_operational_state", None)
         if janela is not None and isinstance(state, dict):
             try:
@@ -1039,6 +1057,9 @@ class DisplayProductionF3Mixin:
             else None,
             "overlay_context": deepcopy(terminal_overlay_context)
             if isinstance(terminal_overlay_context, dict)
+            else None,
+            "divergence_status": deepcopy(terminal_divergence_status)
+            if isinstance(terminal_divergence_status, dict)
             else None,
         }
         self._display_f3_ng_evidence_frozen = True

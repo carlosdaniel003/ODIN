@@ -5371,3 +5371,63 @@ Com Rastreamento Automático DESLIGADO:
 5. repetir os demais CHECKS normalmente para confirmar que a mudança foi apenas
    de apresentação.
 
+---
+
+## D-075 — faixa ANÁLISE VISUAL substituída por DIVERGÊNCIA por máscara
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Objetivo
+
+A terceira linha informativa do painel direito do F3 deixou de ter utilidade
+operacional como `ANÁLISE VISUAL`. Ela passa a apresentar diretamente a
+divergência semântica do CHECK atual.
+
+Formato principal:
+
+```text
+DIVERGÊNCIA • MASK_024 • ESPERADO: ACESO • DETECTADO: APAGADO
+```
+
+### Decisão
+
+A faixa agora consome somente `_display_auto_last_analysis` do CHECK atual:
+
+- falha confirmada: mostra MASK, esperado e detectado;
+- falha ainda em debounce: mesma estrutura + `VALIDANDO`;
+- estado incerto: mesma estrutura + `AGUARDANDO CERTEZA`;
+- nenhuma divergência e CHECK aprovado:
+  `DIVERGÊNCIA • NENHUMA • CHECK <NOME> CONFORME`;
+- aguardando nova leitura/CHECK:
+  `DIVERGÊNCIA • NENHUMA • AGUARDANDO <CHECK>`;
+- rearme:
+  `AGUARDANDO RETIRADA DA PLACA` ou `AGUARDANDO NOVA PLACA`.
+
+Os estados ON/OFF são traduzidos para `ACESO/APAGADO`; `low_light` para
+`POUCA LUZ` e incerteza para `INCERTO/INDETERMINADO`.
+
+### Invariantes
+
+- a faixa é apresentação; não decide OK/NG;
+- não executa CNN, matching, câmera ou análise adicional;
+- a antiga comparação visual global deixa de rodar para alimentar essa faixa no
+  hot path;
+- o diagnóstico visual legado pode continuar existindo no DEBUG TÉCNICO;
+- análise de CHECK anterior não pode aparecer depois que a sequência avançou;
+- no NG, o texto de divergência é publicado a partir do mesmo `analysis`
+  preservado antes do freeze, portanto acompanha o snapshot terminal exato;
+- F2 não é alterado;
+- tracking ON/OFF não muda sua lógica por esta decisão.
+
+### Validação
+
+Regressões dedicadas cobrem:
+
+- formato exato `MASK_024 ON -> OFF`;
+- inverso `expected OFF -> detected ON`;
+- estado VALIDANDO;
+- CHECK conforme;
+- análise stale de CHECK anterior;
+- rearme;
+- publicação da divergência antes do latch/freeze NG.
+

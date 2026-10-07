@@ -4,7 +4,11 @@ import inspect
 import unittest
 
 import src.platform.display_f3_operational_status as operational_module
-from src.platform.display_f3_operational_status import resolver_estado_operacional_f3
+from src.platform.display_f3_operational_status import (
+    formatar_status_divergencia_f3,
+    resolver_estado_operacional_f3,
+)
+from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.desktop_production_app import DesktopProductionApp
 
 
@@ -99,6 +103,117 @@ class DisplayF3OperationalStatusTests(unittest.TestCase):
         self.assertEqual("unknown", state["kind"])
         self.assertEqual("IDENTIFICANDO...", state["text"])
         self.assertFalse(state["allow_auto"])
+
+    def test_status_divergencia_confirmada_mostra_esperado_e_detectado(self):
+        analysis = {
+            "ready": True,
+            "approved": False,
+            "check_id": "CHECK_002",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_024",
+                    "expected": "on",
+                    "classified": "off",
+                    "matched": False,
+                }
+            ],
+            "effective_classifications": {"MASK_024": "off"},
+            "effective_failed_mask_ids": ("MASK_024",),
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+            "effective_validating_mask_ids": (),
+        }
+        context = {"check_id": "CHECK_002", "check_name": "BLUE"}
+
+        status = formatar_status_divergencia_f3(analysis, context)
+
+        self.assertEqual(
+            "DIVERGÊNCIA • MASK_024 • ESPERADO: ACESO • DETECTADO: APAGADO",
+            status["text"],
+        )
+        self.assertEqual("confirmed", status["kind"])
+
+    def test_status_divergencia_cobre_inverso_validando_e_conforme(self):
+        context = {"check_id": "CHECK_003", "check_name": "USB"}
+        inverse = {
+            "ready": True,
+            "approved": False,
+            "check_id": "CHECK_003",
+            "mask_results": [
+                {
+                    "mask_id": "MASK_011",
+                    "expected": "off",
+                    "classified": "on",
+                    "matched": False,
+                }
+            ],
+            "effective_classifications": {"MASK_011": "on"},
+            "effective_failed_mask_ids": ("MASK_011",),
+            "effective_confirmed_failed_mask_ids": (),
+            "effective_validating_mask_ids": ("MASK_011",),
+        }
+        validating = formatar_status_divergencia_f3(inverse, context)
+        self.assertEqual(
+            (
+                "DIVERGÊNCIA • MASK_011 • ESPERADO: APAGADO "
+                "• DETECTADO: ACESO • VALIDANDO"
+            ),
+            validating["text"],
+        )
+
+        conform = formatar_status_divergencia_f3(
+            {
+                "ready": True,
+                "approved": True,
+                "check_id": "CHECK_003",
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_011",
+                        "expected": "off",
+                        "classified": "off",
+                        "matched": True,
+                    }
+                ],
+            },
+            context,
+        )
+        self.assertEqual(
+            "DIVERGÊNCIA • NENHUMA • CHECK USB CONFORME",
+            conform["text"],
+        )
+
+    def test_status_divergencia_nao_reutiliza_analise_do_check_anterior(self):
+        status = formatar_status_divergencia_f3(
+            {
+                "ready": True,
+                "approved": False,
+                "check_id": "CHECK_001",
+                "mask_results": [
+                    {
+                        "mask_id": "MASK_004",
+                        "expected": "on",
+                        "classified": "off",
+                        "matched": False,
+                    }
+                ],
+                "effective_confirmed_failed_mask_ids": ("MASK_004",),
+            },
+            {"check_id": "CHECK_002", "check_name": "BLUE"},
+        )
+        self.assertEqual(
+            "DIVERGÊNCIA • NENHUMA • AGUARDANDO BLUE",
+            status["text"],
+        )
+
+    def test_ng_publica_divergencia_antes_de_congelar_status_da_tela(self):
+        source = inspect.getsource(
+            DisplayProductionF3Mixin._congelar_evidencia_ng_display_f3
+        )
+        divergence = source.index("formatar_status_divergencia_f3(")
+        latch = source.index("self._display_f3_ng_evidence_frozen = True")
+        freeze = source.index('freeze = getattr(janela, "freeze_ng_evidence", None)')
+        self.assertLess(divergence, latch)
+        self.assertLess(divergence, freeze)
+        self.assertIn('"divergence_status"', source)
 
     def test_interface_possui_somente_um_status_operacional(self):
         source = inspect.getsource(operational_module._install_single_status_window)

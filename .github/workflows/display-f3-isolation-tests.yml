@@ -238,6 +238,13 @@ jobs:
             tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_todas_as_28_mascaras_podem_confirmar_ng_sem_caso_especial_024 \
             -v
 
+      - name: Run D-075 divergence status regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_operational_status \
+            tests.test_display_f3_live_status_consistency_fix \
+            -v
+
       - name: Run ROI geometry parity tests
         run: |
           python -m unittest \

@@ -7106,3 +7106,43 @@ mesmos 7 FAIL + 1 ERROR do baseline, não relacionados a esta alteração.
 `MASK_024` deve continuar sendo a única falha, mas agora o vermelho do VISOR
 deve ocupar exatamente a mesma barra física indicada pela câmera.
 
+---
+
+## 07/10/2026 — D-074 PASS físico: VISOR tracking OFF alinhado à câmera
+
+**Resultado:** PASS FÍSICO.
+
+O usuário repetiu o cenário BLUE com Rastreamento Automático DESLIGADO após a
+D-074 e confirmou que o VISOR DO DISPLAY passou a corresponder corretamente às
+máscaras apresentadas na câmera ao vivo/congelada.
+
+A falha anterior — `MASK_024` correta na análise/câmera, mas vermelho em outra
+barra física do visor — não se repetiu.
+
+Conclusão:
+
+```text
+tracking OFF
++ mapeamento físico A..G do snapshot
++ mesma rotação visual
+= câmera e VISOR coerentes
+```
+
+D-074 fica **VALIDADA FISICAMENTE** para o caso disponível em bancada.
+
+A garantia de que qualquer `MASK_001..MASK_028` pode gerar NG nos dois sentidos
+permanece coberta por 56 cenários automatizados; as demais falhas físicas não
+podem ser reproduzidas em bancada enquanto não existirem placas com esses
+defeitos reais.
+
+### Próxima alteração solicitada — D-075
+
+Substituir completamente a linha operacional `ANÁLISE VISUAL` por uma faixa
+de divergência por máscara, por exemplo:
+
+```text
+DIVERGÊNCIA • MASK_024 • ESPERADO: ACESO • DETECTADO: APAGADO
+```
+
+Estado D-075 após implementação: **PENDENTE DE RETESTE VISUAL**.
+
