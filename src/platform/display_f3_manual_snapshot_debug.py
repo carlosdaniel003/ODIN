@@ -1265,13 +1265,19 @@ def _prepare_async_snapshot_seed(app) -> dict:
         and isinstance(evidence.get("analysis"), dict)
         else None
     )
+    frozen_tracking_geometry = (
+        _safe_deepcopy(evidence.get("tracking_geometry"))
+        if isinstance(evidence, dict)
+        and isinstance(evidence.get("tracking_geometry"), dict)
+        else _tracking_geometry_snapshot(app)
+    )
     return {
         "captured_at": captured_at,
         "frame": frame,
         "capture": _safe_deepcopy(capture),
         "rotation": _rotation(app),
         "logical_context": _safe_deepcopy(_current_context(app)),
-        "tracking_geometry": _tracking_geometry_snapshot(app),
+        "tracking_geometry": frozen_tracking_geometry,
         "frozen_production_analysis": frozen_analysis,
     }
 
@@ -1668,6 +1674,11 @@ def capturar_snapshot_debug_display_f3(app) -> dict:
             logical_check_id,
             frozen_analysis if isinstance(frozen_analysis, dict) else None,
             int(snapshot.get("rotation", 0) or 0),
+            tracking_geometry=(
+                snapshot.get("tracking_geometry")
+                if isinstance(snapshot.get("tracking_geometry"), dict)
+                else None
+            ),
         )
     except Exception as exc:
         overlay_context = None
