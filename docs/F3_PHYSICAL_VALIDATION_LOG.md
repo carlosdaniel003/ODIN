@@ -6607,3 +6607,90 @@ H1. A validação completa dos demais cenários de D-065 continua sendo registra
 separadamente conforme forem executados no JIG, especialmente BLUE intermitente
 correto e BLUE NG com `MASK_024` apagada.
 
+
+
+---
+
+## 07/10/2026 — D-071 PASS de tracking/decisão e FAIL visual; D-072 implementada
+
+**Resultado do teste físico reportado:** TRACKING/DECISÃO PASS; APRESENTAÇÃO
+TERMINAL FAIL.
+
+### Evidência física
+
+No BLUE com `MASK_024` fisicamente apagada:
+
+```text
+tracking frame                         camera 1481
+spatial_alignment_ready               true
+spatial_alignment_source              luminous_segment_grid
+analysis_frame_source                 tracking_raw_with_live_geometry
+tracking_snapshot_explicit            true
+BLUE                                  27/28
+falha persistente após 3 amostras     MASK_024
+effective_confirmed_failed_mask_ids   MASK_024
+resultado produtivo                   NG correto
+```
+
+Portanto, a D-071 cumpriu o objetivo físico de manter tracking e julgamento
+coerentes no BLUE defeituoso. O detector, a autoridade híbrida e o debounce não
+foram identificados como causa do novo defeito.
+
+### FAIL observado
+
+Depois do NG, o status congelado continuava correto, apontando somente
+`MASK_024`, mas a câmera/ROIs congeladas passaram a representar outra geometria
+visual e o visor apresentava várias máscaras com classificações incompatíveis
+com a análise produtiva.
+
+A causa encontrada foi temporal:
+
+```text
+frame que fechou NG
++ análise desse frame
++ último overlay live disponível de outro repaint
+= apresentação terminal não atômica
+```
+
+O worker semântico já recebia RAW + geometria do mesmo tracking snapshot, mas
+não transportava essa geometria até o freeze. O repaint terminal ainda podia
+ler `_display_last_overlay_context` e, em `live_luminous_only`, preservar
+classificações visuais live antigas.
+
+### Correção D-072
+
+Foi implementado um snapshot NG atômico contendo:
+
+- frame RAW;
+- `frame_token`;
+- geometria rastreada, incluindo contorno e máscaras;
+- análise produtiva;
+- `effective_classifications`;
+- `effective_confirmed_failed_mask_ids`;
+- contexto lógico;
+- rotação visual;
+- telemetria do debounce.
+
+Câmera e visor congelados passam a consumir exclusivamente esse snapshot.
+O contexto terminal não copia mais o último overlay live; a geometria vem do
+snapshot do tracking e as classificações vêm da análise que fechou o NG.
+
+Não foram alterados CNN, autoridade híbrida, thresholds, tracking luminoso,
+regra do BLUE, debounce nem sequência.
+
+### Reteste físico exigido
+
+Repetir exatamente o BLUE NG com `MASK_024` apagada e confirmar:
+
+```text
+decisão                               NG 27/28
+frame congelado                       mesmo frame_token da análise
+ROIs                                  sobre os 28 segmentos desse frame
+MASK_024                              vermelha e OFF
+demais máscaras                       ON/OFF conforme effective_classifications
+movimento live após o NG              não move ROIs congeladas
+retirada da placa                     libera freeze normalmente
+```
+
+**D-072 IMPLEMENTADA — PENDENTE DE RETESTE FÍSICO.**
+

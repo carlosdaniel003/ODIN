@@ -4089,3 +4089,63 @@ A mudança só será considerada fisicamente validada depois de testar no JIG:
 
 Até essa validação, o estado é **IMPLEMENTADO / PENDENTE DE RETESTE FÍSICO**.
 
+
+
+---
+
+## D-072 — NG terminal usa snapshot atômico do frame que fechou a reprovação
+
+**Status:** Accepted / implementação pendente de reteste físico
+
+### Contexto
+
+No reteste físico com tracking ativo posterior à D-071, o BLUE chegou alinhado,
+foi analisado com geometria rastreada explícita e fechou corretamente em
+`27/28`, com somente `MASK_024` em
+`effective_confirmed_failed_mask_ids`. A decisão NG estava correta.
+
+A apresentação terminal, porém, podia combinar o frame que fechou o debounce com
+`_display_last_overlay_context` ou `_display_frozen_overlay_context` de outro
+repaint. Além disso, quando esse contexto já estava em `live_luminous_only`, as
+classificações visuais live podiam sobreviver ao freeze em vez de serem
+substituídas pela semântica efetiva da análise produtiva.
+
+Isso quebrava o contrato de D-045: decisão, frame, ROIs e cores finais deixavam
+de pertencer ao mesmo instante físico.
+
+### Decisão
+
+1. O worker semântico de tracking devolve, junto da análise, o `raw_frame`,
+   `frame_token`, `tracking_geometry` e `visual_rotation` do mesmo job.
+2. Ao fechar NG, o runtime cria um único
+   `_display_f3_pending_ng_snapshot`; os antigos campos pendentes separados
+   deixam de ser a autoridade do freeze.
+3. O snapshot terminal contém frame RAW, token, geometria rastreada, análise,
+   contexto lógico, rotação e telemetria do debounce.
+4. A geometria terminal é reconstruída de forma stateless a partir de
+   `tracking_geometry` explícita. O builder não consulta geometria live.
+5. O freeze não copia `_display_last_overlay_context`. Câmera e visor recebem
+   um contexto terminal explícito derivado somente do snapshot NG.
+6. `live_visual_classifications` do estado terminal é sempre substituído por
+   `effective_classifications` da análise que fechou o NG. A lista vermelha
+   continua sendo exclusivamente `effective_confirmed_failed_mask_ids`.
+7. A câmera física continua latest-frame-wins internamente para presença/EMPTY e
+   rearme, mas nenhuma atualização posterior pode alterar a evidência terminal
+   exibida enquanto a placa NG permanecer no suporte.
+8. Nenhum detector, CNN, fusão híbrida, threshold, regra do BLUE, debounce,
+   scheduler, worker ou thread adicional é alterado.
+
+### Invariante
+
+```text
+RAW(frame N)
++ tracking_geometry(frame N)
++ effective_classifications(frame N)
++ confirmed_failed(frame N)
+= apresentação NG congelada(frame N)
+```
+
+No caso que originou a decisão, o reteste esperado é: frame 1481 congelado,
+27 máscaras permanecendo sobre seus próprios segmentos e somente
+`MASK_024` vermelha/apagada, sem deslocamento posterior das ROIs.
+

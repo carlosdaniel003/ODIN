@@ -1712,6 +1712,10 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             "tracking_raw_with_live_geometry",
             payload["analysis"]["analysis_frame_source"],
         )
+        self.assertIs(raw, payload["raw_frame"])
+        self.assertEqual(geometry, payload["tracking_geometry"])
+        self.assertEqual(180, payload["visual_rotation"])
+        self.assertEqual(("camera", 123), payload["frame_token"])
 
     def test_semantic_check_analysis_also_runs_in_heavy_executor(self):
         installer = inspect.getsource(
@@ -1727,6 +1731,14 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("analyzer.analyze(", worker)
         self.assertIn("_display_auto_precomputed_payload", process)
         self.assertIn("_display_auto_analysis_frame_override", process)
+        self.assertIn(
+            '"raw_frame": ready_semantic.get("raw_frame")',
+            installer,
+        )
+        self.assertIn(
+            '"tracking_geometry": (',
+            installer,
+        )
 
     def test_semantic_apply_never_replaces_visible_camera_with_old_frame(self):
         source = inspect.getsource(

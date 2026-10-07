@@ -1881,3 +1881,75 @@ Não repetir:
 Estado:
 - D-044 VALIDADA FISICAMENTE NO CENÁRIO BLUE COM MASK_024 APAGADA.
 
+
+
+---
+
+## 07/10/2026 — D-071 PASS físico da decisão com tracking; D-072 snapshot NG atômico
+
+Modo:
+- tracking ON;
+- CHECK BLUE intermitente;
+- autoridade híbrida ativa.
+
+Cenário físico reportado:
+- H1 correto já reconhecido;
+- BLUE chegou alinhado;
+- `MASK_024` deveria estar ON e permaneceu fisicamente OFF;
+- tracking semântico analisou explicitamente o snapshot rastreado;
+- após três amostras válidas de fase ON, o resultado fechou em NG.
+
+Evidência:
+- `frame_token = camera 1481`;
+- `spatial_alignment_ready=true`;
+- `spatial_alignment_source=luminous_segment_grid`;
+- `analysis_frame_source=tracking_raw_with_live_geometry`;
+- `tracking_snapshot_explicit=true`;
+- `27/28`;
+- somente `MASK_024` em
+  `effective_confirmed_failed_mask_ids`.
+
+Resultado D-071:
+- PASS para tracking físico e decisão produtiva;
+- FAIL exclusivamente na apresentação terminal congelada.
+
+Diagnóstico do FAIL visual:
+- RAW e geometria pertenciam ao mesmo job enquanto o analyzer rodava;
+- o payload do worker semântico descartava a geometria antes do runtime de
+  decisão;
+- o freeze preservava frame/análise, mas podia reutilizar o último overlay live;
+- em `live_luminous_only`, classificações de outro repaint podiam sobreviver;
+- logo o erro não exigia alterar detector, homografia, CNN, fusão híbrida,
+  thresholds ou debounce.
+
+Correção D-072:
+- o payload semântico agora transporta RAW + token + geometria + rotação;
+- o runtime registra um único `_display_f3_pending_ng_snapshot`;
+- o builder terminal recebe `tracking_geometry` explicitamente e não consulta
+  geometria live;
+- o freeze recebe contexto atômico explícito e não copia
+  `_display_last_overlay_context`;
+- o estado terminal usa `effective_classifications` da própria análise e
+  somente `effective_confirmed_failed_mask_ids` para vermelho;
+- a câmera live continua rodando apenas para rearme/EMPTY, sem autoridade sobre
+  a evidência exibida.
+
+Não repetir:
+- não remontar NG congelado com último overlay disponível;
+- não consultar `_display_f3_tracking_live_geometry` ao reconstruir evidência
+  de um frame histórico;
+- não preservar `live_visual_classifications` de outro repaint depois do NG;
+- não criar nova autoridade, thread ou scheduler para resolver sincronismo.
+
+Próximo reteste:
+- reproduzir BLUE com somente `MASK_024` apagada;
+- confirmar mesmo frame/token para decisão e freeze;
+- confirmar todas as ROIs sobre os segmentos;
+- confirmar somente `MASK_024` vermelha;
+- mover/alterar a cena após o NG e verificar que a evidência terminal não muda;
+- retirar a placa e confirmar liberação normal do freeze.
+
+Estado:
+- D-071 TRACKING/DECISÃO VALIDADA NO CENÁRIO REPORTADO;
+- D-072 IMPLEMENTADA / PENDENTE DE RETESTE FÍSICO.
+

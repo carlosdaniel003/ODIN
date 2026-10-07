@@ -113,11 +113,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_physical_support_veto_ids = set()
         self._display_auto_intermittent_candidate_failed_ids = set()
         self._display_auto_intermittent_last_phase_analysis = None
-        self._display_f3_pending_ng_frame = None
-        self._display_f3_pending_ng_frame_id = None
-        self._display_f3_pending_ng_analysis = None
-        self._display_f3_pending_ng_context = None
-        self._display_f3_pending_ng_runtime = None
+        self._display_f3_pending_ng_snapshot = None
         self._display_auto_precomputed_payload = None
         self._display_auto_analysis_frame_override = None
         super().__init__(*args, **kwargs)
@@ -148,11 +144,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_intermittent_physical_support_veto_ids = set()
         self._display_auto_intermittent_candidate_failed_ids = set()
         self._display_auto_intermittent_last_phase_analysis = None
-        self._display_f3_pending_ng_frame = None
-        self._display_f3_pending_ng_frame_id = None
-        self._display_f3_pending_ng_analysis = None
-        self._display_f3_pending_ng_context = None
-        self._display_f3_pending_ng_runtime = None
+        self._display_f3_pending_ng_snapshot = None
         self._display_auto_precomputed_payload = None
         self._display_auto_analysis_frame_override = None
         self._display_auto_transition_frames = (
@@ -1854,8 +1846,9 @@ class DisplayAutomaticCheckF3Mixin:
         if self._display_auto_stable_frames < required:
             return
 
+        pending_ng_runtime = None
         if not approved:
-            self._display_f3_pending_ng_runtime = {
+            pending_ng_runtime = {
                 "last_decision": False,
                 "stable_frames": int(self._display_auto_stable_frames),
                 "required_stable_frames": int(required),
@@ -1903,20 +1896,69 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_last_decision = None
 
         if not approved:
-            # Preserva exatamente a evidência que fechou o debounce. A captura
-            # pode atualizar camera_frame_atual em outra thread antes de o método
-            # de resultado montar a UI, portanto não releia "o frame mais novo".
-            try:
-                self._display_f3_pending_ng_frame = frame.copy()
-            except Exception:
-                self._display_f3_pending_ng_frame = frame
-            self._display_f3_pending_ng_frame_id = getattr(
-                self,
-                "camera_ultimo_frame_id",
-                None,
+            # D-072: o NG nasce de um único snapshot atômico. Quando tracking
+            # está ativo, RAW, token e geometria vêm do MESMO job que produziu a
+            # análise semântica; nunca reconstruímos a evidência terminal a
+            # partir de camera_frame_atual ou de um overlay live posterior.
+            snapshot_frame = (
+                precomputed.get("raw_frame")
+                if isinstance(precomputed, dict)
+                and precomputed.get("raw_frame") is not None
+                and getattr(precomputed.get("raw_frame"), "size", 0) > 0
+                else frame
             )
-            self._display_f3_pending_ng_analysis = deepcopy(analysis)
-            self._display_f3_pending_ng_context = deepcopy(context)
+            try:
+                raw_frame = snapshot_frame.copy()
+            except Exception:
+                raw_frame = snapshot_frame
+
+            snapshot_frame_id = None
+            if (
+                isinstance(frame_token, tuple)
+                and len(frame_token) >= 2
+                and frame_token[0] == "camera"
+            ):
+                try:
+                    snapshot_frame_id = int(frame_token[1])
+                except (TypeError, ValueError):
+                    snapshot_frame_id = None
+            if snapshot_frame_id is None:
+                snapshot_frame_id = getattr(
+                    self,
+                    "camera_ultimo_frame_id",
+                    None,
+                )
+
+            tracking_geometry = (
+                deepcopy(precomputed.get("tracking_geometry"))
+                if isinstance(precomputed, dict)
+                and isinstance(precomputed.get("tracking_geometry"), dict)
+                else None
+            )
+            if isinstance(precomputed, dict):
+                visual_rotation = int(
+                    precomputed.get("visual_rotation", 0) or 0
+                ) % 360
+            else:
+                try:
+                    visual_rotation = int(
+                        self._obter_rotacao_visual_display_f3()
+                    ) % 360
+                except Exception:
+                    visual_rotation = 0
+
+            self._display_f3_pending_ng_snapshot = {
+                "raw_frame": raw_frame,
+                "frame_token": deepcopy(frame_token),
+                "frame_id": snapshot_frame_id,
+                "tracking_geometry": tracking_geometry,
+                "analysis": deepcopy(analysis),
+                "context": deepcopy(context),
+                "visual_rotation": visual_rotation,
+                "runtime_debug": deepcopy(pending_ng_runtime)
+                if isinstance(pending_ng_runtime, dict)
+                else None,
+            }
 
         decision_trace = getattr(
             self,

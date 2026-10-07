@@ -6790,6 +6790,13 @@ def _run_live_semantic_job(
             max(0.0, (time.perf_counter() - float(submitted_at_s)) * 1000.0),
             2,
         ),
+        "raw_frame": raw_frame,
+        "tracking_geometry": (
+            deepcopy(tracking_geometry)
+            if isinstance(tracking_geometry, dict)
+            else None
+        ),
+        "visual_rotation": int(visual_rotation or 0) % 360,
         "analysis_frame": analysis_frame,
         "context": deepcopy(context),
         "analysis": analysis,
@@ -7182,7 +7189,19 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
 
         if isinstance(ready_semantic, dict):
             self._display_auto_precomputed_payload = {
-                "frame_token": ready_semantic.get("frame_token"),
+                "frame_token": deepcopy(ready_semantic.get("frame_token")),
+                "raw_frame": ready_semantic.get("raw_frame"),
+                "tracking_geometry": (
+                    deepcopy(ready_semantic.get("tracking_geometry"))
+                    if isinstance(
+                        ready_semantic.get("tracking_geometry"),
+                        dict,
+                    )
+                    else None
+                ),
+                "visual_rotation": int(
+                    ready_semantic.get("visual_rotation", 0) or 0
+                ) % 360,
                 "context": deepcopy(ready_semantic.get("context") or {}),
                 "analysis": deepcopy(ready_semantic.get("analysis") or {}),
             }

@@ -1176,7 +1176,6 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             context["effective_confirmed_failed_mask_ids"] = confirmed
 
         for attr in (
-            "_display_last_overlay_context",
             "_display_frozen_overlay_context",
         ):
             context = getattr(self, attr, None)
@@ -1224,17 +1223,31 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._display_frozen_ng_visual_debug = debug
         return debug
 
-    def freeze_ng_evidence(self, confirmed_failed_mask_ids=()) -> None:
-        """Mantém câmera, visor, CHECK e status no frame que fechou o NG."""
-        # Capture ANTES de levantar o latch. A partir daqui qualquer setter
-        # diagnóstico vira no-op até EMPTY ser confirmado.
+    def freeze_ng_evidence(
+        self,
+        confirmed_failed_mask_ids=(),
+        overlay_context: dict | None = None,
+    ) -> None:
+        """Mantém câmera, visor, CHECK e status no snapshot que fechou o NG."""
+        # D-072: o visor é sincronizado ANTES do latch com o contexto atômico do
+        # NG. Não copie _display_last_overlay_context: ele pode pertencer a um
+        # repaint posterior ou anterior ao frame que fechou o debounce.
+        if isinstance(overlay_context, dict):
+            self.set_display_readout_context(deepcopy(overlay_context))
+            frozen_overlay = deepcopy(overlay_context)
+        else:
+            # Falha ao montar o contexto atômico nunca autoriza reaproveitar
+            # telemetria visual de outro frame. Melhor congelar sem ROIs do que
+            # exibir evidência temporalmente incorreta.
+            self._display_readout_context = None
+            self._redraw_display_readout()
+            frozen_overlay = None
+
         self._display_frozen_analysis_statuses = self._capture_analysis_statuses()
         self._display_frozen_check_snapshot = deepcopy(
             getattr(self, "_check_snapshot", None)
         )
-        self._display_frozen_overlay_context = deepcopy(
-            getattr(self, "_display_last_overlay_context", None)
-        )
+        self._display_frozen_overlay_context = frozen_overlay
         self._display_ng_evidence_frozen = True
         self._display_readout_frozen = True
         self._display_frozen_readout_context = deepcopy(
