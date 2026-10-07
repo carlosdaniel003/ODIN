@@ -118,6 +118,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
         self._display_f3_pending_ng_runtime = None
+        self._display_f3_pending_ng_tracking_geometry = None
         self._display_auto_precomputed_payload = None
         self._display_auto_analysis_frame_override = None
         super().__init__(*args, **kwargs)
@@ -153,6 +154,7 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_f3_pending_ng_analysis = None
         self._display_f3_pending_ng_context = None
         self._display_f3_pending_ng_runtime = None
+        self._display_f3_pending_ng_tracking_geometry = None
         self._display_auto_precomputed_payload = None
         self._display_auto_analysis_frame_override = None
         self._display_auto_transition_frames = (
@@ -1405,6 +1407,17 @@ class DisplayAutomaticCheckF3Mixin:
             return
 
         precomputed = getattr(self, "_display_auto_precomputed_payload", None)
+        precomputed_raw_frame = (
+            precomputed.get("raw_frame")
+            if isinstance(precomputed, dict)
+            else None
+        )
+        precomputed_tracking_geometry = (
+            deepcopy(precomputed.get("tracking_geometry"))
+            if isinstance(precomputed, dict)
+            and isinstance(precomputed.get("tracking_geometry"), dict)
+            else None
+        )
         override_frame = getattr(
             self,
             "_display_auto_analysis_frame_override",
@@ -1903,20 +1916,41 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_last_decision = None
 
         if not approved:
-            # Preserva exatamente a evidência que fechou o debounce. A captura
-            # pode atualizar camera_frame_atual em outra thread antes de o método
-            # de resultado montar a UI, portanto não releia "o frame mais novo".
+            # D-072: preserve o snapshot RAW que gerou a análise, não o frame
+            # alinhado/canônico usado apenas pelo pipeline interno. Frame,
+            # geometria e classificação precisam continuar pertencendo ao mesmo
+            # token até a apresentação terminal do NG.
+            ng_frame = (
+                precomputed_raw_frame
+                if precomputed_raw_frame is not None
+                and getattr(precomputed_raw_frame, "size", 0) > 0
+                else frame
+            )
             try:
-                self._display_f3_pending_ng_frame = frame.copy()
+                self._display_f3_pending_ng_frame = ng_frame.copy()
             except Exception:
-                self._display_f3_pending_ng_frame = frame
-            self._display_f3_pending_ng_frame_id = getattr(
+                self._display_f3_pending_ng_frame = ng_frame
+
+            pending_frame_id = getattr(
                 self,
                 "camera_ultimo_frame_id",
                 None,
             )
+            if (
+                isinstance(frame_token, tuple)
+                and len(frame_token) >= 2
+                and frame_token[0] == "camera"
+            ):
+                try:
+                    pending_frame_id = int(frame_token[1])
+                except (TypeError, ValueError):
+                    pass
+            self._display_f3_pending_ng_frame_id = pending_frame_id
             self._display_f3_pending_ng_analysis = deepcopy(analysis)
             self._display_f3_pending_ng_context = deepcopy(context)
+            self._display_f3_pending_ng_tracking_geometry = deepcopy(
+                precomputed_tracking_geometry
+            )
 
         decision_trace = getattr(
             self,
