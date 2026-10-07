@@ -4978,3 +4978,145 @@ No próximo H1 real com tracking ON:
 - a decisão H1 continua pertencendo ao Hybrid já validado com tracking OFF.
 
 **Estado físico:** PENDENTE DE RETESTE.
+
+
+---
+
+## D-072 — NG congelado preserva frame, geometria e semântica do mesmo snapshot
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Contexto
+
+Após D-071, o ciclo físico com tracking ON passou a alinhar corretamente H1,
+aprovar H1, avançar para BLUE e reprovar corretamente um BLUE 27/28 com
+`MASK_024` apagada.
+
+O defeito remanescente apareceu apenas depois da decisão:
+
+- a câmera terminal congelava;
+- as ROIs desenhadas se deslocavam dos segmentos daquele frame;
+- o visor podia mostrar classificações diferentes da análise que fechou o NG.
+
+A análise produtiva permanecia correta.
+
+### Causa
+
+O pipeline assíncrono possuía coerência interna durante tracking/análise:
+
+```text
+RAW N + GEOMETRY N -> ANALYSIS N
+```
+
+mas descartava RAW N e GEOMETRY N antes do latch terminal. O freeze então
+misturava:
+
+```text
+analysis N
++ frame interno/alinhado
++ último overlay live possivelmente N+1
+```
+
+Além disso, se o contexto visual já estivesse em `live_luminous_only`, o
+repaint terminal podia preservar classificações visuais anteriores à confirmação
+final do debounce.
+
+### Decisão
+
+A evidência NG passa a ser uma unidade atômica e imutável:
+
+```text
+F3FrozenNgEvidence
+  frame_token
+  raw_frame
+  tracking_geometry
+  semantic_analysis
+  logical_context
+  visual_rotation
+```
+
+Não é necessário introduzir uma nova classe pública para representar esse
+contrato; o importante é que esses elementos tenham a mesma proveniência
+temporal e sejam transportados juntos até o freeze.
+
+### Fluxo obrigatório com tracking ON
+
+```text
+tracking worker snapshot N
+  -> raw_frame N
+  -> geometry N
+  -> analysis_frame N
+
+semantic worker
+  -> usa raw_frame N + geometry N
+  -> produz analysis N
+  -> devolve também raw_frame N + geometry N
+
+auto-check
+  -> confirma NG
+  -> preserva raw_frame N
+  -> preserva geometry N
+  -> preserva analysis N
+  -> preserva frame_token N
+
+terminal freeze
+  -> câmera = raw_frame N
+  -> ROIs = geometry N
+  -> estados = effective_classifications de analysis N
+  -> vermelho = effective_confirmed_failed_mask_ids de analysis N
+```
+
+### Regras
+
+1. `camera_frame_atual` não pode ser relido para construir a evidência NG
+   depois que a decisão já existe.
+2. `analysis_frame` alinhado/canônico não substitui o RAW como imagem terminal
+   quando o analyzer decidiu sobre RAW + geometria móvel.
+3. `_display_last_overlay_context` não é autoridade terminal de geometria.
+4. O freeze recebe contexto geométrico explícito quando tracking ON possui
+   snapshot válido.
+5. As classificações visuais terminalmente exibidas vêm sempre de
+   `effective_classifications` da análise final.
+6. Somente `effective_confirmed_failed_mask_ids` pode receber destaque vermelho
+   de NG.
+7. `effective_failed_mask_ids` transitório não vira vermelho terminal.
+8. DEBUG de NG deve preferir a geometria salva na evidência congelada à
+   geometria live posterior.
+9. A câmera física continua capturando em background para detectar EMPTY e
+   rearme; apenas a apresentação terminal fica congelada.
+10. Nenhuma regra semântica, threshold, debounce, worker ou scheduler novo é
+    criado por esta decisão.
+
+### Relação com decisões anteriores
+
+- D-045 define que NG automático pinta somente falha confirmada;
+- D-046 mantém resultado OK visualmente live;
+- D-065 mantém Hybrid como única autoridade semântica;
+- D-066 mantém tracking como autoridade apenas geométrica;
+- D-068 exige snapshots coerentes no pipeline assíncrono;
+- D-072 estende essa coerência até a apresentação terminal congelada.
+
+### Validação automatizada
+
+PASS:
+- RAW + geometria sobrevivem ao semantic payload;
+- geometria é copiada, não compartilhada mutavelmente;
+- auto-check preserva RAW antes do registro NG;
+- overlay snapshot usa geometria rastreada explícita;
+- freeze ignora último overlay live quando recebe contexto atômico;
+- repaint terminal substitui semântica visual stale pela análise final;
+- DEBUG usa geometria congelada.
+
+### Validação física
+
+Pendente:
+
+```text
+H1 correto
+-> BLUE
+-> MASK_024 OFF
+-> NG 27/28
+-> frame terminal permanece alinhado
+-> somente MASK_024 vermelha
+-> visor preserva os mesmos estados
+```
