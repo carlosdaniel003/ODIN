@@ -13,6 +13,9 @@ from src.platform.display_live_roi_overlay import (
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
 from src.platform.display_production_f3_window import DisplayProductionF3Window
 import src.platform.display_f3_preview_clarity_fix as preview_clarity
+from src.platform.display_mask_geometry import (
+    mapear_slots_sete_segmentos_display,
+)
 
 
 class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
@@ -494,6 +497,135 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             window._display_readout_context["validating_mask_ids"],
         )
 
+    def test_snapshot_ng_tracking_off_preserva_slots_fisicos_do_visor(self):
+        # IDs deliberadamente fora da ordem geométrica. O bug físico observado
+        # aparecia quando o snapshot NG perdia os slots e o visor caía no
+        # fallback MASK_001..MASK_028.
+        physical_slot_ids = (
+            "MASK_024", "MASK_023", "MASK_022", "MASK_026",
+            "MASK_027", "MASK_028", "MASK_025",
+            "MASK_021", "MASK_019", "MASK_015", "MASK_016",
+            "MASK_017", "MASK_020", "MASK_018",
+            "MASK_010", "MASK_009", "MASK_008", "MASK_014",
+            "MASK_013", "MASK_012", "MASK_011",
+            "MASK_007", "MASK_005", "MASK_001", "MASK_002",
+            "MASK_003", "MASK_006", "MASK_004",
+        )
+        segment_offsets = (
+            (0, -48),   # a
+            (28, -24),  # b
+            (28, 24),   # c
+            (0, 48),    # d
+            (-28, 24),  # e
+            (-28, -24), # f
+            (0, 0),     # g
+        )
+        masks = []
+        for digit_index, center_x in enumerate((90, 250, 470, 630)):
+            for segment_index, (dx, dy) in enumerate(segment_offsets):
+                mask_id = physical_slot_ids[digit_index * 7 + segment_index]
+                masks.append(
+                    {
+                        "id": mask_id,
+                        "type": "circle",
+                        "cx": center_x + dx,
+                        "cy": 90 + dy,
+                        "radius": 8,
+                    }
+                )
+        # A lista persistida também é embaralhada para provar que a ordem
+        # física vem da geometria, não da posição no JSON.
+        masks = sorted(masks, key=lambda item: item["id"])
+
+        project = {
+            "name": "DISPLAY",
+            "master_resolution": (720, 180),
+            "masks": masks,
+            "checks": [
+                {
+                    "id": "CHECK_002",
+                    "name": "BLUE",
+                    "intermittent": True,
+                    "mask_states": {
+                        mask["id"]: "on" for mask in masks
+                    },
+                }
+            ],
+        }
+
+        class _Repository:
+            @staticmethod
+            def carregar_projeto(_name):
+                return project
+
+        analysis = {
+            "effective_classifications": {
+                mask["id"]: (
+                    "off" if mask["id"] == "MASK_024" else "on"
+                )
+                for mask in masks
+            },
+            "effective_failed_mask_ids": ("MASK_024",),
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+            "effective_validating_mask_ids": (),
+            "ui_mask_authority": "effective_mask_results_v1",
+        }
+
+        for rotation in (0, 180):
+            with self.subTest(rotation=rotation):
+                context = (
+                    overlay_module.montar_contexto_overlay_snapshot_display_f3(
+                        _Repository(),
+                        "DISPLAY",
+                        "CHECK_002",
+                        analysis,
+                        rotation,
+                        tracking_geometry=None,
+                    )
+                )
+                self.assertEqual(
+                    "fixed_project_geometry",
+                    context["snapshot_geometry_source"],
+                )
+                self.assertFalse(context["tracking_active"])
+                slots = tuple(context["readout_slot_mask_ids"])
+                self.assertEqual(28, len(slots))
+                self.assertEqual(28, len(set(slots)))
+                self.assertEqual(
+                    tuple(
+                        mapear_slots_sete_segmentos_display(
+                            context["masks"],
+                            digit_count=4,
+                        )
+                    ),
+                    slots,
+                )
+                self.assertNotEqual(
+                    tuple(
+                        sorted(
+                            context["readout_mask_ids"],
+                            key=DisplayProductionF3Window
+                            ._display_readout_mask_sort_key,
+                        )
+                    ),
+                    slots,
+                )
+
+                window = DisplayProductionF3Window.__new__(
+                    DisplayProductionF3Window
+                )
+                window._display_readout_frozen = False
+                window._redraw_display_readout = lambda: None
+                window.set_display_readout_context(context)
+                self.assertEqual(
+                    slots,
+                    tuple(window._display_readout_context["mask_slots"]),
+                )
+                self.assertEqual(
+                    {"MASK_024"},
+                    window._display_readout_context["failed_mask_ids"],
+                )
+
     def test_snapshot_tracking_preserva_geometria_do_mesmo_frame_ng(self):
         project = {
             "name": "DISPLAY",
@@ -565,6 +697,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             context["snapshot_geometry_source"],
         )
         self.assertTrue(context["tracking_active"])
+        self.assertEqual((), tuple(context.get("readout_slot_mask_ids") or ()))
         self.assertEqual(120, int(context["masks"][0]["cx"]))
         self.assertNotEqual(30, int(context["masks"][0]["cx"]))
         self.assertEqual("off", context["effective_classifications"]["MASK_024"])

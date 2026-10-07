@@ -5,6 +5,9 @@ from copy import deepcopy
 import cv2
 import numpy as np
 
+from src.platform.display_mask_geometry import (
+    mapear_slots_sete_segmentos_display,
+)
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
@@ -491,7 +494,38 @@ def montar_contexto_overlay_snapshot_display_f3(
             )
             tracking_snapshot_used = True
 
+    readout_slot_mask_ids = ()
     if not tracking_snapshot_used:
+        # D-074 / tracking OFF: o VISOR precisa usar a MESMA topologia física
+        # A..G da geometria fixa exibida na câmera. A ordem numérica dos
+        # MASK_IDs não representa posição de segmento e pode colocar uma falha
+        # horizontal em uma barra vertical do visor.
+        all_fixed_masks = [
+            deepcopy(mask)
+            for mask in effective_masks
+            if isinstance(mask, dict)
+            and str(mask.get("id") or "")
+        ]
+        try:
+            _, _, readout_visual_masks = preparar_check_visual_display(
+                None,
+                resolution,
+                all_fixed_masks,
+                rotation,
+            )
+            mapped_slots = mapear_slots_sete_segmentos_display(
+                readout_visual_masks,
+                digit_count=4,
+            )
+            if len(mapped_slots) == 28 and len(set(mapped_slots)) == 28:
+                readout_slot_mask_ids = tuple(
+                    str(mask_id)
+                    for mask_id in mapped_slots
+                    if str(mask_id)
+                )
+        except Exception:
+            readout_slot_mask_ids = ()
+
         active_masks = [
             deepcopy(mask)
             for mask in effective_masks
@@ -596,6 +630,9 @@ def montar_contexto_overlay_snapshot_display_f3(
         "visual_rotation": rotation,
         "intermittent": bool(check.get("intermittent", False)),
         "readout_mask_ids": readout_mask_ids,
+        # Somente tracking OFF recebe o mapa físico fixo nesta etapa.
+        # Tracking ON permanece exatamente com o contrato anterior.
+        "readout_slot_mask_ids": readout_slot_mask_ids,
         "tracking_active": bool(tracking_snapshot_used),
         "tracking_locked": bool(tracking_snapshot_used),
         "tracking_reference": (
