@@ -91,6 +91,65 @@ class DisplayF3ManualSnapshotDebugTests(unittest.TestCase):
         self.assertEqual(180, snapshot_module._rotation(app))
         self.assertTrue(np.all(app.camera_frame_atual == 220))
 
+    def test_ng_congelado_preserva_geometria_do_snapshot_e_nao_a_live(self):
+        app = _FrameApp()
+        app._display_f3_ng_evidence_frozen = True
+        app._display_f3_ng_evidence_frame = np.full(
+            (4, 6, 3),
+            37,
+            dtype=np.uint8,
+        )
+        app._display_f3_ng_evidence_snapshot = {
+            "frame_id": 77,
+            "rotation": 0,
+            "context": {"check_id": "CHECK_BLUE"},
+            "tracking_geometry": {
+                "locked": True,
+                "resolution": (6, 4),
+                "board_points": [],
+                "masks": [
+                    {
+                        "id": "MASK_024",
+                        "type": "circle",
+                        "cx": 2,
+                        "cy": 2,
+                        "radius": 1,
+                    }
+                ],
+                "geometry_space": "canonical_projective",
+                "reference": "luminous:CHECK_BLUE",
+                "source_type": "luminous_segment_grid",
+                "check_id": "CHECK_BLUE",
+                "spatial_alignment_ready": True,
+                "spatial_alignment_source": "luminous_segment_grid",
+            },
+        }
+        app._display_f3_tracking_live_geometry = {
+            "locked": True,
+            "resolution": (6, 4),
+            "board_points": [],
+            "masks": [
+                {
+                    "id": "MASK_024",
+                    "type": "circle",
+                    "cx": 999,
+                    "cy": 2,
+                    "radius": 1,
+                }
+            ],
+        }
+
+        seed = snapshot_module._prepare_async_snapshot_seed(app)
+
+        self.assertEqual(
+            2,
+            seed["tracking_geometry"]["masks"][0]["cx"],
+        )
+        self.assertNotEqual(
+            999,
+            seed["tracking_geometry"]["masks"][0]["cx"],
+        )
+
     def test_ng_congelado_sem_copia_nao_cai_para_camera_ao_vivo(self):
         app = _FrameApp()
         app._display_f3_ng_evidence_frozen = True
