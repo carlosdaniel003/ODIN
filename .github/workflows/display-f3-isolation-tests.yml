@@ -231,6 +231,13 @@ jobs:
             tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_ng_congelado_preserva_geometria_do_snapshot_e_nao_a_live \
             -v
 
+      - name: Run D-074 tracking OFF visor and universal mask regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_snapshot_ng_tracking_off_preserva_slots_fisicos_do_visor \
+            tests.test_display_f3_auto_check.DisplayF3AutoCheckTests.test_todas_as_28_mascaras_podem_confirmar_ng_sem_caso_especial_024 \
+            -v
+
       - name: Run ROI geometry parity tests
         run: |
           python -m unittest \
