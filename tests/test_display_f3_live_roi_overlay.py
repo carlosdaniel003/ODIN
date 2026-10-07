@@ -607,7 +607,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertEqual(35, int(context["masks"][0]["cx"]))
         self.assertEqual("off", context["effective_classifications"]["MASK_024"])
 
-    def test_freeze_ng_usa_contexto_atomico_e_ignora_overlay_live_anterior(self):
+    def test_freeze_ng_reafirma_falha_confirmada_no_contexto_do_visor(self):
         window = DisplayProductionF3Window.__new__(
             DisplayProductionF3Window
         )
@@ -685,7 +685,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             window._display_frozen_ng_visual_debug["readout_repainted"]
         )
 
-    def test_repaint_pos_freeze_usa_contexto_atomico_e_nao_overlay_stale(self):
+    def test_repaint_pos_freeze_pinta_mask_024_vermelha_no_frame_terminal(self):
         frame = np.zeros((80, 180, 3), dtype=np.uint8)
 
         class _Window:

@@ -76,7 +76,15 @@ class _FakeF3Window:
         self.frames.append(frame)
         return True
 
-    def freeze_ng_evidence(self):
+    def update_preview(self, frame, leds=()):
+        self.frames.append(frame)
+        return True
+
+    def freeze_ng_evidence(
+        self,
+        confirmed_failed_mask_ids=(),
+        overlay_context=None,
+    ):
         self.freeze_calls += 1
         self._display_ng_evidence_frozen = True
 

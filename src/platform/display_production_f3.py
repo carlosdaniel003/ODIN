@@ -739,24 +739,31 @@ class DisplayProductionF3Mixin:
         visual_rotation: int,
         overlay_context: dict | None,
     ) -> bool:
-        """Reafirma câmera terminal usando somente o contexto atômico do NG."""
+        """Reafirma câmera terminal usando somente o snapshot atômico do NG."""
         if (
             window is None
             or evidence_frame is None
             or getattr(evidence_frame, "size", 0) == 0
-            or not isinstance(overlay_context, dict)
         ):
             return False
 
-        context = deepcopy(overlay_context)
-        confirmed = tuple(
-            sorted(
-                str(mask_id)
-                for mask_id in (
-                    context.get("effective_confirmed_failed_mask_ids") or ()
+        context = (
+            deepcopy(overlay_context)
+            if isinstance(overlay_context, dict)
+            else None
+        )
+        confirmed = (
+            tuple(
+                sorted(
+                    str(mask_id)
+                    for mask_id in (
+                        context.get("effective_confirmed_failed_mask_ids") or ()
+                    )
+                    if str(mask_id)
                 )
-                if str(mask_id)
             )
+            if isinstance(context, dict)
+            else ()
         )
 
         try:
@@ -770,14 +777,21 @@ class DisplayProductionF3Mixin:
             return False
 
         try:
-            from src.platform.display_f3_preview_clarity_fix import (
-                renderizar_preview_claro_display_f3,
-            )
+            if isinstance(context, dict):
+                from src.platform.display_f3_preview_clarity_fix import (
+                    renderizar_preview_claro_display_f3,
+                )
 
-            decorated = renderizar_preview_claro_display_f3(
-                visual_frame,
-                context,
-            )
+                decorated = renderizar_preview_claro_display_f3(
+                    visual_frame,
+                    context,
+                )
+                source = "ng_atomic_snapshot_after_freeze"
+            else:
+                # Se o projeto/contexto não puder ser reconstruído, preserve o
+                # RAW exato sem ROIs. Nunca substitua por overlay live/stale.
+                decorated = visual_frame.copy()
+                source = "ng_atomic_raw_frame_without_overlay"
             rendered = bool(window.update_preview(decorated, leds=()))
         except Exception as exc:
             debug = dict(
@@ -793,24 +807,31 @@ class DisplayProductionF3Mixin:
             window._display_frozen_ng_visual_debug = debug
             return False
 
-        window._display_frozen_overlay_context = deepcopy(context)
+        window._display_frozen_overlay_context = (
+            deepcopy(context) if isinstance(context, dict) else None
+        )
         debug = dict(
             getattr(window, "_display_frozen_ng_visual_debug", {}) or {}
         )
         debug.update(
             {
-                "source": "ng_atomic_snapshot_after_freeze",
+                "source": source,
                 "confirmed_failed_mask_ids": confirmed,
                 "camera_repainted": bool(rendered),
                 "camera_visual_rotation": int(visual_rotation or 0) % 360,
-                "camera_context_check_id": str(
-                    context.get("check_id") or ""
+                "camera_context_check_id": (
+                    str(context.get("check_id") or "")
+                    if isinstance(context, dict)
+                    else ""
                 ),
-                "camera_snapshot_frame_token": deepcopy(
-                    context.get("snapshot_frame_token")
+                "camera_snapshot_frame_token": (
+                    deepcopy(context.get("snapshot_frame_token"))
+                    if isinstance(context, dict)
+                    else None
                 ),
                 "camera_tracking_locked": bool(
-                    context.get("tracking_locked")
+                    isinstance(context, dict)
+                    and context.get("tracking_locked")
                 ),
             }
         )
@@ -836,7 +857,9 @@ class DisplayProductionF3Mixin:
             if pending is not None
             else None
         )
-        frame_id = pending.get("frame_id") if pending is not None else None
+        pending_frame_id = (
+            pending.get("frame_id") if pending is not None else None
+        )
         analysis = (
             pending.get("analysis")
             if pending is not None
@@ -946,7 +969,7 @@ class DisplayProductionF3Mixin:
             self._display_f3_ng_evidence_frame = None
 
         self._display_f3_ng_evidence_snapshot = {
-            "frame_id": frame_id,
+            "frame_id": pending_frame_id,
             "frame_token": deepcopy(frame_token),
             "rotation": evidence_rotation,
             "tracking_geometry": deepcopy(tracking_geometry)
