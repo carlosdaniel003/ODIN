@@ -2516,3 +2516,101 @@ Não repetir:
   terminal foi confirmada;
 - não parar a aquisição da câmera: EMPTY/rearme continuam live;
 - não alterar D-065/D-066 para resolver problema de apresentação.
+
+---
+
+## 07/10/2026 — Reteste pós-D-072: H1 desalinhado com Rastreamento Automático LIGADO
+
+**Escopo obrigatório deste defeito:** somente **Rastreamento Automático do Display F3 LIGADO**.
+
+O comportamento com **Rastreamento Automático DESLIGADO** pertence a outro
+caminho operacional e não deve ser alterado, ajustado ou usado como alvo desta
+investigação.
+
+**Resultado físico:** FAIL DE ALINHAMENTO — o reteste terminal D-072 não chegou
+a ser executado.
+
+Cenário:
+- projeto `CM_500_L`;
+- CHECK lógico H1;
+- câmera 1920x1080;
+- visual 180°;
+- placa presente;
+- H1 fisicamente aceso;
+- máscaras visivelmente fora do centro dos segmentos reais;
+- UI permaneceu em
+  `LOCK ESTRUTURAL • ALINHANDO SEGMENTOS • MÁSCARA CLÁSSICA`.
+
+Evidência do DEBUG técnico:
+- frame manual congelado: `1151`;
+- resumo do clique: 3 máscaras live ON e 23 OFF;
+- gate produtivo bloqueado por energia considerada OFF;
+- tracking:
+  - `enabled=true`;
+  - `locked=true`;
+  - frame `1138`;
+  - `source_type=neural_filter_pose`;
+  - `reason=locked_neural_filter_pose`;
+  - rotação ~3.321°;
+  - escala ~0.92935;
+- prior neural / filtro:
+  - `filter_corner_source=contour_quad`;
+  - `selected_snap_error_px=134.306`;
+  - limite de snap = 180 px;
+  - confiança ~0.2539;
+  - erro dos quatro cantos contra os anchors neurais:
+    69.368 / 185.439 / 254.799 / 332.456 px;
+  - erro médio = 210.516 px;
+  - erro máximo = 332.456 px;
+  - apesar disso, `projective_pose_ready=true` e reprojeção interna ~0.0001 px;
+- refinamento luminoso:
+  - 7 segmentos ON esperados;
+  - 6 componentes luminosos observados;
+  - validação base-core = 3/7, mínimo exigido = 4;
+  - somente 1 landmark luminoso local;
+  - coarse match = 5;
+  - final match = 0;
+  - `fit_failure_stage=refined_affine_rejected`;
+  - `luminous_grid_not_fitted`;
+- autoridade espacial:
+  - `spatial_alignment_required=true`;
+  - `spatial_alignment_ready=false`;
+  - `spatial_alignment_source=projective_filter_structural`;
+- pipeline observado:
+  - worker de tracking ~559.66 ms de idade;
+  - semântica usou frame 1118 quando a câmera já estava no 1144;
+  - gap = 26 frames;
+  - idade total semântica ~925.17 ms;
+  - `normal_fresh=false`;
+  - `accepted_for_runtime=false`.
+
+Leitura técnica:
+- o fail-closed está funcionando: o sistema NÃO declarou alinhamento espacial
+  pronto e não registrou H1 com geometria ainda incorreta;
+- o problema está no caminho de tracking ON antes da decisão semântica terminal;
+- o lock estrutural `neural_filter_pose` aceitou uma pose grosseira cuja
+  geometria ainda divergia fortemente dos anchors neurais;
+- a reprojeção projectiva próxima de zero não prova alinhamento físico, pois ela
+  mede a consistência da homografia com os próprios quatro cantos fornecidos;
+- o refinamento luminoso percebeu a inconsistência e rejeitou a pose em vez de
+  promovê-la;
+- a idade/gap do pipeline também precisa permanecer sob observação, pois pode
+  agravar o deslocamento visual entre o frame live e a última geometria
+  publicada.
+
+Impacto sobre D-072:
+- D-072 continua **IMPLEMENTADA / PENDENTE DE RETESTE FÍSICO**;
+- este teste não chegou ao BLUE/NG e portanto não valida nem invalida o freeze
+  terminal atômico;
+- o bloqueio atual ocorre antes: aquisição/alinhamento H1 com tracking ON.
+
+Próxima investigação:
+- atuar somente no proprietário geométrico do tracking ON;
+- revisar aceitação/seleção do quadrilátero estrutural e sua coerência com o
+  prior neural antes de publicar a pose;
+- medir a influência da idade da geometria sobre o preview;
+- preservar o refinamento luminoso fail-closed;
+- NÃO alterar Hybrid, regras ON/OFF, autoridade de energia, CHECKS ou thresholds
+  semânticos para compensar geometria ruim;
+- NÃO modificar o caminho com Rastreamento Automático DESLIGADO.
+
