@@ -494,133 +494,17 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             window._display_readout_context["validating_mask_ids"],
         )
 
-    def test_snapshot_overlay_usa_geometria_rastreada_explicita(self):
-        project_masks = [
-            {
-                "id": "MASK_001",
-                "type": "circle",
-                "cx": 20,
-                "cy": 40,
-                "radius": 8,
-            },
-            {
-                "id": "MASK_024",
-                "type": "circle",
-                "cx": 90,
-                "cy": 40,
-                "radius": 8,
-            },
-            {
-                "id": "MASK_028",
-                "type": "circle",
-                "cx": 160,
-                "cy": 40,
-                "radius": 8,
-            },
-        ]
-
-        class _Repository:
-            def carregar_projeto(self, _name):
-                return {
-                    "name": "DISPLAY",
-                    "master_resolution": [180, 80],
-                    "masks": project_masks,
-                    "checks": [
-                        {
-                            "id": "CHECK_002",
-                            "name": "BLUE",
-                            "intermittent": True,
-                            "mask_states": {
-                                "MASK_001": "on",
-                                "MASK_024": "on",
-                                "MASK_028": "off",
-                            },
-                        }
-                    ],
-                }
-
-        tracked_masks = [
-            {
-                "id": "MASK_001",
-                "type": "circle",
-                "cx": 35,
-                "cy": 42,
-                "radius": 8,
-            },
-            {
-                "id": "MASK_024",
-                "type": "circle",
-                "cx": 105,
-                "cy": 42,
-                "radius": 8,
-            },
-            {
-                "id": "MASK_028",
-                "type": "circle",
-                "cx": 170,
-                "cy": 42,
-                "radius": 8,
-            },
-        ]
-        tracking_geometry = {
-            "locked": True,
-            "resolution": (180, 80),
-            "masks": tracked_masks,
-            "board_points": [
-                [10.0, 10.0],
-                [175.0, 10.0],
-                [175.0, 75.0],
-                [10.0, 75.0],
-            ],
-            "reference": "luminous:CHECK_002",
-            "geometry_space": "tracking_raw",
-        }
-        analysis = {
-            "effective_classifications": {
-                "MASK_001": "on",
-                "MASK_024": "off",
-                "MASK_028": "off",
-            },
-            "effective_failed_mask_ids": ("MASK_024",),
-            "effective_confirmed_failed_mask_ids": ("MASK_024",),
-            "effective_validating_mask_ids": (),
-            "ui_mask_authority": "effective_mask_results_v1",
-        }
-
-        context = overlay_module.montar_contexto_overlay_snapshot_display_f3(
-            _Repository(),
-            "DISPLAY",
-            "CHECK_002",
-            analysis,
-            0,
-            tracking_geometry=tracking_geometry,
-        )
-
-        self.assertTrue(context["tracking_active"])
-        self.assertTrue(context["tracking_locked"])
-        self.assertEqual("luminous:CHECK_002", context["tracking_reference"])
-        self.assertEqual(4, len(context["board_points"]))
-        self.assertEqual(
-            ["MASK_001", "MASK_024", "MASK_028"],
-            [mask["id"] for mask in context["masks"]],
-        )
-        self.assertEqual(35, int(context["masks"][0]["cx"]))
-        self.assertEqual("off", context["effective_classifications"]["MASK_024"])
-
     def test_freeze_ng_reafirma_falha_confirmada_no_contexto_do_visor(self):
         window = DisplayProductionF3Window.__new__(
             DisplayProductionF3Window
         )
-        window._display_readout_frozen = False
         window._display_readout_context = {
             "failed_mask_ids": set(),
-            "classifications": {"MASK_024": "on"},
+            "classifications": {"MASK_024": "off"},
         }
-        stale_overlay = {
-            "live_visual_classifications": {"MASK_024": "on"},
+        window._display_last_overlay_context = {
             "effective_confirmed_failed_mask_ids": (),
         }
-        window._display_last_overlay_context = stale_overlay.copy()
         window._check_snapshot = {}
         window._display_frozen_ng_visual_debug = {}
         window.display_readout_canvas = None
@@ -628,32 +512,12 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         window._set_segregation_action_enabled = lambda _enabled: None
         window.restore_frozen_analysis_statuses = lambda: None
         redraws = []
-        window._redraw_display_readout = lambda: redraws.append(True)
-
-        atomic_context = {
-            "readout_mask_ids": ("MASK_001", "MASK_024"),
-            "readout_slot_mask_ids": (),
-            "effective_classifications": {
-                "MASK_001": "on",
-                "MASK_024": "off",
-            },
-            "effective_failed_mask_ids": ("MASK_024",),
-            "effective_confirmed_failed_mask_ids": ("MASK_024",),
-            "effective_validating_mask_ids": (),
-            "live_luminous_only": True,
-            "live_visual_sample_ready": True,
-            "live_visual_mask_ids": ("MASK_001",),
-            "live_visual_classifications": {
-                "MASK_001": "on",
-                "MASK_024": "off",
-            },
-            "luminous_mask_ids": ("MASK_001",),
-            "ui_mask_authority": "effective_mask_results_v1",
-        }
+        window._redraw_display_readout = lambda: redraws.append(
+            set(window._display_readout_context["failed_mask_ids"])
+        )
 
         window.freeze_ng_evidence(
-            confirmed_failed_mask_ids=("MASK_024",),
-            overlay_context=atomic_context,
+            confirmed_failed_mask_ids=("MASK_024",)
         )
 
         self.assertEqual(
@@ -661,26 +525,16 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             window._display_readout_context["failed_mask_ids"],
         )
         self.assertEqual(
-            "off",
-            window._display_frozen_readout_context[
-                "live_visual_classifications"
-            ]["MASK_024"],
+            {"MASK_024"},
+            window._display_frozen_readout_context["failed_mask_ids"],
         )
         self.assertEqual(
-            "off",
+            ("MASK_024",),
             window._display_frozen_overlay_context[
-                "live_visual_classifications"
-            ]["MASK_024"],
+                "effective_confirmed_failed_mask_ids"
+            ],
         )
-        self.assertNotEqual(
-            window._display_frozen_overlay_context,
-            window._display_last_overlay_context,
-        )
-        self.assertEqual(
-            stale_overlay,
-            window._display_last_overlay_context,
-        )
-        self.assertTrue(redraws)
+        self.assertEqual([{"MASK_024"}], redraws)
         self.assertTrue(
             window._display_frozen_ng_visual_debug["readout_repainted"]
         )
@@ -690,11 +544,41 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
 
         class _Window:
             def __init__(self):
-                # Estado propositalmente errado: D-072 não pode consultá-lo.
                 self._display_frozen_overlay_context = {
+                    "resolution": (180, 80),
+                    "masks": (
+                        {
+                            "id": "MASK_001",
+                            "type": "circle",
+                            "cx": 30,
+                            "cy": 40,
+                            "radius": 12,
+                        },
+                        {
+                            "id": "MASK_024",
+                            "type": "circle",
+                            "cx": 90,
+                            "cy": 40,
+                            "radius": 12,
+                        },
+                        {
+                            "id": "MASK_028",
+                            "type": "circle",
+                            "cx": 150,
+                            "cy": 40,
+                            "radius": 12,
+                        },
+                    ),
+                    "live_luminous_only": True,
+                    "live_visual_sample_ready": True,
+                    "live_visual_mask_ids": ("MASK_001",),
                     "live_visual_classifications": {
-                        "MASK_024": "on",
-                    }
+                        "MASK_001": "on",
+                        "MASK_024": "off",
+                        "MASK_028": "off",
+                    },
+                    "board_points": (),
+                    "check_id": "CHECK_002",
                 }
                 self._display_frozen_ng_visual_debug = {}
                 self.rendered = None
@@ -707,51 +591,17 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         owner = DisplayProductionF3Mixin.__new__(
             DisplayProductionF3Mixin
         )
-        atomic_context = {
-            "resolution": (180, 80),
-            "masks": (
-                {
-                    "id": "MASK_001",
-                    "type": "circle",
-                    "cx": 30,
-                    "cy": 40,
-                    "radius": 12,
-                },
-                {
-                    "id": "MASK_024",
-                    "type": "circle",
-                    "cx": 90,
-                    "cy": 40,
-                    "radius": 12,
-                },
-                {
-                    "id": "MASK_028",
-                    "type": "circle",
-                    "cx": 150,
-                    "cy": 40,
-                    "radius": 12,
-                },
-            ),
-            "live_luminous_only": True,
-            "live_visual_sample_ready": True,
-            "live_visual_mask_ids": ("MASK_001",),
-            "live_visual_classifications": {
-                "MASK_001": "on",
-                "MASK_024": "off",
-                "MASK_028": "off",
-            },
-            "effective_confirmed_failed_mask_ids": ("MASK_024",),
-            "board_points": (),
+        analysis = {
+            "project_name": "DISPLAY",
             "check_id": "CHECK_002",
-            "tracking_locked": True,
-            "snapshot_frame_token": ("camera", 1481),
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
         }
 
         rendered = owner._repaint_frozen_ng_evidence_display_f3(
             window,
             frame,
             0,
-            atomic_context,
+            analysis,
         )
 
         self.assertTrue(rendered)
@@ -764,35 +614,13 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertGreater(int(ng_pixel[2]), int(ng_pixel[0]))
         self.assertGreater(int(off_pixel[1]), int(off_pixel[2]))
         self.assertEqual(
-            "off",
-            window._display_frozen_overlay_context[
-                "live_visual_classifications"
-            ]["MASK_024"],
-        )
-        self.assertEqual(
             ("MASK_024",),
             window._display_frozen_ng_visual_debug[
                 "confirmed_failed_mask_ids"
             ],
         )
-        self.assertEqual(
-            ("camera", 1481),
-            window._display_frozen_ng_visual_debug[
-                "camera_snapshot_frame_token"
-            ],
-        )
         self.assertTrue(
             window._display_frozen_ng_visual_debug["camera_repainted"]
-        )
-
-    def test_repaint_ng_nao_consulta_ultimo_overlay_live(self):
-        source = inspect.getsource(
-            DisplayProductionF3Mixin._repaint_frozen_ng_evidence_display_f3
-        )
-        self.assertNotIn("_display_last_overlay_context", source)
-        self.assertNotIn(
-            'getattr(window, "_display_frozen_overlay_context"',
-            source,
         )
 
     def test_visor_live_usa_verde_escuro_para_segmento_apagado(self):

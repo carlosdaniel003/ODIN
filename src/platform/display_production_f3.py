@@ -647,53 +647,26 @@ class DisplayProductionF3Mixin:
         except Exception:
             pass
 
-    def _montar_contexto_ng_snapshot_display_f3(
+    def _repaint_frozen_ng_evidence_display_f3(
         self,
-        analysis: dict | None,
-        context: dict | None,
-        tracking_geometry: dict | None,
+        window,
+        evidence_frame,
         visual_rotation: int,
-        frame_token,
-    ) -> dict | None:
-        """Monta apresentação terminal somente com dados do snapshot que fechou NG."""
-        if not isinstance(analysis, dict) or not isinstance(context, dict):
-            return None
+        analysis: dict | None,
+    ) -> bool:
+        """Reafirma a apresentação terminal usando o snapshot exato do NG.
 
-        try:
-            from src.platform.display_live_roi_overlay import (
-                montar_contexto_overlay_snapshot_display_f3,
-            )
-
-            overlay = montar_contexto_overlay_snapshot_display_f3(
-                self.display_project_repository,
-                str(context.get("project_name") or analysis.get("project_name") or ""),
-                str(context.get("check_id") or analysis.get("check_id") or ""),
-                analysis,
-                int(visual_rotation or 0),
-                tracking_geometry=tracking_geometry,
-            )
-        except Exception:
-            overlay = None
-        if not isinstance(overlay, dict):
-            return None
-
-        classifications = {
-            str(mask_id): str(state or "").strip().lower()
-            for mask_id, state in dict(
-                analysis.get("effective_classifications") or {}
-            ).items()
-            if str(mask_id)
-        }
-        if not classifications:
-            classifications = {
-                str(item.get("mask_id")): str(
-                    item.get("classified") or ""
-                ).strip().lower()
-                for item in (analysis.get("mask_results") or ())
-                if isinstance(item, dict)
-                and str(item.get("mask_id") or "")
-                and str(item.get("classified") or "").strip()
-            }
+        Não executa nova análise. Apenas combina o frame que fechou o debounce,
+        a geometria já congelada e os IDs efetivamente confirmados pela análise
+        produtiva para repintar câmera + telemetria visual depois do latch.
+        """
+        if (
+            window is None
+            or evidence_frame is None
+            or getattr(evidence_frame, "size", 0) == 0
+            or not isinstance(analysis, dict)
+        ):
+            return False
 
         confirmed = tuple(
             sorted(
@@ -706,65 +679,70 @@ class DisplayProductionF3Mixin:
                 }
             )
         )
-        on_ids = tuple(
-            sorted(
-                mask_id
-                for mask_id, state in classifications.items()
-                if state == "on"
+        context = deepcopy(
+            getattr(window, "_display_frozen_overlay_context", None)
+        )
+        if not isinstance(context, dict):
+            context = deepcopy(
+                getattr(window, "_display_last_overlay_context", None)
             )
-        )
 
-        terminal = dict(overlay)
-        terminal["classifications"] = dict(classifications)
-        terminal["effective_classifications"] = dict(classifications)
-        terminal["effective_confirmed_failed_mask_ids"] = confirmed
-        terminal["live_luminous_only"] = True
-        terminal["live_visual_sample_ready"] = True
-        terminal["live_visual_classifications"] = dict(classifications)
-        terminal["live_visual_mask_ids"] = on_ids
-        terminal["luminous_mask_ids"] = on_ids
-        terminal["live_visual_frame_token"] = deepcopy(frame_token)
-        terminal["live_visual_sample_source"] = (
-            "ng_atomic_snapshot_effective_classifications"
-        )
-        terminal["has_any_on"] = bool(on_ids)
-        terminal["terminal_ng_atomic_snapshot"] = True
-        terminal["snapshot_frame_token"] = deepcopy(frame_token)
-        return terminal
+        if not isinstance(context, dict):
+            try:
+                from src.platform.display_live_roi_overlay import (
+                    montar_contexto_overlay_snapshot_display_f3,
+                )
 
-    def _repaint_frozen_ng_evidence_display_f3(
-        self,
-        window,
-        evidence_frame,
-        visual_rotation: int,
-        overlay_context: dict | None,
-    ) -> bool:
-        """Reafirma câmera terminal usando somente o snapshot atômico do NG."""
-        if (
-            window is None
-            or evidence_frame is None
-            or getattr(evidence_frame, "size", 0) == 0
-        ):
+                context = montar_contexto_overlay_snapshot_display_f3(
+                    self.display_project_repository,
+                    str(analysis.get("project_name") or ""),
+                    str(analysis.get("check_id") or ""),
+                    analysis,
+                    int(visual_rotation or 0),
+                )
+            except Exception:
+                context = None
+
+        if not isinstance(context, dict):
             return False
 
-        context = (
-            deepcopy(overlay_context)
-            if isinstance(overlay_context, dict)
-            else None
-        )
-        confirmed = (
-            tuple(
+        # A geometria/espelho físico vêm do contexto que já pertence ao frame
+        # final. A lista de falha terminal, porém, vem diretamente da análise que
+        # fechou o NG e não do último repaint assíncrono.
+        context = dict(context)
+        context["effective_confirmed_failed_mask_ids"] = confirmed
+
+        if not bool(context.get("live_luminous_only")):
+            classifications = {
+                str(mask_id): str(state or "").strip().lower()
+                for mask_id, state in dict(
+                    analysis.get("effective_classifications") or {}
+                ).items()
+                if str(mask_id)
+            }
+            if not classifications:
+                classifications = {
+                    str(item.get("mask_id")): str(
+                        item.get("classified") or ""
+                    ).strip().lower()
+                    for item in (analysis.get("mask_results") or ())
+                    if isinstance(item, dict)
+                    and str(item.get("mask_id") or "")
+                    and str(item.get("classified") or "").strip()
+                }
+            context["live_luminous_only"] = True
+            context["live_visual_sample_ready"] = True
+            context["live_visual_classifications"] = dict(classifications)
+            context["live_visual_mask_ids"] = tuple(
                 sorted(
-                    str(mask_id)
-                    for mask_id in (
-                        context.get("effective_confirmed_failed_mask_ids") or ()
-                    )
-                    if str(mask_id)
+                    mask_id
+                    for mask_id, state in classifications.items()
+                    if state == "on"
                 )
             )
-            if isinstance(context, dict)
-            else ()
-        )
+            context["luminous_mask_ids"] = tuple(
+                context["live_visual_mask_ids"]
+            )
 
         try:
             visual_frame = preparar_frame_visual_display(
@@ -777,21 +755,14 @@ class DisplayProductionF3Mixin:
             return False
 
         try:
-            if isinstance(context, dict):
-                from src.platform.display_f3_preview_clarity_fix import (
-                    renderizar_preview_claro_display_f3,
-                )
+            from src.platform.display_f3_preview_clarity_fix import (
+                renderizar_preview_claro_display_f3,
+            )
 
-                decorated = renderizar_preview_claro_display_f3(
-                    visual_frame,
-                    context,
-                )
-                source = "ng_atomic_snapshot_after_freeze"
-            else:
-                # Se o projeto/contexto não puder ser reconstruído, preserve o
-                # RAW exato sem ROIs. Nunca substitua por overlay live/stale.
-                decorated = visual_frame.copy()
-                source = "ng_atomic_raw_frame_without_overlay"
+            decorated = renderizar_preview_claro_display_f3(
+                visual_frame,
+                context,
+            )
             rendered = bool(window.update_preview(decorated, leds=()))
         except Exception as exc:
             debug = dict(
@@ -807,31 +778,22 @@ class DisplayProductionF3Mixin:
             window._display_frozen_ng_visual_debug = debug
             return False
 
-        window._display_frozen_overlay_context = (
-            deepcopy(context) if isinstance(context, dict) else None
-        )
+        try:
+            window._display_frozen_overlay_context = deepcopy(context)
+        except Exception:
+            window._display_frozen_overlay_context = context
+
         debug = dict(
             getattr(window, "_display_frozen_ng_visual_debug", {}) or {}
         )
         debug.update(
             {
-                "source": source,
+                "source": "exact_pending_ng_analysis_after_freeze",
                 "confirmed_failed_mask_ids": confirmed,
                 "camera_repainted": bool(rendered),
                 "camera_visual_rotation": int(visual_rotation or 0) % 360,
-                "camera_context_check_id": (
-                    str(context.get("check_id") or "")
-                    if isinstance(context, dict)
-                    else ""
-                ),
-                "camera_snapshot_frame_token": (
-                    deepcopy(context.get("snapshot_frame_token"))
-                    if isinstance(context, dict)
-                    else None
-                ),
-                "camera_tracking_locked": bool(
-                    isinstance(context, dict)
-                    and context.get("tracking_locked")
+                "camera_context_check_id": str(
+                    context.get("check_id") or analysis.get("check_id") or ""
                 ),
             }
         )
@@ -839,62 +801,36 @@ class DisplayProductionF3Mixin:
         return bool(rendered)
 
     def _congelar_evidencia_ng_display_f3(self) -> None:
-        """Congela frame, geometria e semântica do mesmo snapshot que fechou NG."""
+        """Congela a evidência visual do NG sem parar a aquisição da câmera."""
         if bool(getattr(self, "_display_f3_ng_evidence_frozen", False)):
             return
 
         janela = self.display_f3_window
-        pending = getattr(self, "_display_f3_pending_ng_snapshot", None)
-        pending = pending if isinstance(pending, dict) else None
-
+        pending_frame = getattr(self, "_display_f3_pending_ng_frame", None)
         frame = (
-            pending.get("raw_frame")
-            if pending is not None
+            pending_frame
+            if pending_frame is not None and getattr(pending_frame, "size", 0) > 0
             else getattr(self, "camera_frame_atual", None)
         )
-        frame_token = (
-            deepcopy(pending.get("frame_token"))
-            if pending is not None
-            else None
-        )
-        pending_frame_id = (
-            pending.get("frame_id") if pending is not None else None
-        )
+        pending_frame_id = getattr(self, "_display_f3_pending_ng_frame_id", None)
+        pending_analysis = getattr(self, "_display_f3_pending_ng_analysis", None)
         analysis = (
-            pending.get("analysis")
-            if pending is not None
+            pending_analysis
+            if isinstance(pending_analysis, dict)
             else getattr(self, "_display_auto_last_analysis", None)
         )
-        context = pending.get("context") if pending is not None else None
-        if not isinstance(context, dict):
+        pending_context = getattr(self, "_display_f3_pending_ng_context", None)
+        pending_runtime = getattr(self, "_display_f3_pending_ng_runtime", None)
+        if isinstance(pending_context, dict):
+            context = pending_context
+        else:
             try:
                 context = self._display_auto_current_context()
             except Exception:
                 context = None
-        tracking_geometry = (
-            pending.get("tracking_geometry")
-            if pending is not None
-            and isinstance(pending.get("tracking_geometry"), dict)
-            else None
-        )
-        pending_runtime = (
-            pending.get("runtime_debug")
-            if pending is not None
-            and isinstance(pending.get("runtime_debug"), dict)
-            else None
-        )
-        if pending is not None:
-            evidence_rotation = int(
-                pending.get("visual_rotation", 0) or 0
-            ) % 360
-        else:
-            try:
-                evidence_rotation = int(
-                    self._obter_rotacao_visual_display_f3()
-                ) % 360
-            except Exception:
-                evidence_rotation = 0
 
+        # O renderer semântico consulta _display_auto_last_analysis. Reafirmamos
+        # a mesma análise associada ao frame preservado antes de desenhar.
         if isinstance(analysis, dict):
             self._display_auto_last_analysis = analysis
 
@@ -905,11 +841,11 @@ class DisplayProductionF3Mixin:
             except Exception:
                 evidence_frame = frame
 
-        if (
-            janela is not None
-            and isinstance(analysis, dict)
-            and isinstance(context, dict)
-        ):
+        # Ainda estamos no CHECK que falhou. Publicamos também o resumo de
+        # máscaras usando analysis+context preservados deste MESMO frame. O
+        # wrapper normal de status roda depois do processo automático e seria
+        # tarde demais: nesse ponto o runtime já teria voltado internamente ao H1.
+        if janela is not None and isinstance(analysis, dict) and isinstance(context, dict):
             try:
                 from src.platform.display_f3_mask_status import (
                     formatar_status_mascaras_f3,
@@ -937,6 +873,23 @@ class DisplayProductionF3Mixin:
             except Exception:
                 pass
 
+        # Forçamos um último render antes de o runtime voltar ao H1, garantindo
+        # que câmera e visor recebam exatamente as classificações/cores do frame
+        # responsável pelo NG.
+        if janela is not None and evidence_frame is not None:
+            try:
+                janela.update_camera_preview(
+                    evidence_frame,
+                    visual_rotation=self._obter_rotacao_visual_display_f3(),
+                )
+            except TypeError:
+                try:
+                    janela.update_camera_preview(evidence_frame)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
         state = getattr(self, "_display_f3_operational_state", None)
         if janela is not None and isinstance(state, dict):
             try:
@@ -952,13 +905,10 @@ class DisplayProductionF3Mixin:
         except Exception:
             sequence_at_ng = None
 
-        terminal_context = self._montar_contexto_ng_snapshot_display_f3(
-            analysis if isinstance(analysis, dict) else None,
-            context if isinstance(context, dict) else None,
-            tracking_geometry,
-            evidence_rotation,
-            frame_token,
-        )
+        try:
+            evidence_rotation = int(self._obter_rotacao_visual_display_f3())
+        except Exception:
+            evidence_rotation = 0
 
         if evidence_frame is not None and getattr(evidence_frame, "size", 0) > 0:
             try:
@@ -970,16 +920,9 @@ class DisplayProductionF3Mixin:
 
         self._display_f3_ng_evidence_snapshot = {
             "frame_id": pending_frame_id,
-            "frame_token": deepcopy(frame_token),
             "rotation": evidence_rotation,
-            "tracking_geometry": deepcopy(tracking_geometry)
-            if isinstance(tracking_geometry, dict)
-            else None,
             "analysis": deepcopy(analysis) if isinstance(analysis, dict) else None,
             "context": deepcopy(context) if isinstance(context, dict) else None,
-            "overlay_context": deepcopy(terminal_context)
-            if isinstance(terminal_context, dict)
-            else None,
             "operational_state": deepcopy(state) if isinstance(state, dict) else None,
             "sequence": deepcopy(sequence_at_ng)
             if isinstance(sequence_at_ng, dict)
@@ -989,7 +932,11 @@ class DisplayProductionF3Mixin:
             else None,
         }
         self._display_f3_ng_evidence_frozen = True
-        self._display_f3_pending_ng_snapshot = None
+        self._display_f3_pending_ng_frame = None
+        self._display_f3_pending_ng_frame_id = None
+        self._display_f3_pending_ng_analysis = None
+        self._display_f3_pending_ng_context = None
+        self._display_f3_pending_ng_runtime = None
 
         if janela is not None:
             confirmed_failed_mask_ids = (
@@ -1005,19 +952,35 @@ class DisplayProductionF3Mixin:
             )
             freeze = getattr(janela, "freeze_ng_evidence", None)
             if callable(freeze):
-                freeze(
-                    confirmed_failed_mask_ids=confirmed_failed_mask_ids,
-                    overlay_context=terminal_context,
-                )
+                try:
+                    freeze(
+                        confirmed_failed_mask_ids=confirmed_failed_mask_ids
+                    )
+                except TypeError:
+                    # Compatibilidade defensiva com adapters antigos: reafirma a
+                    # falha confirmada imediatamente após o freeze legado.
+                    try:
+                        freeze()
+                        sync = getattr(
+                            janela,
+                            "_apply_frozen_ng_failure_highlight",
+                            None,
+                        )
+                        if callable(sync):
+                            sync(confirmed_failed_mask_ids)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
 
-            # Depois do latch, a câmera é repintada exclusivamente com o RAW e a
-            # geometria/classificação do mesmo snapshot. Nenhum overlay live
-            # posterior participa da apresentação terminal.
+            # O update_camera_preview normal retorna cedo depois do latch. Então
+            # o último repaint terminal é feito explicitamente a partir do frame
+            # exato que fechou o NG, sem nova captura nem nova análise.
             self._repaint_frozen_ng_evidence_display_f3(
                 janela,
                 evidence_frame,
                 evidence_rotation,
-                terminal_context,
+                analysis if isinstance(analysis, dict) else None,
             )
 
             visual_snapshot = getattr(
