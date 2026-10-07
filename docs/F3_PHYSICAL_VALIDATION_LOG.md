@@ -6985,3 +6985,48 @@ Próxima investigação:
   semânticos para compensar geometria ruim;
 - NÃO modificar o caminho com Rastreamento Automático DESLIGADO.
 
+---
+
+## 07/10/2026 — Correção D-073 aplicada ao H1 desalinhado com tracking ON
+
+**Cenário de origem:** reteste pós-D-072, H1, projeto `CM_500_L`,
+Rastreamento Automático LIGADO.
+
+**Resultado anterior:** FAIL de alinhamento antes de chegar ao BLUE/NG.
+
+**Causa confirmada no código:** o gate da `neural_filter_pose` aceitava o erro
+do affine aproximado, mas a geometria publicada podia ser a homografia
+projectiva exata. No frame físico observado:
+
+- affine snap = 134.306 px;
+- limite = 180 px;
+- erro médio dos cantos projectivos publicados = 210.516 px;
+- erro máximo = 332.456 px.
+
+**Alteração aplicada — D-073:**
+- pose projetiva agora só pode ser publicada quando os próprios quatro cantos
+  que serão usados pelas ROIs passam pelo snap neural;
+- usa o mesmo limite já calibrado, sem novo threshold;
+- affine continua somente como orientação/diagnóstico;
+- tracking desligado permanece intocado.
+
+**CI focado:** PASS até o bloco amplo histórico. O bloco histórico manteve os
+mesmos 7 FAIL + 1 ERROR já conhecidos.
+
+**Estado:** PENDENTE DE RETESTE FÍSICO.
+
+**Próximo reteste:**
+```text
+Rastreamento Automático = LIGADO
+-> inserir placa
+-> H1 correto
+-> observar aquisição
+-> ROIs precisam convergir sobre os segmentos
+-> spatial_alignment_ready somente com geometria coerente
+-> H1 deve ser aprovado
+-> avançar para BLUE
+```
+
+Se H1 alinhar e avançar, continuar no mesmo ciclo para o reteste D-072:
+BLUE com `MASK_024` apagada -> 27/28 -> NG -> freeze alinhado -> somente
+`MASK_024` vermelha.

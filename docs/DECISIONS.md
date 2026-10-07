@@ -5120,3 +5120,127 @@ H1 correto
 -> somente MASK_024 vermelha
 -> visor preserva os mesmos estados
 ```
+
+---
+
+## D-073 — pose projetiva precisa passar pelo mesmo snap que a geometria publicada
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Contexto
+
+No reteste físico pós-D-072 com Rastreamento Automático LIGADO, o H1 não
+chegou ao reteste de NG porque as ROIs ficaram desalinhadas ainda na aquisição.
+
+O DEBUG mostrou simultaneamente:
+
+- `locked_neural_filter_pose`;
+- `selected_snap_error_px=134.306` com limite de 180 px;
+- homografia projetiva marcada como pronta;
+- porém os quatro cantos realmente publicados pela homografia divergiam do
+  prior neural em 69.368 / 185.439 / 254.799 / 332.456 px;
+- erro médio dos cantos publicados = 210.516 px;
+- refinamento luminoso rejeitado em `refined_affine_rejected`;
+- `spatial_alignment_ready=false`.
+
+### Causa
+
+O gate neural media o snap somente na aproximação affine usada para escolher a
+orientação do quadrilátero. Depois desse gate, a geometria produtiva podia ser
+substituída pela homografia exata dos quatro cantos físicos.
+
+Logo era possível:
+
+```text
+affine aproximado passa no snap
+        ↓
+homografia exata usa cantos muito diferentes
+        ↓
+lock estrutural publicado desalinhado
+        ↓
+refinamento luminoso precisa rejeitar depois
+```
+
+A reprojeção interna quase zero da homografia não detecta esse erro porque mede
+somente a consistência matemática entre os quatro cantos fornecidos e os quatro
+cantos canônicos.
+
+### Decisão
+
+Quando existir geometria projetiva, o erro usado para selecionar e aceitar a
+`neural_filter_pose` passa a ser calculado sobre os **quatro cantos
+projectivos que serão realmente publicados**, comparados com os quatro anchors
+neurais do mesmo frame.
+
+O mesmo `runtime_max_snap_error_px` já calibrado pelo artefato neural continua
+sendo o limite. Não foi criado um segundo threshold.
+
+A aproximação affine continua disponível apenas como:
+
+- mecanismo de escolha inicial da correspondência/orientação;
+- diagnóstico `affine_snap_error_px`;
+- fallback quando a fonte geométrica não permite homografia projetiva.
+
+Para candidato projetivo:
+
+```text
+published_geometry = projective current_points
+snap_error = mean(distance(published_corner_i, neural_anchor_i))
+
+snap_error > runtime_max_snap_error_px
+        -> rejeitar neural_filter_pose
+        -> não publicar lock estrutural ruim
+        -> permitir fallback/reacquisition existente
+```
+
+### Escopo
+
+Esta decisão se aplica **somente quando Rastreamento Automático do Display F3
+está LIGADO**.
+
+O caminho com Rastreamento Automático DESLIGADO não foi alterado.
+
+Também permanecem inalterados:
+
+- Hybrid D-065;
+- CNN semântica ON/OFF;
+- autoridade de energia;
+- sequência dos CHECKS;
+- debounce;
+- thresholds semânticos;
+- scheduler;
+- executor pesado;
+- D-072 de freeze NG.
+
+### Validação automatizada
+
+PASS:
+
+- compilação dos módulos F3;
+- 20 testes de geometria neural F3, incluindo regressão em que o affine passa e
+  os cantos projectivos excedem o snap;
+- pipeline latency;
+- D-025;
+- luminous tracking;
+- live visual sync;
+- D-072 atomic NG snapshot;
+- ROI parity;
+- D-042;
+- strict mask/segregation.
+
+O bloco amplo histórico permanece com os mesmos **7 FAIL + 1 ERROR** anteriores,
+sem regressão nova da D-073.
+
+### Validação física
+
+PENDENTE.
+
+Próximo teste deve repetir H1 com tracking ON e confirmar primeiro:
+
+1. nenhum `locked_neural_filter_pose` é publicado quando os cantos projectivos
+   excedem o snap;
+2. as 28 ROIs convergem para os segmentos reais;
+3. `spatial_alignment_ready=true` somente depois de geometria coerente;
+4. H1 correto avança para BLUE.
+
+Somente depois disso o reteste físico D-072 de BLUE/NG volta a ser válido.

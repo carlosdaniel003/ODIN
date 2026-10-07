@@ -2614,3 +2614,61 @@ Próxima investigação:
   semânticos para compensar geometria ruim;
 - NÃO modificar o caminho com Rastreamento Automático DESLIGADO.
 
+---
+
+## 07/10/2026 — D-073: gate do snap passa a validar a pose projetiva publicada
+
+**Escopo:** somente Rastreamento Automático LIGADO.
+
+Correção aplicada ao defeito físico registrado no reteste pós-D-072.
+
+Diagnóstico consolidado:
+- a pose neural estrutural era aceita por `selected_snap_error_px=134.306`
+  contra limite 180 px;
+- esse valor pertencia ao affine usado para orientar a correspondência;
+- os cantos projetivos realmente publicados tinham erro médio 210.516 px e
+  máximo 332.456 px contra os anchors neurais;
+- portanto o gate validava uma geometria e o renderer/ROI recebia outra;
+- o luminous tracking detectava a inconsistência depois e falhava fechado em
+  `refined_affine_rejected`.
+
+Implementação D-073 em `display_f3_object_tracking.py`:
+- constrói a homografia candidata antes da seleção final;
+- mede os quatro `current_points` projectivos contra os quatro anchors neurais;
+- `snap_error_px` passa a representar a geometria que será publicada;
+- `affine_snap_error_px` fica explícito apenas como diagnóstico;
+- `projective_snap_error_px`, `projective_corner_error_max_px` e
+  `snap_source` tornam a decisão auditável;
+- candidato projetivo acima do mesmo `runtime_max_snap_error_px` é rejeitado
+  com `neural_pose_projective_snap_rejected`;
+- não foi criado novo threshold;
+- fallback/reacquisition já existentes continuam responsáveis pela próxima
+  tentativa.
+
+Regressão adicionada:
+`test_projective_pose_rejects_geometry_that_only_affine_snap_accepts`.
+
+CI focado:
+- neural geometry tracking: PASS;
+- pipeline latency: PASS;
+- D-025: PASS;
+- luminous tracking: PASS;
+- live visual sync: PASS;
+- D-072 atomic NG: PASS;
+- ROI parity: PASS;
+- D-042: PASS;
+- strict mask/segregation: PASS.
+
+Bloco amplo histórico:
+- 127 testes;
+- 7 FAIL + 1 ERROR;
+- mesma lista conhecida do baseline anterior;
+- nenhuma falha nova causada pela D-073.
+
+Estado: **IMPLEMENTADA / PENDENTE DE RETESTE FÍSICO**.
+
+Não repetir:
+- não usar reprojeção ~0 da própria homografia como prova de alinhamento físico;
+- não validar affine e depois publicar homografia sem validar seus cantos;
+- não compensar geometria ruim alterando Hybrid, energia ou thresholds ON/OFF;
+- não alterar o caminho com Rastreamento Automático DESLIGADO.
