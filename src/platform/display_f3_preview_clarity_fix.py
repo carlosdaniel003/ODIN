@@ -798,6 +798,9 @@ def _contexto_preview_claro(original):
         result["readout_slot_mask_ids"] = tuple(
             project_context.get("readout_slot_mask_ids") or ()
         )
+        result["readout_indicator_mask_ids"] = dict(
+            project_context.get("readout_indicator_mask_ids") or {}
+        )
         result["tracking_active"] = bool(
             project_context.get("tracking_active")
         )
