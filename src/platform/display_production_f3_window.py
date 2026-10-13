@@ -823,8 +823,12 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             thickness,
         )
         segment_order = ("a", "b", "c", "d", "e", "f", "g")
+        terminal_segregated = bool(context.get("terminal_segregated"))
         for segment_name, mask_id in zip(segment_order, mask_ids):
-            state = self._display_readout_mask_state(mask_id, context, ready)
+            if terminal_segregated:
+                state = "ng"
+            else:
+                state = self._display_readout_mask_state(mask_id, context, ready)
             fill, outline, _number = self._display_readout_color(state)
             points = polygons[segment_name]
 
