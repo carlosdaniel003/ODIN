@@ -84,8 +84,8 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             fg=self.PREVIEW_MUTED,
         )
 
-        # Visor lógico 88:88: espelha os 28 segmentos do CHECK atual sem
-        # depender da posição física/rastreamento das máscaras na câmera.
+        # Visor lógico: 28 barras A..G e, quando configurados, FM e decimal.
+        # A classificação é compartilhada com as mesmas máscaras da câmera.
         self._build_display_readout()
 
         self.footer_label.configure(
@@ -247,7 +247,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self.set_check_sequence(self._check_snapshot)
 
     def _build_display_readout(self) -> None:
-        """Cria o visor lógico fixo 88:88 (4 dígitos × 7 segmentos)."""
+        """Cria o visor físico: quatro dígitos e indicadores opcionais."""
         self.display_readout_value = "88:88"
         self._display_readout_context: dict | None = None
 
@@ -555,6 +555,18 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 for mask_id in (context.get("readout_slot_mask_ids") or ())
                 if str(mask_id)
             )
+            raw_indicators = context.get("readout_indicator_mask_ids") or {}
+            indicators = (
+                {
+                    role: str(raw_indicators[role])
+                    for role in ("fm", "decimal")
+                    if str(raw_indicators.get(role) or "") in mask_ids
+                }
+                if isinstance(raw_indicators, dict)
+                else {}
+            )
+            if len(indicators) != 2 or len(set(indicators.values())) != 2:
+                indicators = {}
             self._display_readout_context = {
                 "mask_ids": mask_ids,
                 "mask_slots": (
@@ -563,6 +575,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                     and len(set(canonical_slots)) == 28
                     else ()
                 ),
+                "indicator_mask_ids": indicators,
                 "classifications": {
                     str(key): str(value).strip().lower()
                     for key, value in dict(
@@ -701,6 +714,95 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             tags=("display-readout-number",),
         )
 
+    def _display_readout_mask_state(
+        self,
+        mask_id: str,
+        context: dict,
+        ready: bool,
+    ) -> str:
+        """O mesmo estado visual é usado para barras, FM e ponto decimal."""
+        if bool(context.get("terminal_segregated")):
+            return "ng"
+
+        failed = set(context.get("failed_mask_ids") or ())
+        if mask_id in failed:
+            # Falha terminal confirmada prevalece sobre qualquer luz amostrada.
+            return "ng"
+
+        if bool(context.get("live_luminous_only")):
+            visual_states = context.get("live_visual_classifications") or {}
+            visual_state = str(visual_states.get(mask_id) or "").lower()
+            live_display_ids = set(context.get("live_visual_mask_ids") or ())
+            if not bool(context.get("live_visual_sample_ready")):
+                live_display_ids.update(context.get("luminous_mask_ids") or ())
+            live_display_ids.update(
+                mid for mid, state in visual_states.items()
+                if str(state).lower() == "on"
+            )
+            if mask_id in live_display_ids or visual_state == "on":
+                return "on"
+            if visual_state == "low_light":
+                return "warning"
+            if visual_state == "off":
+                return "off"
+            return "neutral"
+
+        return self._display_readout_semantic_state(
+            (context.get("classifications") or {}).get(mask_id),
+            (context.get("expected_states") or {}).get(mask_id),
+            ready=ready,
+            intermittent=bool(context.get("intermittent", False)),
+            has_any_on=bool(context.get("has_any_on")),
+            validating=mask_id in (context.get("validating_mask_ids") or ()),
+            effective_authority=bool(context.get("ui_mask_authority")),
+        )
+
+    def _draw_fixed_readout_indicator(
+        self,
+        x: float,
+        y: float,
+        mask_id: str,
+        label: str,
+        context: dict,
+        ready: bool,
+    ) -> None:
+        """Desenha o indicador circular usando a classificação do MASK_ID."""
+        canvas = self.display_readout_canvas
+        state = self._display_readout_mask_state(mask_id, context, ready)
+        fill, outline, number_color = self._display_readout_color(state)
+        radius = 5.0
+        if state == "ng":
+            canvas.create_oval(
+                x - radius - 2, y - radius - 2,
+                x + radius + 2, y + radius + 2,
+                fill="", outline=self.DISPLAY_READOUT_NG_OUTLINE,
+                width=2, tags=("display-readout-ng-halo",),
+            )
+        canvas.create_oval(
+            x - radius, y - radius, x + radius, y + radius,
+            fill=fill, outline=outline,
+            width=2 if state == "ng" else 1,
+            tags=(
+                "display-readout-indicator",
+                f"display-readout-mask:{mask_id}",
+                f"display-readout-state:{state}",
+            ),
+        )
+        canvas.create_text(
+            x, y - 13,
+            text=self._display_readout_mask_number(mask_id),
+            fill=number_color,
+            font=("DejaVu Sans", 6, "bold"),
+            tags=("display-readout-number",),
+        )
+        if label:
+            canvas.create_text(
+                x, y + 15, text=label,
+                fill=self.DISPLAY_READOUT_NUMBER,
+                font=("DejaVu Sans", 7, "bold"),
+                tags=("display-readout-indicator-label",),
+            )
+
     def _draw_fixed_semantic_digit(
         self,
         x: float,
@@ -721,88 +823,8 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             thickness,
         )
         segment_order = ("a", "b", "c", "d", "e", "f", "g")
-        classifications = dict(context.get("classifications") or {})
-        expected_states = dict(context.get("expected_states") or {})
-        failed = {
-            str(mask_id)
-            for mask_id in (context.get("failed_mask_ids") or ())
-            if str(mask_id)
-        }
-        validating = {
-            str(mask_id)
-            for mask_id in (context.get("validating_mask_ids") or ())
-            if str(mask_id)
-        }
-        effective_authority = bool(context.get("ui_mask_authority"))
-
-        live_luminous_only = bool(context.get("live_luminous_only"))
-        luminous_mask_ids = {
-            str(mask_id)
-            for mask_id in (context.get("luminous_mask_ids") or ())
-            if str(mask_id)
-        }
-        live_visual_ready = bool(
-            context.get("live_visual_sample_ready")
-        )
-        live_visual_ids = {
-            str(item)
-            for item in (context.get("live_visual_mask_ids") or ())
-            if str(item)
-        }
-        live_visual_classifications = {
-            str(mask_id): str(state or "").strip().lower()
-            for mask_id, state in dict(
-                context.get("live_visual_classifications") or {}
-            ).items()
-            if str(mask_id)
-        }
-
-        live_display_ids = set(live_visual_ids)
-        if not live_visual_ready:
-            live_display_ids.update(luminous_mask_ids)
-        live_display_ids.update(
-            mask_id
-            for mask_id, state in live_visual_classifications.items()
-            if state == "on"
-        )
-
-        terminal_segregated = bool(context.get("terminal_segregated"))
-
         for segment_name, mask_id in zip(segment_order, mask_ids):
-            if terminal_segregated:
-                state = "ng"
-            elif mask_id in failed:
-                # D-045: falha efetivamente confirmada tem prioridade visual
-                # sobre o espelho ON/OFF. Em NG congelado isso mantém no visor
-                # exatamente o segmento defeituoso em vermelho, sem transformar
-                # divergências transitórias em falha final.
-                state = "ng"
-            elif live_luminous_only:
-                # D-034: câmera e visor consomem o MESMO mapa físico.
-                # A cor independe de gate/expected; classified descreve somente
-                # o que a câmera observou naquele segmento.
-                visual_state = str(
-                    live_visual_classifications.get(mask_id) or ""
-                ).strip().lower()
-                if mask_id in live_display_ids or visual_state == "on":
-                    state = "on"
-                elif visual_state == "low_light":
-                    state = "warning"
-                elif visual_state == "off":
-                    state = "off"
-                else:
-                    state = "neutral"
-            else:
-                state = self._display_readout_semantic_state(
-                    classifications.get(mask_id),
-                    expected_states.get(mask_id),
-                    mask_id in failed,
-                    ready=ready,
-                    intermittent=bool(context.get("intermittent", False)),
-                    has_any_on=bool(context.get("has_any_on")),
-                    validating=mask_id in validating,
-                    effective_authority=effective_authority,
-                )
+            state = self._display_readout_mask_state(mask_id, context, ready)
             fill, outline, _number = self._display_readout_color(state)
             points = polygons[segment_name]
 
@@ -848,6 +870,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         if len(slots) != 28:
             return False
 
+        indicators = dict(context.get("indicator_mask_ids") or {})
         canvas = self.display_readout_canvas
         width = max(360, int(canvas.winfo_width()))
         height = max(96, int(canvas.winfo_height()))
@@ -859,11 +882,13 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         digit_gap = 44.0
         colon_width = 24.0
         group_gap = 34.0
+        indicator_space = 35.0 if indicators else 0.0
         total_width = (
             digit_width * 4.0
             + digit_gap * 2.0
             + group_gap * 2.0
             + colon_width
+            + indicator_space
         )
         start_x = (width - total_width) / 2.0
         y = (height - digit_height) / 2.0
@@ -880,7 +905,13 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             and energy_state != "off"
         )
 
-        x = start_x
+        if indicators.get("fm"):
+            self._draw_fixed_readout_indicator(
+                start_x + 12.0, y + digit_height * 0.34,
+                indicators["fm"], "FM", context, ready,
+            )
+
+        x = start_x + indicator_space
         self._draw_fixed_semantic_digit(
             x, y, digit_width, digit_height, slots[0:7], context, ready
         )
@@ -890,29 +921,37 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         )
         x += digit_width + group_gap
 
-        terminal_segregated = bool(context.get("terminal_segregated"))
-        colon_fill = (
-            self.DISPLAY_READOUT_NG
-            if terminal_segregated
-            else self.DISPLAY_READOUT_INACTIVE
-        )
-        colon_outline = (
-            self.DISPLAY_READOUT_NG_OUTLINE
-            if terminal_segregated
-            else self.DISPLAY_READOUT_INACTIVE_OUTLINE
-        )
         colon_x = x + colon_width / 2.0
-        dot_radius = 3.2
-        for cy in (y + digit_height * 0.36, y + digit_height * 0.66):
-            canvas.create_oval(
-                colon_x - dot_radius,
-                cy - dot_radius,
-                colon_x + dot_radius,
-                cy + dot_radius,
-                fill=colon_fill,
-                outline=colon_outline,
-                tags=("display-readout-colon",),
+        if indicators.get("decimal"):
+            # O ponto de 76.0 não é um ":" decorativo: é uma máscara real.
+            self._draw_fixed_readout_indicator(
+                colon_x, y + digit_height * 0.80,
+                indicators["decimal"], "", context, ready,
             )
+        else:
+            # Compatibilidade com projetos antigos de 28 máscaras.
+            terminal_segregated = bool(context.get("terminal_segregated"))
+            colon_fill = (
+                self.DISPLAY_READOUT_NG
+                if terminal_segregated
+                else self.DISPLAY_READOUT_INACTIVE
+            )
+            colon_outline = (
+                self.DISPLAY_READOUT_NG_OUTLINE
+                if terminal_segregated
+                else self.DISPLAY_READOUT_INACTIVE_OUTLINE
+            )
+            dot_radius = 3.2
+            for cy in (y + digit_height * 0.36, y + digit_height * 0.66):
+                canvas.create_oval(
+                    colon_x - dot_radius,
+                    cy - dot_radius,
+                    colon_x + dot_radius,
+                    cy + dot_radius,
+                    fill=colon_fill,
+                    outline=colon_outline,
+                    tags=("display-readout-colon",),
+                )
 
         x += colon_width + group_gap
         self._draw_fixed_semantic_digit(
