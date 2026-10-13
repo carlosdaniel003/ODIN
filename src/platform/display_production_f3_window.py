@@ -926,14 +926,8 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         x += digit_width + group_gap
 
         colon_x = x + colon_width / 2.0
-        if indicators.get("decimal"):
-            # O ponto de 76.0 não é um ":" decorativo: é uma máscara real.
-            self._draw_fixed_readout_indicator(
-                colon_x, y + digit_height * 0.80,
-                indicators["decimal"], "", context, ready,
-            )
-        else:
-            # Compatibilidade com projetos antigos de 28 máscaras.
+        if not indicators:
+            # Em projetos de 28 máscaras o ":" permanece decorativo.
             terminal_segregated = bool(context.get("terminal_segregated"))
             colon_fill = (
                 self.DISPLAY_READOUT_NG
@@ -961,6 +955,13 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._draw_fixed_semantic_digit(
             x, y, digit_width, digit_height, slots[14:21], context, ready
         )
+        if indicators.get("decimal"):
+            # 76.0: ponto ao lado inferior direito do terceiro dígito.
+            self._draw_fixed_readout_indicator(
+                x + digit_width + digit_gap * 0.50,
+                y + digit_height * 0.82,
+                indicators["decimal"], "", context, ready,
+            )
         x += digit_width + digit_gap
         self._draw_fixed_semantic_digit(
             x, y, digit_width, digit_height, slots[21:28], context, ready
