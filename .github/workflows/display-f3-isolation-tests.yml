@@ -54,6 +54,7 @@ jobs:
             src/platform/display_f3_reference_authority_fix.py \
             src/platform/display_f3_reference_authority_bridge.py \
             src/platform/display_f3_same_mask_reference_fix.py \
+            src/platform/display_f3_neural_runtime.py \
             src/platform/display_f3_physical_learning_policy.py \
             src/platform/display_f3_exact_check_template.py \
             src/platform/display_f3_contour_check_identity.py \
@@ -237,6 +238,14 @@ jobs:
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_freeze_ng_prefere_contexto_atomico_ao_ultimo_overlay_live \
             tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_repaint_pos_freeze_pinta_mask_024_vermelha_no_frame_terminal \
             tests.test_display_f3_manual_snapshot_debug.DisplayF3ManualSnapshotDebugTests.test_ng_congelado_preserva_geometria_do_snapshot_e_nao_a_live \
+            -v
+
+      - name: Run FM neural and physical ON/OFF fusion regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_neural_runtime.DisplayF3NeuralRuntimeTests.test_fm_circles_cannot_be_certain_off_when_model_prefers_on \
+            tests.test_display_f3_neural_runtime.DisplayF3NeuralRuntimeTests.test_circulos_fm_geram_par_local_de_fotos_de_checks_e_avancam \
+            tests.test_display_f3_neural_runtime.DisplayF3NeuralRuntimeTests.test_fm_sem_par_fisico_local_permanece_incerto_e_nao_aprova \
             -v
 
       - name: Run F3 30-mask readout and indicator regressions
