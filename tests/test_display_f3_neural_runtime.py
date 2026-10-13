@@ -197,6 +197,75 @@ class _FakeNet:
 
 
 class DisplayF3NeuralRuntimeTests(unittest.TestCase):
+    def test_fm_circles_cannot_be_certain_off_when_model_prefers_on(self):
+        """Reproduz o modelo real: OFF <= 0.660738 inclui p(ON)>50%."""
+        class CalibratedNet:
+            def setInput(self, batch):
+                self.batch_size = len(batch)
+
+            def forward(self):
+                assert self.batch_size == 3
+                probabilities = ((0.341842, 0.658158),
+                                 (0.487847, 0.512153),
+                                 (0.82, 0.18))
+                return np.log(np.asarray(probabilities, dtype=np.float32))
+
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _, _ = _repository(Path(temp))
+            detector = F3NeuralSegmentDetector(repository)
+            detector._net = CalibratedNet()
+            detector.prepare = Mock(return_value={
+                **_ready_model_status(),
+                "off_max_on_probability": 0.660738,
+                "on_min_on_probability": 0.809613,
+            })
+            batch = [np.zeros((4, 48, 48), dtype=np.float32) for _ in range(3)]
+            observations = detector.predict("DISPLAY A", batch)["observations"]
+
+        self.assertEqual(
+            ["uncertain", "uncertain", "off"],
+            [item["state"] for item in observations],
+        )
+        self.assertEqual(
+            [False, False, True],
+            [item["certain"] for item in observations],
+        )
+        self.assertGreater(observations[0]["probabilities"]["on"], 0.5)
+        self.assertGreater(observations[1]["probabilities"]["on"], 0.5)
+
+    def test_fm_sem_par_fisico_local_permanece_incerto_e_nao_aprova(self):
+        """Pool global não vira autoridade por causa de um LED aceso."""
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _ = _repository(Path(temp))
+            repository.salvar_estados_check(
+                "DISPLAY A", h1["id"],
+                {"MASK_001": "on", "MASK_002": "on"},
+            )
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["uncertain", "uncertain"])
+            )
+            pool_analysis = _physical_analysis(["on", "on"])
+            for mask in pool_analysis["mask_results"]:
+                mask["reference_source"] = "f3_check_photos_class_pool"
+            with patch.object(
+                F3SameMaskReferenceAnalyzer,
+                "analyze",
+                return_value=pool_analysis,
+            ):
+                result = analyzer.analyze(_frame(), "DISPLAY A", h1["id"])
+
+            self.assertFalse(result["approved"])
+            self.assertEqual(2, result["uncertain_mask_count"])
+            self.assertTrue(all(
+                item["hybrid_resolution"] == "neural_uncertain_without_local_physical"
+                and item["matched"] is None
+                for item in result["mask_results"]
+            ))
+
     def test_detector_loads_onnx_once_and_infers_all_segments_as_one_batch(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, _h1, _blue = _repository(
