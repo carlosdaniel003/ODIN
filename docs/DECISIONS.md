@@ -5564,3 +5564,71 @@ ON/OFF/NG/SEGREGAR dos indicadores e compatibilidade com 28 máscaras.
 **Próximo reteste físico:** confirmar no F3 com 30 máscaras reais o
 posicionamento, IDs, acendimento e apagamento sincronizados, NG individual
 para FM e decimal, com tracking ligado e desligado.
+
+
+## D-078 — FM 30 máscaras: OFF neural contraditório não pode ser certeza
+
+**Status:** Correção em código / regressões PASS / reteste físico pendente.
+
+### Evidência do teste físico (13/10/2026)
+
+O projeto CM_500_L possui 30 máscaras e avançou por H1 → BLUE → USB,
+mas permaneceu em FM (CHECK_005, 4/5), com 27/30 conformes.
+Energia e transição física USB → FM estavam confirmadas.
+
+O analisador físico das fotos de CHECKS aprovou 30/30; no entanto,
+a autoridade híbrida apresentou:
+- MASK_012 esperada ON, física ON com confiança 0,9885 e par local
+  completo; CNN declarou OFF com P(ON)=0,658158 e confiança 0,341842;
+  resultado final INCERTO por conflito.
+- MASK_029 (decimal) física ON (confiança 0,969, class_pool);
+  CNN declarou OFF com P(ON)=0,512153 e confiança 0,487847.
+- MASK_030 (FM) física ON (confiança 0,9806, class_pool);
+  CNN declarou OFF com P(ON)=0,517336 e confiança 0,482664.
+
+A CNN usava `off_max_on_probability=0.660738` e declarava OFF certo
+mesmo quando P(ON) > P(OFF). Esse descompasso entre limiar calibrado e
+sentido do softmax expôs o modelo segmentado à inferência fora do domínio
+original nos dois indicadores circulares.
+
+### Correção e contrato de segurança
+
+No método canônico `F3NeuralSegmentDetector.predict`, o estado OFF só
+é considerado certo quando **ambas** as condições são verdadeiras:
+- `P(ON) <= off_max_on_probability` (limiar calibrado);
+- `P(OFF) >= P(ON)` (a rede realmente prefere OFF).
+
+Se o valor está abaixo do limiar OFF, mas a rede prefere ON, o resultado
+passa a ser `INCERTO`, nunca falso NG. Quando existir um par físico ON/OFF
+*da mesma máscara* confiável, a fusão D-065 pode resolver essa incerteza.
+Isso resolve a contradição da MASK_012 sem diminuir thresholds nem
+promover diagnóstico por pool a autoridade.
+
+Para MASK_029 e MASK_030, o relatório mostra somente par incompleto:
+estão ON em FM e IGNORAR nos outros quatro CHECKS; a origem física é
+`f3_check_photos_class_pool`. Por regra D-065, esse pool **não pode**
+ser promovido a autoridade de OK. É necessário registrar exemplos OFF
+**da própria máscara**, com geometria correta e foto física, mediante:
+- configurar ambos como OFF em CHECK(s) nos quais estejam realmente
+  apagados, com fotos de referência correspondentes; **ou**
+- atualizar foto e geometria de referência de PLACA DESLIGADA para
+  incluir explicitamente as duas máscaras.
+
+Não inferir OFF para máscaras IGNORAR, nem copiar automaticamente máscara
+para foto antiga, nem forçar aprovação com 27/30. Não alterar pesos ONNX.
+
+### Evidência automatizada
+
+A CI passou os 3 testes específicos de correção:
+- `test_fm_circles_cannot_be_certain_off_when_model_prefers_on`
+- `test_circulos_fm_geram_par_local_de_fotos_de_checks_e_avancam`
+- `test_fm_sem_par_fisico_local_permanece_incerto_e_nao_aprova`
+
+Também passaram os testes de visor 30 máscaras, D-074 e conformidade/
+segregação. O workflow completo continua com as 7 falhas e 1 erro
+preexistentes no bloco genérico de rastreamento F3.
+
+**Reteste físico pendente:** garantir fonte OFF local para MASK_029 e
+MASK_030 sem falsificar estados; repetir FM com ambas ON e placa sem defeito.
+Esperado: 30/30 -> avanço para AUX, preservando NG em qualquer indicador
+verdadeiramente apagado.
