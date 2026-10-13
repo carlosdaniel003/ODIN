@@ -233,6 +233,72 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         self.assertGreater(observations[0]["probabilities"]["on"], 0.5)
         self.assertGreater(observations[1]["probabilities"]["on"], 0.5)
 
+    def test_circulos_fm_geram_par_local_de_fotos_de_checks_e_avancam(self):
+        """Se ON no FM e OFF no H1, o aprendizado real gera pares por ID."""
+        from src.platform.display_check_presence_reference import (
+            DisplayCheckPresenceReferenceStore,
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repository = DisplayProjectRepository(root / "display_projects.json")
+            repository.adicionar_projeto("DISPLAY FM", (120, 80))
+            circles = [
+                {"id": "MASK_029", "type": "circle", "cx": 30, "cy": 40, "radius": 10},
+                {"id": "MASK_030", "type": "circle", "cx": 90, "cy": 40, "radius": 10},
+            ]
+            repository.salvar_mascaras("DISPLAY FM", circles)
+            checks = repository.listar_checks("DISPLAY FM")
+            first, second = checks[:2]
+            mask_ids = ("MASK_029", "MASK_030")
+            self.assertTrue(repository.salvar_estados_check(
+                "DISPLAY FM", first["id"],
+                {mask_id: "off" for mask_id in mask_ids},
+            ))
+            self.assertTrue(repository.salvar_estados_check(
+                "DISPLAY FM", second["id"],
+                {mask_id: "on" for mask_id in mask_ids},
+            ))
+            frame_off = np.full((80, 120, 3), 20, dtype=np.uint8)
+            frame_on = frame_off.copy()
+            for cx in (30, 90):
+                frame_on[30:51, cx-10:cx+11] = 250
+            store = DisplayCheckPresenceReferenceStore(repository)
+            self.assertIsNotNone(store.capture(
+                "DISPLAY FM", first["id"], frame_off, (120, 80),
+            ))
+            self.assertIsNotNone(store.capture(
+                "DISPLAY FM", second["id"], frame_on, (120, 80),
+            ))
+
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value={**_ready_model_status(), "project_name": "DISPLAY FM"}
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["uncertain", "uncertain"])
+            )
+            result = analyzer.analyze(frame_on, "DISPLAY FM", second["id"])
+            self.assertTrue(result["ready"])
+            self.assertTrue(result["approved"], result)
+            self.assertEqual(2, result["matched_mask_count"])
+            self.assertEqual(
+                2, result["physical_same_mask_authoritative_count"],
+            )
+            self.assertEqual(
+                {"physical_resolved_neural_uncertain"},
+                {item["hybrid_resolution"] for item in result["mask_results"]},
+            )
+
+            # Os MESMOS LEDs acesos no CHECK que exige OFF devem divergir;
+            # a alteração não pode introduzir falso OK.
+            result_ng = analyzer.analyze(frame_on, "DISPLAY FM", first["id"])
+            self.assertFalse(result_ng["approved"])
+            self.assertTrue(all(
+                item["classified"] == "on" and item["matched"] is False
+                for item in result_ng["mask_results"]
+            ))
+
     def test_fm_sem_par_fisico_local_permanece_incerto_e_nao_aprova(self):
         """Pool global não vira autoridade por causa de um LED aceso."""
         with tempfile.TemporaryDirectory() as temp:
