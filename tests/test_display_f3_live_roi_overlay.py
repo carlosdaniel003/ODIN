@@ -140,8 +140,9 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertLess(int(dark[0]) + int(dark[1]) + int(dark[2]), 20)
 
     def test_visor_luminoso_so_mostra_segmentos_identificados_com_luz(self):
+        # A resolução da cor é compartilhada por barras e indicadores.
         source = inspect.getsource(
-            DisplayProductionF3Window._draw_fixed_semantic_digit
+            DisplayProductionF3Window._display_readout_mask_state
         )
         self.assertIn('context.get("live_luminous_only")', source)
         self.assertIn('context.get("live_visual_sample_ready")', source)
