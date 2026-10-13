@@ -166,7 +166,7 @@ def _semantic_mask_pattern_presence_evidence(
         return result
 
     try:
-        checks = repository.listar_checks(project_name)
+        checks = repository.listar_checks_ativos(project_name)
     except Exception:
         checks = []
 

@@ -1990,13 +1990,19 @@ class DisplayProjectConfigWindow:
             )
         )
         self.mask_summary.configure(text=f"{len(masks)} máscara(s) salva(s)")
-        check_names = " → ".join(str(check.get("name", "CHECK")) for check in checks)
+        active_checks = [
+            check for check in checks
+            if isinstance(check, dict) and bool(check.get("enabled", True))
+        ]
+        check_names = " → ".join(
+            str(check.get("name", "CHECK")) for check in active_checks
+        )
         if len(check_names) > 54:
             check_names = check_names[:51] + "..."
         self.check_summary.configure(
             text=(
-                f"{len(checks)} CHECK(s) configurado(s)"
-                + (f"\n{check_names}" if check_names else "")
+                f"{len(active_checks)} CHECK(s) ativo(s) de {len(checks)} salvo(s)"
+                + (f"\nSequência F3: {check_names}" if check_names else "\nNenhum CHECK ativo")
             )
         )
         self._render_mask_reference_preview(project)

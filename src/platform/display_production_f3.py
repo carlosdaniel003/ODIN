@@ -641,7 +641,7 @@ class DisplayProductionF3Mixin:
                 projeto.get("name"),
                 resolucao,
                 len(mascaras) if isinstance(mascaras, list) else 0,
-                len(checks) if isinstance(checks, list) else 0,
+                len(self.display_check_runtime.snapshot().get("checks", ())),
             )
             janela.set_check_sequence(self.display_check_runtime.snapshot())
         except Exception:

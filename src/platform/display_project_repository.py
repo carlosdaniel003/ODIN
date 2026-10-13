@@ -380,6 +380,7 @@ def _checks_padrao(mask_ids) -> list[dict]:
             "id": f"CHECK_{indice:03d}",
             "name": nome,
             "intermittent": nome in DISPLAY_LEGACY_INTERMITTENT_CHECK_NAMES,
+            "enabled": True,
             "mask_states": normalizar_estados_check_display({}, ids),
         }
         for indice, nome in enumerate(DISPLAY_DEFAULT_CHECK_NAMES, start=1)
@@ -461,6 +462,11 @@ def normalizar_checks_display(
             "id": identificador,
             "name": nome,
             "intermittent": check_display_intermitente(check),
+            # Projetos antigos sem esta chave mantêm todos os CHECKS ativos.
+            "enabled": normalizar_booleano_display(
+                check.get("enabled", True),
+                padrao=True,
+            ),
             "mask_states": normalizar_estados_check_display(estados, mask_ids),
         }
         board_points = normalizar_pontos_geometria_check(
@@ -786,6 +792,13 @@ class DisplayProjectRepository:
             return []
         return deepcopy(projeto.get("checks", []))
 
+    def listar_checks_ativos(self, nome_projeto: str) -> list[dict]:
+        """Somente CHECKS habilitados para a sequência e identidade produtivas."""
+        return [
+            check for check in self.listar_checks(nome_projeto)
+            if bool(check.get("enabled", True))
+        ]
+
     def carregar_check(self, nome_projeto: str, check_id: str) -> dict | None:
         identificador = str(check_id or "").strip().upper()
         for check in self.listar_checks(nome_projeto):
@@ -813,6 +826,7 @@ class DisplayProjectRepository:
                 "id": check_id,
                 "name": nome,
                 "intermittent": False,
+                "enabled": True,
                 "mask_states": normalizar_estados_check_display({}, mask_ids),
             }
         )
@@ -855,6 +869,33 @@ class DisplayProjectRepository:
         self._atualizar_timestamp(projeto)
         self._escrever(dados)
         return True
+
+    def salvar_check_ativo(
+        self,
+        nome_projeto: str,
+        check_id: str,
+        ativo: bool,
+    ) -> bool:
+        """Ativa/desativa sem apagar estados, geometria ou fotos do CHECK."""
+        projeto_nome = normalizar_nome_projeto_display(nome_projeto)
+        identificador = str(check_id or "").strip().upper()
+        dados = self._carregar()
+        projeto = dados["projects"].get(projeto_nome)
+        if projeto is None or not identificador:
+            return False
+
+        for check in projeto.get("checks", []):
+            if str(check.get("id", "")).upper() != identificador:
+                continue
+            check["enabled"] = bool(ativo)
+            projeto["checks"] = normalizar_checks_display(
+                projeto.get("checks", []),
+                projeto.get("masks", []),
+            )
+            self._atualizar_timestamp(projeto)
+            self._escrever(dados)
+            return True
+        return False
 
     def salvar_check_intermitente(
         self,

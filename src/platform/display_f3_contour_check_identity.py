@@ -336,7 +336,7 @@ def _reference_cache(app, runtime, project_name: str):
         return rows
 
     try:
-        checks = runtime.repository.listar_checks(project_name)
+        checks = runtime.repository.listar_checks_ativos(project_name)
     except Exception:
         checks = []
 

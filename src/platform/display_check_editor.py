@@ -115,8 +115,8 @@ class DisplayCheckManagerWindow:
         tk.Label(
             self.window,
             text=(
-                f"Projeto: {self.project_name} • a ordem abaixo será a ordem "
-                "operacional do F3 nas próximas fases."
+                f"Projeto: {self.project_name} • CHECKS desativados continuam "
+                "salvos, mas não entram na sequência de inspeção F3."
             ),
             font=("Segoe UI", 9),
             fg=self.MUTED,
@@ -306,6 +306,42 @@ class DisplayCheckManagerWindow:
         )
         self.check_order.pack(fill=tk.X, padx=16, pady=(0, 18))
 
+        enabled_box = tk.Frame(right, bg="#0B1728")
+        enabled_box.pack(fill=tk.X, padx=16, pady=(0, 12))
+        self.check_enabled_var = tk.BooleanVar(value=True)
+        self.check_enabled_toggle = tk.Checkbutton(
+            enabled_box,
+            text="CHECK ATIVO NO F3 • ATIVADO",
+            variable=self.check_enabled_var,
+            command=self._toggle_enabled,
+            indicatoron=False,
+            font=("Segoe UI", 10, "bold"),
+            bg="#065F46",
+            fg="#ECFDF5",
+            selectcolor="#065F46",
+            activebackground="#047857",
+            activeforeground="#FFFFFF",
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=9,
+            cursor="hand2",
+        )
+        self.check_enabled_toggle.pack(fill=tk.X)
+        tk.Label(
+            enabled_box,
+            text=(
+                "DESATIVADO: o F3 ignora este CHECK. Máscaras, estados, "
+                "geometria, fotos e configurações permanecem salvos."
+            ),
+            font=("Segoe UI", 8),
+            fg=self.MUTED,
+            bg="#0B1728",
+            wraplength=330,
+            justify=tk.LEFT,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(5, 0))
+
         summary_box = tk.Frame(right, bg="#0F1B2C")
         summary_box.pack(fill=tk.X, padx=16, pady=(0, 12))
         tk.Label(
@@ -471,7 +507,14 @@ class DisplayCheckManagerWindow:
         for index, check in enumerate(checks):
             check_id = str(check.get("id", ""))
             self._check_ids.append(check_id)
-            self.check_list.insert(tk.END, f"{index + 1}.  {check.get('name', 'CHECK')}")
+            ativo = bool(check.get("enabled", True))
+            sufixo = "" if ativo else "  •  DESATIVADO"
+            self.check_list.insert(
+                tk.END,
+                f"{index + 1}.  {check.get('name', 'CHECK')}{sufixo}",
+            )
+            if not ativo:
+                self.check_list.itemconfig(index, fg=self.MUTED)
             if check_id.upper() == prefer:
                 selected_index = index
         if selected_index is None and checks:
@@ -480,8 +523,12 @@ class DisplayCheckManagerWindow:
             self.check_list.selection_set(selected_index)
             self.check_list.see(selected_index)
         self._update_detail()
+        ativos = sum(bool(item.get("enabled", True)) for item in checks)
         self.status.configure(
-            text=f"{len(checks)} CHECK(s) configurado(s) no Projeto Display."
+            text=(
+                f"{len(checks)} CHECK(s) salvo(s) • "
+                f"{ativos} ativo(s) • {len(checks) - ativos} desativado(s)."
+            )
         )
 
     def _update_detail(self) -> None:
@@ -492,6 +539,8 @@ class DisplayCheckManagerWindow:
             self.state_summary.configure(text="ACESO: 0\nAPAGADO: 0\nIGNORAR: 0")
             self.intermittent_var.set(False)
             self.intermittent_toggle.configure(state=tk.DISABLED)
+            self.check_enabled_var.set(False)
+            self.check_enabled_toggle.configure(state=tk.DISABLED)
             return
         check = self.repository.carregar_check(self.project_name, check_id)
         if check is None:
@@ -506,6 +555,17 @@ class DisplayCheckManagerWindow:
         for state in states.values():
             counts[str(state)] = counts.get(str(state), 0) + 1
         self.check_title.configure(text=str(check.get("name", "CHECK")))
+        ativo = bool(check.get("enabled", True))
+        self.check_enabled_var.set(ativo)
+        self.check_enabled_toggle.configure(
+            state=tk.NORMAL,
+            text=(
+                "CHECK ATIVO NO F3 • ATIVADO"
+                if ativo else "CHECK ATIVO NO F3 • DESATIVADO"
+            ),
+            bg="#065F46" if ativo else "#7F1D1D",
+            fg="#ECFDF5" if ativo else "#FEE2E2",
+        )
         self.check_order.configure(
             text=f"Posição na sequência: {(index or 0) + 1} • ID interno: {check_id}"
         )
@@ -527,6 +587,33 @@ class DisplayCheckManagerWindow:
             ),
             bg="#065F46" if is_intermittent else "#1E293B",
             fg="#ECFDF5" if is_intermittent else "#CBD5E1",
+        )
+
+    def _toggle_enabled(self) -> None:
+        check_id = self._selected_id()
+        if not check_id:
+            return
+        ativo = bool(self.check_enabled_var.get())
+        if self.repository.salvar_check_ativo(
+            self.project_name,
+            check_id,
+            ativo,
+        ):
+            self.refresh(check_id)
+            self._notify_change()
+            self.status.configure(
+                text=(
+                    "CHECK ativado • incluído na sequência F3."
+                    if ativo
+                    else "CHECK desativado • configuração preservada e fora da sequência F3."
+                )
+            )
+            return
+        self.check_enabled_var.set(not ativo)
+        messagebox.showwarning(
+            "Não foi possível salvar",
+            "Não foi possível alterar a ativação deste CHECK.",
+            parent=self.window,
         )
 
     def _toggle_intermittent(self) -> None:

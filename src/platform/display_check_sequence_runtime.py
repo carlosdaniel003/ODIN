@@ -33,7 +33,7 @@ class DisplayCheckSequenceRuntime:
         resultado: list[dict] = []
         ids_usados: set[str] = set()
         for indice, check in enumerate(checks or []):
-            if not isinstance(check, dict):
+            if not isinstance(check, dict) or not bool(check.get("enabled", True)):
                 continue
             check_id = str(check.get("id") or f"CHECK_{indice + 1:03d}").strip().upper()
             nome = str(check.get("name") or check_id).strip() or check_id
@@ -62,7 +62,7 @@ class DisplayCheckSequenceRuntime:
         )
 
     def configurar_checks(self, checks, reiniciar: bool = False) -> bool:
-        """Atualiza a sequência e reinicia a placa se a configuração mudou."""
+        """Opera somente CHECKS ativos; reinicia se a sequência mudou."""
         novos = self._normalizar_checks(checks)
         mudou = self._assinatura(novos) != self._assinatura(self._checks)
         self._checks = novos
