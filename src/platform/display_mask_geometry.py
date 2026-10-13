@@ -453,6 +453,67 @@ def _centro_mascara_display(mask: dict) -> tuple[float, float]:
     return (float(x1 + x2) / 2.0, float(y1 + y2) / 2.0)
 
 
+def _separar_layout_visor_display(masks, digit_count: int):
+    """Mantém 28 barras e identifica dois indicadores circulares opcionais.
+
+    O F3 também aceita projetos legados de 28 máscaras circulares: somente
+    quando há 30 máscaras separam-se os dois círculos adicionais. As
+    identidades originais são mantidas, sem renumerar ou excluir máscaras.
+    """
+    expected = max(1, int(digit_count)) * 7
+    items = [
+        deepcopy(mask)
+        for mask in (masks or ())
+        if isinstance(mask, dict) and str(mask.get("id") or "").strip()
+    ]
+    if len(items) != expected + 2:
+        return items, {}
+
+    ids = [str(item["id"]) for item in items]
+    if len(set(ids)) != len(ids):
+        return items, {}
+
+    circles = [mask for mask in items if str(mask.get("type") or "").lower() == "circle"]
+    if len(circles) < 2:
+        return items, {}
+
+    if len(circles) > 2:
+        # Compatibilidade: projetos antigos podem desenhar as 28 barras
+        # usando círculos. As duas máscaras recém-adicionadas recebem os
+        # próximos IDs; não se pode eliminar duas barras por tipo geométrico.
+        def order(mask):
+            number = numero_mascara_display(mask)
+            return (int(number) if number.isdigit() else -1, str(mask["id"]))
+
+        circles = sorted(circles, key=order)[-2:]
+
+    indicator_ids = {str(mask["id"]) for mask in circles}
+    segments = [mask for mask in items if str(mask["id"]) not in indicator_ids]
+    if len(segments) != expected:
+        return items, {}
+
+    # A indicação FM fica fora do grupo dos dígitos; o ponto decimal fica
+    # próximo deles. Distância ao centro do grid também funciona em 180°.
+    centers = [_centro_mascara_display(mask) for mask in segments]
+    center_x = (min(x for x, _ in centers) + max(x for x, _ in centers)) / 2.0
+    center_y = (min(y for _, y in centers) + max(y for _, y in centers)) / 2.0
+    fm = max(
+        circles,
+        key=lambda mask: (
+            (float(mask.get("cx", 0)) - center_x) ** 2
+            + (float(mask.get("cy", 0)) - center_y) ** 2
+        ),
+    )
+    decimal = next(mask for mask in circles if str(mask["id"]) != str(fm["id"]))
+    return segments, {"fm": str(fm["id"]), "decimal": str(decimal["id"])}
+
+
+def mapear_indicadores_circulares_display(masks, *, digit_count: int = 4) -> dict[str, str]:
+    """Relaciona os dois círculos do visor com os MASK_IDs físicos."""
+    _, indicators = _separar_layout_visor_display(masks, digit_count)
+    return indicators
+
+
 def mapear_slots_sete_segmentos_display(
     masks,
     *,
@@ -465,11 +526,7 @@ def mapear_slots_sete_segmentos_display(
     visor 88:88 aquele ID está. Nenhum MASK_ID é recriado ou renumerado.
     """
     expected = max(1, int(digit_count)) * 7
-    items = [
-        deepcopy(mask)
-        for mask in (masks or ())
-        if isinstance(mask, dict) and str(mask.get("id") or "").strip()
-    ]
+    items, _ = _separar_layout_visor_display(masks, digit_count)
     if len(items) != expected:
         return []
 
