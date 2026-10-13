@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
 
+from src.platform.display_check_editor import DisplayCheckManagerWindow
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_IGNORE,
     DISPLAY_CHECK_STATE_OFF,
@@ -92,6 +94,123 @@ class DisplayCheckRepositoryTests(unittest.TestCase):
             self.assertTrue(
                 DisplayProjectRepository(config_file)
                 .carregar_check("DISPLAY A", novo)["intermittent"]
+            )
+
+    def test_toggle_ativo_preserva_todas_as_configuracoes_e_reabre(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "display.json"
+            repo = DisplayProjectRepository(path)
+            repo.adicionar_projeto("DISPLAY A", (1920, 1080))
+            repo.salvar_mascaras("DISPLAY A", self._masks())
+            blue = next(
+                item for item in repo.listar_checks("DISPLAY A")
+                if item["name"] == "BLUE"
+            )
+            check_id = blue["id"]
+            states = {"MASK_001": "on", "MASK_002": "off"}
+            board = [[0, 0], [100, 0], [100, 100], [0, 100]]
+            overrides = {
+                "MASK_001": {
+                    "id": "MASK_001",
+                    "type": "rectangle",
+                    "x": 22,
+                    "y": 40,
+                    "width": 120,
+                    "height": 40,
+                }
+            }
+            self.assertTrue(repo.salvar_estados_check("DISPLAY A", check_id, states))
+            self.assertTrue(
+                repo.salvar_geometria_check(
+                    "DISPLAY A", check_id, board, overrides
+                )
+            )
+            before = repo.carregar_check("DISPLAY A", check_id)
+            self.assertTrue(before["enabled"])
+            self.assertTrue(before["intermittent"])
+
+            self.assertTrue(repo.salvar_check_ativo("DISPLAY A", check_id, False))
+            inactive = DisplayProjectRepository(path)
+            saved = inactive.carregar_check("DISPLAY A", check_id)
+            self.assertFalse(saved["enabled"])
+            self.assertEqual(
+                {key: value for key, value in before.items() if key != "enabled"},
+                {key: value for key, value in saved.items() if key != "enabled"},
+            )
+            self.assertEqual(4, len(inactive.listar_checks("DISPLAY A")))
+            self.assertEqual(
+                ["H1", "AUX", "USB"],
+                [item["name"] for item in inactive.listar_checks_ativos("DISPLAY A")],
+            )
+
+            self.assertTrue(inactive.salvar_check_ativo("DISPLAY A", check_id, True))
+            restored = DisplayProjectRepository(path)
+            self.assertEqual(before, restored.carregar_check("DISPLAY A", check_id))
+            self.assertEqual(
+                list(DISPLAY_DEFAULT_CHECK_NAMES),
+                [item["name"] for item in restored.listar_checks_ativos("DISPLAY A")],
+            )
+            self.assertFalse(restored.salvar_check_ativo("DISPLAY A", "INEXISTENTE", False))
+
+    def test_json_legado_sem_flag_enabled_mantem_todos_os_checks_ativos(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "display.json"
+            repo = DisplayProjectRepository(path)
+            repo.adicionar_projeto("DISPLAY A", (640, 480))
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            for check in raw["projects"]["DISPLAY A"]["checks"]:
+                check.pop("enabled", None)
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            legacy = DisplayProjectRepository(path)
+            self.assertEqual(
+                list(DISPLAY_DEFAULT_CHECK_NAMES),
+                [item["name"] for item in legacy.listar_checks_ativos("DISPLAY A")],
+            )
+            self.assertTrue(
+                all(item["enabled"] for item in legacy.listar_checks("DISPLAY A"))
+            )
+
+    def test_interface_toggle_f3_muda_flag_sem_abrir_editor_e_notifica(self):
+        class _Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        class _Status:
+            def __init__(self):
+                self.options = {}
+
+            def configure(self, **kwargs):
+                self.options.update(kwargs)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = DisplayProjectRepository(Path(temp_dir) / "display.json")
+            repo.adicionar_projeto("DISPLAY A", (640, 480))
+            selected = repo.listar_checks("DISPLAY A")[2]["id"]
+            manager = DisplayCheckManagerWindow.__new__(DisplayCheckManagerWindow)
+            manager.repository = repo
+            manager.project_name = "DISPLAY A"
+            manager._selected_id = lambda: selected
+            manager.check_enabled_var = _Var(False)
+            manager.status = _Status()
+            refreshes = []
+            notifications = []
+            manager.refresh = lambda check_id: refreshes.append(check_id)
+            manager._notify_change = lambda: notifications.append(True)
+            manager._toggle_enabled()
+
+            self.assertFalse(repo.carregar_check("DISPLAY A", selected)["enabled"])
+            self.assertEqual([selected], refreshes)
+            self.assertEqual([True], notifications)
+            self.assertIn("desativado", manager.status.options["text"])
+            self.assertIn(
+                "self.check_enabled_toggle = tk.Checkbutton(",
+                inspect.getsource(DisplayCheckManagerWindow.__init__),
             )
 
     def test_salvar_mascaras_adiciona_estado_ignorar_em_todos_os_checks(self):

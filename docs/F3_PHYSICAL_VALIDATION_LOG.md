@@ -7146,3 +7146,26 @@ DIVERGÊNCIA • MASK_024 • ESPERADO: ACESO • DETECTADO: APAGADO
 
 Estado D-075 após implementação: **PENDENTE DE RETESTE VISUAL**.
 
+---
+
+## 13/10/2026 — D-076 toggle CHECK ativo/inativo — reteste solicitado
+
+**Estado:** IMPLEMENTADO / PENDENTE DE RETESTE FÍSICO.
+
+Solicitação: botão toggle em `CHECKS DO DISPLAY`, com CHECK desabilitado
+fora da sequência/julgamento F3, sem excluir nenhuma configuração já criada.
+
+Cenários a validar no ODIN real:
+
+1. desabilitar AUX e confirmar que a lista de configuração mantém AUX
+   marcado DESATIVADO, com máscaras e fotos editáveis;
+2. executar H1 -> BLUE -> USB, sem aguardar AUX;
+3. reativar AUX e confirmar H1 -> BLUE -> AUX -> USB;
+4. conferir que estados ON/OFF/IGNORAR, opção intermitente, geometrias e
+   referências previamente salvas permaneceram iguais;
+5. testar somente um CHECK ativo, com encerramento de placa após ele;
+6. sem CHECK ativo, não pode ocorrer inspeção nem registro OK/NG.
+
+Nenhum dado real de defeito ou teste físico foi fornecido nesta etapa; o PASS
+físico ainda depende dos próximos testes do usuário.
+

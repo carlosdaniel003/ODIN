@@ -5431,3 +5431,82 @@ Regressões dedicadas cobrem:
 - rearme;
 - publicação da divergência antes do latch/freeze NG.
 
+---
+
+## D-076 — CHECK habilitado/desabilitado sem perder configuração
+
+**Status:** Accepted / Implemented / Physical validation pending
+
+### Requisito
+
+Dentro de **CHECKS DO DISPLAY**, permitir ativar/desativar individualmente
+qualquer CHECK sem apagar suas informações.
+
+### Contrato persistente
+
+Cada CHECK salvo em `odin_display_projects.json` passa a conter:
+
+```json
+"enabled": true
+```
+
+`enabled=true` é o padrão para projetos antigos sem a chave e CHECKS novos.
+`enabled=false` preserva no mesmo cadastro:
+
+- ID, nome e posição na lista configurada;
+- estados ON/OFF/IGNORAR por máscara;
+- geometria de placa e overrides locais de máscaras;
+- natureza intermitente;
+- fotografias/referências separadas indexadas pelo mesmo projeto/CHECK.
+
+O toggle usa `DisplayProjectRepository.salvar_check_ativo`; não executa exclusão
+nem apaga dados externos de referência.
+
+### Contrato produtivo
+
+`DisplayCheckSequenceRuntime` opera somente CHECKS habilitados, na ordem em
+que estão salvos. CHECKS desabilitados não entram nos cards F3, CHECK atual,
+transições, aprovações, reprovações ou contagem de etapas.
+
+- desabilitar CHECK intermediário: avançar diretamente ao próximo habilitado;
+- desabilitar primeiro CHECK: primeiro habilitado assume posição 0 e regras
+  de referência inicial;
+- desabilitar último CHECK: último habilitado encerra placa OK;
+- um único habilitado: aprovação dele conclui a placa;
+- nenhum habilitado: `EVENT_NO_CHECKS`, sem OK/NG/contadores automáticos;
+- reativar: recupera o CHECK e seu lugar original, sem apagar os contadores
+  históricos da sessão;
+- alterar a lista habilitada durante configuração reinicia o progresso atual
+  por segurança, sem alterar os contadores já registrados.
+
+Identificação semântica de presença e identidade visual por contorno só
+consideram CHECKS habilitados, evitando que uma foto/padrão de um CHECK
+desabilitado seja promovido como CHECK em produção.
+
+Treinamentos e fotos já persistidos permanecem intactos. O artefato CNN ON/OFF
+treinado mantém suas referências históricas e seu vínculo de validação de
+dataset; desabilitar um CHECK da sequência **não muda retroativamente o modelo
+neural treinado**.
+
+### UI
+
+Cada CHECK aparece na lista de configuração com indicação clara de ativo ou
+desativado. Um toggle dedicado `CHECK ATIVO NO F3` permite alternar o estado.
+Editar máscaras, reordenar, renomear e reativar continuam possíveis também
+quando o CHECK estiver desabilitado. A configuração mostra quantos CHECKS
+permanecem ativos; o painel F3 apresenta somente os ativos.
+
+### Limites
+
+F2, tracking geométrico, autoridade híbrida ON/OFF, política NG, temporização,
+scheduler e persistência de resultados de placa não foram modificados.
+
+### Testes
+
+A regressão D-076 cobre compatibilidade com JSON legado; preservação integral
+dos dados ao desligar/ligar; toggle de UI; exclusão de CHECK intermediário,
+primeiro, último e todos; reversão/restauração de ordem; ausência de OK/NG sem
+CHECKS ativos; contadores preservados; regressões de presença F3.
+
+**Estado físico:** pendente de teste no ODIN real com um CHECK desabilitado e
+posterior reativação.

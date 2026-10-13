@@ -62,6 +62,79 @@ class DisplayF3CheckSequenceRuntimeTests(unittest.TestCase):
         runtime.registrar_resultado_check(True)
         self.assertTrue(runtime.snapshot()["current_check"]["intermittent"])
 
+    def test_check_intermediario_desativado_e_pulado_sem_ng(self):
+        checks = [dict(item) for item in CHECKS]
+        checks[1]["enabled"] = False
+        self.assertTrue(self.runtime.configurar_checks(checks))
+        snapshot = self.runtime.snapshot()
+        self.assertEqual(
+            ["H1", "AUX", "USB"],
+            [row["name"] for row in snapshot["checks"]],
+        )
+        advanced = self.runtime.registrar_resultado_check(True)
+        self.assertEqual(
+            DisplayCheckSequenceRuntime.EVENT_ADVANCED,
+            advanced["event"],
+        )
+        self.assertEqual("AUX", advanced["snapshot"]["current_check"]["name"])
+        self.runtime.registrar_resultado_check(True)
+        result = self.runtime.registrar_resultado_check(True)
+        self.assertEqual(DisplayCheckSequenceRuntime.EVENT_PLATE_OK, result["event"])
+        self.assertEqual(("CHECK_001", "CHECK_003", "CHECK_004"), result["completed_ids"])
+        self.assertEqual((1, 1, 0), (
+            self.runtime.total, self.runtime.ok, self.runtime.ng
+        ))
+
+    def test_primeiro_ou_ultimo_inativo_muda_referencia_e_terminal(self):
+        checks = [
+            {"id": "CHECK_001", "name": "H1", "enabled": False},
+            {"id": "CHECK_002", "name": "BLUE", "enabled": True},
+            {"id": "CHECK_003", "name": "AUX", "enabled": False},
+            {"id": "CHECK_004", "name": "USB", "enabled": False},
+        ]
+        self.runtime.configurar_checks(checks)
+        snapshot = self.runtime.snapshot()
+        self.assertEqual(["BLUE"], [item["name"] for item in snapshot["checks"]])
+        self.assertEqual("BLUE", snapshot["current_check"]["name"])
+        result = self.runtime.registrar_resultado_check(True)
+        self.assertEqual(DisplayCheckSequenceRuntime.EVENT_PLATE_OK, result["event"])
+        self.assertEqual(("CHECK_002",), result["completed_ids"])
+
+    def test_todos_desativados_ou_sem_checks_nao_geram_resultado(self):
+        self.runtime.configurar_checks([
+            {**check, "enabled": False} for check in CHECKS
+        ])
+        snapshot = self.runtime.snapshot()
+        self.assertEqual([], snapshot["checks"])
+        self.assertIsNone(snapshot["current_check"])
+        self.assertEqual(
+            DisplayCheckSequenceRuntime.EVENT_NO_CHECKS,
+            self.runtime.registrar_resultado_check(True)["event"],
+        )
+        self.assertEqual(
+            DisplayCheckSequenceRuntime.EVENT_NO_CHECKS,
+            self.runtime.registrar_resultado_check(False)["event"],
+        )
+        self.assertEqual((0, 0, 0), (
+            self.runtime.total, self.runtime.ok, self.runtime.ng
+        ))
+
+    def test_reativacao_restabelece_ordem_sem_zerar_contadores_sessao(self):
+        self.runtime.configurar_checks([
+            {**item, "enabled": item["name"] != "BLUE"}
+            for item in CHECKS
+        ])
+        for _ in range(3):
+            self.runtime.registrar_resultado_check(True)
+        self.assertEqual((1, 1, 0), (
+            self.runtime.total, self.runtime.ok, self.runtime.ng
+        ))
+        self.assertTrue(self.runtime.configurar_checks(CHECKS))
+        snapshot = self.runtime.snapshot()
+        self.assertEqual("H1", snapshot["current_check"]["name"])
+        self.assertEqual(4, len(snapshot["checks"]))
+        self.assertEqual((1, 1, 0), (snapshot["total"], snapshot["ok"], snapshot["ng"]))
+
     def test_inicia_aguardando_primeiro_check(self):
         snapshot = self.runtime.snapshot()
         self.assertEqual("H1", snapshot["current_check"]["name"])

@@ -336,7 +336,11 @@ def _reference_cache(app, runtime, project_name: str):
         return rows
 
     try:
-        checks = runtime.repository.listar_checks_ativos(project_name)
+        checks = [
+            check
+            for check in runtime.repository.listar_checks(project_name)
+            if isinstance(check, dict) and bool(check.get("enabled", True))
+        ]
     except Exception:
         checks = []
 
