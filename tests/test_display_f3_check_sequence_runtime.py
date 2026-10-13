@@ -202,6 +202,22 @@ class DisplayF3CheckSequenceRuntimeTests(unittest.TestCase):
         self.assertEqual((1, 1, 0), (snapshot["total"], snapshot["ok"], snapshot["ng"]))
         self.assertEqual("START", snapshot["current_check"]["name"])
 
+    def test_resumo_producao_invalida_cache_contorno_apos_toggle(self):
+        source = inspect.getsource(
+            DisplayProductionF3Mixin._atualizar_resumo_projeto_display_f3
+        )
+        self.assertIn(
+            "self._display_f3_contour_identity_reference_cache = None",
+            source,
+        )
+
+    def test_nenhum_check_ativo_tem_aviso_de_configuracao(self):
+        from src.platform import display_f3_status_layout_fix
+        source = inspect.getsource(
+            display_f3_status_layout_fix._render_check_cards_f3_fixed
+        )
+        self.assertIn("Nenhum CHECK ativo no F3", source)
+
     def test_runtime_puro_nao_importa_f2_camera_ou_tkinter(self):
         modulo = __import__(
             "src.platform.display_check_sequence_runtime",

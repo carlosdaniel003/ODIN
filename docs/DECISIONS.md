@@ -5508,5 +5508,14 @@ dos dados ao desligar/ligar; toggle de UI; exclusão de CHECK intermediário,
 primeiro, último e todos; reversão/restauração de ordem; ausência de OK/NG sem
 CHECKS ativos; contadores preservados; regressões de presença F3.
 
+**Validação automatizada:** 52 testes dedicados (repositório, sequência F3 e
+presença semântica) PASS, além de regressões D-072, D-074, D-075, tracking
+luminoso, geometria neural e D-042. O bloco histórico object tracking conserva
+7 FAIL + 1 ERROR já anteriores à D-076.
+
+O cache de referência por contorno é invalidado quando o resumo do projeto
+recebe alterações de CHECK. Se todos forem desabilitados, a UI informa
+explicitamente que não há CHECK ativo, sem confundir com perda da configuração.
+
 **Estado físico:** pendente de teste no ODIN real com um CHECK desabilitado e
 posterior reativação.

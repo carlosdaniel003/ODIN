@@ -117,7 +117,7 @@ def _render_check_cards_f3_fixed(
         if not checks:
             label = tk.Label(
                 self.check_flow_frame,
-                text="Nenhum CHECK configurado no Projeto Display.",
+                text="Nenhum CHECK ativo no F3. Ative um CHECK em CONFIGURAR.",
                 font=("DejaVu Sans", 11, "bold"),
                 bg=self.COLOR_WAITING,
                 fg="#FCA5A5",

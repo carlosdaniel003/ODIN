@@ -629,6 +629,10 @@ class DisplayProductionF3Mixin:
         )
         mascaras = projeto.get("masks", [])
         checks = projeto.get("checks", [])
+        # O catálogo de fotografias por contorno é cacheado por projeto/pose.
+        # Após ativar/desativar um CHECK, não pode reutilizar candidatos do
+        # catálogo antigo e reconhecer um CHECK agora desabilitado.
+        self._display_f3_contour_identity_reference_cache = None
         authority = getattr(self, "_display_f3_state_machine_authority", None)
         if authority is not None:
             authority.configure(checks if isinstance(checks, list) else [])
