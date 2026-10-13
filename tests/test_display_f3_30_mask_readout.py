@@ -49,7 +49,7 @@ class _Canvas:
         return 108
 
     def create_oval(self, *coords, **kwargs):
-        self.ovals.append(kwargs)
+        self.ovals.append({**kwargs, "coords": coords})
 
     def create_polygon(self, *coords, **kwargs):
         self.polygons.append(kwargs)
@@ -169,6 +169,16 @@ class DisplayF3Readout30MasksTests(unittest.TestCase):
             "display-readout-mask:MASK_029": window.DISPLAY_READOUT_OFF,
         }, indicator_states())
         self.assertTrue(any(item.get("text") == "FM" for item in window.display_readout_canvas.texts))
+        circles = {
+            tag: item
+            for item in window.display_readout_canvas.ovals
+            for tag in item.get("tags", ())
+            if tag.startswith("display-readout-mask:")
+        }
+        fm_x = sum(circles["display-readout-mask:MASK_030"]["coords"][::2]) / 2
+        decimal_x = sum(circles["display-readout-mask:MASK_029"]["coords"][::2]) / 2
+        self.assertLess(fm_x, 60)  # FM fica à esquerda do primeiro dígito
+        self.assertGreater(decimal_x, 300)  # 76.0: último intervalo à direita
         self.assertTrue(any(item.get("text") == "29" for item in window.display_readout_canvas.texts))
         self.assertTrue(any(item.get("text") == "30" for item in window.display_readout_canvas.texts))
 
