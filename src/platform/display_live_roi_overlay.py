@@ -496,7 +496,11 @@ def montar_contexto_overlay_snapshot_display_f3(
             tracking_snapshot_used = True
 
     readout_slot_mask_ids = ()
-    readout_indicator_mask_ids = {}
+    readout_indicator_mask_ids = (
+        mapear_indicadores_circulares_display(visual_masks, digit_count=4)
+        if tracking_snapshot_used
+        else {}
+    )
     if not tracking_snapshot_used:
         # D-074 / tracking OFF: o VISOR precisa usar a MESMA topologia física
         # A..G da geometria fixa exibida na câmera. A ordem numérica dos
