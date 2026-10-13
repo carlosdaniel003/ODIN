@@ -41,6 +41,7 @@ import src.platform.display_live_roi_overlay as overlay_module
 from src.platform.display_mask_geometry import (
     bbox_mascara_display,
     mapear_slots_sete_segmentos_display,
+    mapear_indicadores_circulares_display,
 )
 from src.platform.display_auto_check_analyzer import DISPLAY_AUTO_CLASS_LOW_LIGHT
 from src.platform.display_project_repository import (
@@ -203,6 +204,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         if isinstance(mask, dict) and str(mask.get("id") or "")
     )
     readout_slot_mask_ids = ()
+    readout_indicator_mask_ids = {}
     base_resolution = normalizar_resolucao_display(project.get("master_resolution"))
     if base_resolution is not None:
         try:
@@ -218,8 +220,12 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                     digit_count=4,
                 )
             )
+            readout_indicator_mask_ids = mapear_indicadores_circulares_display(
+                canonical_visual_masks, digit_count=4,
+            )
         except Exception:
             readout_slot_mask_ids = ()
+            readout_indicator_mask_ids = {}
 
     # Rastreamento ativo: contorno e ROIs já estão projetados para o frame RAW
     # atual. Rotacionamos essa geometria apenas para a orientação visual escolhida
@@ -292,6 +298,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                 "intermittent": bool(check.get("intermittent", False)),
                 "readout_mask_ids": readout_mask_ids,
                 "readout_slot_mask_ids": readout_slot_mask_ids,
+                "readout_indicator_mask_ids": dict(readout_indicator_mask_ids),
                 "tracking_active": True,
                 "tracking_locked": True,
                 "tracking_reference": str(
@@ -330,6 +337,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
             "intermittent": bool(check.get("intermittent", False)),
             "readout_mask_ids": readout_mask_ids,
             "readout_slot_mask_ids": readout_slot_mask_ids,
+            "readout_indicator_mask_ids": dict(readout_indicator_mask_ids),
             "tracking_active": True,
             "tracking_locked": False,
             "tracking_reference": "",
@@ -400,6 +408,7 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
         "intermittent": bool(check.get("intermittent", False)),
         "readout_mask_ids": readout_mask_ids,
         "readout_slot_mask_ids": readout_slot_mask_ids,
+        "readout_indicator_mask_ids": dict(readout_indicator_mask_ids),
         "tracking_active": False,
         "tracking_locked": False,
         # D-033: tracking OFF muda somente a geometria (fixa em vez de móvel).
