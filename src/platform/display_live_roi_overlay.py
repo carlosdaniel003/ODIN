@@ -7,6 +7,7 @@ import numpy as np
 
 from src.platform.display_mask_geometry import (
     mapear_slots_sete_segmentos_display,
+    mapear_indicadores_circulares_display,
 )
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
@@ -495,6 +496,7 @@ def montar_contexto_overlay_snapshot_display_f3(
             tracking_snapshot_used = True
 
     readout_slot_mask_ids = ()
+    readout_indicator_mask_ids = {}
     if not tracking_snapshot_used:
         # D-074 / tracking OFF: o VISOR precisa usar a MESMA topologia física
         # A..G da geometria fixa exibida na câmera. A ordem numérica dos
@@ -523,8 +525,12 @@ def montar_contexto_overlay_snapshot_display_f3(
                     for mask_id in mapped_slots
                     if str(mask_id)
                 )
+            readout_indicator_mask_ids = mapear_indicadores_circulares_display(
+                readout_visual_masks, digit_count=4,
+            )
         except Exception:
             readout_slot_mask_ids = ()
+            readout_indicator_mask_ids = {}
 
         active_masks = [
             deepcopy(mask)
@@ -633,6 +639,7 @@ def montar_contexto_overlay_snapshot_display_f3(
         # Somente tracking OFF recebe o mapa físico fixo nesta etapa.
         # Tracking ON permanece exatamente com o contrato anterior.
         "readout_slot_mask_ids": readout_slot_mask_ids,
+        "readout_indicator_mask_ids": readout_indicator_mask_ids,
         "tracking_active": bool(tracking_snapshot_used),
         "tracking_locked": bool(tracking_snapshot_used),
         "tracking_reference": (
