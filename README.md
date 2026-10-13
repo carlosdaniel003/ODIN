@@ -322,6 +322,16 @@ ativado e LOCK válido, o mesmo contorno canônico é projetado para a pose atua
 placa. Contornos locais de CHECK/referência continuam restritos ao treinamento e
 não substituem o contorno live.
 
+### VISOR DO DISPLAY: 28 barras ou 30 máscaras
+
+O VISOR mantém as quatro posições de sete segmentos (28 barras A..G).
+Quando o Projeto Display contém dois indicadores circulares adicionais,
+o F3 apresenta também o FM e o ponto decimal: 30 máscaras reais, cada
+uma com seu próprio MASK_ID, estado óptico e resultado por CHECK.
+O mapeamento mantém a topologia das barras pela geometria e identifica
+as duas máscaras circulares novas sem renumerar os segmentos antigos.
+Os projetos com somente 28 máscaras continuam compatíveis.
+
 ## 5.2 Aprendizado semântico do F3
 
 O F3 mantém referências ópticas e fotografias reais dos CHECKS, mas o runtime
@@ -603,8 +613,9 @@ dos CHECKS, os contornos dos painéis de câmera/visor e os status de rearme
 permanecem vermelhos; os cards mostram `SEGREGADO`.
 
 Esse vermelho representa o **resultado terminal da placa**. Durante esse latch,
-a câmera ao vivo, o contorno da placa, todas as máscaras e os 28 segmentos do
-VISOR DO DISPLAY são apresentados em vermelho. Isso é somente um override de
+a câmera ao vivo, o contorno da placa, todas as máscaras e todos os elementos
+configurados no VISOR DO DISPLAY são apresentados em vermelho (28 barras ou
+30 máscaras incluindo os indicadores FM e decimal). Isso é somente um override de
 apresentação: a classificação e a telemetria internas continuam preservando o
 ON/OFF físico real e não alteram a lógica de decisão.
 
@@ -778,7 +789,7 @@ frame RAW
   -> contorno/filtro atual
   -> localizar placa/display
   -> refinar pose dos segmentos
-  -> reprojetar as 28 máscaras
+  -> reprojetar todas as máscaras configuradas (28 ou 30)
   -> F3HybridCheckAnalyzer
        -> CNN/ONNX + aprendizado físico same-mask
        -> ON / OFF / POUCA LUZ / INCERTO
