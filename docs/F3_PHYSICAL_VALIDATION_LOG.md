@@ -7169,3 +7169,24 @@ Cenários a validar no ODIN real:
 Nenhum dado real de defeito ou teste físico foi fornecido nesta etapa; o PASS
 físico ainda depende dos próximos testes do usuário.
 
+
+## 13/10/2026 — Solicitação de expansão do VISOR F3 para 30 máscaras (D-077)
+
+**Estado:** IMPLEMENTADO EM SOFTWARE / PENDENTE DE RETESTE FÍSICO.
+
+**Cenário informado:** visor do produto mostrando 76.0 com ponto decimal
+luminoso e marcação FM à esquerda. A UI antiga apresentava somente quatro
+dígitos de sete segmentos, totalizando 28 máscaras numeradas, e os pontos
+centrais eram decorativos.
+
+**Solicitação:** as duas ROIs circulares já foram criadas em Máscaras
+na configuração F3. Integrar os dois IDs ao VISOR e permitir projetos
+com 30 máscaras sem perder a compatibilidade com os de 28.
+
+**Alteração aplicada:** mapeamento geométrico dos 28 segmentos +
+indicadores FM/decimal; estado visual compartilhado ON/OFF/NG,
+snapshot terminal e tracking ON/OFF; testes de regressão específicos.
+
+**Próximo reteste:** confirmar em bancada posicionamento, números,
+resposta ON/OFF/NG de FM/decimal, espelho câmera/visor e total 30 nos
+CHECKS configurados. Nenhum resultado físico pós-alteração foi relatado.
