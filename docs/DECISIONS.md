@@ -5519,3 +5519,48 @@ explicitamente que não há CHECK ativo, sem confundir com perda da configuraç�
 
 **Estado físico:** pendente de teste no ODIN real com um CHECK desabilitado e
 posterior reativação.
+
+
+## D-077 — VISOR F3 incorpora indicadores circulares FM e decimal (28 → 30 máscaras)
+
+**Status:** Implementado em software / PENDENTE DE RETESTE FÍSICO.
+
+### Requisito
+
+O visor do Projeto Display F3 representa quatro dígitos de sete segmentos
+(28 barras) e agora pode incluir duas máscaras físicas circulares:
+indicador FM e ponto decimal (76.0). Ambos são criados no editor
+Máscaras do projeto e possuem MASK_ID independente.
+
+### Contrato
+
+- A contagem produtiva é determinada pelas máscaras configuradas: 28 em
+  projetos antigos ou 30 quando os dois indicadores são adicionados.
+- As 28 barras A..G continuam mapeadas por geometria, não por ordem numérica
+  dos IDs (D-074); os círculos não entram nesse grupo.
+- No conjunto de 30 máscaras, os dois círculos adicionais são identificados
+  sem renumerar nada. O círculo externo ao grid é FM; o próximo ao grid é
+  o ponto decimal. Se o desenho antigo já usa ROIs circulares, os dois
+  novos indicadores possuem os maiores IDs numéricos.
+- O VISOR mostra o número do MASK_ID dos círculos, usa o mesmo estado
+  físico ON/OFF/POUCA LUZ/NG das barras e reflete tanto preview live
+  quanto snapshot terminal.
+- D-040 (SEGREGAR vermelho total), D-045 (NG confirmado somente no ID
+  divergente), D-046 (OK ainda live) e D-074 (topologia do tracking OFF)
+  continuam valendo para os 30 IDs.
+- O ponto decimal deixa de ser decorativo quando configurado como máscara;
+  os dois pontos neutros tradicionais são mantidos apenas nos projetos
+  antigos de 28 máscaras.
+- A inspeção semântica usa a quantidade real de máscaras e somente inclui
+  os novos IDs na conformidade quando seu estado esperado ON/OFF tiver
+  sido configurado em cada CHECK. IGNORAR continua sem gerar divergência.
+
+### Validação
+
+Regressão dedicada em tests/test_display_f3_30_mask_readout.py:
+geometria dos 30 IDs, 0°/180°, snapshot NG tracking OFF, estado
+ON/OFF/NG/SEGREGAR dos indicadores e compatibilidade com 28 máscaras.
+
+**Próximo reteste físico:** confirmar no F3 com 30 máscaras reais o
+posicionamento, IDs, acendimento e apagamento sincronizados, NG individual
+para FM e decimal, com tracking ligado e desligado.
