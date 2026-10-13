@@ -7190,3 +7190,42 @@ snapshot terminal e tracking ON/OFF; testes de regressão específicos.
 **Próximo reteste:** confirmar em bancada posicionamento, números,
 resposta ON/OFF/NG de FM/decimal, espelho câmera/visor e total 30 nos
 CHECKS configurados. Nenhum resultado físico pós-alteração foi relatado.
+
+
+## 13/10/2026 — FAIL físico após D-077: FM preso em 27/30 (D-078)
+
+**Cenário:** CM_500_L, CHECK FM (4/5), tracking OFF, visual 180°,
+30 máscaras. H1, BLUE e USB concluídos. O FM real e o ponto decimal
+aparecem acesos na câmera e verdes no visor.
+
+**Evidência objetiva:** energia confirmada; gate produtivo liberado;
+transição USB→FM confirmada; análise física same-mask dos CHECKS 30/30;
+CNN/híbrido apenas 27/30. Máscaras divergentes:
+- MASK_029: esperado ON, físico ON, CNN OFF P(ON)=0,512153,
+  referência física class_pool; MASK_029 acabou exposta na UI.
+- MASK_030: esperado ON, físico ON, CNN OFF P(ON)=0,517336,
+  referência class_pool.
+- MASK_012: esperado ON, físico local ON com 0,9885 e par completo;
+  CNN OFF P(ON)=0,658158; resultado final INCERTO.
+O threshold OFF vigente era P(ON)<=0,660738, aceitando falsos OFF com
+P(ON)>P(OFF). A CI já tinha 7 FAIL+1 ERROR de rastreamento no baseline.
+
+**Correção aplicada:** a CNN só confirma OFF se também P(OFF)>=P(ON).
+P(ON)>P(OFF), sem alcançar o threshold ON, vira INCERTO. Mantida a
+autoridade híbrida D-065: INCERTO só pode ser resolvido por evidência
+física local ON+OFF da mesma MASK_ID, não pelo pool global.
+
+**Limite encontrado:** os CHECKS H1/BLUE/USB/AUX configuram MASK_029
+e MASK_030 como IGNORAR; apenas FM os declara ON. Sem OFF local,
+os dois círculos continuam INCERTOS, intencionalmente fail-closed,
+até o projeto receber referências físicas OFF para cada ID.
+
+**Validação de software:** regressões de probabilidade, leitura de
+círculos ON/OFF por fotos e teste de não aprovação sem par local PASS.
+VISOR 30 e conformidade estrita PASS. **Reteste físico ainda pendente.**
+
+**Próximo reteste:** definir MASK_029 e MASK_030 como OFF em CHECKS
+onde estejam comprovadamente apagadas e verificar as fotos de referência,
+ou configurar geometria explícita delas na foto BOARD_OFF. Confirmar
+fonte `f3_check_photos_same_mask` de ambos no DEBUG e evolução
+FM 30/30→AUX. Validar que OFF real ainda acusa NG.
