@@ -815,7 +815,12 @@ class F3NeuralSegmentDetector:
                 state = DISPLAY_CHECK_STATE_ON
                 certain = True
                 confidence = p_on
-            elif p_on <= off_max:
+            elif p_on <= off_max and p_off >= p_on:
+                # Uma calibração H1 pode estabelecer off_max acima de 0.50.
+                # A CNN não pode declarar OFF com certeza quando o próprio
+                # softmax dá maior probabilidade à classe ON. Esse caso é
+                # INCERTO e somente a prova física local completa poderá
+                # resolvê-lo, sem reduzir o threshold calibrado do modelo.
                 state = DISPLAY_CHECK_STATE_OFF
                 certain = True
                 confidence = p_off
