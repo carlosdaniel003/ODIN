@@ -205,6 +205,8 @@ qualquer POUCA LUZ     ->  PLACA NG
 
 O F2 também aplica uma guarda física de emissão. Ela busca evidência de núcleo luminoso e emissão real antes de aceitar determinados casos como `ACESO`, reduzindo falsos positivos causados por reflexo ou brilho espalhado de LEDs próximos.
 
+Quando a referência `ACESO` do projeto apresenta núcleo de baixa saturação e anel colorido, a guarda física também exige coerência cromática entre núcleo e anel. Uma região intensamente iluminada por reflexo, mas que perdeu essa assinatura, é tratada como `APAGADO`, ainda que seus pixels estejam muito brilhantes. A regra é condicionada à referência para não exigir núcleo esbranquiçado de LEDs genuinamente coloridos e não altera o classificador compartilhado com o F3.
+
 ## 4.4 Análise automática do F2
 
 O modo automático monitora continuamente as ROIs e pode iniciar a inspeção sem pressionar Enter quando existe evidência luminosa estável suficiente.

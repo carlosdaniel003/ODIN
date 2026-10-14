@@ -16,6 +16,14 @@ F2_PHYSICAL_MIN_HOT_245 = 0.050
 F2_PHYSICAL_MIN_HOT_250 = 0.040
 F2_PHYSICAL_REFERENCE_HOT_RATIO = 0.35
 
+# Quando a referência ON possui núcleo quase branco e anel colorido, sua
+# assinatura também é física: brilho de reflexo sem esse núcleo não basta.
+# O gatilho depende da referência do projeto, não da cor vermelha do JIG.
+F2_CHROMATIC_MAX_REFERENCE_INNER_S = 90.0
+F2_CHROMATIC_MIN_REFERENCE_RING_CORE_GAP = 80.0
+F2_CHROMATIC_MIN_INNER_S_RISE_RATIO = 0.60
+F2_CHROMATIC_MAX_RETAINED_GAP_RATIO = 0.25
+
 
 @dataclass(frozen=True)
 class F2PhysicalEmissionEvaluation:
@@ -26,6 +34,10 @@ class F2PhysicalEmissionEvaluation:
     min_percent_on: float
     min_hot_245: float
     min_hot_250: float
+    chromatic_mismatch: bool = False
+    reference_chromatic_gap: float = 0.0
+    current_chromatic_gap: float = 0.0
+    inner_s_mean: float = 0.0
 
 
 def _positive(value) -> float:
@@ -78,7 +90,32 @@ def avaliar_emissao_fisica_f2(features, reference_on=None) -> F2PhysicalEmission
     # 2) existe área iluminada suficiente acompanhada de um núcleo quente.
     # Reflexos do suporte/encapsulamento no debug desligado não satisfazem
     # nenhuma das duas condições.
-    emitted = very_broad_light or (broad_light and hot_core)
+    luminosity_emitted = very_broad_light or (broad_light and hot_core)
+
+    # Os LEDs do projeto que produzem um núcleo claro e pouco saturado não
+    # podem ser aprovados por vermelho saturado/reflexos igualmente brilhantes.
+    # Exigimos DUAS evidências de perda do núcleo: forte aumento da saturação
+    # interna e desaparecimento do contraste de saturação núcleo/anel. LEDs
+    # verdadeiramente coloridos (referência ON sem núcleo claro) não entram
+    # nessa guarda.
+    ref_inner_s = _positive(getattr(reference_on, "inner_s_mean", 0.0))
+    ref_ring_s = _positive(getattr(reference_on, "ring_s_mean", 0.0))
+    inner_s = _positive(getattr(features, "inner_s_mean", 0.0))
+    ring_s = _positive(getattr(features, "ring_s_mean", 0.0))
+    reference_gap = ref_ring_s - ref_inner_s
+    current_gap = ring_s - inner_s
+    reference_expects_clear_core = bool(
+        reference_on is not None
+        and ref_inner_s <= F2_CHROMATIC_MAX_REFERENCE_INNER_S
+        and reference_gap >= F2_CHROMATIC_MIN_REFERENCE_RING_CORE_GAP
+    )
+    chromatic_mismatch = bool(
+        reference_expects_clear_core
+        and inner_s - ref_inner_s
+        >= reference_gap * F2_CHROMATIC_MIN_INNER_S_RISE_RATIO
+        and current_gap <= reference_gap * F2_CHROMATIC_MAX_RETAINED_GAP_RATIO
+    )
+    emitted = luminosity_emitted and not chromatic_mismatch
 
     return F2PhysicalEmissionEvaluation(
         emitted=bool(emitted),
@@ -88,6 +125,10 @@ def avaliar_emissao_fisica_f2(features, reference_on=None) -> F2PhysicalEmission
         min_percent_on=float(F2_PHYSICAL_MIN_PERCENT_ON),
         min_hot_245=float(min_hot_245),
         min_hot_250=float(min_hot_250),
+        chromatic_mismatch=chromatic_mismatch,
+        reference_chromatic_gap=float(reference_gap),
+        current_chromatic_gap=float(current_gap),
+        inner_s_mean=float(inner_s),
     )
 
 
@@ -116,11 +157,19 @@ def aplicar_guarda_emissao_fisica_f2(result, reference_on=None):
     result.score_falha_luminosidade = 0.0
 
     reasons = list(getattr(result, "motivos", ()) or ())
-    reasons.append(
-        "F2 LED: sem emissão física suficiente "
-        f"(area={evaluation.percent_on:.3f}/{evaluation.min_percent_on:.3f}, "
-        f"hot245={evaluation.percent_hot_245:.3f}/{evaluation.min_hot_245:.3f}, "
-        f"hot250={evaluation.percent_hot_250:.3f}/{evaluation.min_hot_250:.3f})"
-    )
+    if evaluation.chromatic_mismatch:
+        reasons.append(
+            "F2 LED: núcleo cromático incompatível com referência ACESO "
+            f"(S_interno={evaluation.inner_s_mean:.1f}, "
+            f"contraste_S={evaluation.current_chromatic_gap:.1f}, "
+            f"referência={evaluation.reference_chromatic_gap:.1f})"
+        )
+    else:
+        reasons.append(
+            "F2 LED: sem emissão física suficiente "
+            f"(area={evaluation.percent_on:.3f}/{evaluation.min_percent_on:.3f}, "
+            f"hot245={evaluation.percent_hot_245:.3f}/{evaluation.min_hot_245:.3f}, "
+            f"hot250={evaluation.percent_hot_250:.3f}/{evaluation.min_hot_250:.3f})"
+        )
     result.motivos = reasons
     return result
