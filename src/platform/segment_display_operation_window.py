@@ -40,6 +40,8 @@ F2_RESULT_MASK_NG_BGR = (235, 99, 37)
 F2_RESULT_MASK_NG_ALPHA = 0.28
 F2_RESULT_MASK_NORMAL_THICKNESS = 2
 F2_RESULT_MASK_NG_THICKNESS = 5
+F2_RESULT_BOARD_COLOR_BGR = (248, 189, 56)
+F2_RESULT_BOARD_SHADOW_BGR = (15, 23, 42)
 
 F2_BOARD_STATUS_UI = {
     "board_on": ("PLACA PRESENTE — LIGADA", "#86EFAC"),
@@ -181,8 +183,8 @@ def renderizar_overlay_rois_f2(frame, leds, states: dict[str, str] | None):
     return result
 
 
-def renderizar_mascaras_resultado_f2(frame, leds, failed_led_ids=()):
-    """Sobrepõe as máscaras no frame congelado, enfatizando as máscaras NG."""
+def renderizar_mascaras_resultado_f2(frame, leds, failed_led_ids=(), *, board_shape=()):
+    """Desenha as máscaras e o contorno atual no resultado, sem afetar a análise."""
     if frame is None or getattr(frame, "size", 0) == 0:
         return frame
 
@@ -271,6 +273,24 @@ def renderizar_mascaras_resultado_f2(frame, leds, failed_led_ids=()):
                 cv2.LINE_AA,
             )
 
+    # O contorno físico do projeto não é uma máscara de LED nem altera OK/NG.
+    for roi in tuple(board_shape or ()):
+        if normalizar_tipo_roi(getattr(roi, "tipo_roi", None)) != TIPO_ROI_SEGMENTO:
+            continue
+        points = np.asarray(
+            [(int(round(x)), int(round(y))) for x, y in pontos_segmento(roi)],
+            dtype=np.int32,
+        )
+        if len(points) < 3:
+            continue
+        polygon = points.reshape((-1, 1, 2))
+        cv2.polylines(
+            result, [polygon], True, F2_RESULT_BOARD_SHADOW_BGR, 6, cv2.LINE_AA,
+        )
+        cv2.polylines(
+            result, [polygon], True, F2_RESULT_BOARD_COLOR_BGR, 3, cv2.LINE_AA,
+        )
+
     return result
 
 
@@ -288,6 +308,7 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
         self._result_snapshot_visible = False
         self._result_snapshot_is_ok: bool | None = None
         self._result_snapshot_leds = ()
+        self._result_snapshot_board_shape = ()
         self._result_snapshot_failed_ids: frozenset[str] = frozenset()
         super().__init__(*args, **kwargs)
         try:
@@ -463,6 +484,7 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
             self._result_snapshot_tk = None
             self._result_snapshot_is_ok = None
             self._result_snapshot_leds = ()
+            self._result_snapshot_board_shape = ()
             self._result_snapshot_failed_ids = frozenset()
             try:
                 self.result_snapshot_canvas.delete("all")
@@ -484,6 +506,7 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
         is_ok: bool,
         failed_led_ids=(),
         leds=None,
+        board_shape=None,
     ) -> bool:
         """Congela o frame do OK/NG e associa somente dados visuais das máscaras.
 
@@ -505,6 +528,8 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
 
         if leds is not None:
             self._result_snapshot_leds = tuple(leds or ())
+        if board_shape is not None:
+            self._result_snapshot_board_shape = tuple(board_shape or ())
         self._result_snapshot_failed_ids = frozenset(
             str(item) for item in (failed_led_ids or ())
         )
@@ -576,6 +601,7 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
             frame,
             getattr(self, "_result_snapshot_leds", ()),
             getattr(self, "_result_snapshot_failed_ids", ()),
+            board_shape=getattr(self, "_result_snapshot_board_shape", ()),
         )
         if decorated is None or getattr(decorated, "size", 0) == 0:
             return False

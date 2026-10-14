@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import time
 import tkinter as tk
+from types import SimpleNamespace
 
 from src.app import (
     CAMERA_ALTURA_MINIMA,
@@ -23,6 +25,7 @@ from src.core.operation_engine import (
 from src.platform.desktop_camera_service import (
     DesktopCameraService,
 )
+import src.platform.f2_board_shape_editor as f2_board_shape_editor
 from src.platform.desktop_settings import (
     CAMERA_FPS,
     CAMERA_HEIGHT,
@@ -52,6 +55,7 @@ class DesktopODINApp(ODINApp):
         self.operacao_engine = OperationEngine()
         self.operacao_window = None
         self.operacao_leds_preview = []
+        self.operacao_board_shape_preview = []
         self._operacao_preparo_after_id = None
         self._operacao_preview_after_id = None
         self._operacao_resultado_after_id = None
@@ -234,6 +238,7 @@ class DesktopODINApp(ODINApp):
         self.operacao_processando = False
         self.operacao_engine.invalidate()
         self.operacao_leds_preview = []
+        self.operacao_board_shape_preview = []
         self.operacao_window.show()
 
         if self.camera_frame_atual is not None:
@@ -435,6 +440,29 @@ class DesktopODINApp(ODINApp):
             )
             self.leds_fixos_configurados = leds_salvos
             self.operacao_leds_preview = leds_adaptados
+            # Recarrega o contorno compartilhado ao preparar o F2 para não
+            # apresentar uma geometria anterior após edição nas configurações.
+            self.operacao_board_shape_preview = []
+            controller = getattr(self, "_f2_board_presence_refs", None)
+            if controller is None:
+                controller = SimpleNamespace(app=self)
+            try:
+                project_name = getattr(controller, "project_name", None)
+                projeto = (
+                    project_name() if callable(project_name)
+                    else self.config_repository.obter_projeto_led_ativo()
+                )
+                self.operacao_board_shape_preview = (
+                    f2_board_shape_editor.carregar_contorno_placa_leds(
+                        controller, projeto, largura_frame, altura_frame,
+                    )
+                )
+            except Exception:
+                # O contorno é somente visual: não bloquear a análise dos LEDs.
+                logging.getLogger(__name__).warning(
+                    "Falha ao carregar o contorno atual da placa F2",
+                    exc_info=True,
+                )
             self.operacao_window.update_preview(
                 frame,
                 self.operacao_leds_preview,
@@ -515,6 +543,7 @@ class DesktopODINApp(ODINApp):
                     is_ok=resultado.ok,
                     failed_led_ids=resultado.failed_led_ids,
                     leds=self.operacao_leds_preview,
+                    board_shape=getattr(self, "operacao_board_shape_preview", ()),
                 )
             except Exception:
                 # A miniatura é somente visual: nunca interromper o fluxo F2.

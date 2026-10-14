@@ -97,6 +97,30 @@ def obter_rois_rastreadas_analise_f2(app, raw_frame):
     return tuple(transformed)
 
 
+def obter_contorno_rastreado_analise_f2(app, raw_frame):
+    """Projeta o contorno salvo pela mesma pose do frame analisado."""
+    if (
+        not _tracking_ativo(app)
+        or not _frame_valido(raw_frame)
+        or not _tracking_com_lock(app)
+    ):
+        return ()
+    contorno = tuple(getattr(app, "operacao_board_shape_preview", ()) or ())
+    if not contorno:
+        return ()
+    tracker = getattr(app, "_f2_object_tracker", None)
+    inverse = inverter_matriz_rastreamento_f2(
+        getattr(tracker, "last_matrix", None)
+    )
+    if inverse is None:
+        return ()
+    height, width = raw_frame.shape[:2]
+    projected = transformar_rois_para_frame_atual_f2(
+        contorno, inverse, int(width), int(height),
+    )
+    return tuple(projected) if len(projected) == len(contorno) else ()
+
+
 def _preparar_rois_para_engine(engine, raw_frame, tracked_rois):
     if engine is None or not getattr(engine, "ready", False):
         return ()
@@ -185,6 +209,7 @@ def _executar_dispatch_com_rois_rastreadas(app, raw_frame, tracked_rois):
 
     original_frame = getattr(app, "camera_frame_atual", None)
     original_preview_rois = getattr(app, "operacao_leds_preview", None)
+    original_board_shape = getattr(app, "operacao_board_shape_preview", ())
     original_prepared = getattr(engine, "_prepared_leds", ())
     original_width = getattr(engine, "_frame_width", 0)
     original_height = getattr(engine, "_frame_height", 0)
@@ -194,6 +219,9 @@ def _executar_dispatch_com_rois_rastreadas(app, raw_frame, tracked_rois):
     app._f2_tracking_analysis_override_depth = depth + 1
     app.camera_frame_atual = raw_frame
     app.operacao_leds_preview = list(tracked_rois)
+    app.operacao_board_shape_preview = obter_contorno_rastreado_analise_f2(
+        app, raw_frame,
+    )
     engine._prepared_leds = prepared
     engine._frame_width = int(width)
     engine._frame_height = int(height)
@@ -206,6 +234,7 @@ def _executar_dispatch_com_rois_rastreadas(app, raw_frame, tracked_rois):
     finally:
         app.camera_frame_atual = original_frame
         app.operacao_leds_preview = original_preview_rois
+        app.operacao_board_shape_preview = original_board_shape
         engine._prepared_leds = original_prepared
         engine._frame_width = original_width
         engine._frame_height = original_height

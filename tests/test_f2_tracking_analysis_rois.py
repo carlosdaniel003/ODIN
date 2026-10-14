@@ -5,8 +5,10 @@ import numpy as np
 
 from src.models.led_selection import LedSelection
 from src.platform.f2_tracking_analysis_rois import (
+    obter_contorno_rastreado_analise_f2,
     obter_rois_rastreadas_analise_f2,
 )
+from src.core.roi_geometry import pontos_segmento
 
 
 class _TrackingHarness:
@@ -50,6 +52,27 @@ class F2TrackedAnalysisRoiTests(unittest.TestCase):
         self.assertEqual(120, rois[0].centro_x)
         self.assertEqual(80, rois[0].centro_y)
         self.assertEqual(10, rois[0].raio)
+
+    def test_contorno_do_resultado_usa_mesma_pose_das_mascaras(self):
+        app = _TrackingHarness(locked=True)
+        app.operacao_board_shape_preview = [
+            LedSelection(
+                id="BOARD_NEW", centro_x=80, centro_y=80, raio=2,
+                tipo_roi="segmento",
+                pontos_segmento_livre=[
+                    (-10, -10), (10, -10), (10, 10), (-10, 10),
+                ],
+            )
+        ]
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+        projected = obter_contorno_rastreado_analise_f2(app, frame)
+
+        self.assertEqual(1, len(projected))
+        self.assertEqual(90, int(round(pontos_segmento(projected[0])[0][0])))
+        self.assertEqual(70, int(round(pontos_segmento(projected[0])[0][1])))
+        app._f2_object_tracking_last_status["locked"] = False
+        self.assertEqual((), obter_contorno_rastreado_analise_f2(app, frame))
 
     def test_sem_lock_nao_reutiliza_mascara_fixa(self):
         app = _TrackingHarness(locked=False)

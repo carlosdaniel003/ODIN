@@ -1,13 +1,16 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
 from src.platform.f2_automatic_analysis import F2AutomaticAnalysisMixin
 from src.platform.desktop_profile import DesktopODINApp
+from src.models.led_selection import LedSelection
 from src.platform.segment_display_operation_window import (
     calcular_tamanho_quadro_resultado_f2,
     renderizar_mascaras_resultado_f2,
+    SegmentDisplayOperationWindow,
 )
 
 
@@ -24,6 +27,7 @@ class _FakeWindow:
         is_ok: bool,
         failed_led_ids=(),
         leds=None,
+        board_shape=None,
     ):
         self.preview_calls.append(
             {
@@ -31,6 +35,7 @@ class _FakeWindow:
                 "is_ok": bool(is_ok),
                 "failed_led_ids": tuple(failed_led_ids or ()),
                 "leds": None if leds is None else tuple(leds or ()),
+                "board_shape": None if board_shape is None else tuple(board_shape or ()),
             }
         )
         return True
@@ -151,6 +156,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         ).reshape((8, 10, 3))
         app.operacao_engine = _FakeEngine(ok=False)
         app.operacao_window = _CanonicalWindow()
+        app.operacao_board_shape_preview = (SimpleNamespace(id="BOARD_NEW"),)
         app.operacao_leds_preview = (
             SimpleNamespace(id="LED_001"),
             SimpleNamespace(id="LED_002"),
@@ -172,6 +178,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertFalse(call["is_ok"])
         self.assertEqual(("LED_002",), call["failed_led_ids"])
         self.assertEqual(app.operacao_leds_preview, call["leds"])
+        self.assertEqual(app.operacao_board_shape_preview, call["board_shape"])
         np.testing.assert_array_equal(
             app.operacao_engine.received_frames[0],
             call["frame"],
@@ -179,6 +186,95 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertEqual(1, app.operacao_total)
         self.assertEqual(0, app.operacao_ok)
         self.assertEqual(1, app.operacao_ng)
+
+    def test_contorno_redesenhado_substitui_formato_anterior_no_resultado(self):
+        frame = np.zeros((160, 160, 3), dtype=np.uint8)
+        new_board = LedSelection(
+            id="BOARD_NEW", centro_x=110, centro_y=110, raio=2,
+            tipo_roi="segmento",
+            pontos_segmento_livre=[
+                (-20, -20), (20, -20), (20, 20), (-20, 20),
+            ],
+        )
+
+        rendered = renderizar_mascaras_resultado_f2(
+            frame, (), board_shape=(new_board,),
+        )
+
+        self.assertGreater(int(rendered[90, 110].sum()), 0)
+        self.assertEqual(0, int(rendered[20, 40].sum()))
+        np.testing.assert_array_equal(frame, np.zeros_like(frame))
+
+    def test_reafirmacao_automatica_preserva_contorno_do_mesmo_resultado(self):
+        window = SegmentDisplayOperationWindow.__new__(SegmentDisplayOperationWindow)
+        window._show_result_snapshot = lambda: True
+        window.result_snapshot_result = SimpleNamespace(
+            configure=lambda **_kwargs: None,
+        )
+        frame = np.zeros((30, 40, 3), dtype=np.uint8)
+        current_board = SimpleNamespace(id="BOARD_NEW")
+
+        self.assertTrue(window.set_result_preview_frame(
+            frame, is_ok=False, leds=(), board_shape=(current_board,),
+        ))
+        self.assertTrue(window.set_result_preview_frame(
+            frame, is_ok=False, failed_led_ids=("LED_002",),
+        ))
+        self.assertEqual((current_board,), window._result_snapshot_board_shape)
+
+        window.set_result_preview_frame(frame, is_ok=True, board_shape=())
+        self.assertEqual((), window._result_snapshot_board_shape)
+
+    def test_preparo_recarrega_contorno_salvo_no_projeto_ativo(self):
+        class Repository:
+            def carregar_leds_fixos(self):
+                return [SimpleNamespace(id="LED_001")]
+
+        class Engine:
+            ready = True
+            led_count = 1
+
+            def prepare(self, **_kwargs):
+                return None
+
+        app = DesktopODINApp.__new__(DesktopODINApp)
+        app.operacao_ativa = True
+        app.camera_ativa = True
+        app.camera_desconectada = False
+        app.camera_service = object()
+        app.camera_frame_atual = np.zeros((120, 160, 3), dtype=np.uint8)
+        app.config_repository = Repository()
+        app.operacao_engine = Engine()
+        app.operacao_window = SimpleNamespace(
+            update_preview=lambda *_args: None,
+            show_waiting=lambda **_kwargs: None,
+        )
+        app._f2_board_presence_refs = SimpleNamespace(
+            app=app, project_name=lambda: "PROJETO_F2",
+        )
+        app.carregar_referencias_automaticamente_se_necessario = lambda: None
+        app.referencias_disponiveis = lambda: True
+        app.adaptar_leds_fixos_para_frame_camera = lambda leds: leds
+        app.features_referencia_acesa = {}
+        app.features_referencia_apagada = {}
+        app.operacao_total = 0
+        app.operacao_ok = 0
+        app.operacao_ng = 0
+        original = SimpleNamespace(id="BOARD_OLD")
+        latest = SimpleNamespace(id="BOARD_NEW")
+
+        with patch(
+            "src.platform.f2_board_shape_editor.carregar_contorno_placa_leds",
+            side_effect=[(original,), (latest,)],
+        ) as loader:
+            DesktopODINApp.preparar_tela_operacao(app)
+            self.assertEqual((original,), tuple(app.operacao_board_shape_preview))
+            DesktopODINApp.preparar_tela_operacao(app)
+
+        self.assertEqual((latest,), tuple(app.operacao_board_shape_preview))
+        self.assertEqual(2, loader.call_count)
+        self.assertEqual("PROJETO_F2", loader.call_args.args[1])
+        self.assertEqual((160, 120), loader.call_args.args[2:])
 
     def test_quadro_resultado_preserva_proporcao_da_camera(self):
         width, height = calcular_tamanho_quadro_resultado_f2(
