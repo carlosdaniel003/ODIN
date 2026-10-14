@@ -26,6 +26,9 @@ from src.platform.desktop_camera_service import (
     DesktopCameraService,
 )
 import src.platform.f2_board_shape_editor as f2_board_shape_editor
+from src.platform.f2_inspection_optical_diagnostic import (
+    registrar_diagnostico_optico_inspecao_f2,
+)
 from src.platform.desktop_settings import (
     CAMERA_FPS,
     CAMERA_HEIGHT,
@@ -511,6 +514,9 @@ class DesktopODINApp(ODINApp):
         try:
             frame = self.camera_frame_atual.copy()
             resultado = self.operacao_engine.analyze(frame)
+            # Apenas a inspeção oficial, nunca a sondagem automática por frame.
+            # Registra os resultados e PreparedLed efetivamente usados pelo motor.
+            registrar_diagnostico_optico_inspecao_f2(self, frame, resultado)
         except Exception as erro:
             self.operacao_processando = False
             self.operacao_window.set_preview_paused(False)

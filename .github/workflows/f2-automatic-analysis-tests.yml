@@ -33,6 +33,7 @@ jobs:
             src/core/f2_led_physical_guard.py \
             src/core/operation_engine.py \
             src/platform/f2_automatic_analysis.py \
+            src/platform/f2_inspection_optical_diagnostic.py \
             src/platform/f2_object_tracking_visual_overlay.py \
             src/platform/f2_tracking_analysis_rois.py \
             src/platform/f2_automatic_cycle_guard.py \
@@ -44,6 +45,7 @@ jobs:
             src/platform/desktop_production_app.py \
             tests/test_f2_automatic_analysis.py \
             tests/test_f2_result_frame_preview.py \
+            tests/test_f2_inspection_optical_diagnostic.py \
             tests/test_f2_object_tracking_visual_overlay.py \
             tests/test_f2_tracking_analysis_rois.py \
             tests/test_f2_automatic_cycle_guard.py \
@@ -58,6 +60,7 @@ jobs:
           python -m unittest \
             tests.test_f2_automatic_analysis \
             tests.test_f2_result_frame_preview \
+            tests.test_f2_inspection_optical_diagnostic \
             tests.test_f2_object_tracking_visual_overlay \
             tests.test_f2_tracking_analysis_rois \
             tests.test_f2_automatic_cycle_guard \
