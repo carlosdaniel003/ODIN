@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
+import sys
 import tkinter as tk
+from datetime import datetime, timezone
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -294,6 +299,113 @@ def renderizar_mascaras_resultado_f2(frame, leds, failed_led_ids=(), *, board_sh
     return result
 
 
+def registrar_diagnostico_snapshot_geometria_f2(window, frame) -> None:
+    """Coleta a origem das ROIs no resultado F2, sem alterar o pipeline.
+
+    Coleta limitada às seis primeiras publicações com tracking ativo por
+    sessão; registra somente metadados numéricos, nunca imagens.
+    """
+    app = getattr(getattr(window, "on_trigger", None), "__self__", None)
+    enabled = getattr(app, "_f2_tracking_enabled", None)
+    if not callable(enabled):
+        return
+    try:
+        if not enabled():
+            return
+    except Exception:
+        return
+
+    counter = int(getattr(window, "_f2_result_geometry_trace_count", 0) or 0)
+    if counter >= 6:
+        return
+    window._f2_result_geometry_trace_count = counter + 1
+
+    def serialize_rois(items):
+        rois = tuple(items or ())
+        return {
+            "count": len(rois),
+            "items": [
+                {
+                    "id": str(getattr(roi, "id", "")),
+                    "x": int(getattr(roi, "centro_x", 0) or 0),
+                    "y": int(getattr(roi, "centro_y", 0) or 0),
+                    "radius": int(getattr(roi, "raio", 0) or 0),
+                    "roi_type": str(getattr(roi, "tipo_roi", "")),
+                }
+                for roi in rois[:80]
+            ],
+        }
+
+    try:
+        caller = sys._getframe(1)
+        tracker = getattr(app, "_f2_object_tracker", None)
+        status = getattr(app, "_f2_object_tracking_last_status", {})
+        cached_raw = getattr(app, "_f2_tracking_analysis_raw_frame", None)
+        matrix = getattr(tracker, "last_matrix", None)
+        visual_cache = getattr(app, "_f2_tracking_visual_geometry_cache", None)
+        if not isinstance(visual_cache, dict):
+            visual_cache = {}
+
+        raw_matches = bool(
+            cached_raw is not None
+            and getattr(cached_raw, "shape", None) == getattr(frame, "shape", None)
+            and np.array_equal(cached_raw, frame)
+        )
+        record = {
+            "time_utc": datetime.now(timezone.utc).isoformat(),
+            "publication": counter + 1,
+            "publisher": f"{Path(caller.f_code.co_filename).name}:{caller.f_code.co_name}",
+            "snapshot_serial_before": int(
+                getattr(window, "_result_snapshot_serial", 0) or 0
+            ),
+            "frame_shape": list(getattr(frame, "shape", ())),
+            "camera_frame_id": getattr(app, "camera_ultimo_frame_id", None),
+            "tracked_frame_id": getattr(
+                app, "_f2_tracking_analysis_frame_id", None,
+            ),
+            "frame_matches_tracking_raw": raw_matches,
+            "tracking_status": status if isinstance(status, dict) else {},
+            "tracking_method": str(
+                getattr(tracker, "_f2_tracking_last_method", "") or ""
+            ),
+            "tracking_matrix": (
+                np.asarray(matrix).round(3).tolist() if matrix is not None else None
+            ),
+            "tracking_override_depth": int(
+                getattr(app, "_f2_tracking_analysis_override_depth", 0) or 0
+            ),
+            "window_leds": serialize_rois(
+                getattr(window, "_result_snapshot_leds", ()),
+            ),
+            "window_board": serialize_rois(
+                getattr(window, "_result_snapshot_board_shape", ()),
+            ),
+            "analysis_tracked_leds": serialize_rois(
+                getattr(app, "_f2_tracking_analysis_rois", ()),
+            ),
+            "analysis_base_leds": serialize_rois(
+                getattr(app, "_f2_tracking_analysis_base_rois", ()),
+            ),
+            "runtime_leds": serialize_rois(
+                getattr(app, "operacao_leds_preview", ()),
+            ),
+            "engine_leds": serialize_rois(
+                getattr(getattr(app, "operacao_engine", None), "_prepared_leds", ()),
+            ),
+            "live_visual_base_leds": serialize_rois(
+                visual_cache.get("leds", ()),
+            ),
+        }
+        trace_file = Path("data") / "logs" / "f2_result_geometry_trace.jsonl"
+        trace_file.parent.mkdir(parents=True, exist_ok=True)
+        with trace_file.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Falha no diagnóstico visual do snapshot F2", exc_info=True,
+        )
+
+
 class SegmentDisplayOperationWindow(BlueOperationWindow):
     """Prévia F2 capaz de desenhar simultaneamente círculos e segmentos."""
 
@@ -535,6 +647,9 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
             str(item) for item in (failed_led_ids or ())
         )
         self._result_snapshot_is_ok = bool(is_ok)
+        registrar_diagnostico_snapshot_geometria_f2(
+            self, self._result_snapshot_bgr,
+        )
         try:
             self.result_snapshot_result.configure(
                 text="OK" if is_ok else "NG",

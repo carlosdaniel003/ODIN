@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,6 +14,7 @@ from src.platform.segment_display_operation_window import (
     calcular_tamanho_quadro_resultado_f2,
     renderizar_mascaras_resultado_f2,
     SegmentDisplayOperationWindow,
+    registrar_diagnostico_snapshot_geometria_f2,
 )
 
 
@@ -295,6 +299,94 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertEqual(1, app.operacao_total)
         self.assertEqual(0, app.operacao_ok)
         self.assertEqual(1, app.operacao_ng)
+
+    def test_diagnostico_identifica_origem_das_rois_sem_mudar_snapshot(self):
+        class _TrackingApp:
+            def __init__(self):
+                self.camera_ultimo_frame_id = 73
+                self._f2_tracking_analysis_frame_id = 73
+                self._f2_object_tracking_last_status = {
+                    "locked": True, "reason": "locked",
+                }
+                self._f2_object_tracker = SimpleNamespace(
+                    last_matrix=np.asarray(
+                        [[1.0, 0, -16], [0, 1, 8]], dtype=np.float32,
+                    ),
+                    _f2_tracking_last_method="ORB",
+                )
+                self._f2_tracking_analysis_rois = (
+                    LedSelection(id="LED_1", centro_x=115, centro_y=80, raio=9),
+                )
+                self._f2_tracking_analysis_base_rois = (
+                    LedSelection(id="LED_1", centro_x=99, centro_y=88, raio=9),
+                )
+                self.operacao_leds_preview = self._f2_tracking_analysis_base_rois
+                self.operacao_engine = SimpleNamespace(_prepared_leds=())
+                self._f2_tracking_visual_geometry_cache = {}
+                self._f2_tracking_analysis_raw_frame = np.zeros(
+                    (140, 180, 3), dtype=np.uint8,
+                )
+
+            def _f2_tracking_enabled(self):
+                return True
+
+            def trigger(self):
+                return None
+
+        app = _TrackingApp()
+        window = SimpleNamespace(
+            on_trigger=app.trigger,
+            _result_snapshot_serial=1,
+            _result_snapshot_leds=app._f2_tracking_analysis_rois,
+            _result_snapshot_board_shape=(),
+        )
+        original_rois = window._result_snapshot_leds
+
+        with tempfile.TemporaryDirectory() as directory:
+            import src.platform.segment_display_operation_window as renderer
+            real_path = Path
+            def redirected_path(value):
+                if value == "data":
+                    return real_path(directory) / "data"
+                return real_path(value)
+
+            with patch.object(renderer, "Path", side_effect=redirected_path):
+                for _ in range(7):
+                    registrar_diagnostico_snapshot_geometria_f2(
+                        window, app._f2_tracking_analysis_raw_frame,
+                    )
+
+            logfile = real_path(directory) / "data/logs/f2_result_geometry_trace.jsonl"
+            rows = [
+                json.loads(line)
+                for line in logfile.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(6, len(rows))
+        self.assertEqual(1, rows[0]["window_leds"]["count"])
+        self.assertEqual(115, rows[0]["window_leds"]["items"][0]["x"])
+        self.assertEqual(99, rows[0]["analysis_base_leds"]["items"][0]["x"])
+        self.assertEqual(115, rows[0]["analysis_tracked_leds"]["items"][0]["x"])
+        self.assertEqual("ORB", rows[0]["tracking_method"])
+        self.assertTrue(rows[0]["frame_matches_tracking_raw"])
+        self.assertIs(original_rois, window._result_snapshot_leds)
+        self.assertEqual(1, window._result_snapshot_serial)
+
+    def test_diagnostico_desligado_nao_escreve_log(self):
+        app = SimpleNamespace(_f2_tracking_enabled=lambda: False)
+        window = SimpleNamespace(
+            on_trigger=lambda: None,
+            _result_snapshot_serial=0,
+        )
+        with patch.object(
+            app, "_f2_tracking_enabled", return_value=False,
+        ), patch(
+            "src.platform.segment_display_operation_window.Path",
+        ) as folder:
+            registrar_diagnostico_snapshot_geometria_f2(
+                window, np.zeros((32, 32, 3), dtype=np.uint8),
+            )
+            folder.assert_not_called()
 
     def test_contorno_redesenhado_substitui_formato_anterior_no_resultado(self):
         frame = np.zeros((160, 160, 3), dtype=np.uint8)
