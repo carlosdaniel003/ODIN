@@ -458,6 +458,7 @@ class F2AutomaticAnalysisMixin:
 
         window = getattr(self, "operacao_window", None)
         preview_setter = getattr(window, "set_result_preview_frame", None)
+        snapshot_serial_before = getattr(window, "_result_snapshot_serial", 0)
         engine = getattr(self, "operacao_engine", None)
         original_analyze = getattr(engine, "analyze", None)
         captured: dict[str, object] = {}
@@ -498,7 +499,16 @@ class F2AutomaticAnalysisMixin:
         ng_after = int(getattr(self, "operacao_ng", 0) or 0)
         inspection_completed = total_after > total_before
 
-        if inspection_completed and callable(preview_setter):
+        # O disparo base publica frame + ROIs na mesma chamada ao motor,
+        # inclusive com tracking. Não sobrescrever a geometria desse snapshot
+        # com uma segunda publicação de fallback da camada automática.
+        # O fallback permanece somente quando o fluxo base não publicou.
+        base_snapshot_published = (
+            window is not None
+            and getattr(window, "_result_snapshot_serial", 0)
+            != snapshot_serial_before
+        )
+        if inspection_completed and callable(preview_setter) and not base_snapshot_published:
             result_frame = captured.get("frame")
             if result_frame is not None and getattr(result_frame, "size", 0) > 0:
                 is_ok = None

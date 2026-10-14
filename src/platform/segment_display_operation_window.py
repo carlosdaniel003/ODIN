@@ -307,6 +307,7 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
         self._result_snapshot_resize_after_id = None
         self._result_snapshot_visible = False
         self._result_snapshot_is_ok: bool | None = None
+        self._result_snapshot_serial = 0
         self._result_snapshot_leds = ()
         self._result_snapshot_board_shape = ()
         self._result_snapshot_failed_ids: frozenset[str] = frozenset()
@@ -541,7 +542,12 @@ class SegmentDisplayOperationWindow(BlueOperationWindow):
             )
         except Exception:
             pass
-        return self._show_result_snapshot()
+        shown = self._show_result_snapshot()
+        if shown:
+            # Marca uma publicação concluída. Wrappers de F2 não devem
+            # substituir a geometria já associada a este resultado.
+            self._result_snapshot_serial += 1
+        return shown
 
     def _result_snapshot_target_size(self) -> tuple[int, int]:
         frame = getattr(self, "_result_snapshot_bgr", None)

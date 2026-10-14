@@ -19,6 +19,7 @@ class _FakeWindow:
         self.preview_calls = []
         self._failed_led_ids = frozenset()
         self._last_result_ok = None
+        self._result_snapshot_serial = 0
 
     def set_result_preview_frame(
         self,
@@ -29,6 +30,7 @@ class _FakeWindow:
         leds=None,
         board_shape=None,
     ):
+        self._result_snapshot_serial += 1
         self.preview_calls.append(
             {
                 "frame": frame.copy(),
@@ -86,6 +88,24 @@ class _F2PreviewHarness(F2AutomaticAnalysisMixin, _BaseF2Inspection):
         ).reshape((4, 6, 3))
         self.operacao_engine = _FakeEngine(ok=ok)
         self.operacao_window = _FakeWindow()
+
+
+class _BaseF2WithPrimarySnapshot(_BaseF2Inspection):
+    def disparar_inspecao_operacao(self):
+        result = super().disparar_inspecao_operacao()
+        self.operacao_window.set_result_preview_frame(
+            self.camera_frame_atual,
+            is_ok=result.ok,
+            failed_led_ids=result.failed_led_ids,
+            leds=self.operacao_leds_preview,
+            board_shape=self.operacao_board_shape_preview,
+        )
+        return result
+
+
+class _F2PrimarySnapshotHarness(F2AutomaticAnalysisMixin, _BaseF2WithPrimarySnapshot):
+    def __init__(self, *, ok: bool):
+        _F2PreviewHarness.__init__(self, ok=ok)
 
 
 class _CanonicalWindow(_FakeWindow):
@@ -208,6 +228,31 @@ class F2ResultFramePreviewTests(unittest.TestCase):
             (led_fixo,), app.operacao_window.preview_calls[0]["leds"],
         )
 
+    def test_publicacao_automatica_nao_substitui_rois_rastreadas_do_fluxo_base(self):
+        app = _F2PrimarySnapshotHarness(ok=False)
+        tracked_leds = (SimpleNamespace(id="LED_RASTREADO", centro_x=170),)
+        tracked_shape = (SimpleNamespace(id="CONTORNO_RASTREADO"),)
+        app.operacao_leds_preview = tracked_leds
+        app.operacao_board_shape_preview = tracked_shape
+
+        # Uma segunda publicação usaria estas posições fixas antigas.
+        stale_leds = (SimpleNamespace(id="LED_FIXO", centro_x=100),)
+        with patch(
+            "src.platform.f2_automatic_analysis._geometria_do_snapshot_analisado_f2",
+            return_value=(stale_leds, (SimpleNamespace(id="CONTORNO_FIXO"),)),
+        ):
+            app.disparar_inspecao_operacao()
+
+        self.assertEqual(1, app.operacao_window._result_snapshot_serial)
+        self.assertEqual(1, len(app.operacao_window.preview_calls))
+        preview = app.operacao_window.preview_calls[0]
+        self.assertEqual(tracked_leds, preview["leds"])
+        self.assertEqual(tracked_shape, preview["board_shape"])
+        self.assertEqual(("LED_002",), preview["failed_led_ids"])
+        np.testing.assert_array_equal(
+            app.operacao_engine.received_frames[0], preview["frame"],
+        )
+
     def test_fluxo_base_f2_publica_frame_e_geometria_das_mascaras(self):
         app = DesktopODINApp.__new__(DesktopODINApp)
         app.operacao_ativa = True
@@ -271,6 +316,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
 
     def test_reafirmacao_automatica_preserva_contorno_do_mesmo_resultado(self):
         window = SegmentDisplayOperationWindow.__new__(SegmentDisplayOperationWindow)
+        window._result_snapshot_serial = 0
         window._show_result_snapshot = lambda: True
         window.result_snapshot_result = SimpleNamespace(
             configure=lambda **_kwargs: None,
@@ -288,6 +334,7 @@ class F2ResultFramePreviewTests(unittest.TestCase):
 
         window.set_result_preview_frame(frame, is_ok=True, board_shape=())
         self.assertEqual((), window._result_snapshot_board_shape)
+        self.assertEqual(3, window._result_snapshot_serial)
 
     def test_preparo_recarrega_contorno_salvo_no_projeto_ativo(self):
         class Repository:
