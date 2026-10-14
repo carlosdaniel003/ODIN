@@ -16,6 +16,8 @@ Contrato:
 - referências e ROIs persistidas nunca são modificadas.
 """
 
+import numpy as np
+
 from src.core.operation_engine import OperationResult
 from src.platform.f2_automatic_presence_cycle_policy import (
     F2AutomaticPresenceCyclePolicyMixin,
@@ -119,6 +121,47 @@ def obter_contorno_rastreado_analise_f2(app, raw_frame):
         contorno, inverse, int(width), int(height),
     )
     return tuple(projected) if len(projected) == len(contorno) else ()
+
+
+def obter_mascaras_do_frame_analisado_f2(app, frame):
+    """Seleciona as mesmas ROIs já preparadas para julgar este frame F2.
+
+    Retorna None com rastreamento desligado (fluxo fixo normal), ou uma tupla
+    de ROIs rastreadas quando frame, IDs e centros coincidem com a inspeção.
+    Sem evidência de correspondência, retorna () para não desenhar máscaras
+    fixas sobre uma placa móvel. Não toca no motor nem no resultado.
+    """
+    if not _tracking_ativo(app):
+        return None
+    if not _frame_valido(frame):
+        return ()
+
+    cached_frame = getattr(app, "_f2_tracking_analysis_raw_frame", None)
+    cached_id = getattr(app, "_f2_tracking_analysis_frame_id", None)
+    live_id = getattr(app, "camera_ultimo_frame_id", None)
+    tracked_rois = tuple(getattr(app, "_f2_tracking_analysis_rois", ()) or ())
+    engine = getattr(app, "operacao_engine", None)
+    prepared_leds = tuple(getattr(engine, "_prepared_leds", ()) or ())
+
+    if (
+        not _frame_valido(cached_frame)
+        or cached_frame.shape != frame.shape
+        or (live_id is not None and cached_id != live_id)
+        or not np.array_equal(cached_frame, frame)
+        or not tracked_rois
+        or len(tracked_rois) != len(prepared_leds)
+    ):
+        return ()
+
+    for roi, prepared in zip(tracked_rois, prepared_leds):
+        if (
+            str(getattr(roi, "id", "")) != str(getattr(prepared, "id", ""))
+            or int(getattr(roi, "centro_x", -1)) != int(getattr(prepared, "centro_x", -2))
+            or int(getattr(roi, "centro_y", -1)) != int(getattr(prepared, "centro_y", -2))
+        ):
+            return ()
+
+    return tracked_rois
 
 
 def _preparar_rois_para_engine(engine, raw_frame, tracked_rois):

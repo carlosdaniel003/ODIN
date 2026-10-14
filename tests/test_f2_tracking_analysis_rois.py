@@ -7,6 +7,7 @@ from src.models.led_selection import LedSelection
 from src.platform.f2_tracking_analysis_rois import (
     obter_contorno_rastreado_analise_f2,
     obter_rois_rastreadas_analise_f2,
+    obter_mascaras_do_frame_analisado_f2,
 )
 from src.core.roi_geometry import pontos_segmento
 
@@ -73,6 +74,76 @@ class F2TrackedAnalysisRoiTests(unittest.TestCase):
         self.assertEqual(70, int(round(pontos_segmento(projected[0])[0][1])))
         app._f2_object_tracking_last_status["locked"] = False
         self.assertEqual((), obter_contorno_rastreado_analise_f2(app, frame))
+
+    def test_frame_analisado_utiliza_rois_do_motor_em_vez_das_fixas(self):
+        app = _TrackingHarness()
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        frame[15, 20] = (48, 12, 200)
+        tracked = tuple(obter_rois_rastreadas_analise_f2(app, frame))
+        app.camera_ultimo_frame_id = 37
+        app._f2_tracking_analysis_frame_id = 37
+        app._f2_tracking_analysis_raw_frame = frame.copy()
+        app._f2_tracking_analysis_rois = tracked
+        app.operacao_engine = SimpleNamespace(
+            _prepared_leds=(
+                SimpleNamespace(
+                    id=roi.id, centro_x=roi.centro_x, centro_y=roi.centro_y
+                )
+                for roi in tracked
+            )
+        )
+        app.operacao_engine._prepared_leds = tuple(
+            app.operacao_engine._prepared_leds
+        )
+
+        selected = obter_mascaras_do_frame_analisado_f2(app, frame.copy())
+
+        self.assertEqual(tracked, selected)
+        self.assertEqual(120, selected[0].centro_x)
+        self.assertEqual(100, app.operacao_leds_preview[0].centro_x)
+
+    def test_frame_analisado_rejeita_geometria_de_frame_antigo(self):
+        app = _TrackingHarness()
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        tracked = tuple(obter_rois_rastreadas_analise_f2(app, frame))
+        app.camera_ultimo_frame_id = 38
+        app._f2_tracking_analysis_frame_id = 37
+        app._f2_tracking_analysis_raw_frame = frame.copy()
+        app._f2_tracking_analysis_rois = tracked
+        app.operacao_engine = SimpleNamespace(
+            _prepared_leds=(
+                SimpleNamespace(
+                    id=roi.id, centro_x=roi.centro_x, centro_y=roi.centro_y,
+                )
+                for roi in tracked
+            )
+        )
+        app.operacao_engine._prepared_leds = tuple(
+            app.operacao_engine._prepared_leds
+        )
+        self.assertEqual((), obter_mascaras_do_frame_analisado_f2(app, frame))
+
+    def test_frame_analisado_rejeita_motor_com_coordenada_diferente(self):
+        app = _TrackingHarness()
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        tracked = tuple(obter_rois_rastreadas_analise_f2(app, frame))
+        app.camera_ultimo_frame_id = 37
+        app._f2_tracking_analysis_frame_id = 37
+        app._f2_tracking_analysis_raw_frame = frame.copy()
+        app._f2_tracking_analysis_rois = tracked
+        app.operacao_engine = SimpleNamespace(_prepared_leds=(
+            SimpleNamespace(id="LED_001", centro_x=100, centro_y=80),
+        ))
+        self.assertEqual((), obter_mascaras_do_frame_analisado_f2(app, frame))
+
+    def test_frame_analisado_desligado_preserva_mascaras_fixas(self):
+        app = _TrackingHarness()
+        app.rastreamento_automatico_f2 = False
+        self.assertIsNone(
+            obter_mascaras_do_frame_analisado_f2(
+                app, np.zeros((240, 320, 3), dtype=np.uint8),
+            )
+        )
 
     def test_sem_lock_nao_reutiliza_mascara_fixa(self):
         app = _TrackingHarness(locked=False)

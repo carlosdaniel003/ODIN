@@ -538,11 +538,25 @@ class DesktopODINApp(ODINApp):
         )
         if callable(preview_setter):
             try:
+                leds_resultado = self.operacao_leds_preview
+                tracking_enabled = getattr(self, "_f2_tracking_enabled", None)
+                if callable(tracking_enabled) and tracking_enabled():
+                    # A análise automática pode deixar operacao_leds_preview
+                    # nas posições canônicas enquanto _prepared_leds julga o
+                    # frame com ROIs móveis. O snapshot visual recebe aquelas
+                    # mesmas ROIs efetivamente preparadas, sem reprojetá-las.
+                    from src.platform.f2_tracking_analysis_rois import (
+                        obter_mascaras_do_frame_analisado_f2,
+                    )
+
+                    leds_resultado = obter_mascaras_do_frame_analisado_f2(
+                        self, frame,
+                    )
                 preview_setter(
                     frame,
                     is_ok=resultado.ok,
                     failed_led_ids=resultado.failed_led_ids,
-                    leds=self.operacao_leds_preview,
+                    leds=leds_resultado,
                     board_shape=getattr(self, "operacao_board_shape_preview", ()),
                 )
             except Exception:

@@ -300,6 +300,57 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertEqual(0, app.operacao_ok)
         self.assertEqual(1, app.operacao_ng)
 
+    def test_fluxo_real_publica_rois_do_motor_quando_tracking_ativo(self):
+        app = DesktopODINApp.__new__(DesktopODINApp)
+        app.operacao_ativa = True
+        app.operacao_processando = False
+        app._operacao_resultado_after_id = None
+        app.camera_desconectada = False
+        app.camera_frame_atual = np.arange(
+            80 * 100 * 3, dtype=np.uint8,
+        ).reshape((80, 100, 3))
+        app.operacao_engine = _FakeEngine(ok=False)
+        app.operacao_window = _CanonicalWindow()
+        app.operacao_board_shape_preview = (SimpleNamespace(id="BOARD_RASTREADA"),)
+        app.operacao_leds_preview = (
+            LedSelection(id="LED_001", centro_x=30, centro_y=50, raio=8),
+            LedSelection(id="LED_002", centro_x=60, centro_y=50, raio=8),
+        )
+        tracked = (
+            LedSelection(id="LED_001", centro_x=34, centro_y=41, raio=8),
+            LedSelection(id="LED_002", centro_x=64, centro_y=41, raio=8),
+        )
+        app._f2_tracking_enabled = lambda: True
+        app._f2_tracking_analysis_rois = tracked
+        app._f2_tracking_analysis_raw_frame = app.camera_frame_atual.copy()
+        app._f2_tracking_analysis_frame_id = 11
+        app.camera_ultimo_frame_id = 11
+        app.operacao_engine._prepared_leds = tuple(
+            SimpleNamespace(id=roi.id, centro_x=roi.centro_x, centro_y=roi.centro_y)
+            for roi in tracked
+        )
+        app.operacao_total = 0
+        app.operacao_ok = 0
+        app.operacao_ng = 0
+        app.root = _FakeRoot()
+        app._cancelar_preview_operacao = lambda: None
+        app._agendar_preview_operacao = lambda *_args, **_kwargs: None
+        app._agendar_retorno_aguardando = lambda: None
+
+        DesktopODINApp.disparar_inspecao_operacao(app)
+
+        self.assertEqual(1, len(app.operacao_window.preview_calls))
+        published = app.operacao_window.preview_calls[0]
+        self.assertEqual(tracked, published["leds"])
+        self.assertEqual(34, published["leds"][0].centro_x)
+        self.assertEqual(30, app.operacao_leds_preview[0].centro_x)
+        self.assertEqual(("LED_002",), published["failed_led_ids"])
+        self.assertEqual(1, app.operacao_ng)
+        self.assertEqual(0, app.operacao_ok)
+        np.testing.assert_array_equal(
+            app.operacao_engine.received_frames[0], published["frame"],
+        )
+
     def test_diagnostico_identifica_origem_das_rois_sem_mudar_snapshot(self):
         class _TrackingApp:
             def __init__(self):
