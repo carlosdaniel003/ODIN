@@ -144,6 +144,70 @@ class F2ResultFramePreviewTests(unittest.TestCase):
         self.assertEqual(0, app.operacao_ok)
         self.assertEqual(1, app.operacao_ng)
 
+    def test_snapshot_do_tracking_reutiliza_pose_visual_do_frame_analisado(self):
+        app = _F2PreviewHarness(ok=False)
+        app.operacao_leds_preview = (SimpleNamespace(id="LED_FIXO"),)
+        app.operacao_board_shape_preview = (SimpleNamespace(id="CONTORNO_FIXO"),)
+        app._f2_tracking_enabled = lambda: True
+        app.camera_ultimo_frame_id = 17
+        app._f2_tracking_analysis_frame_id = 17
+        app._f2_tracking_analysis_raw_frame = app.camera_frame_atual.copy()
+        leds_live = (SimpleNamespace(id="LED_RASTREADO"),)
+        contorno_live = (SimpleNamespace(id="CONTORNO_RASTREADO"),)
+
+        with patch(
+            "src.platform.f2_automatic_analysis.obter_geometria_visual_rastreada_f2",
+            return_value=(contorno_live, leds_live),
+        ) as projection:
+            app.disparar_inspecao_operacao()
+
+        self.assertEqual(1, projection.call_count)
+        call = app.operacao_window.preview_calls[0]
+        self.assertEqual(leds_live, call["leds"])
+        self.assertEqual(contorno_live, call["board_shape"])
+        self.assertEqual(("LED_002",), call["failed_led_ids"])
+        np.testing.assert_array_equal(
+            app.operacao_engine.received_frames[0], call["frame"],
+        )
+
+    def test_snapshot_nao_aplica_pose_de_frame_anterior(self):
+        app = _F2PreviewHarness(ok=True)
+        leds_fixos = (SimpleNamespace(id="LED_FIXO"),)
+        contorno_fixo = (SimpleNamespace(id="CONTORNO_FIXO"),)
+        app.operacao_leds_preview = leds_fixos
+        app.operacao_board_shape_preview = contorno_fixo
+        app._f2_tracking_enabled = lambda: True
+        app.camera_ultimo_frame_id = 18
+        app._f2_tracking_analysis_frame_id = 17
+        app._f2_tracking_analysis_raw_frame = app.camera_frame_atual.copy()
+
+        with patch(
+            "src.platform.f2_automatic_analysis.obter_geometria_visual_rastreada_f2",
+        ) as projection:
+            app.disparar_inspecao_operacao()
+
+        projection.assert_not_called()
+        call = app.operacao_window.preview_calls[0]
+        self.assertEqual(leds_fixos, call["leds"])
+        self.assertEqual(contorno_fixo, call["board_shape"])
+        self.assertTrue(call["is_ok"])
+
+    def test_snapshot_sem_tracking_preserva_geometria_configurada(self):
+        app = _F2PreviewHarness(ok=True)
+        led_fixo = SimpleNamespace(id="LED_FIXO")
+        app.operacao_leds_preview = (led_fixo,)
+        app._f2_tracking_enabled = lambda: False
+
+        with patch(
+            "src.platform.f2_automatic_analysis.obter_geometria_visual_rastreada_f2",
+        ) as projection:
+            app.disparar_inspecao_operacao()
+
+        projection.assert_not_called()
+        self.assertEqual(
+            (led_fixo,), app.operacao_window.preview_calls[0]["leds"],
+        )
+
     def test_fluxo_base_f2_publica_frame_e_geometria_das_mascaras(self):
         app = DesktopODINApp.__new__(DesktopODINApp)
         app.operacao_ativa = True

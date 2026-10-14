@@ -314,8 +314,12 @@ def _carregar_geometria_visual(app):
     return shape, leds
 
 
-def preparar_preview_rastreamento_f2(app, raw_frame):
-    """Retorna (frame_com_contorno, leds_transformados) ou None sem lock válido."""
+def obter_geometria_visual_rastreada_f2(app, raw_frame):
+    """Obtém contorno e máscaras na pose usada pela câmera F2 ao vivo.
+
+    O consumidor do frame analisado recebe a mesma geometria geométrica do
+    preview ao vivo, sem criar outra transformação nem alterar a análise.
+    """
     if raw_frame is None or getattr(raw_frame, "size", 0) == 0:
         return None
     if not bool(getattr(app, "_f2_tracking_enabled", lambda: False)()):
@@ -341,20 +345,25 @@ def preparar_preview_rastreamento_f2(app, raw_frame):
 
     height, width = raw_frame.shape[:2]
     tracked_shape = transformar_rois_para_frame_atual_f2(
-        shape,
-        reference_to_current,
-        width,
-        height,
+        shape, reference_to_current, width, height,
     )
     tracked_leds = transformar_rois_para_frame_atual_f2(
-        leds,
-        reference_to_current,
-        width,
-        height,
+        leds, reference_to_current, width, height,
     )
-    if not tracked_shape:
+    if len(tracked_shape) != len(shape) or len(tracked_leds) != len(leds):
         return None
 
+    return tuple(tracked_shape), tuple(tracked_leds)
+
+
+def preparar_preview_rastreamento_f2(app, raw_frame):
+    """Retorna (frame_com_contorno, leds_transformados) ou None sem lock válido."""
+    geometry = obter_geometria_visual_rastreada_f2(app, raw_frame)
+    if geometry is None:
+        return None
+
+    tracked_shape, tracked_leds = geometry
+    status = getattr(app, "_f2_object_tracking_last_status", {})
     decorated = desenhar_contorno_rastreado_f2(raw_frame, tracked_shape)
     app._f2_object_tracking_visual_last = {
         "locked": True,

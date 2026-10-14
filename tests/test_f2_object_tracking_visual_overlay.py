@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -13,6 +15,8 @@ from src.platform.f2_object_tracking_visual_overlay import (
     desenhar_contorno_rastreado_f2,
     desenhar_mascaras_rastreadas_neutras_f2,
     instalar_overlay_visual_rastreamento_f2,
+    obter_geometria_visual_rastreada_f2,
+    preparar_preview_rastreamento_f2,
     inverter_matriz_rastreamento_f2,
     transformar_pontos_rastreamento_f2,
     transformar_roi_para_frame_atual_f2,
@@ -78,6 +82,45 @@ class F2ObjectTrackingVisualOverlayTests(unittest.TestCase):
         self.assertEqual(4, len(tracked.pontos_segmento_livre))
         self.assertGreater(tracked.centro_x, board.centro_x)
         self.assertGreater(tracked.centro_y, board.centro_y)
+
+    def test_resultado_e_camera_usam_mesmo_contorno_e_mascaras_projetados(self):
+        board = LedSelection(
+            id="BOARD", centro_x=120, centro_y=100, raio=2,
+            tipo_roi="segmento",
+            pontos_segmento_livre=[
+                (-40, -30), (40, -30), (40, 30), (-40, 30),
+            ],
+        )
+        led = LedSelection(id="LED_001", centro_x=100, centro_y=80, raio=10)
+        app = SimpleNamespace(
+            _f2_tracking_enabled=lambda: True,
+            _f2_object_tracking_last_status={"locked": True, "reference": "board_on"},
+            _f2_object_tracker=SimpleNamespace(
+                last_matrix=np.asarray(
+                    [[1, 0, -20], [0, 1, 10]], dtype=np.float32,
+                ),
+            ),
+        )
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+        with patch(
+            "src.platform.f2_object_tracking_visual_overlay._carregar_geometria_visual",
+            return_value=((board,), (led,)),
+        ):
+            geometry = obter_geometria_visual_rastreada_f2(app, frame)
+            live_preview = preparar_preview_rastreamento_f2(app, frame)
+
+        self.assertIsNotNone(geometry)
+        self.assertIsNotNone(live_preview)
+        tracked_board, tracked_leds = geometry
+        self.assertEqual(120, tracked_leds[0].centro_x)
+        self.assertEqual(70, tracked_leds[0].centro_y)
+        self.assertEqual(tracked_leds[0].centro_x, live_preview[1][0].centro_x)
+        self.assertEqual(tracked_leds[0].centro_y, live_preview[1][0].centro_y)
+        self.assertEqual(140, tracked_board[0].centro_x)
+        self.assertEqual(90, tracked_board[0].centro_y)
+        self.assertGreater(int(np.count_nonzero(live_preview[0])), 0)
+        self.assertEqual(0, int(np.count_nonzero(frame)))
 
     def test_contorno_e_apenas_overlay_visual_em_copia(self):
         frame = np.zeros((180, 260, 3), dtype=np.uint8)

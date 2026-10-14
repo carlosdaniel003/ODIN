@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - display
+      - display-tracking-on
   workflow_dispatch:
 
 jobs:
@@ -24,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install opencv-python-headless numpy
+          python -m pip install opencv-python-headless numpy Pillow
 
       - name: Compile F2 automatic modules
         run: |
@@ -32,6 +33,8 @@ jobs:
             src/core/f2_led_physical_guard.py \
             src/core/operation_engine.py \
             src/platform/f2_automatic_analysis.py \
+            src/platform/f2_object_tracking_visual_overlay.py \
+            src/platform/f2_tracking_analysis_rois.py \
             src/platform/f2_automatic_cycle_guard.py \
             src/platform/f2_automatic_presence_cycle_policy.py \
             src/platform/f2_board_presence_references.py \
@@ -40,6 +43,9 @@ jobs:
             src/platform/segment_display_operation_window.py \
             src/platform/desktop_production_app.py \
             tests/test_f2_automatic_analysis.py \
+            tests/test_f2_result_frame_preview.py \
+            tests/test_f2_object_tracking_visual_overlay.py \
+            tests/test_f2_tracking_analysis_rois.py \
             tests/test_f2_automatic_cycle_guard.py \
             tests/test_f2_board_presence_cycle.py \
             tests/test_f2_board_presence_references.py \
@@ -51,6 +57,9 @@ jobs:
         run: |
           python -m unittest \
             tests.test_f2_automatic_analysis \
+            tests.test_f2_result_frame_preview \
+            tests.test_f2_object_tracking_visual_overlay \
+            tests.test_f2_tracking_analysis_rois \
             tests.test_f2_automatic_cycle_guard \
             tests.test_f2_board_presence_cycle \
             tests.test_f2_board_presence_references \

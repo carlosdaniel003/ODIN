@@ -1,18 +1,68 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import tkinter as tk
+
+import numpy as np
 
 from src.core.segment_low_light import (
     STATUS_ACESO,
     STATUS_APAGADO,
+)
+from src.platform.f2_object_tracking_visual_overlay import (
+    obter_geometria_visual_rastreada_f2,
 )
 
 
 F2_AUTO_SETTING_KEY = "f2_auto_analysis_enabled"
 F2_AUTO_ANALYSIS_INTERVAL_S = 0.10
 F2_AUTO_REARM_OFF_FRAMES = 2
+
+
+def _geometria_do_snapshot_analisado_f2(app, frame):
+    """Associa a pose visual do tracking ao frame exato da inspeção F2.
+
+    A câmera ao vivo usa geometria projetada, enquanto o estado de preview
+    pode conter as ROIs fixas fora do override temporário da inspeção.
+    Essa função altera apenas a apresentação, nunca a decisão OK/NG.
+    """
+    leds = tuple(getattr(app, "operacao_leds_preview", ()) or ())
+    board_shape = tuple(getattr(app, "operacao_board_shape_preview", ()) or ())
+
+    tracking_enabled = getattr(app, "_f2_tracking_enabled", None)
+    if not callable(tracking_enabled) or not tracking_enabled():
+        return leds, board_shape
+
+    raw_frame = getattr(app, "_f2_tracking_analysis_raw_frame", None)
+    tracked_frame_id = getattr(app, "_f2_tracking_analysis_frame_id", None)
+    current_frame_id = getattr(app, "camera_ultimo_frame_id", None)
+
+    # Nunca usar a pose rastreada em imagem alinhada ou outro frame.
+    if (
+        raw_frame is None
+        or getattr(raw_frame, "size", 0) == 0
+        or frame is None
+        or getattr(frame, "shape", None) != getattr(raw_frame, "shape", None)
+        or (current_frame_id is not None and tracked_frame_id != current_frame_id)
+        or not np.array_equal(frame, raw_frame)
+    ):
+        return leds, board_shape
+
+    try:
+        geometry = obter_geometria_visual_rastreada_f2(app, raw_frame)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Falha ao projetar geometria visual do snapshot F2", exc_info=True,
+        )
+        return leds, board_shape
+
+    if geometry is None:
+        return leds, board_shape
+
+    shape_live, leds_live = geometry
+    return leds_live, shape_live
 
 
 class F2AutomaticTriggerLatch:
@@ -419,6 +469,11 @@ class F2AutomaticAnalysisMixin:
             def analyze_with_result_frame(frame, *args, **kwargs):
                 try:
                     captured["frame"] = frame.copy()
+                    leds, board_shape = _geometria_do_snapshot_analisado_f2(
+                        self, frame,
+                    )
+                    captured["leds"] = leds
+                    captured["board_shape"] = board_shape
                 except Exception:
                     captured["frame"] = None
                 return original_analyze(frame, *args, **kwargs)
@@ -464,6 +519,8 @@ class F2AutomaticAnalysisMixin:
                             failed_led_ids=tuple(
                                 getattr(window, "_failed_led_ids", ()) or ()
                             ),
+                            leds=captured.get("leds", ()),
+                            board_shape=captured.get("board_shape", ()),
                         )
                     except Exception:
                         # A miniatura é apenas apresentação e nunca pode afetar
