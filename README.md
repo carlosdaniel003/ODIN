@@ -894,6 +894,8 @@ Antes de iniciar a câmera ou uma produção sem câmera ativa, o ODIN pode abri
 
 No Windows, a descoberta utiliza caminhos compatíveis com **Media Foundation**, **DirectShow** e backend automático. No Linux, o sistema trabalha com a pilha V4L2 e os backends disponíveis no ambiente.
 
+No Windows, após detectar a primeira câmera utilizável, o worker de descoberta oferece uma curta oportunidade de seleção antes de iniciar a busca potencialmente bloqueante por outros índices. Ao confirmar, o serviço aguarda obrigatoriamente o `release()` do seletor; com backend de prévia comprovado usa um intervalo de assentamento menor, enquanto backends desconhecidos mantêm a espera conservadora anterior. Para resolução mestre alta, o backend da prévia só assume prioridade se tiver entregue exatamente a resolução exigida; as demais tentativas permanecem disponíveis como fallback. O Linux mantém seu fluxo anterior.
+
 ## 7.2 Linux: V4L2 e GStreamer
 
 O backend Linux possui descoberta por `/dev/v4l/by-id` e `/dev/videoN` e pode construir candidatos com:

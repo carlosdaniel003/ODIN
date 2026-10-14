@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -23,6 +24,9 @@ SELECTOR_WINDOW_WIDTH = 920
 SELECTOR_WINDOW_HEIGHT = 520
 SELECTOR_LOADING_MS = 320
 SELECTOR_RELEASE_WAIT_MAX_MS = 2200
+# No Windows, dê tempo para selecionar a primeira câmera já comprovada antes
+# de iniciar um VideoCapture potencialmente bloqueante em outro índice.
+CAMERA_SELECTOR_WINDOWS_FIRST_CHOICE_GRACE_S = 1.2
 
 
 def _codificar_preview(frame) -> str | None:
@@ -84,7 +88,18 @@ def executar_busca_camera_em_background(
             if dados is not None:
                 with previews_lock:
                     previews[int(indice)] = dados
-            eventos.put(("encontrada", int(indice), str(backend or "")))
+            eventos.put((
+                "encontrada",
+                int(indice),
+                str(backend or ""),
+                (int(primeiro_frame.shape[1]), int(primeiro_frame.shape[0])),
+            ))
+            if (
+                sys.platform.startswith("win")
+                and len(captures) == 1
+                and stop_event.wait(CAMERA_SELECTOR_WINDOWS_FIRST_CHOICE_GRACE_S)
+            ):
+                break
 
         eventos.put(("concluida", len(captures)))
 
@@ -254,6 +269,7 @@ class ResponsiveCameraSelectionMixin:
         self._camera_selector_cards = {}
         self._camera_selector_captures = {}
         self._selector_latest_previews = {}
+        self._selector_preview_resolutions = {}
         self._selector_event_queue = queue.Queue()
         self._selector_stop_event = threading.Event()
         self._selector_released_event = threading.Event()
@@ -341,6 +357,8 @@ class ResponsiveCameraSelectionMixin:
                 elif tipo == "encontrada":
                     indice = int(evento[1])
                     backend = str(evento[2] or "")
+                    if len(evento) >= 4:
+                        self._selector_preview_resolutions[indice] = tuple(evento[3])
                     if indice not in self._camera_selector_cards:
                         self._remover_loading_camera()
                         self._criar_card_camera_responsivo(
@@ -563,6 +581,7 @@ class ResponsiveCameraSelectionMixin:
 
         self._camera_selector_cards = {}
         self._camera_selector_captures = {}
+        self._selector_preview_resolutions = {}
         self._selector_status_label = None
         self._selector_loading_frame = None
         self._selector_loading_label = None

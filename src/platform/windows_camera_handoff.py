@@ -13,6 +13,9 @@ _PATCH_INSTALADO = False
 # O worker já confirmou release(), mas alguns drivers UVC/MSMF ainda mantêm a
 # sessão USB por alguns centenas de milissegundos. O atraso é exclusivo Windows.
 WINDOWS_POST_RELEASE_SETTLE_MS = 1800
+# O backend comprovado e release() concluído permitem uma espera mais curta;
+# seleção sem backend confirmado permanece no prazo conservador original.
+WINDOWS_CONFIRMED_PREVIEW_SETTLE_MS = 850
 WINDOWS_RELEASE_STATUS_AFTER_MS = 2500
 WINDOWS_RELEASE_POLL_MS = 50
 WINDOWS_HIGH_RES_MIN_WIDTH = 1280
@@ -57,6 +60,7 @@ def ordenar_backends_servico_windows(
     backends,
     backend_preview: str | None,
     resolucao_solicitada=None,
+    resolucao_preview=None,
     perfil_automatico: bool = False,
     plataforma: str | None = None,
 ):
@@ -91,6 +95,19 @@ def ordenar_backends_servico_windows(
         largura < WINDOWS_HIGH_RES_MIN_WIDTH
         or altura < WINDOWS_HIGH_RES_MIN_HEIGHT
     ):
+        return preferidos
+
+    # A prévia é evidência suficiente para priorizar seu backend APENAS se
+    # entregou exatamente a resolução exigida. Caso contrário a ordenação
+    # conservadora DirectShow -> automático permanece como antes.
+    try:
+        preview_comprova_resolucao = (
+            (int(resolucao_preview[0]), int(resolucao_preview[1]))
+            == (largura, altura)
+        )
+    except (TypeError, ValueError, IndexError):
+        preview_comprova_resolucao = False
+    if preview_comprova_resolucao:
         return preferidos
 
     directshow = next(
@@ -139,6 +156,13 @@ def pode_iniciar_camera_apos_preview(
     return int(espera_ms) >= int(limite_ms)
 
 
+def espera_assentamento_preview_windows(backend_preview: str | None) -> int:
+    """Aguarda release() comprovado; backend não comprovado usa margem histórica."""
+    if _normalizar_backend(backend_preview) in ("directshow", "media foundation"):
+        return WINDOWS_CONFIRMED_PREVIEW_SETTLE_MS
+    return WINDOWS_POST_RELEASE_SETTLE_MS
+
+
 def _registrar_backend_preview_windows(self, indice: int, backend: str | None) -> None:
     if not sys.platform.startswith("win"):
         return
@@ -149,11 +173,14 @@ def _registrar_backend_preview_windows(self, indice: int, backend: str | None) -
     mapa[int(indice)] = str(backend or "")
 
 
-def _instalar_preferencia_backend_na_classe(classe, backend: str | None) -> None:
+def _instalar_preferencia_backend_na_classe(
+    classe, backend: str | None, resolucao_preview=None,
+) -> None:
     if not sys.platform.startswith("win") or not backend:
         return
 
     classe._odin_windows_backend_preferido = str(backend)
+    classe._odin_windows_resolucao_preview = resolucao_preview
     if getattr(classe, "_odin_windows_backend_handoff_instalado", False):
         return
 
@@ -172,6 +199,11 @@ def _instalar_preferencia_backend_na_classe(classe, backend: str | None) -> None
             resolucao_solicitada=getattr(
                 self,
                 "_resolucao_solicitada",
+                None,
+            ),
+            resolucao_preview=getattr(
+                type(self),
+                "_odin_windows_resolucao_preview",
                 None,
             ),
             perfil_automatico=bool(
@@ -221,6 +253,9 @@ def instalar_handoff_camera_windows() -> None:
         self.backend_camera_selecionado = (
             str(mapa.get(indice) or "") if isinstance(mapa, dict) else ""
         )
+        self.resolucao_preview_camera_selecionada = (
+            getattr(self, "_selector_preview_resolutions", {}) or {}
+        ).get(indice)
 
         released_event = getattr(self, "_selector_released_event", None)
         self._fechar_seletor_camera()
@@ -251,7 +286,9 @@ def instalar_handoff_camera_windows() -> None:
                     pass
                 # O settle ocorre somente no Windows, após release() confirmado.
                 self.root.after(
-                    WINDOWS_POST_RELEASE_SETTLE_MS,
+                    espera_assentamento_preview_windows(
+                        self.backend_camera_selecionado,
+                    ),
                     lambda: callback(indice),
                 )
                 return
@@ -279,7 +316,11 @@ def instalar_handoff_camera_windows() -> None:
         backend = getattr(self, "backend_camera_selecionado", None)
         classe = getattr(self, "CAMERA_SERVICE_CLASS", None)
         if classe is not None:
-            _instalar_preferencia_backend_na_classe(classe, backend)
+            _instalar_preferencia_backend_na_classe(
+                classe,
+                backend,
+                getattr(self, "resolucao_preview_camera_selecionada", None),
+            )
         return resultado
 
     confirmar_camera_com_handoff_seguro._odin_windows_handoff = True

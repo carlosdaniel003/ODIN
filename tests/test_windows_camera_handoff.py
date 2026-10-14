@@ -5,6 +5,8 @@ from unittest.mock import patch
 from src.platform.desktop_production_app import DesktopProductionApp
 from src.platform.windows_camera_handoff import (
     WINDOWS_POST_RELEASE_SETTLE_MS,
+    WINDOWS_CONFIRMED_PREVIEW_SETTLE_MS,
+    espera_assentamento_preview_windows,
     _instalar_preferencia_backend_na_classe,
     ordenar_backends_servico_windows,
     pode_iniciar_camera_apos_preview,
@@ -61,6 +63,29 @@ class WindowsCameraHandoffTests(unittest.TestCase):
     def test_windows_aguarda_assentamento_do_driver_apos_release(self):
         self.assertGreaterEqual(WINDOWS_POST_RELEASE_SETTLE_MS, 1200)
 
+    def test_backend_confirmado_encurta_assentamento_sem_abrir_handle_ocupado(self):
+        self.assertGreaterEqual(WINDOWS_CONFIRMED_PREVIEW_SETTLE_MS, 500)
+        self.assertLess(
+            WINDOWS_CONFIRMED_PREVIEW_SETTLE_MS,
+            WINDOWS_POST_RELEASE_SETTLE_MS,
+        )
+        self.assertEqual(
+            WINDOWS_CONFIRMED_PREVIEW_SETTLE_MS,
+            espera_assentamento_preview_windows("Media Foundation"),
+        )
+        self.assertEqual(
+            WINDOWS_CONFIRMED_PREVIEW_SETTLE_MS,
+            espera_assentamento_preview_windows("DirectShow"),
+        )
+        self.assertEqual(
+            WINDOWS_POST_RELEASE_SETTLE_MS,
+            espera_assentamento_preview_windows(None),
+        )
+        self.assertEqual(
+            WINDOWS_POST_RELEASE_SETTLE_MS,
+            espera_assentamento_preview_windows("Automático"),
+        )
+
     def test_linux_preserva_limite_legado_do_handoff(self):
         self.assertFalse(
             pode_iniciar_camera_apos_preview(
@@ -101,6 +126,28 @@ class WindowsCameraHandoffTests(unittest.TestCase):
         self.assertEqual("Automático", ordenados[1][1])
         self.assertEqual("Media Foundation", ordenados[2][1])
         self.assertEqual(set(BACKENDS), set(ordenados))
+
+    def test_backend_preview_comprova_1080p_e_evitas_fallbacks_antes_dele(self):
+        ordenados = ordenar_backends_servico_windows(
+            BACKENDS,
+            "Media Foundation",
+            resolucao_solicitada=(1920, 1080),
+            resolucao_preview=(1920, 1080),
+            perfil_automatico=False,
+            plataforma="win32",
+        )
+        self.assertEqual("Media Foundation", ordenados[0][1])
+        self.assertEqual(set(BACKENDS), set(ordenados))
+
+    def test_preview_720p_nao_prova_suporte_a_1080p(self):
+        ordenados = ordenar_backends_servico_windows(
+            BACKENDS,
+            "Media Foundation",
+            resolucao_solicitada=(1920, 1080),
+            resolucao_preview=(1280, 720),
+            plataforma="win32",
+        )
+        self.assertEqual("DirectShow", ordenados[0][1])
 
     def test_baixa_resolucao_continua_respeitando_backend_do_preview(self):
         ordenados = ordenar_backends_servico_windows(
@@ -156,6 +203,18 @@ class WindowsCameraHandoffTests(unittest.TestCase):
             self.assertEqual(
                 "DirectShow",
                 CameraWindows()._backends_preferidos()[0][1],
+            )
+
+        class CameraWindowsFullHD(_FakeCameraService):
+            _odin_windows_backend_handoff_instalado = False
+
+        with patch("src.platform.windows_camera_handoff.sys.platform", "win32"):
+            _instalar_preferencia_backend_na_classe(
+                CameraWindowsFullHD, "Media Foundation", (1920, 1080),
+            )
+            self.assertEqual(
+                "Media Foundation",
+                CameraWindowsFullHD()._backends_preferidos()[0][1],
             )
 
         class CameraLinux(_FakeCameraService):

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - display
+      - display-tracking-on
   workflow_dispatch:
 
 jobs:
