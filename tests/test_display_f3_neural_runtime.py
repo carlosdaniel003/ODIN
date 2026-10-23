@@ -1078,10 +1078,10 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                 return_value=_ready_model_status()
             )
             analyzer.neural_detector.predict = Mock(
-                return_value=_inference(["off", "on"])
+                return_value=_inference(["off", "off"])
             )
-            physical = _physical_analysis(["on", "on"])
-            physical["mask_results"][0]["core_emission_evidence"] = {
+            physical = _physical_analysis(["off", "on"])
+            physical["mask_results"][1]["core_emission_evidence"] = {
                 "state": "off",
                 "off_reference_ceiling": 18.0,
                 "on_reference_floor": 190.0,
@@ -1099,9 +1099,9 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                     mask_geometry_resolution=(160, 96),
                 )
             self.assertFalse(result["approved"])
-            self.assertTrue(result["mask_results"][0]["semantic_certain"])
-            self.assertEqual("off", result["mask_results"][0]["classified"])
-            self.assertFalse(result["mask_results"][0]["matched"])
+            self.assertTrue(result["mask_results"][1]["semantic_certain"])
+            self.assertEqual("off", result["mask_results"][1]["classified"])
+            self.assertFalse(result["mask_results"][1]["matched"])
 
     def test_tracking_core_emission_does_not_approve_when_neural_disagrees(self):
         with tempfile.TemporaryDirectory() as temp:
