@@ -43,6 +43,7 @@ jobs:
             src/platform/display_visual_rotation.py \
             src/platform/display_project_repository.py \
             src/platform/display_project_config.py \
+            src/platform/display_f3_zoom.py \
             src/platform/display_mask_editor.py \
             src/platform/display_mask_geometry.py \
             src/platform/display_mask_editor_interactions.py \
@@ -106,7 +107,12 @@ jobs:
             tests/test_display_f3_h1_registration.py \
             tests/test_display_f3_status_layout_fix.py \
             tests/test_display_f3_tracking_ui_contract.py \
-            tests/test_display_f3_geometry_adjustments.py
+            tests/test_display_f3_geometry_adjustments.py \
+            tests/test_display_f3_zoom.py
+
+      - name: Run F3 live zoom map and crop regressions
+        run: |
+          python -m unittest tests.test_display_f3_zoom -v
 
       - name: Run D-076 CHECK enable toggle and sequence regressions
         run: |
