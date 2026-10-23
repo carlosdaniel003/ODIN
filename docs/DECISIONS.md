@@ -5663,3 +5663,61 @@ H1 correto e com um segmento defeituoso, BLUE intermitente, passagem FM/AUX e
 rearme após EMPTY. Uma placa que se mova dentro do mesmo ciclo invalida a premissa
 de reutilização e exige nova detecção de movimento antes de promover essa
 estratégia a modo de produção definitivo.
+
+## D-080 — Mapa e recorte do zoom F3 devem representar o mesmo frame ao vivo
+
+**Status:** Accepted no código / PENDENTE DE RETESTE FÍSICO.
+
+### Contexto
+
+O operador observou o MAPA DA CÂMERA com fotografia diferente da mostrada
+em RECORTE ATUAL DO F3 (por exemplo, mapa escuro e FM aceso no recorte).
+Arrastar o quadro azul e alterar zoom nem sempre modificava o que era
+efetivamente exibido na câmera da produção.
+
+A D-049 havia introduzido um snapshot 1x capturado antes da aplicação de zoom
+físico para simular um mapa completo. Esse snapshot não representa a imagem
+atual quando a câmera UVC já está fisicamente ampliada, nem permite mostrar
+mudanças de cena ou pan/tilt posteriores no mapa. Além disso, o recorte final
+operacional recebia um frame já ampliado pelo driver e aplicava o Zoom ODIN,
+enquanto o retângulo do mapa combinava ambos os zooms em outra imagem.
+
+### Decisão
+
+1. O MAPA DA CÂMERA e o RECORTE ATUAL DO F3 recebem o mesmo snapshot
+   corrente do frame RAW publicado pela câmera. O segundo painel aplica
+   exclusivamente o crop do Zoom ODIN sobre esse snapshot.
+2. O quadro azul usa calcular_recorte_zoom_software_display_f3, idêntico
+   ao recorte usado em produção; representa somente a região do Zoom ODIN
+   sobre o frame que a câmera entrega **depois** do zoom físico.
+3. A câmera física ampliada não oferece simultaneamente uma imagem completa
+   1x no mesmo stream. Com Zoom ODIN em 1x, o quadro azul abrange todo o mapa:
+   o enquadramento físico é ajustado pelo PAN/TILT UVC ao arrastar a imagem,
+   e o mapa reflete o efeito real que o driver retornar.
+4. Quando Zoom ODIN é maior que 1x, arrastar o quadro azul altera somente
+   software_zoom_center. O PAN/TILT físico não é alterado por esse gesto,
+   evitando perder a região atual ou zerar o centro do software.
+5. O mapa e o recorte continuam a aplicar a mesma rotação **visual** do
+   desenvolvimento, conforme D-050. Geometria e persistência são mantidas
+   na orientação canônica.
+6. O F3RuntimeCoordinator continua como único scheduler do preview; não
+   existe segunda captura, loop, thread, worker ou autoridade de câmera.
+7. Sem modificação de rastreamento, máscaras, análise OK/NG, energia,
+   presença, freeze terminal nem modo F2.
+
+### Relação com decisões anteriores
+
+Esta decisão **substitui os itens 1, 2, 3 e 9 da D-049** na parte que prevê
+mapa completo 1x estático, snapshot histórico e quadro de zoom combinado.
+O enquadramento final permanece representado fielmente, agora no campo atual
+do hardware. O restante da D-049 (persistência por projeto, controle
+UVC PAN/TILT, restauração após F3 e um único scheduler) permanece válido.
+A D-050 continua vigente para rotação visual; sua referência ao snapshot
+1x da D-049 passa a ser substituída por esta decisão.
+
+### Validação
+
+Testes automatizados cobrem mapa/recorte do mesmo snapshot, contrato entre
+frame RAW e visão derivada do F3, e arraste independente do zoom físico e do
+Zoom ODIN. Reteste físico com câmera real continua necessário, sobretudo para
+confirmar que o backend específico responde aos comandos PAN/TILT.
