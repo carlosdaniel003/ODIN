@@ -7779,6 +7779,44 @@ def _reuse_h1_cycle_geometry(app, runtime, frame, project_name: str):
     return result
 
 
+
+def _h1_cycle_geometry_usable_for_current_check(app, status) -> bool:
+    """Gate geométrico, sem criar prova de presença/energia da placa."""
+    if (
+        not isinstance(status, dict)
+        or not bool(status.get("locked"))
+        or str(status.get("source_type") or "") != "h1_cycle_luminous_geometry"
+        or bool(status.get("evidence_current"))
+        or not tracking_enabled(app)
+    ):
+        return False
+    geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    runtime = get_tracking_runtime(app)
+    anchor = getattr(runtime, "_cycle_h1_pose", None)
+    if (
+        not isinstance(geometry, dict)
+        or not isinstance(anchor, dict)
+        or not bool(geometry.get("locked"))
+        or str(geometry.get("source_type") or "") != "h1_cycle_luminous_geometry"
+        or geometry.get("spatial_alignment_ready") is not True
+        or bool(getattr(app, "_display_f3_waiting_empty_rearm", False))
+        or bool(getattr(app, "_display_f3_waiting_new_board_after_empty", False))
+    ):
+        return False
+    sequence = getattr(app, "display_check_runtime", None)
+    try:
+        snapshot = sequence.snapshot()
+    except (AttributeError, TypeError):
+        return False
+    current = snapshot.get("current_check") or {}
+    return bool(
+        snapshot.get("current_index") is not None
+        and snapshot["current_index"] > 0
+        and str(current.get("id") or "") == str(geometry.get("check_id") or "")
+        and anchor.get("h1_check_id") in (snapshot.get("completed_ids") or ())
+    )
+
+
 def align_frame_for_f3(app, frame, *, frame_token=None):
     if not tracking_enabled(app):
         return frame, None
@@ -8103,23 +8141,16 @@ def _update_tracking_live_geometry(
             "h1_cycle_luminous_geometry",
         }
     )
-    spatial_alignment_source = (
-        "h1_cycle_luminous_geometry"
-        if source_type == "h1_cycle_luminous_geometry"
-        else (
-            "luminous_segment_grid"
-            if spatial_alignment_ready and alignment_required
-            else (
-            "projective_filter_structural"
-            if alignment_required and projective_geometry
-            else (
-                "structural_only"
-                if alignment_required
-                else "not_required"
-            )
-        )
-    )
-    )
+    if source_type == "h1_cycle_luminous_geometry":
+        spatial_alignment_source = "h1_cycle_luminous_geometry"
+    elif not alignment_required:
+        spatial_alignment_source = "not_required"
+    elif source_type == "luminous_segment_grid":
+        spatial_alignment_source = "luminous_segment_grid"
+    elif projective_geometry:
+        spatial_alignment_source = "projective_filter_structural"
+    else:
+        spatial_alignment_source = "structural_only"
 
     # D-070: LK/cached transform pode manter a visualização somente depois que
     # o alinhamento fino foi provado. Enquanto ainda estamos ALINHANDO, o próximo
@@ -10051,6 +10082,9 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         "VERDE = LUZ IDENTIFICADA"
                     )
                     color = "#E2E8F0"
+                elif str(status.get("source_type") or "") == "h1_cycle_luminous_geometry":
+                    legend = "GEOMETRIA H1 • mantida para a mesma placa • sem nova prova óptica"
+                    color = "#E2E8F0"
                 else:
                     legend = (
                         "LOCK MANTIDO • confirmando novamente a placa • "
@@ -10213,6 +10247,9 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
                     isinstance(status, dict)
                     and bool(status.get("locked"))
                     and not bool(status.get("evidence_current", False))
+                    and not _h1_cycle_geometry_usable_for_current_check(
+                        self, status
+                    )
                 ):
                     try:
                         self._display_auto_set_preview_status(

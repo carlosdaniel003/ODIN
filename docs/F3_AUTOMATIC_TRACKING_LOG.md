@@ -2691,3 +2691,7 @@ essas opções requerem dataset de banco físico e validação separada.
 
 **Próximo teste:** verificar se o H1 alinha com cada nova PCI, permanece alinhado
 até AUX mesmo nas fases sem luz e invalida corretamente após remoção e EMPTY.
+
+**Integração no auto-check:** o gate de stale lock reconhece somente a origem
+`h1_cycle_luminous_geometry` com H1 efetivamente concluído, mesmo CHECK e
+alinhamento espacial pronto. LOCK temporal comum permanece bloqueado.

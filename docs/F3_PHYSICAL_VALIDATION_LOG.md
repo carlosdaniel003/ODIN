@@ -7249,3 +7249,7 @@ Sem mudança em CNN semântica, híbrido, NG, temporizações e F2. Sem reteste
 físico neste commit. Reteste esperado: inserir duas ou mais placas com pequenos
 deslocamentos distintos, H1 com pose revalidada em cada placa, conferência do
 alinhamento no BLUE/USB/FM/AUX, NG verdadeiro e remoção/EMPTY entre placas.
+
+**Revisão de integração:** o gate existente que rejeita lock sem prova atual
+passou a permitir exclusivamente a geometria intraplaca H1 quando CHECK atual,
+H1 concluído e geometria ativa coincidem. Não dispensa gate físico de energia.

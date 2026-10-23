@@ -137,6 +137,63 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             )
             self.assertIsNone(runtime._cycle_h1_pose)
 
+
+    def test_h1_cycle_gate_only_accepts_verified_anchor_of_same_completed_check(self):
+        snapshot = {
+            "current_index": 1,
+            "current_check": {"id": "CHECK_002", "name": "BLUE"},
+            "completed_ids": ("CHECK_001",),
+        }
+        geometry = {
+            "locked": True,
+            "source_type": "h1_cycle_luminous_geometry",
+            "spatial_alignment_ready": True,
+            "check_id": "CHECK_002",
+        }
+        runtime = SimpleNamespace(_cycle_h1_pose={"h1_check_id": "CHECK_001"})
+        app = SimpleNamespace(
+            _display_f3_tracking_live_geometry=geometry,
+            display_check_runtime=SimpleNamespace(snapshot=lambda: snapshot),
+            _display_f3_waiting_empty_rearm=False,
+            _display_f3_waiting_new_board_after_empty=False,
+        )
+        status = {
+            "locked": True,
+            "source_type": "h1_cycle_luminous_geometry",
+            "evidence_current": False,
+        }
+        with (
+            patch.object(tracking, "tracking_enabled", return_value=True),
+            patch.object(tracking, "get_tracking_runtime", return_value=runtime),
+        ):
+            self.assertTrue(
+                tracking._h1_cycle_geometry_usable_for_current_check(app, status)
+            )
+            self.assertFalse(
+                tracking._h1_cycle_geometry_usable_for_current_check(
+                    app, {**status, "source_type": "temporal_flow"}
+                )
+            )
+            geometry["spatial_alignment_ready"] = False
+            self.assertFalse(
+                tracking._h1_cycle_geometry_usable_for_current_check(app, status)
+            )
+            geometry["spatial_alignment_ready"] = True
+            geometry["check_id"] = "CHECK_003"
+            self.assertFalse(
+                tracking._h1_cycle_geometry_usable_for_current_check(app, status)
+            )
+            geometry["check_id"] = "CHECK_002"
+            snapshot["completed_ids"] = ()
+            self.assertFalse(
+                tracking._h1_cycle_geometry_usable_for_current_check(app, status)
+            )
+            snapshot["completed_ids"] = ("CHECK_001",)
+            app._display_f3_waiting_empty_rearm = True
+            self.assertFalse(
+                tracking._h1_cycle_geometry_usable_for_current_check(app, status)
+            )
+
     def test_setting_uses_dedicated_f3_sidecar(self):
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)

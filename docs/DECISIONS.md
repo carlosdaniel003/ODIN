@@ -5648,7 +5648,9 @@ conforme condição operacional informada pelo usuário.
 A origem `h1_cycle_luminous_geometry` indica POSE REUTILIZADA, não evidência
 óptica nova: `evidence_current=False`, sem renovação de `last_verified_s`.
 Presença, energia, controle temporal, análise híbrida, debounce e decisão OK/NG
-continuam em suas autoridades atuais. O H1 só é guardado por geometria
+continuam em suas autoridades atuais. O gate de análise automático só reconhece
+essa fonte como geometria válida quando a pose/ID do CHECK coincidem com o ciclo
+H1 concluído; não promove evidence_current nem prova presença/energia. O H1 só é guardado por geometria
 `luminous_segment_grid` atual e com landmarks distintos mínimos; lock estrutural
 ou prior neural isolado não podem guardar a pose. O início do novo ciclo,
 reset de configuração, alternância do tracking e troca de projeto invalidam a
