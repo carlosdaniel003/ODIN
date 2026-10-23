@@ -2672,3 +2672,22 @@ Não repetir:
 - não validar affine e depois publicar homografia sem validar seus cantos;
 - não compensar geometria ruim alterando Hybrid, energia ou thresholds ON/OFF;
 - não alterar o caminho com Rastreamento Automático DESLIGADO.
+
+## 23/10/2026 — D-079: manter pose H1 validada até saída da placa
+
+**Estado:** CÓDIGO ALTERADO / RETESTE FÍSICO PENDENTE.
+
+O H1 com `luminous_segment_grid` e >=3 IDs distintos validados registra
+pose CURRENT→CANÔNICO por placa. Com tracking ON, BLUE/USB/FM/AUX podem
+reutilizar somente essa transformação após conclusão do H1, sem exigir
+segmentos luminosos para recalibrar em cada CHECK. A origem própria
+`h1_cycle_luminous_geometry` não é nova prova óptica; mantém
+`evidence_current=False`. Reset de pose por rearme ou configuração descarta a
+âncora. Presença, energia e julgamento continuam isolados da pose reutilizada.
+
+A rede neural de pose existente continua como prior na aquisição H1. Não foi
+adicionado modelo de classificação de imagem completa ou retreinamento neural;
+essas opções requerem dataset de banco físico e validação separada.
+
+**Próximo teste:** verificar se o H1 alinha com cada nova PCI, permanece alinhado
+até AUX mesmo nas fases sem luz e invalida corretamente após remoção e EMPTY.

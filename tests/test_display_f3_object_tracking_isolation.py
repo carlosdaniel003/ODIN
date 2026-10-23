@@ -28,6 +28,115 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         )
         return tracking.F3TrackingConfigStore(repository)
 
+
+    def test_h1_luminous_pose_is_reused_only_after_h1_and_reset_on_new_plate(self):
+        from unittest.mock import Mock
+
+        frame = np.zeros((80, 120, 3), dtype=np.uint8)
+        h1 = {"id": "CHECK_001", "name": "H1"}
+        snapshot = {
+            "current_index": 0,
+            "current_check": h1,
+            "checks": [{"id": "CHECK_001"}, {"id": "CHECK_002"}],
+            "completed_ids": (),
+        }
+        app = SimpleNamespace(
+            display_check_runtime=SimpleNamespace(snapshot=lambda: dict(snapshot)),
+            _display_f3_waiting_empty_rearm=False,
+            _display_f3_waiting_new_board_after_empty=False,
+        )
+        runtime = SimpleNamespace(
+            width=120, height=80, _cycle_h1_pose=None,
+            last_verified_s=12.0,
+        )
+        matrix = np.asarray([[1.0, 0.0, -6.0], [0.0, 1.0, 3.0]], dtype=np.float32)
+        h1_lock = tracking.F3TrackingResult(
+            True, frame, source_type="luminous_segment_grid",
+            evidence_current=True, current_to_canonical=matrix,
+            luminous_validated_mask_ids=("MASK_001", "MASK_002", "MASK_003"),
+        )
+        with patch.object(tracking, "tracking_enabled", return_value=True):
+            self.assertTrue(
+                tracking._capture_h1_cycle_geometry(app, runtime, "DISPLAY A", h1_lock)
+            )
+            self.assertIsNone(
+                tracking._reuse_h1_cycle_geometry(app, runtime, frame, "DISPLAY A")
+            )
+            snapshot["current_index"] = 1
+            snapshot["current_check"] = {"id": "CHECK_002", "name": "BLUE"}
+            snapshot["completed_ids"] = ("CHECK_001",)
+            restored = tracking._reuse_h1_cycle_geometry(
+                app, runtime, frame, "DISPLAY A"
+            )
+            self.assertIsNotNone(restored)
+            self.assertTrue(restored.locked)
+            self.assertFalse(restored.evidence_current)
+            self.assertEqual("h1_cycle_luminous_geometry", restored.source_type)
+            self.assertEqual("locked_h1_cycle_geometry", restored.reason)
+            np.testing.assert_allclose(matrix, restored.current_to_canonical)
+            self.assertEqual(12.0, runtime.last_verified_s)
+            self.assertIsNone(
+                tracking._reuse_h1_cycle_geometry(app, runtime, frame, "OUTRO")
+            )
+            app._display_f3_waiting_empty_rearm = True
+            self.assertIsNone(
+                tracking._reuse_h1_cycle_geometry(app, runtime, frame, "DISPLAY A")
+            )
+            app._display_f3_waiting_empty_rearm = False
+            # Mesmo após o H1 completo, uma nova placa exige aquisição própria.
+            snapshot["completed_ids"] = ()
+            self.assertIsNone(
+                tracking._reuse_h1_cycle_geometry(app, runtime, frame, "DISPLAY A")
+            )
+            snapshot["completed_ids"] = ("CHECK_001",)
+        with patch.object(tracking, "tracking_enabled", return_value=False):
+            self.assertIsNone(
+                tracking._reuse_h1_cycle_geometry(app, runtime, frame, "DISPLAY A")
+            )
+
+    def test_h1_luminous_anchor_rejects_weak_or_non_h1_geometry(self):
+        frame = np.zeros((80, 120, 3), dtype=np.uint8)
+        snapshot = {
+            "current_index": 0,
+            "current_check": {"id": "CHECK_001", "name": "H1"},
+            "checks": [{"id": "CHECK_001"}],
+        }
+        app = SimpleNamespace(
+            display_check_runtime=SimpleNamespace(snapshot=lambda: snapshot)
+        )
+        runtime = SimpleNamespace(width=120, height=80, _cycle_h1_pose=None)
+        base = tracking.F3TrackingResult(
+            True, frame,
+            current_to_canonical=np.asarray(
+                [[1, 0, 0], [0, 1, 0]], dtype=np.float32
+            ),
+            source_type="luminous_segment_grid",
+            evidence_current=True,
+            luminous_validated_mask_ids=("MASK_001", "MASK_002"),
+        )
+        with patch.object(tracking, "tracking_enabled", return_value=True):
+            self.assertFalse(
+                tracking._capture_h1_cycle_geometry(app, runtime, "DISPLAY A", base)
+            )
+            base.luminous_validated_mask_ids = (
+                "MASK_001", "MASK_002", "MASK_003"
+            )
+            base.evidence_current = False
+            self.assertFalse(
+                tracking._capture_h1_cycle_geometry(app, runtime, "DISPLAY A", base)
+            )
+            base.evidence_current = True
+            base.source_type = "neural_filter_pose"
+            self.assertFalse(
+                tracking._capture_h1_cycle_geometry(app, runtime, "DISPLAY A", base)
+            )
+            base.source_type = "luminous_segment_grid"
+            snapshot["current_check"] = {"id": "CHECK_001", "name": "USB"}
+            self.assertFalse(
+                tracking._capture_h1_cycle_geometry(app, runtime, "DISPLAY A", base)
+            )
+            self.assertIsNone(runtime._cycle_h1_pose)
+
     def test_setting_uses_dedicated_f3_sidecar(self):
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)

@@ -7229,3 +7229,23 @@ onde estejam comprovadamente apagadas e verificar as fotos de referência,
 ou configurar geometria explícita delas na foto BOARD_OFF. Confirmar
 fonte `f3_check_photos_same_mask` de ambos no DEBUG e evolução
 FM 30/30→AUX. Validar que OFF real ainda acusa NG.
+
+## 23/10/2026 — D-079: H1 como âncora geométrica por placa, só tracking ON
+
+**Resultado:** ALTERAÇÃO DE SOFTWARE / PENDENTE DE RETESTE FÍSICO.
+
+Cenário reportado: câmeras Full HD com alto zoom exibem display diminuto;
+pequenos deslocamentos na troca de PCI desalinhavam máscaras. Durante H1 → AUX,
+a PCI fica imóvel. Contorno escuro tem contraste insuficiente para exigir
+rastreamento estrutural fino em todos os CHECKS.
+
+Alteração: no F3 com rastreamento ON, o tracker guarda somente a pose H1
+com alinhamento `luminous_segment_grid` atual e no mínimo três MASK_IDs
+validados. CHECKS seguintes reutilizam essa geometria se H1 foi concluído;
+`evidence_current=False` impede que a pose reutilizada prove ocupação. A
+âncora é invalidada em rearme/reset/troca de projeto/desativação.
+
+Sem mudança em CNN semântica, híbrido, NG, temporizações e F2. Sem reteste
+físico neste commit. Reteste esperado: inserir duas ou mais placas com pequenos
+deslocamentos distintos, H1 com pose revalidada em cada placa, conferência do
+alinhamento no BLUE/USB/FM/AUX, NG verdadeiro e remoção/EMPTY entre placas.

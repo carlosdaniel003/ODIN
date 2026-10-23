@@ -5632,3 +5632,32 @@ preexistentes no bloco genérico de rastreamento F3.
 MASK_030 sem falsificar estados; repetir FM com ambas ON e placa sem defeito.
 Esperado: 30/30 -> avanço para AUX, preservando NG em qualquer indicador
 verdadeiramente apagado.
+
+## D-079 — Reutilização intraplaca da geometria luminosa H1 (tracking opt-in)
+
+**Status:** Implementada no código / testes de regressão adicionados / PENDENTE DE RETESTE FÍSICO.
+
+No fluxo F3 com `Ativar rastreamento automático` habilitado, a pose validada
+por ao menos três landmarks luminosos distintos no primeiro CHECK H1 é guardada
+exclusivamente durante o ciclo físico da mesma placa. Nos CHECKS posteriores,
+se H1 consta como concluído, o tracker reutiliza a transformação canônica
+validada para projetar contorno e máscaras, mesmo sem segmentos suficientes
+acesos no CHECK atual. Durante os CHECKS a placa permanece imóvel no suporte,
+conforme condição operacional informada pelo usuário.
+
+A origem `h1_cycle_luminous_geometry` indica POSE REUTILIZADA, não evidência
+óptica nova: `evidence_current=False`, sem renovação de `last_verified_s`.
+Presença, energia, controle temporal, análise híbrida, debounce e decisão OK/NG
+continuam em suas autoridades atuais. O H1 só é guardado por geometria
+`luminous_segment_grid` atual e com landmarks distintos mínimos; lock estrutural
+ou prior neural isolado não podem guardar a pose. O início do novo ciclo,
+reset de configuração, alternância do tracking e troca de projeto invalidam a
+âncora. Com tracking desligado o caminho anterior é preservado.
+
+A CNN de pose já existente permanece no caminho de aquisição do H1; não há
+novo modelo de reconhecimento luminoso global nem treinamento online nesta etapa.
+O próximo reteste físico deve confirmar diferentes deslocamentos entre placas,
+H1 correto e com um segmento defeituoso, BLUE intermitente, passagem FM/AUX e
+rearme após EMPTY. Uma placa que se mova dentro do mesmo ciclo invalida a premissa
+de reutilização e exige nova detecção de movimento antes de promover essa
+estratégia a modo de produção definitivo.

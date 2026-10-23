@@ -5035,6 +5035,9 @@ class F3DisplayObjectTracker:
         """
         self.last_matrix: np.ndarray | None = None
         self.last_homography: np.ndarray | None = None
+        # Uma geometria luminosa H1 pertence somente à placa física atual.
+        # Nunca atravessa reset/rearme, troca de projeto ou tracking desativado.
+        self._cycle_h1_pose: dict | None = None
         self._force_absolute_reacquire = False
         self.last_compute_s = 0.0
         self.last_result: F3TrackingResult | None = None
@@ -7646,6 +7649,136 @@ def _invalidate_spatial_authority_after_tracking_loss(
         app._display_f3_operational_state = updated
 
 
+
+def _capture_h1_cycle_geometry(app, runtime, project_name: str, result) -> bool:
+    """Guarda a pose fina comprovada no primeiro CHECK H1 desta placa."""
+    if (
+        not tracking_enabled(app)
+        or result is None
+        or not bool(getattr(result, "locked", False))
+        or str(getattr(result, "source_type", "") or "") != "luminous_segment_grid"
+        or not bool(getattr(result, "evidence_current", False))
+    ):
+        return False
+    validated_ids = set(getattr(result, "luminous_validated_mask_ids", ()) or ())
+    if len(validated_ids) < F3_TRACKING_LUMINOUS_MIN_COMPONENTS:
+        return False
+    sequence = getattr(app, "display_check_runtime", None)
+    try:
+        snapshot = sequence.snapshot()
+    except (AttributeError, TypeError):
+        return False
+    current = snapshot.get("current_check") or {}
+    checks = snapshot.get("checks") or ()
+    if (
+        snapshot.get("current_index") != 0
+        or not checks
+        or str(current.get("id") or "") != str(checks[0].get("id") or "")
+        or str(current.get("name") or "").strip().upper() != "H1"
+    ):
+        return False
+    matrix = getattr(result, "current_to_canonical", None)
+    if matrix is None:
+        return False
+    try:
+        affine = np.asarray(matrix, dtype=np.float32).reshape(2, 3)
+        if not np.isfinite(affine).all():
+            return False
+        homography = getattr(result, "current_to_canonical_homography", None)
+        if homography is not None:
+            homography = np.asarray(homography, dtype=np.float32).reshape(3, 3)
+            if not np.isfinite(homography).all():
+                return False
+    except (TypeError, ValueError):
+        return False
+    runtime._cycle_h1_pose = {
+        "project_name": str(project_name or ""),
+        "h1_check_id": str(current["id"]),
+        "resolution": (int(runtime.width), int(runtime.height)),
+        "matrix": affine.copy(),
+        "homography": homography.copy() if homography is not None else None,
+        "validated_mask_ids": tuple(sorted(validated_ids)),
+    }
+    return True
+
+
+def _reuse_h1_cycle_geometry(app, runtime, frame, project_name: str):
+    """Reprojeta a pose H1 nos CHECKS posteriores sem depender de LEDs acesos.
+
+    O H1 só pode ser reutilizado depois de concluído na MESMA placa. A
+    autoridade física de presença/energia continua independente: essa pose
+    antiga nunca produz evidence_current=True nem autoriza presença sozinha.
+    """
+    anchor = getattr(runtime, "_cycle_h1_pose", None)
+    if (
+        not tracking_enabled(app)
+        or not isinstance(anchor, dict)
+        or not _valid_frame(frame)
+        or bool(getattr(app, "_display_f3_waiting_empty_rearm", False))
+        or bool(getattr(app, "_display_f3_waiting_new_board_after_empty", False))
+        or anchor.get("project_name") != str(project_name or "")
+        or anchor.get("resolution") != (int(runtime.width), int(runtime.height))
+        or frame.shape[:2] != (int(runtime.height), int(runtime.width))
+    ):
+        return None
+    sequence = getattr(app, "display_check_runtime", None)
+    try:
+        snapshot = sequence.snapshot()
+    except (AttributeError, TypeError):
+        return None
+    checks = snapshot.get("checks") or ()
+    if (
+        not checks
+        or str(checks[0].get("id") or "") != anchor.get("h1_check_id")
+        or not isinstance(snapshot.get("current_index"), int)
+        or snapshot["current_index"] <= 0
+        or anchor["h1_check_id"] not in (snapshot.get("completed_ids") or ())
+    ):
+        return None
+
+    try:
+        affine = np.asarray(anchor["matrix"], dtype=np.float32).reshape(2, 3)
+        homography = anchor.get("homography")
+        if homography is not None:
+            homography = np.asarray(homography, dtype=np.float32).reshape(3, 3)
+            aligned = cv2.warpPerspective(
+                frame, homography, (int(runtime.width), int(runtime.height)),
+                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101,
+            )
+        else:
+            aligned = cv2.warpAffine(
+                frame, affine, (int(runtime.width), int(runtime.height)),
+                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101,
+            )
+    except (cv2.error, TypeError, ValueError, KeyError):
+        return None
+
+    result = F3TrackingResult(
+        True,
+        aligned,
+        reference="luminous:" + anchor["h1_check_id"],
+        reason="locked_h1_cycle_geometry",
+        current_to_canonical=affine.copy(),
+        current_to_canonical_homography=(
+            homography.copy() if homography is not None else None
+        ),
+        rotation_deg=float(affine_rotation_deg(affine)),
+        scale=float(affine_scale(affine)),
+        source_type="h1_cycle_luminous_geometry",
+        evidence_current=False,
+        luminous_validated_mask_ids=(),
+    )
+    runtime.last_result = result
+    runtime.last_matrix = affine.copy()
+    runtime.last_homography = (
+        homography.copy() if homography is not None else None
+    )
+    runtime._force_absolute_reacquire = False
+    # last_verified_s não é atualizado: reaproveitamento não equivale a
+    # nova medição óptica nem deve provar presença física atual.
+    return result
+
+
 def align_frame_for_f3(app, frame, *, frame_token=None):
     if not tracking_enabled(app):
         return frame, None
@@ -7667,7 +7800,13 @@ def align_frame_for_f3(app, frame, *, frame_token=None):
         else getattr(app, "camera_ultimo_frame_id", None)
     )
     configured = runtime.configure(project_name)
-    if not configured:
+    cycle_h1_result = (
+        _reuse_h1_cycle_geometry(app, runtime, frame, project_name)
+        if configured else None
+    )
+    if cycle_h1_result is not None:
+        result = cycle_h1_result
+    elif not configured:
         # Mesmo quando ORB/AKAZE/template não geram uma referência utilizável,
         # o projeto pode ter contorno + máscaras + estados suficientes para
         # reencontrar o display pelos segmentos que realmente acenderam.
@@ -7730,6 +7869,9 @@ def align_frame_for_f3(app, frame, *, frame_token=None):
         )
         if luminous is not None:
             result = luminous
+
+    if str(getattr(result, "source_type", "") or "") == "luminous_segment_grid":
+        _capture_h1_cycle_geometry(app, runtime, project_name, result)
 
     app._display_f3_object_tracking_last_status = {
         "enabled": True,
@@ -7953,14 +8095,21 @@ def _update_tracking_live_geometry(
     alignment_required = bool(
         expected_on_count >= F3_TRACKING_LUMINOUS_MIN_COMPONENTS
     )
+    source_type = str(result.source_type or "")
     spatial_alignment_ready = bool(
         not alignment_required
-        or str(result.source_type or "") == "luminous_segment_grid"
+        or source_type in {
+            "luminous_segment_grid",
+            "h1_cycle_luminous_geometry",
+        }
     )
     spatial_alignment_source = (
-        "luminous_segment_grid"
-        if spatial_alignment_ready and alignment_required
+        "h1_cycle_luminous_geometry"
+        if source_type == "h1_cycle_luminous_geometry"
         else (
+            "luminous_segment_grid"
+            if spatial_alignment_ready and alignment_required
+            else (
             "projective_filter_structural"
             if alignment_required and projective_geometry
             else (
@@ -7969,6 +8118,7 @@ def _update_tracking_live_geometry(
                 else "not_required"
             )
         )
+    )
     )
 
     # D-070: LK/cached transform pode manter a visualização somente depois que
