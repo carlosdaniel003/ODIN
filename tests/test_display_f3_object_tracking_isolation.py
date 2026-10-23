@@ -2064,6 +2064,40 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertIn("_display_auto_precomputed_payload", process)
         self.assertIn("_display_auto_analysis_frame_override", process)
 
+    def test_semantic_snapshot_power_gate_reads_same_raw_as_classification(self):
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        ready = source.split("if isinstance(ready_semantic, dict):", 1)[1]
+        ready = ready.split("if pending and _valid_frame(pending_frame):", 1)[0]
+        self.assertIn('semantic_raw = ready_semantic.get("raw_frame")', ready)
+        self.assertIn(
+            "self._display_f3_tracking_raw_authority_frame = semantic_raw",
+            ready,
+        )
+        self.assertLess(
+            ready.index("self._display_f3_tracking_raw_authority_frame = semantic_raw"),
+            ready.index("return previous_preview()"),
+        )
+        self.assertIn(
+            "self._display_f3_tracking_raw_authority_frame = raw_latest",
+            ready,
+        )
+
+        # Em produção, a authority de energia prefere o RAW temporário
+        # durante o processamento do snapshot, não o frame live mais recente.
+        frozen_on = np.full((60, 80, 3), 255, dtype=np.uint8)
+        latest_off = np.zeros((60, 80, 3), dtype=np.uint8)
+        app = SimpleNamespace(
+            _display_f3_tracking_instance_frame_prepared=True,
+            _display_f3_tracking_raw_authority_frame=frozen_on,
+        )
+        selected, source_name = power_v2._energy_authority_frame(
+            app, latest_off
+        )
+        self.assertIs(selected, frozen_on)
+        self.assertEqual("tracking_raw_authority_frame", source_name)
+
     def test_semantic_apply_never_replaces_visible_camera_with_old_frame(self):
         source = inspect.getsource(
             tracking.instalar_autoridade_final_instancia_rastreamento_f3

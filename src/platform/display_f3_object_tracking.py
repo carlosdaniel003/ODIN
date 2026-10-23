@@ -9169,6 +9169,14 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     ready_semantic = payload
 
         if isinstance(ready_semantic, dict):
+            # O snapshot semântico pode ter sido capturado durante a fase ON
+            # de BLUE e chegar depois de a câmera latest-frame entrar em OFF.
+            # O gate físico deve avaliar o RAW da MESMA captura que produziu
+            # a classificação, nunca a fase atual da câmera contra o snapshot
+            # ON anterior. A preview continua usando somente raw_latest.
+            semantic_raw = ready_semantic.get("raw_frame")
+            if _valid_frame(semantic_raw):
+                self._display_f3_tracking_raw_authority_frame = semantic_raw
             self._display_auto_precomputed_payload = {
                 "frame_token": ready_semantic.get("frame_token"),
                 "raw_frame": ready_semantic.get("raw_frame"),

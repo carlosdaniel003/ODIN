@@ -7302,3 +7302,27 @@ Mitigação: nova aquisição rápida H1 com tracking ON evita AKAZE/template
 absolutos e rescue estrutural pesado, priorizando neural/ORB + referência
 luminosa no tempo da janela física. H1 sem pose validada continua bloqueado.
 **Status:** mudança de código / reteste físico pendente.
+
+## 23/10/2026 — H1 PASS / BLUE NG não registrado com tracking ON (D-081)
+
+**Cenário:** Projeto CM_500_L com 30 máscaras, H1 físico curto, rastreamento
+ligado, BLUE intermitente com MASK_024 fisicamente apagada (esperado ON).
+
+**Resultado físico:** H1 PASS e máscaras geométricas alinhadas. BLUE FAIL:
+permaneceu em AGUARDANDO BLUE e status `0/30 SEM CLASSIFICAÇÃO`, sem NG.
+O DEBUG manual (08:21:30) confirmou presença, energia e chegada de BLUE;
+MASK_024 expected ON / observed OFF. A última análise neutra tinha
+`blocked_by_power_gate=true` enquanto o status físico registrado estava em
+`powered` por latch intermitente. O snapshot semântico passou por frame 2213,
+ao passo que a autoridade de energia reportava frame 2360 já em fase OFF
+(`intermittent_phase_hold=true`, `off_votes=28`). Também havia SEARCHING
+por `classificacao_hibrida_incerta` no snapshot ON: não prova sozinho NG.
+
+**Causa de integração identificada:** ao aplicar `ready_semantic`, o código
+mantinha o RAW da câmera latest-frame como autoridade energética, em vez do
+RAW congelado que gerou o resultado semântico. Corrigido o handoff temporário
+para o RAW do snapshot; restauração do latest no finally. Sem relaxar critérios
+para NG; será necessária estabilidade de MASK_024 em fases ON qualificadas.
+
+**Estado:** CORREÇÃO PUBLICADA / RETESTE FÍSICO PENDENTE. Retestar BLUE NG
+MASK_024 e BLUE OK, com múltiplas fases ON e divergência persistente.

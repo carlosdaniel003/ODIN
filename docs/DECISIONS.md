@@ -5742,3 +5742,22 @@ Não altera debounces, evidência de energia, autoridade híbrida, seleção do 
 controle de ciclo ou NG; o caso 28/30 no H1 continua uma divergência semântica
 a ser avaliada separadamente, não tratada como performance. Retestar novo ciclo
 com captura de H1 em até 3 segundos e os relatórios de duração do worker.
+
+## D-081 — Gate físico e julgamento semântico usam o RAW do mesmo snapshot F3
+
+**Status:** Implemented; aguardando reteste físico.
+
+Em tracking ON, a fase ON de um CHECK intermitente pode ser analisada
+assincronamente após a câmera latest-frame entrar na fase OFF. A análise
+semântica recebe a imagem RAW congelada do worker, mas o gate físico estava
+consumindo `_display_f3_tracking_raw_authority_frame` atualizado pela câmera
+latest-frame. Isso pode bloquear a decisão BLUE apesar de o snapshot congelado
+possuir evidência positiva real de ON, e publicar `0/30 SEM CLASSIFICAÇÃO`.
+
+Na entrega de `ready_semantic`, o proprietário existente do tracking coloca o
+RAW emparelhado com a análise no campo de autoridade física **apenas durante**
+`previous_preview()`; no `finally` restaura o último RAW da câmera. O pipeline
+de energia unificada já lê esse campo quando o tracking prepara o frame, sem
+introduzir outro worker, cache, política ou classificador. O visor da câmera
+continua latest-frame-wins. Gate OFF real, rearme, presença, persistência NG,
+ON/OFF híbrido e tracking OFF permanecem inalterados.

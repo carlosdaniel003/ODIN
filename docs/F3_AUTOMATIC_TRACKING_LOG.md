@@ -2705,3 +2705,14 @@ continua sem LOCK, aguardando frame atual; não altera critérios de OK/NG nem
 autoridades de presença/energia. Outros CHECKS seguem fallback completo.
 **Reteste físico obrigatório:** H1 com máscara alinhada antes de 3 s, saída
 para BLUE somente se H1 julgado, nova placa com outra posição.
+
+## 23/10/2026 — D-081: handoff raw semântico/energia de BLUE intermitente
+
+H1 passou com rastreamento ON e pose alinhada. BLUE real tinha MASK_024
+esperado ON e fisicamente OFF; o diagnóstico registrou gate físico powered,
+mas outro snapshot ficou neutro `0/30` e bloqueado ao coincidir com fase
+OFF do pisca. O worker de semântica entregava RAW congelado, porém o campo
+que o gate energético usa ainda apontava para o RAW latest-frame. Corrigido
+esse emparelhamento durante o consumo de `ready_semantic`; após a análise,
+a autoridade volta ao RAW live. Não força NG, não reaproveita semântica de
+frames stale fora da janela já existente. Exigir reteste real BLUE NG e OK.
