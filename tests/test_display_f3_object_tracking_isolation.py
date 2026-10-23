@@ -240,7 +240,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         orb = SimpleNamespace(detectAndCompute=lambda image, mask: ([], None))
         with (
             patch.object(tracking.cv2, "ORB_create", return_value=orb),
-            patch.object(tracking.cv2, "AKAZE_create") as akaze,
+            patch.object(tracking.cv2, "AKAZE_create", create=True) as akaze,
             patch.object(tracking.cv2, "Canny") as canny,
         ):
             result = tracker.align(frame, frame_id=101, fast_acquire=True)
@@ -277,7 +277,7 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         akaze = SimpleNamespace(detectAndCompute=lambda image, mask: ([], None))
         with (
             patch.object(tracking.cv2, "ORB_create", return_value=orb),
-            patch.object(tracking.cv2, "AKAZE_create", return_value=akaze) as akaze_create,
+            patch.object(tracking.cv2, "AKAZE_create", return_value=akaze, create=True) as akaze_create,
         ):
             result = tracker.align(frame, frame_id=102)
             self.assertFalse(result.locked)
