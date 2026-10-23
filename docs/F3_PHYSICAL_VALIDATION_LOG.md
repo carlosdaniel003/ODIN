@@ -7288,3 +7288,17 @@ recorte são a mesma imagem ao vivo; arrastar e observar PAN/TILT. Com Zoom
 ODIN 2x, mover quadro azul e conferir que o recorte e a câmera operacional
 do F3 mostram a mesma região, inclusive FM, na rotação visual 180°.
 Verificar suporte efetivo a PAN/TILT do driver.
+
+## 23/10/2026 — D-080: H1 de 3 segundos não pode aguardar rastreamento de 3,4 s
+
+Auditoria recebida: H1 congelado 30/30 no diagnóstico, porém o runtime registrou
+tracking `align=3417,21 ms` / `worker_age=3759,18 ms` e sem LOCK
+(`neural_tracking_geometry_changed`). Outro frame obteve LOCK luminoso
+(7 landmarks), mas análise produtiva permaneceu 28/30 incerta. Resultado não
+indica aprovação da placa e revela dois problemas separados: prazo de aquisição
+e semântica de máscaras.
+
+Mitigação: nova aquisição rápida H1 com tracking ON evita AKAZE/template
+absolutos e rescue estrutural pesado, priorizando neural/ORB + referência
+luminosa no tempo da janela física. H1 sem pose validada continua bloqueado.
+**Status:** mudança de código / reteste físico pendente.

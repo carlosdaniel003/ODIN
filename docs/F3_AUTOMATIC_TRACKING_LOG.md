@@ -2695,3 +2695,13 @@ até AUX mesmo nas fases sem luz e invalida corretamente após remoção e EMPTY
 **Integração no auto-check:** o gate de stale lock reconhece somente a origem
 `h1_cycle_luminous_geometry` com H1 efetivamente concluído, mesmo CHECK e
 alinhamento espacial pronto. LOCK temporal comum permanece bloqueado.
+
+## 23/10/2026 — D-080: prioridade de pose para H1 curto
+
+H1 de ~3 s: o worker observado durou 3417,21 ms no alinhamento e perdeu a janela
+física. Apenas no primeiro CHECK H1 com rastreamento ON, o alinhamento faz
+neural/ORB e refino luminoso sem AKAZE/template estrutural mais caro. Falha
+continua sem LOCK, aguardando frame atual; não altera critérios de OK/NG nem
+autoridades de presença/energia. Outros CHECKS seguem fallback completo.
+**Reteste físico obrigatório:** H1 com máscara alinhada antes de 3 s, saída
+para BLUE somente se H1 julgado, nova placa com outra posição.

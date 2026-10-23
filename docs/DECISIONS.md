@@ -5721,3 +5721,24 @@ Testes automatizados cobrem mapa/recorte do mesmo snapshot, contrato entre
 frame RAW e visão derivada do F3, e arraste independente do zoom físico e do
 Zoom ODIN. Reteste físico com câmera real continua necessário, sobretudo para
 confirmar que o backend específico responde aos comandos PAN/TILT.
+
+## D-080 — Aquisição geométrica rápida durante H1 com rastreamento ativado
+
+**Estado:** implementado; teste automatizado adicionado; validação em câmera real pendente.
+
+O H1 físico dura aproximadamente 3 segundos. Auditoria operacional de 23/10/2026
+mostrou um job de tracking de 3417,21 ms (100% desse tempo em align), apesar de
+a foto congelada H1 ser 30/30 e outro frame fornecer LOCK luminoso válido.
+
+Somente quando o primeiro CHECK H1 está pendente e o tracking F3 está ligado,
+o tracker executa aquisição geométrica por CNN/continuidade/ORB e refino pelos
+segmentos luminosos, sem os fallbacks absolutos AKAZE/template que podem durar
+mais que o próprio H1. Se não houver LOCK, o próximo frame pode tentar novamente
+com política latest-frame-wins; não há aprovação sem pose fina. A fonte neural
+de geometria segue como prior opcional; modelo antigo/desatualizado não vira
+prova geométrica. BLUE/USB/FM/AUX e tracking OFF mantêm o comportamento legado.
+
+Não altera debounces, evidência de energia, autoridade híbrida, seleção do CHECK,
+controle de ciclo ou NG; o caso 28/30 no H1 continua uma divergência semântica
+a ser avaliada separadamente, não tratada como performance. Retestar novo ciclo
+com captura de H1 em até 3 segundos e os relatórios de duração do worker.

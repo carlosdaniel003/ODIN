@@ -6840,7 +6840,13 @@ class F3DisplayObjectTracker:
         frame_id=None,
         *,
         preferred_reference_keys=None,
+        fast_acquire: bool = False,
     ) -> F3TrackingResult:
+        """No H1 curto, evita AKAZE/template absoluto de múltiplos segundos.
+
+        O resto do rastreamento mantém a política normal. A ausência de pose
+        fina continua bloqueando a decisão e nunca equivale a aprovação.
+        """
         if not _valid_frame(frame):
             return F3TrackingResult(False, frame, reason="invalid_frame")
         if not self.ready:
@@ -7024,9 +7030,12 @@ class F3DisplayObjectTracker:
                         candidates = group_candidates
                         break
 
-        # Reacquisition absoluta mais cara somente quando os caminhos rápidos
-        # não produziram pose.
-        if not candidates:
+        # No H1 físico (~3 s), os fallbacks AKAZE/template em Full-HD podem
+        # ocupar o worker por mais tempo que a própria emissão. Primeiro tente
+        # neural/ORB + rescue luminoso no frame mais recente; sem pose, aguarde
+        # outro frame H1 em vez de bloquear o worker com fallback longo.
+        # Demais CHECKS preservam a reaquisição completa.
+        if not candidates and not fast_acquire:
             if gray is None:
                 gray = self._gray(frame)
             try:
@@ -7065,7 +7074,7 @@ class F3DisplayObjectTracker:
                         candidates = group_candidates
                         break
 
-        if not candidates:
+        if not candidates and not fast_acquire:
             if gray is None:
                 gray = self._gray(frame)
             try:
@@ -7115,8 +7124,11 @@ class F3DisplayObjectTracker:
                 False,
                 frame,
                 reason=(
-                    "current_features_insufficient"
-                    if not orb_available and not akaze_available
+                    "h1_fast_acquisition_unlocked"
+                    if fast_acquire
+                    else (
+                        "current_features_insufficient"
+                        if not orb_available and not akaze_available
                     else (
                         neural_reason
                         if neural_reason
@@ -7126,6 +7138,7 @@ class F3DisplayObjectTracker:
                             "neural_tracking_model_not_validated",
                         }
                         else "object_not_locked"
+                    )
                     )
                 ),
                 evidence_current=False,
@@ -7817,6 +7830,27 @@ def _h1_cycle_geometry_usable_for_current_check(app, status) -> bool:
     )
 
 
+
+def _h1_fast_tracking_acquisition(app) -> bool:
+    """Acelera somente a primeira etapa H1 de rastreamento opt-in."""
+    current = _current_check(app)
+    if not isinstance(current, dict):
+        return False
+    if str(current.get("name") or "").strip().upper() != "H1":
+        return False
+    sequence = getattr(app, "display_check_runtime", None)
+    try:
+        snapshot = sequence.snapshot()
+    except (AttributeError, TypeError):
+        return False
+    return bool(
+        snapshot.get("current_index") == 0
+        and str((snapshot.get("current_check") or {}).get("id") or "")
+        == str(current.get("id") or "")
+        and not snapshot.get("completed_ids")
+    )
+
+
 def align_frame_for_f3(app, frame, *, frame_token=None):
     if not tracking_enabled(app):
         return frame, None
@@ -7881,12 +7915,14 @@ def align_frame_for_f3(app, frame, *, frame_token=None):
             preferred_reference_keys.append(f"check:{current_check_id}")
         preferred_reference_keys.append("board_off")
 
+        fast_h1 = _h1_fast_tracking_acquisition(app)
         result = runtime.align(
             frame,
             frame_id=analysis_frame_id,
             preferred_reference_keys=preferred_reference_keys,
+            fast_acquire=fast_h1,
         )
-        if not bool(result.locked):
+        if not bool(result.locked) and not fast_h1:
             rescued = _rescue_current_check_tracking_lock(
                 app,
                 frame,

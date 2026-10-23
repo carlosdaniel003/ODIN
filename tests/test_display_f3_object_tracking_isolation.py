@@ -194,6 +194,95 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
                 tracking._h1_cycle_geometry_usable_for_current_check(app, status)
             )
 
+
+    def test_h1_fast_tracking_is_limited_to_first_uncompleted_check(self):
+        context = {
+            "current_index": 0,
+            "current_check": {"id": "CHECK_001", "name": "H1"},
+            "completed_ids": (),
+        }
+        app = SimpleNamespace(
+            display_check_runtime=SimpleNamespace(snapshot=lambda: dict(context))
+        )
+        self.assertTrue(tracking._h1_fast_tracking_acquisition(app))
+        context["current_index"] = 1
+        context["current_check"] = {"id": "CHECK_002", "name": "BLUE"}
+        self.assertFalse(tracking._h1_fast_tracking_acquisition(app))
+        context["current_index"] = 0
+        context["current_check"] = {"id": "CHECK_001", "name": "H1"}
+        context["completed_ids"] = ("CHECK_001",)
+        self.assertFalse(tracking._h1_fast_tracking_acquisition(app))
+
+    def test_h1_fast_align_skips_akaze_and_template_when_orb_fails(self):
+        frame = np.zeros((80, 120, 3), dtype=np.uint8)
+        tracker = object.__new__(tracking.F3DisplayObjectTracker)
+        tracker.width, tracker.height = 120, 80
+        tracker.ready = True
+        tracker.reason = "ready"
+        tracker.last_result = None
+        tracker.last_frame_id = None
+        tracker.last_matrix = None
+        tracker.last_homography = None
+        tracker.last_gray = None
+        tracker.last_verified_s = 0.0
+        tracker.last_compute_s = 0.0
+        tracker.last_verified_rotation_deg = None
+        tracker.consecutive_misses = 0
+        tracker._force_absolute_reacquire = False
+        tracker._last_neural_pose_debug = {}
+        tracker._last_reference = ""
+        tracker._last_rotation_jump_rejections = []
+        tracker.references = {}
+        tracker.reference_specs = {}
+        tracker._available_reference_keys = lambda: ()
+        tracker._gray = lambda image: np.zeros((80, 120), dtype=np.uint8)
+        tracker._neural_filter_pose_candidate = lambda image: None
+        orb = SimpleNamespace(detectAndCompute=lambda image, mask: ([], None))
+        with (
+            patch.object(tracking.cv2, "ORB_create", return_value=orb),
+            patch.object(tracking.cv2, "AKAZE_create") as akaze,
+            patch.object(tracking.cv2, "Canny") as canny,
+        ):
+            result = tracker.align(frame, frame_id=101, fast_acquire=True)
+            self.assertFalse(result.locked)
+            self.assertEqual("h1_fast_acquisition_unlocked", result.reason)
+            akaze.assert_not_called()
+            canny.assert_not_called()
+
+    def test_standard_tracking_still_uses_akaze_fallback(self):
+        frame = np.zeros((80, 120, 3), dtype=np.uint8)
+        tracker = object.__new__(tracking.F3DisplayObjectTracker)
+        tracker.width, tracker.height = 120, 80
+        tracker.ready = True
+        tracker.reason = "ready"
+        tracker.last_result = None
+        tracker.last_frame_id = None
+        tracker.last_matrix = None
+        tracker.last_homography = None
+        tracker.last_gray = None
+        tracker.last_verified_s = 0.0
+        tracker.last_compute_s = 0.0
+        tracker.last_verified_rotation_deg = None
+        tracker.consecutive_misses = 0
+        tracker._force_absolute_reacquire = False
+        tracker._last_neural_pose_debug = {}
+        tracker._last_reference = ""
+        tracker._last_rotation_jump_rejections = []
+        tracker.references = {}
+        tracker.reference_specs = {}
+        tracker._available_reference_keys = lambda: ()
+        tracker._gray = lambda image: np.zeros((80, 120), dtype=np.uint8)
+        tracker._neural_filter_pose_candidate = lambda image: None
+        orb = SimpleNamespace(detectAndCompute=lambda image, mask: ([], None))
+        akaze = SimpleNamespace(detectAndCompute=lambda image, mask: ([], None))
+        with (
+            patch.object(tracking.cv2, "ORB_create", return_value=orb),
+            patch.object(tracking.cv2, "AKAZE_create", return_value=akaze) as akaze_create,
+        ):
+            result = tracker.align(frame, frame_id=102)
+            self.assertFalse(result.locked)
+            akaze_create.assert_called_once()
+
     def test_setting_uses_dedicated_f3_sidecar(self):
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)
