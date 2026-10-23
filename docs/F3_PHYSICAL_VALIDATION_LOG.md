@@ -7385,3 +7385,8 @@ não promove foto exata a autoridade e mantém NG por OFF realmente físico.
 
 **Estado:** alteração de software; sem validação no JIG. Repetir H1 correto
 com múltiplas placas e BLUE NG segmentado para provar precisão/sensibilidade.
+
+**Validação automatizada D-082:** workflow neural da branch PASS na primeira
+execução com 72 testes; caso de NG por ON indevido também adicionado em suíte
+focada. A execução ampla de isolamento mantém as 7 falhas/1 erro históricas.
+Reteste da câmera física continua PENDENTE e não pode ser substituído pela CI.

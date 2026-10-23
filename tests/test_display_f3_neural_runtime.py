@@ -1103,6 +1103,45 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertEqual("off", result["mask_results"][1]["classified"])
             self.assertFalse(result["mask_results"][1]["matched"])
 
+    def test_tracking_core_emission_detects_unexpected_on_as_ng(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            # H1 espera OFF na segunda máscara; emissão ON real é defeito.
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["on", "on"])
+            )
+            physical = _physical_analysis(["on", "off"])
+            physical["mask_results"][1]["core_emission_evidence"] = {
+                "state": "on",
+                "off_reference_ceiling": 20.0,
+                "on_reference_floor": 180.0,
+            }
+            with patch.object(
+                F3SameMaskReferenceAnalyzer, "analyze",
+                return_value=physical,
+            ):
+                result = analyzer.analyze(
+                    _frame(), "DISPLAY A", h1["id"],
+                    mask_geometry_override=[
+                        {"id": "MASK_001", "type": "circle", "cx": 42, "cy": 48, "radius": 9},
+                        {"id": "MASK_002", "type": "circle", "cx": 118, "cy": 48, "radius": 9},
+                    ],
+                    mask_geometry_resolution=(160, 96),
+                )
+            self.assertFalse(result["approved"])
+            mask = result["mask_results"][1]
+            self.assertEqual("on", mask["classified"])
+            self.assertTrue(mask["semantic_certain"])
+            self.assertFalse(mask["matched"])
+            self.assertTrue(mask["physical_disagreed_with_core"])
+            decision = decidir_analise_display_f3(result, reference_gate=False)
+            self.assertEqual("ng", decision["decision"])
+            self.assertEqual("MASK_002", decision["failed_mask_id"])
+
     def test_tracking_core_emission_does_not_approve_when_neural_disagrees(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, h1, _blue = _repository(Path(temp))

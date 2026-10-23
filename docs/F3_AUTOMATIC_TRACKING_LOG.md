@@ -2744,3 +2744,7 @@ a CNN precisa concordar com a faixa óptica ou continua INCERTO.
 Nenhum algoritmo de reconhecimento de imagem inteira nem threshold novo.
 Tracking OFF permanece intacto. Pendente de reteste físico com H1 OK,
 BLUE NG MASK_024, segmento ON indevido e baixa emissão.
+
+**CI D-082:** suíte neural/same-mask no tracking branch (72 PASS antes de
+adicionar caso explícito de ON indevido). NG em segmento esperado ON, conflito
+forte preservado e H1 com halo simulado passaram. JIG permanece pendente.

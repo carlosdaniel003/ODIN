@@ -5764,8 +5764,8 @@ ON/OFF híbrido e tracking OFF permanecem inalterados.
 
 ## D-082 — Verificação de emissão no núcleo da mesma máscara no tracking F3
 
-**Estado:** Implementada no código; validação automatizada pendente; reteste
-físico obrigatório antes de liberação irrestrita de produção.
+**Estado:** Implementada; regressões focadas PASS (CI neural);
+reteste físico obrigatório antes de liberação irrestrita de produção.
 
 O H1 com tracking ON às vezes trava 29/30 por conflito: `MASK_021`
 OFF pela CNN (0,722676) e ON por distância multifeature física (0,608).
@@ -5796,3 +5796,9 @@ nos resultados por máscara. Sem loops/workers/caches adicionais.
 Validar fisicamente: H1 correto com deslocamentos diferentes, BLUE NG
 MASK_024 apagado, ON indevido, pouca luz e variação de reflexos antes de
 considerar a decisão confiável.
+
+**Validação D-082:** suíte `Display F3 neural dataset tests` habilitada na
+branch `display-tracking-on` e testes do classificador same-mask incluídos.
+Teste de conflito H1, core ON/OFF real, NG por segmento apagado e NG por ON
+indevido cobrem o contrato sem alterar política de CHECK. O conjunto legado de
+isolamento F3 ainda apresenta 7 FAIL + 1 ERROR históricos, iguais ao baseline.
