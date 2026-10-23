@@ -257,5 +257,76 @@ class DisplayF3ZoomTests(unittest.TestCase):
         self.assertEqual(0.5, software_y.get())
         self.assertEqual(["hardware"], calls)
 
+
+    def test_runtime_f3_entrega_raw_ao_mapa_e_zoom_ao_preview_operacional(self):
+        raw = np.full((40, 80, 3), 80, dtype=np.uint8)
+        cropped = np.full((40, 80, 3), 180, dtype=np.uint8)
+        received = {}
+        config = SimpleNamespace(
+            visible=True,
+            update_live_zoom_preview=lambda frame, **kwargs: received.update(
+                {"map": frame, "map_rotation": kwargs.get("visual_rotation")}
+            ),
+        )
+        operational = SimpleNamespace(
+            update_camera_preview=lambda frame, **kwargs: received.update(
+                {"f3": frame, "f3_rotation": kwargs.get("visual_rotation")}
+            ),
+        )
+        app = SimpleNamespace(
+            display_f3_ativo=True,
+            display_f3_window=operational,
+            camera_frame_atual=cropped,
+            _display_f3_runtime_raw_frame=raw,
+            _display_f3_ng_evidence_frozen=False,
+            _display_project_config_window=config,
+            _obter_rotacao_visual_display_f3=lambda: 180,
+            _revalidar_zoom_camera_runtime_display_f3=lambda: None,
+        )
+        DisplayProductionF3Mixin._render_preview_display_f3_once(app)
+        self.assertIs(received["map"], raw)
+        self.assertIs(received["f3"], cropped)
+        self.assertEqual(180, received["map_rotation"])
+        self.assertEqual(180, received["f3_rotation"])
+
+    def test_com_hardware_zoom_e_recorte_odin_arraste_move_so_software(self):
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def set(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+        calls = []
+        camera_x, software_x, software_zoom = Var(0.5), Var(0.5), Var(2.0)
+        window = SimpleNamespace(
+            _zoom_drag_active=True,
+            _zoom_drag_hardware_origin=None,
+            _zoom_pointer_normalized=lambda event: (event.x, event.y),
+            _zoom_values=lambda: (130.0, software_zoom.get(), software_x.get(), 0.5),
+            _zoom_drag_offset_x=0.0,
+            _zoom_drag_offset_y=0.0,
+            software_zoom_var=software_zoom,
+            software_zoom_center_x_var=software_x,
+            software_zoom_center_y_var=Var(0.5),
+            camera_zoom_center_x_var=camera_x,
+            camera_zoom_center_y_var=Var(0.5),
+            _publish_hardware_zoom_preview=lambda: calls.append("hardware"),
+            _publish_software_zoom_preview=lambda: calls.append("software"),
+            _update_zoom_labels=lambda: None,
+            _update_zoom_viewport_overlay=lambda: None,
+            _render_zoom_final_only=lambda: None,
+        )
+        DisplayProjectConfigWindow._on_zoom_viewport_drag(
+            window, SimpleNamespace(x=0.65, y=0.5),
+        )
+        self.assertEqual(["software"], calls)
+        self.assertAlmostEqual(0.65, software_x.get())
+        self.assertAlmostEqual(0.5, camera_x.get())
+        self.assertAlmostEqual(2.0, software_zoom.get())
+
 if __name__ == "__main__":
     unittest.main()
