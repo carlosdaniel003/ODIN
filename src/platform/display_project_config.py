@@ -11,7 +11,7 @@ from src.platform.display_check_editor import DisplayCheckManagerWindow
 from src.platform.display_f3_window_geometry import fit_f3_toplevel
 from src.platform.display_f3_zoom import (
     aplicar_zoom_software_frame_display_f3,
-    calcular_viewport_efetivo_display_f3,
+    calcular_recorte_zoom_software_display_f3,
     normalizar_centro_zoom_software_display_f3,
 )
 from src.platform.display_mask_editor import DisplayMaskEditorWindow
@@ -86,7 +86,6 @@ class DisplayProjectConfigWindow:
         self.software_zoom_center_x_var = tk.DoubleVar(value=0.5)
         self.software_zoom_center_y_var = tk.DoubleVar(value=0.5)
         self._zoom_live_source_frame = None
-        self._zoom_live_overview_frame = None
         self._zoom_live_visual_rotation = 0
         self._zoom_source_photo = None
         self._zoom_final_photo = None
@@ -386,7 +385,7 @@ class DisplayProjectConfigWindow:
 
         tk.Label(
             zoom_box,
-            text="MAPA DA CÂMERA • ROTAÇÃO DO F3 • ARRASTE O QUADRO AZUL",
+            text="MAPA DA CÂMERA AO VIVO • ROTAÇÃO DO F3",
             font=("Segoe UI", 8, "bold"),
             fg=self.TEXT,
             bg="#0F1B2C",
@@ -394,10 +393,9 @@ class DisplayProjectConfigWindow:
         tk.Label(
             zoom_box,
             text=(
-                "A imagem abaixo usa a mesma rotação visual definida na tela "
-                "de desenvolvimento do ODIN. O quadro azul mostra exatamente "
-                "a área efetiva que o F3 usará. Arraste o quadro para "
-                "reposicionar o enquadramento."
+                "Mapa e recorte mostram o mesmo frame ao vivo, após zoom físico. "
+                "O quadro azul representa apenas o Zoom ODIN e pode ser arrastado "
+                "para reposicionar o recorte."
             ),
             font=("Segoe UI", 8),
             fg=self.MUTED,
@@ -825,35 +823,24 @@ class DisplayProjectConfigWindow:
         )
 
     def _effective_zoom_view(self, frame_shape=None):
-        camera_zoom, software_zoom, software_x, software_y = self._zoom_values()
-        camera_enabled = bool(self.camera_zoom_enabled_var.get())
-        camera_factor = camera_zoom / 100.0 if camera_enabled else 1.0
-        camera_x, camera_y = self._camera_center_values()
+        # O frame recebido já contém zoom físico; só a transformação ODIN
+        # resta para delimitar a área realmente exibida pela Produção F3.
+        _camera_zoom, software_zoom, cx, cy = self._zoom_values()
         if frame_shape is None:
-            frame = self._zoom_live_overview_frame
-            frame_shape = getattr(frame, "shape", None)
+            frame_shape = getattr(self._zoom_live_source_frame, "shape", None)
         if frame_shape is None:
-            return (
-                camera_factor * software_zoom,
-                0.5,
-                0.5,
-                None,
-            )
-        rect = calcular_viewport_efetivo_display_f3(
-            frame_shape,
-            camera_factor,
-            software_zoom,
-            camera_x,
-            camera_y,
-            software_x,
-            software_y,
+            return software_zoom, cx, cy, None
+        crop = calcular_recorte_zoom_software_display_f3(
+            frame_shape, software_zoom, cx, cy,
         )
-        return rect[6], rect[4], rect[5], rect[:4]
+        return software_zoom, crop[4], crop[5], crop[:4]
 
     def _update_zoom_labels(self) -> None:
         camera_zoom, software_zoom, _center_x, _center_y = self._zoom_values()
-        effective_zoom, effective_x, effective_y, _rect = (
-            self._effective_zoom_view()
+        crop_zoom, crop_x, crop_y, _rect = self._effective_zoom_view()
+        camera_factor = (
+            camera_zoom / 100.0
+            if bool(self.camera_zoom_enabled_var.get()) else 1.0
         )
         try:
             self.camera_zoom_value_label.configure(
@@ -864,10 +851,10 @@ class DisplayProjectConfigWindow:
             )
             self.zoom_center_label.configure(
                 text=(
-                    f"ÁREA F3 • VISUAL {self._zoom_visual_rotation()}° • "
-                    f"{effective_zoom:.2f}× • "
-                    f"centro X {effective_x * 100.0:.1f}% • "
-                    f"Y {effective_y * 100.0:.1f}%"
+                    f"F3 AO VIVO • VISUAL {self._zoom_visual_rotation()}° • "
+                    f"CÂMERA {camera_factor:.2f}× • RECORTE {crop_zoom:.2f}× • "
+                    f"centro X {crop_x * 100.0:.1f}% • "
+                    f"Y {crop_y * 100.0:.1f}%"
                 )
             )
         except Exception:
@@ -1085,7 +1072,7 @@ class DisplayProjectConfigWindow:
             return
 
         if frame is None:
-            frame = self._zoom_live_overview_frame
+            frame = self._zoom_live_source_frame
         if frame is None or getattr(frame, "size", 0) == 0:
             return
 
@@ -1189,47 +1176,17 @@ class DisplayProjectConfigWindow:
         self._update_zoom_viewport_overlay(frame)
 
     def update_live_zoom_preview(
-        self,
-        source_frame,
-        *,
-        overview_frame=None,
-        visual_rotation: int = 0,
+        self, source_frame, *, visual_rotation: int = 0,
     ) -> None:
         if not self.visible:
             return
-        source_canvas = getattr(self, "zoom_source_canvas", None)
-        final_canvas = getattr(self, "zoom_final_canvas", None)
-        if source_canvas is None or final_canvas is None:
+        if self.zoom_source_canvas is None or self.zoom_final_canvas is None:
             return
+        # Mesmo snapshot ao vivo nos dois canvases: sem fotografia 1x antiga.
         self._zoom_live_source_frame = source_frame
         self._zoom_live_visual_rotation = int(visual_rotation or 0)
-        if overview_frame is not None and getattr(overview_frame, "size", 0) > 0:
-            self._zoom_live_overview_frame = overview_frame
-        elif self._zoom_live_overview_frame is None:
-            self._zoom_live_overview_frame = source_frame
-        overview_frame = (
-            self._zoom_live_overview_frame
-            if self._zoom_live_overview_frame is not None
-            else source_frame
-        )
-        if self._zoom_drag_active:
-            self._update_zoom_viewport_overlay(overview_frame)
-        else:
-            self._draw_zoom_source_viewport(overview_frame)
-
-        _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
-        final_frame = aplicar_zoom_software_frame_display_f3(
-            source_frame,
-            software_zoom,
-            center_x,
-            center_y,
-        )
-        final_visual = self._zoom_visual_frame(final_frame)
-        self._render_bgr_zoom_canvas(
-            final_canvas,
-            final_visual,
-            "_zoom_final_photo",
-        )
+        self._draw_zoom_source_viewport(source_frame)
+        self._render_zoom_final_only()
         self._update_zoom_labels()
 
     def _rerender_zoom_preview(self) -> None:
@@ -1265,7 +1222,7 @@ class DisplayProjectConfigWindow:
         visual_x = min(1.0, max(0.0, visual_x))
         visual_y = min(1.0, max(0.0, visual_y))
 
-        frame = self._zoom_live_overview_frame
+        frame = self._zoom_live_source_frame
         if frame is None or getattr(frame, "size", 0) == 0:
             return visual_x, visual_y
         original_h, original_w = frame.shape[:2]
@@ -1298,11 +1255,10 @@ class DisplayProjectConfigWindow:
     def _render_zoom_final_only(self) -> None:
         frame = self._zoom_live_source_frame
         final_canvas = getattr(self, "zoom_final_canvas", None)
-        if (
-            final_canvas is None
-            or frame is None
-            or getattr(frame, "size", 0) == 0
-        ):
+        if final_canvas is None:
+            return
+        if frame is None or getattr(frame, "size", 0) == 0:
+            self._render_bgr_zoom_canvas(final_canvas, None, "_zoom_final_photo")
             return
 
         _camera_zoom, software_zoom, center_x, center_y = self._zoom_values()
@@ -2210,7 +2166,6 @@ class DisplayProjectConfigWindow:
                 pass
         self.mask_capture_window = None
         self._zoom_live_source_frame = None
-        self._zoom_live_overview_frame = None
         self._zoom_source_photo = None
         self._zoom_final_photo = None
         self._zoom_source_mapping = None
