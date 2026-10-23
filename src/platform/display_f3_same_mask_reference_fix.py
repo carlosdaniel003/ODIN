@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 import time
+from math import isfinite
 
 import cv2
 
@@ -134,6 +135,57 @@ def _low_light_from_real_pair(
         return False, float(interpolation)
 
     return True, float(interpolation)
+
+
+
+def _same_mask_core_emission_evidence(
+    current: LedFeatures,
+    on_references: list[LedFeatures],
+    off_references: list[LedFeatures],
+) -> dict:
+    """Referências REAIS da mesma máscara delimitam luz no núcleo do segmento.
+
+    Só produz ON/OFF quando todas as amostras físicas separam as faixas:
+    o ON mais fraco precisa superar o OFF mais claro. Intermediários ficam
+    inconclusivos. Não existe limiar novo nem transferência entre máscaras.
+    """
+    on = list(on_references or ())
+    off = list(off_references or ())
+    samples = [current, *on, *off]
+    if not on or not off or any(
+        int(getattr(sample, "inner_area_pixels", 0) or 0) <= 0
+        for sample in samples
+    ):
+        return {"state": "unavailable", "reason": "missing_same_mask_core_samples"}
+    try:
+        values = [float(sample.inner_v_mean) for sample in samples]
+    except (TypeError, ValueError, AttributeError):
+        return {"state": "unavailable", "reason": "invalid_core_emission"}
+    if not all(isfinite(value) and value >= 0.0 for value in values):
+        return {"state": "unavailable", "reason": "invalid_core_emission"}
+    current_core = values[0]
+    on_floor = min(values[1:1 + len(on)])
+    off_ceiling = max(values[1 + len(on):])
+    if on_floor <= off_ceiling:
+        return {
+            "state": "unavailable",
+            "reason": "on_off_core_ranges_overlap",
+        }
+    if current_core <= off_ceiling:
+        state = DISPLAY_CHECK_STATE_OFF
+    elif current_core >= on_floor:
+        state = DISPLAY_CHECK_STATE_ON
+    else:
+        state = "uncertain"
+    return {
+        "state": state,
+        "reason": "same_mask_physical_core_ranges",
+        "current_inner_v_mean": round(current_core, 4),
+        "off_reference_ceiling": round(off_ceiling, 4),
+        "on_reference_floor": round(on_floor, 4),
+        "reference_on_count": len(on),
+        "reference_off_count": len(off),
+    }
 
 
 def classificar_mascara_por_referencias_locais_f3(
@@ -865,6 +917,13 @@ class F3SameMaskReferenceAnalyzer:
                     reference_context.get("complete_local_pair")
                 ),
             )
+            core_emission = (
+                _same_mask_core_emission_evidence(
+                    features, on_references, off_references
+                )
+                if reference_context.get("complete_local_pair")
+                else {"state": "unavailable", "reason": "local_pair_incomplete"}
+            )
             if classified is None:
                 return self._not_ready(
                     "checks_sem_amostras_para_mascara",
@@ -921,6 +980,7 @@ class F3SameMaskReferenceAnalyzer:
                 "features": features.to_dict(),
                 "reference_source": reference_source,
                 "reference_separation": classified["reference_separation"],
+                "core_emission_evidence": core_emission,
                 "nearest_reference_indexes": nearest,
                 "reference_counts": classified["reference_counts"],
                 "low_light_interpolation": classified.get(

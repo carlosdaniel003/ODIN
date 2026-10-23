@@ -5761,3 +5761,38 @@ de energia unificada já lê esse campo quando o tracking prepara o frame, sem
 introduzir outro worker, cache, política ou classificador. O visor da câmera
 continua latest-frame-wins. Gate OFF real, rearme, presença, persistência NG,
 ON/OFF híbrido e tracking OFF permanecem inalterados.
+
+## D-082 — Verificação de emissão no núcleo da mesma máscara no tracking F3
+
+**Estado:** Implementada no código; validação automatizada pendente; reteste
+físico obrigatório antes de liberação irrestrita de produção.
+
+O H1 com tracking ON às vezes trava 29/30 por conflito: `MASK_021`
+OFF pela CNN (0,722676) e ON por distância multifeature física (0,608).
+O retrato H1 separado mostrou 30/30, e o contexto é LOCK estável e energia
+confirmada. Um halo ou pequena variação de posição pode induzir distância
+multifeature a ON sem que o **núcleo** da máscara emita luz.
+
+O proprietário de aprendizado físico same-mask publica, além do classificador
+existente, uma prova conservadora de emissão `inner_v_mean` do centro da
+mesma MASK_ID. Ela só produz ON/OFF se as faixas de referências reais dessa
+mesma máscara não se sobrepõem (mínimo ON estritamente maior que máximo OFF).
+Observação dentro da faixa OFF = OFF; dentro da faixa ON = ON; intervalo
+intermediário/sem par local separável = inconclusivo. Nenhum threshold novo,
+nenhuma referência de outra máscara e nenhum peso ONNX alterados.
+
+**Somente ao receber geometria móvel válida (tracking ON)**, o híbrido usa a
+prova como controle de qualidade da fonte física: se o ON/OFF físico forte
+discordar do núcleo calibrado, deixa de ser considerado fonte autoritativa.
+A CNN só decide quando concorda com o núcleo: se não concordar, fica INCERTO.
+Uma divergência certa OFF em CHECK esperado ON continua NG; um ON inesperado
+continua NG. POUCA LUZ e referências com faixas sobrepostas não usam a
+reconciliação. Tracking OFF preserva a fusão D-065 anterior.
+
+Não é atalho de 29/30: todos os 30 segmentos continuam obrigatórios para OK.
+Preserva motivo, evidência física, probabilidade neural e auditoria de emissão
+nos resultados por máscara. Sem loops/workers/caches adicionais.
+
+Validar fisicamente: H1 correto com deslocamentos diferentes, BLUE NG
+MASK_024 apagado, ON indevido, pouca luz e variação de reflexos antes de
+considerar a decisão confiável.

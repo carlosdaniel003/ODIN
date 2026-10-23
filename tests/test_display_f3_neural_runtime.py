@@ -1028,6 +1028,113 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertTrue(result["approved"])
             self.assertEqual(0, result["uncertain_mask_count"])
 
+    def test_tracking_core_emission_resolves_false_physical_on_as_h1_off(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            # A primeira máscara H1 é ON e a segunda é OFF.
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["on", "off"])
+            )
+            physical = _physical_analysis(["on", "on"])
+            physical["mask_results"][1]["core_emission_evidence"] = {
+                "state": "off",
+                "reason": "same_mask_physical_core_ranges",
+                "current_inner_v_mean": 14.0,
+                "off_reference_ceiling": 20.0,
+                "on_reference_floor": 180.0,
+            }
+            with patch.object(
+                F3SameMaskReferenceAnalyzer,
+                "analyze",
+                return_value=physical,
+            ):
+                result = analyzer.analyze(
+                    _frame(), "DISPLAY A", h1["id"],
+                    mask_geometry_override=[
+                        {"id": "MASK_001", "type": "circle", "cx": 42, "cy": 48, "radius": 9},
+                        {"id": "MASK_002", "type": "circle", "cx": 118, "cy": 48, "radius": 9},
+                    ],
+                    mask_geometry_resolution=(160, 96),
+                )
+            mask = result["mask_results"][1]
+            self.assertTrue(result["approved"])
+            self.assertEqual("off", mask["classified"])
+            self.assertTrue(mask["matched"])
+            self.assertTrue(mask["physical_disagreed_with_core"])
+            self.assertEqual(
+                "neural_confirmed_by_same_mask_core",
+                mask["hybrid_resolution"],
+            )
+
+    def test_tracking_core_emission_preserves_ng_for_real_off_segment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, _h1, blue = _repository(Path(temp))
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["off", "on"])
+            )
+            physical = _physical_analysis(["on", "on"])
+            physical["mask_results"][0]["core_emission_evidence"] = {
+                "state": "off",
+                "off_reference_ceiling": 18.0,
+                "on_reference_floor": 190.0,
+            }
+            with patch.object(
+                F3SameMaskReferenceAnalyzer, "analyze",
+                return_value=physical,
+            ):
+                result = analyzer.analyze(
+                    _frame(), "DISPLAY A", blue["id"],
+                    mask_geometry_override=[
+                        {"id": "MASK_001", "type": "circle", "cx": 42, "cy": 48, "radius": 9},
+                        {"id": "MASK_002", "type": "circle", "cx": 118, "cy": 48, "radius": 9},
+                    ],
+                    mask_geometry_resolution=(160, 96),
+                )
+            self.assertFalse(result["approved"])
+            self.assertTrue(result["mask_results"][0]["semantic_certain"])
+            self.assertEqual("off", result["mask_results"][0]["classified"])
+            self.assertFalse(result["mask_results"][0]["matched"])
+
+    def test_tracking_core_emission_does_not_approve_when_neural_disagrees(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["on", "on"])
+            )
+            physical = _physical_analysis(["on", "on"])
+            physical["mask_results"][1]["core_emission_evidence"] = {
+                "state": "off",
+                "off_reference_ceiling": 18.0,
+                "on_reference_floor": 190.0,
+            }
+            with patch.object(
+                F3SameMaskReferenceAnalyzer, "analyze",
+                return_value=physical,
+            ):
+                result = analyzer.analyze(
+                    _frame(), "DISPLAY A", h1["id"],
+                    mask_geometry_override=[
+                        {"id": "MASK_001", "type": "circle", "cx": 42, "cy": 48, "radius": 9},
+                        {"id": "MASK_002", "type": "circle", "cx": 118, "cy": 48, "radius": 9},
+                    ],
+                    mask_geometry_resolution=(160, 96),
+                )
+            self.assertFalse(result["approved"])
+            self.assertEqual("uncertain", result["mask_results"][1]["classified"])
+            self.assertFalse(result["mask_results"][1]["semantic_certain"])
+
     def test_strong_neural_physical_conflict_becomes_uncertain_not_ok_or_ng(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, h1, _blue = _repository(Path(temp))

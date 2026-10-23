@@ -82,6 +82,52 @@ def _project_with_two_masks(root: Path):
 
 
 class DisplayF3SameMaskReferenceFixTests(unittest.TestCase):
+    def test_core_emission_rejects_halo_on_when_inner_matches_off(self):
+        from src.platform.display_f3_same_mask_reference_fix import (
+            _same_mask_core_emission_evidence,
+        )
+
+        def physical(value):
+            features = _features(value)
+            features.inner_v_mean = float(value)
+            return features
+
+        evidence = _same_mask_core_emission_evidence(
+            physical(15),
+            [physical(185), physical(240)],
+            [physical(12), physical(18)],
+        )
+        self.assertEqual("off", evidence["state"])
+        self.assertEqual(18.0, evidence["off_reference_ceiling"])
+        self.assertEqual(185.0, evidence["on_reference_floor"])
+
+    def test_core_emission_preserves_real_on_and_ambiguous_light(self):
+        from src.platform.display_f3_same_mask_reference_fix import (
+            _same_mask_core_emission_evidence,
+        )
+        def physical(value):
+            features = _features(value)
+            features.inner_v_mean = float(value)
+            return features
+
+        on = [physical(180), physical(245)]
+        off = [physical(13), physical(21)]
+        self.assertEqual(
+            "on",
+            _same_mask_core_emission_evidence(physical(222), on, off)["state"],
+        )
+        self.assertEqual(
+            "uncertain",
+            _same_mask_core_emission_evidence(physical(80), on, off)["state"],
+        )
+        # Referências de luz sobrepostas: nenhuma terceira autoridade.
+        self.assertEqual(
+            "unavailable",
+            _same_mask_core_emission_evidence(
+                physical(20), [physical(18)], [physical(21)]
+            )["state"],
+        )
+
     def test_reflexo_legitimo_off_uses_same_physical_mask(self):
         result = classificar_mascara_por_referencias_locais_f3(
             current=_features(121),

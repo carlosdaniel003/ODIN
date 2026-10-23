@@ -7367,3 +7367,21 @@ tracking ON, verificando MASK_021 em fases consecutivas e comparação com
 tracking OFF sob a mesma posição/iluminação. Validar também H1 com falso ON
 real na máscara 021 para não criar aprovação indevida. A etapa H1 deve ser
 corrigida e validada antes de nova alteração na lógica BLUE.
+
+## 23/10/2026 — D-082: prova empírica de emissão same-mask contra falso ON por halo
+
+**Cenário:** H1, CM_500_L, tracking ON, geometria alinhada, 29/30
+(`MASK_021` INCERTA). CNN OFF 0,722676; físico same-mask ON 0,608,
+`strong_source_conflict`. Diagnóstico congelado posterior mostrou
+gabarito H1 30/30, mas era outro frame.
+
+**Correção de engenharia:** preserva a autoridade híbrida e calcula a faixa
+de brilho `inner_v_mean` observada nas fotos físicas ON/OFF da mesma
+máscara. Apenas com separação empírica real entre os estados, uma fonte
+física multifeature ON/OFF contrária ao núcleo perde autoridade na fusão
+com tracking ON. CNN só decide quando concorda com a emissão física.
+Essa reconciliação não depende do ID 021, não altera limiares globais,
+não promove foto exata a autoridade e mantém NG por OFF realmente físico.
+
+**Estado:** alteração de software; sem validação no JIG. Repetir H1 correto
+com múltiplas placas e BLUE NG segmentado para provar precisão/sensibilidade.

@@ -2733,3 +2733,14 @@ Resultado: FAIL físico / PENDENTE DE RETESTE; ainda não existe solução
 validada. Não promover 29/30 a OK, nem atribuir autoridade a gabarito exato.
 Próximo passo: avaliar evidência e amostras same-mask da 021 em capturas
 consecutivas com tracking ON/OFF antes de alteração semântica.
+
+## 23/10/2026 — D-082: H1 29/30, fonte física ON sem emissão no núcleo
+
+Modo: tracking ON. Revisado conflito MASK_021 neural OFF vs físico ON.
+Implementada aferição empírica core same-mask (`inner_v_mean`),
+disponível ao híbrido quando geometria móvel está ativa. Só faixas ON/OFF
+reais não sobrepostas têm poder de desautorizar o classificador físico;
+a CNN precisa concordar com a faixa óptica ou continua INCERTO.
+Nenhum algoritmo de reconhecimento de imagem inteira nem threshold novo.
+Tracking OFF permanece intacto. Pendente de reteste físico com H1 OK,
+BLUE NG MASK_024, segmento ON indevido e baixa emissão.

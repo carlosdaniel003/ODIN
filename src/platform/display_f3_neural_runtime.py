@@ -1230,7 +1230,9 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             physical_confidence = 0.0
             physical_reference_source = ""
             physical_reference_separation = None
+            physical_core_emission = {}
             physical_local_authoritative = False
+            physical_disagreed_with_core = False
             if isinstance(physical, dict):
                 physical_state = str(
                     physical.get("classified") or ""
@@ -1248,6 +1250,11 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 physical_reference_separation = (
                     physical.get("reference_separation")
                 )
+                physical_core_emission = (
+                    physical.get("core_emission_evidence") or {}
+                )
+                if not isinstance(physical_core_emission, dict):
+                    physical_core_emission = {}
                 physical_local_authoritative = bool(
                     physical_reference_source
                     == F3_SAME_MASK_REFERENCE_SOURCE
@@ -1260,6 +1267,25 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                         "low_light",
                     )
                 )
+                # Com ROIs móveis, variação de poucos pixels e halo de vizinhos
+                # podem gerar ON aparente na distância multifeature, apesar de
+                # o núcleo não emitir luz. Só desautoriza esse falso positivo
+                # quando a PRÓPRIA MASK_ID possui faixas ON/OFF não sobrepostas
+                # e a observação cai dentro de uma das faixas físicas.
+                calibrated_core = str(
+                    physical_core_emission.get("state") or ""
+                )
+                physical_disagreed_with_core = bool(
+                    use_geometry_override
+                    and physical_local_authoritative
+                    and calibrated_core in (
+                        DISPLAY_CHECK_STATE_ON,
+                        DISPLAY_CHECK_STATE_OFF,
+                    )
+                    and physical_state != calibrated_core
+                )
+                if physical_disagreed_with_core:
+                    physical_local_authoritative = False
 
             final_state = neural_state
             semantic_certain = bool(neural_certain)
@@ -1267,6 +1293,23 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             final_confidence = neural_confidence
 
             if (
+                physical_disagreed_with_core
+                and (
+                    not neural_certain
+                    or neural_state
+                    != str(physical_core_emission.get("state") or "")
+                )
+            ):
+                # Também não aceitar OK se a própria CNN concordar com o
+                # estado físico inconsistente com a emissão calibrada.
+                final_state = F3_NEURAL_UNCERTAIN_STATE
+                semantic_certain = False
+                hybrid_resolution = "neural_core_emission_conflict"
+            elif physical_disagreed_with_core:
+                final_state = neural_state
+                semantic_certain = True
+                hybrid_resolution = "neural_confirmed_by_same_mask_core"
+            elif (
                 physical_local_authoritative
                 and physical_state == "low_light"
             ):
@@ -1360,6 +1403,10 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 ),
                 "physical_reference_separation": (
                     physical_reference_separation
+                ),
+                "physical_core_emission": deepcopy(physical_core_emission),
+                "physical_disagreed_with_core": bool(
+                    physical_disagreed_with_core
                 ),
                 "physical_distances": deepcopy(
                     physical.get("distances") or {}
