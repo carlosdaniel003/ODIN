@@ -7253,3 +7253,38 @@ alinhamento no BLUE/USB/FM/AUX, NG verdadeiro e remoção/EMPTY entre placas.
 **Revisão de integração:** o gate existente que rejeita lock sem prova atual
 passou a permitir exclusivamente a geometria intraplaca H1 quando CHECK atual,
 H1 concluído e geometria ativa coincidem. Não dispensa gate físico de energia.
+
+## 23/10/2026 — FAIL físico: mapa/recorte de zoom divergiam da câmera F3
+
+**Cenário:** Configurações Projeto Display, mapa e recorte F3, rotação
+visual 180°, zoom físico e Zoom ODIN ajustados pelo operador.
+
+**Resultado relatado:** FAIL. O mapa mantinha imagem anterior, sem corresponder
+ao recorte atualizado, e arrastar o quadro azul/alterar zoom podia não refletir
+a imagem operacional ao vivo. Evidência: screenshots do operador, incluindo
+mapa com filtro escuro e recorte exibindo FM aceso.
+
+**Causa encontrada:** a configuração guardava _display_f3_camera_overview_frame
+como fotografia anterior ao zoom físico; o recorte usava frame corrente.
+O quadro era calculado combinando zoom físico e Zoom ODIN sobre a fotografia
+antiga, porém a produção usa o frame já zoomado pelo hardware e recorta
+somente a parte de software.
+
+**Alteração aplicada:** ambos os canvases recebem o mesmo RAW atual do
+F3RuntimeCoordinator; o retângulo usa calcular_recorte_zoom_software_display_f3,
+a mesma geometria aplicada no caminho de produção. O cache 1x antigo foi
+removido. O mapa permanece ao vivo durante o arraste. Zoom ODIN acima de 1x
+move somente o recorte software; em Zoom ODIN 1x com hardware ativo, o arraste
+atualiza centro PAN/TILT e acompanha a resposta real da câmera. Os painéis
+preservam a mesma rotação visual. Sem mudanças em decisão OK/NG, tracking,
+máscaras ou F2.
+
+**Validação:** testes unitários adicionados para coerência do snapshot e
+arraste físico sem modificar o zoom software; incluídos no workflow de
+isolamento do F3. **Reteste físico pendente.**
+
+**Próximo reteste:** câmera em zoom 1,30x com ODIN 1x, verificar que mapa e
+recorte são a mesma imagem ao vivo; arrastar e observar PAN/TILT. Com Zoom
+ODIN 2x, mover quadro azul e conferir que o recorte e a câmera operacional
+do F3 mostram a mesma região, inclusive FM, na rotação visual 180°.
+Verificar suporte efetivo a PAN/TILT do driver.
