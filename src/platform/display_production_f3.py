@@ -63,7 +63,6 @@ class DisplayProductionF3Mixin:
         self._display_f3_software_zoom_cache_key = None
         self._display_f3_software_zoom_cache_frame = None
         self._display_f3_camera_zoom_signature = None
-        self._display_f3_camera_overview_frame = None
         self._display_f3_zoom_project_name = ""
         self._display_f3_zoom_runtime_config = normalizar_zoom_projeto_display(None)
         super().__init__(*args, **kwargs)
@@ -381,13 +380,6 @@ class DisplayProductionF3Mixin:
             current = {}
         current = dict(current or {})
         if enabled and camera_factor > 1.0001:
-            if self._display_f3_camera_overview_frame is None:
-                frame = getattr(self, "camera_frame_atual", None)
-                if frame is not None and getattr(frame, "size", 0) > 0:
-                    try:
-                        self._display_f3_camera_overview_frame = frame.copy()
-                    except Exception:
-                        self._display_f3_camera_overview_frame = frame
             current["zoom_enabled"] = True
             current["zoom"] = value
             current["pan_enabled"] = True
@@ -407,7 +399,6 @@ class DisplayProductionF3Mixin:
             current["pan_enabled"] = False
             current["tilt_enabled"] = False
             keys = ["zoom_enabled", "pan_enabled", "tilt_enabled"]
-            self._display_f3_camera_overview_frame = None
         try:
             updater(current, keys)
         except Exception:
@@ -482,7 +473,6 @@ class DisplayProductionF3Mixin:
             )
         except Exception:
             pass
-        self._display_f3_camera_overview_frame = None
 
     def _ao_fechar_configuracao_projeto_display(self) -> None:
         self._display_project_config_window = None
@@ -1485,34 +1475,15 @@ class DisplayProductionF3Mixin:
         if configuracao is not None:
             try:
                 if configuracao.visible:
+                    # O coordinator expõe o RAW da mesma iteração; o zoom ODIN
+                    # não deve ser reaplicado à amostra da configuração.
                     source_frame = getattr(
-                        self,
-                        "_display_f3_runtime_raw_frame",
-                        None,
+                        self, "_display_f3_runtime_raw_frame", None,
                     )
                     if source_frame is None:
                         source_frame = frame
-
-                    signature = self._display_f3_camera_zoom_signature
-                    hardware_zoom_active = bool(
-                        signature
-                        and bool(signature[0])
-                        and float(signature[1]) > 100.0001
-                    )
-                    if not hardware_zoom_active:
-                        try:
-                            self._display_f3_camera_overview_frame = source_frame.copy()
-                        except Exception:
-                            self._display_f3_camera_overview_frame = source_frame
-
-                    overview_frame = (
-                        self._display_f3_camera_overview_frame
-                        if self._display_f3_camera_overview_frame is not None
-                        else source_frame
-                    )
                     configuracao.update_live_zoom_preview(
                         source_frame,
-                        overview_frame=overview_frame,
                         visual_rotation=visual_rotation,
                     )
             except Exception:
