@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from types import MethodType, SimpleNamespace
 
 import numpy as np
 
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
+from src.platform.display_project_config import DisplayProjectConfigWindow
 from src.platform.display_f3_zoom import (
     aplicar_zoom_software_frame_display_f3,
     calcular_recorte_zoom_software_display_f3,
@@ -173,6 +175,87 @@ class DisplayF3ZoomTests(unittest.TestCase):
         self.assertAlmostEqual(0.1, center_x, places=3)
         self.assertAlmostEqual(0.9, center_y, places=3)
 
+
+
+    def test_configuracao_mapa_e_recorte_usam_o_mesmo_frame_live(self):
+        maps, crops = [], []
+        window = SimpleNamespace(
+            visible=True,
+            zoom_source_canvas=object(),
+            zoom_final_canvas=object(),
+            _zoom_live_source_frame=None,
+            _zoom_values=lambda: (130.0, 2.0, 0.25, 0.5),
+            _zoom_visual_frame=lambda frame: frame,
+            _draw_zoom_source_viewport=lambda frame: maps.append(frame.copy()),
+            _render_bgr_zoom_canvas=lambda _canvas, frame, _photo: crops.append(frame.copy()),
+            _update_zoom_labels=lambda: None,
+        )
+        window._render_zoom_final_only = MethodType(
+            DisplayProjectConfigWindow._render_zoom_final_only, window,
+        )
+        first = np.full((60, 120, 3), 40, dtype=np.uint8)
+        second = np.full((60, 120, 3), 220, dtype=np.uint8)
+        DisplayProjectConfigWindow.update_live_zoom_preview(window, first)
+        DisplayProjectConfigWindow.update_live_zoom_preview(window, second)
+
+        self.assertEqual(2, len(maps))
+        self.assertEqual(2, len(crops))
+        self.assertEqual(40, int(maps[0].mean()))
+        self.assertEqual(220, int(maps[1].mean()))
+        self.assertEqual(40, int(crops[0].mean()))
+        self.assertEqual(220, int(crops[1].mean()))
+        self.assertIs(window._zoom_live_source_frame, second)
+
+        # A câmera já enviou o frame com hardware zoom: o quadro azul
+        # delimita apenas o software zoom na mesma imagem corrente.
+        zoom, cx, cy, rectangle = DisplayProjectConfigWindow._effective_zoom_view(
+            window, second.shape,
+        )
+        self.assertEqual(2.0, zoom)
+        self.assertEqual((0, 15, 60, 45), rectangle)
+        self.assertAlmostEqual(0.25, cx)
+        self.assertAlmostEqual(0.5, cy)
+
+    def test_arraste_zoom_fisico_move_camera_sem_modificar_zoom_odin(self):
+        class Var:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+            def set(self, value):
+                self.value = value
+
+        calls = []
+        camera_x, camera_y = Var(0.5), Var(0.5)
+        software_x, software_y = Var(0.5), Var(0.5)
+        software_zoom = Var(1.0)
+        window = SimpleNamespace(
+            _zoom_drag_active=True,
+            _zoom_drag_hardware_origin=(0.5, 0.5, 0.5, 0.5, 2.0),
+            _zoom_pointer_normalized=lambda event: (event.x, event.y),
+            _zoom_values=lambda: (200.0, software_zoom.get(), 0.5, 0.5),
+            software_zoom_var=software_zoom,
+            software_zoom_center_x_var=software_x,
+            software_zoom_center_y_var=software_y,
+            camera_zoom_center_x_var=camera_x,
+            camera_zoom_center_y_var=camera_y,
+            _publish_hardware_zoom_preview=lambda: calls.append("hardware"),
+            _publish_software_zoom_preview=lambda: calls.append("software"),
+            _update_zoom_labels=lambda: None,
+            _update_zoom_viewport_overlay=lambda: None,
+            _render_zoom_final_only=lambda: None,
+        )
+        DisplayProjectConfigWindow._on_zoom_viewport_drag(
+            window, SimpleNamespace(x=0.7, y=0.4),
+        )
+        self.assertAlmostEqual(0.6, camera_x.get())
+        self.assertAlmostEqual(0.45, camera_y.get())
+        self.assertEqual(1.0, software_zoom.get())
+        self.assertEqual(0.5, software_x.get())
+        self.assertEqual(0.5, software_y.get())
+        self.assertEqual(["hardware"], calls)
 
 if __name__ == "__main__":
     unittest.main()
