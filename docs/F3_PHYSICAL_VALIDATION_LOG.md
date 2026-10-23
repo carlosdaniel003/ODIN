@@ -7413,3 +7413,8 @@ quando físico e emissão local fornecem ON forte e coerente.
 somente contra CNN fraca; preserva discordância forte, NG e tracking OFF.
 **Estado:** código pendente de reteste em JIG; repetir H1 OK, BLUE NG
 com MASK_024 apagada e ON indevido. Sem declarar PASS físico antecipado.
+
+**CI de D-083:** `Display F3 neural dataset tests` 77/77 PASS
+(run 39964478950), com testes para ON real/NG e conflito forte.
+Isolamento F3 permanece 7 FAIL + 1 ERROR do baseline
+(run 39964479008). **JIG: PENDENTE DE RETESTE.**

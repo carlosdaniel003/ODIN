@@ -5805,7 +5805,7 @@ isolamento F3 ainda apresenta 7 FAIL + 1 ERROR históricos, iguais ao baseline.
 
 ## D-083 — Calibração de intensidade resolve CNN fraca em conflito, sem maioria
 
-**Status:** implementação submetida, testes automatizados e reteste industrial pendentes.
+**Status:** implementação submetida; CI neural 77/77 PASS; reteste industrial pendente.
 
 Novo reteste F3 rastreamento ON (23/10/2026, 09:43 -04:00) documentou H1
 29/30, mas agora devido a `MASK_020` (esperado ON). O mesmo snapshot
@@ -5834,3 +5834,10 @@ D-065/D-082. A regra só depende do estado observado, nunca do
 quando o estado é provado. Tracking OFF, F2, energy gate, CHECKs, CNN ONNX
 e captura não foram alterados. Reteste com H1 bom, BLUE NG MASK_024, ON
 indevido e reflexos físicos é obrigatório antes de declarar liberado.
+
+**Validação D-083 (23/10/2026):** workflow `Display F3 neural dataset tests`
+run 39964478950 aprovado (77/77), inclusive H1 correto `MASK_020`
+análoga, ON indevido → NG, conflito neural realmente forte → INCERTO e
+referência fotométrica ausente → INCERTO. Suíte de isolamento F3
+run 39964479008 mantém os 7 FAIL + 1 ERROR históricos sem novos erros.
+Nenhum teste automatizado substitui reteste da câmera física.

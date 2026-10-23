@@ -2760,3 +2760,7 @@ CNN fraca de desacordo realmente forte e priorizar físico same-mask
 corroborado pelo núcleo, apenas com tracking ON. Não usar estado esperado
 para arbitragem; NG real permanece. Nenhuma fonte nova ou loop.
 **Estado:** reteste físico ainda pendente.
+
+**Validação automática de D-083:** 77/77 testes neurais PASS (run 39964478950).
+Suíte F3 ampla com 7 falhas e 1 erro preexistentes (run 39964479008).
+Reteste real de H1 com rastreamento ON e BLUE NG MASK_024 continua pendente.
