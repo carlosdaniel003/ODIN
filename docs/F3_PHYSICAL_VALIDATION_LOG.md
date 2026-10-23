@@ -7326,3 +7326,44 @@ para NG; será necessária estabilidade de MASK_024 em fases ON qualificadas.
 
 **Estado:** CORREÇÃO PUBLICADA / RETESTE FÍSICO PENDENTE. Retestar BLUE NG
 MASK_024 e BLUE OK, com múltiplas fases ON e divergência persistente.
+
+## 23/10/2026 — Reteste D-081: H1 29/30 preso por conflito híbrido MASK_021
+
+**Modo:** Rastreamento Automático ON. **Cenário:** placa com H1 visualmente
+correto, contorno e máscaras alinhados; projeto CM_500_L, 30 máscaras,
+1920×1080, rotação visual 180°, CHECK_001 (não intermitente).
+**Resultado do teste físico:** FAIL do avanço H1 / PENDENTE DE RETESTE.
+Tela permaneceu AGUARDANDO H1 com 29/30 conformes, 7 ON, 22 OFF,
+1 INCERTO; placa presente, energia confirmada e LOCK estável.
+
+**Evidência do DEBUG capturado em 23/10/2026, 08:37:28 -04:00:**
+- Gate produtivo LIBERADO, `allow_auto=true`; `policy_decision=searching`,
+  `policy_reason=classificacao_hibrida_incerta`, não houve tentativa de registro.
+- `MASK_021`: H1 espera OFF; `classified=uncertain`,
+  `hybrid_resolution=strong_source_conflict`. CNN: OFF,
+  `neural_certain=true`, P(OFF)=0,722676. Evidência física local
+  `f3_check_photos_same_mask`: ON, confiança 0,608,
+  separação 0,2204; distâncias ON 120,6822 / OFF 188,9082.
+- Demais 29 máscaras conformes. A análise manual sobre o frame 613
+  encontrou gabarito exato H1 30/30 e similaridade de foto H1 0,9531,
+  mas esse diagnóstico não tem autoridade para sobrescrever D-065.
+- A câmera reportava ~15,65 FPS; o snapshot produtivo auditado era o frame
+  577 e a captura de diagnóstico posterior era o frame 613. Não é prova de
+  latência por debounce, pois o julgamento sequer entrou em estado OK.
+- Registro anterior H1 PASS continua válido para a execução anterior;
+  este FAIL evidencia variabilidade entre capturas/placas com tracking ON.
+
+**Diagnóstico:** conflito real entre os dois classificadores da mesma ROI,
+não falha da autoridade de energia corrigida em D-081. Não há evidência
+suficiente para presumir erro exclusivo da CNN ou do físico: inspecionar
+amostras ON/OFF locais e eventual halo/reflexo/deslocamento na máscara 021
+em snapshots sucessivos.
+
+**Alteração aplicada nesta ocorrência:** nenhuma regra produtiva foi mudada;
+somente registro da evidência. Mantido fail-closed D-065 (sem exceção por ID,
+redução arbitrária de threshold ou aprovação por 29/30).
+**Próximo reteste:** H1 comprovadamente correto em nova captura com
+tracking ON, verificando MASK_021 em fases consecutivas e comparação com
+tracking OFF sob a mesma posição/iluminação. Validar também H1 com falso ON
+real na máscara 021 para não criar aprovação indevida. A etapa H1 deve ser
+corrigida e validada antes de nova alteração na lógica BLUE.

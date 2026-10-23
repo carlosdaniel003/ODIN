@@ -2716,3 +2716,20 @@ que o gate energético usa ainda apontava para o RAW latest-frame. Corrigido
 esse emparelhamento durante o consumo de `ready_semantic`; após a análise,
 a autoridade volta ao RAW live. Não força NG, não reaproveita semântica de
 frames stale fora da janela já existente. Exigir reteste real BLUE NG e OK.
+
+## 23/10/2026 — H1 tracking ON: 29/30 por MASK_021 com conflito semântico
+
+Modo: tracking ON.
+Cenário: CM_500_L, H1 nominal, contorno/máscaras alinhados e energia ON.
+Sintoma/evidência: H1 AGUARDANDO; 29 conformes, uma incerta
+(`MASK_021`, esperado OFF). Snapshot híbrido: CNN OFF 0,722676
+versus físico same-mask ON 0,608, `strong_source_conflict`.
+Gate produtivo liberado; policy `SEARCHING/classificacao_hibrida_incerta`.
+Gabarito exato H1 30/30 no frame diagnóstico distinto, sem autoridade.
+Hipótese: variabilidade geométrica/halo ou referência física local
+discrepante para a máscara 021; não se demonstrou falha de scheduler.
+Tentativa: inspeção da política D-065, sem alterar algoritmo nem thresholds.
+Resultado: FAIL físico / PENDENTE DE RETESTE; ainda não existe solução
+validada. Não promover 29/30 a OK, nem atribuir autoridade a gabarito exato.
+Próximo passo: avaliar evidência e amostras same-mask da 021 em capturas
+consecutivas com tracking ON/OFF antes de alteração semântica.
