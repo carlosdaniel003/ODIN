@@ -5802,3 +5802,35 @@ branch `display-tracking-on` e testes do classificador same-mask incluídos.
 Teste de conflito H1, core ON/OFF real, NG por segmento apagado e NG por ON
 indevido cobrem o contrato sem alterar política de CHECK. O conjunto legado de
 isolamento F3 ainda apresenta 7 FAIL + 1 ERROR históricos, iguais ao baseline.
+
+## D-083 — Calibração de intensidade resolve CNN fraca em conflito, sem maioria
+
+**Status:** implementação submetida, testes automatizados e reteste industrial pendentes.
+
+Novo reteste F3 rastreamento ON (23/10/2026, 09:43 -04:00) documentou H1
+29/30, mas agora devido a `MASK_020` (esperado ON). O mesmo snapshot
+produtivo possuía fonte física same-mask ON 0,9883, separação 0,9965,
+núcleo luminoso 251,0306 contra referências OFF ≤0 e ON ≥106,2529;
+CNN declarou OFF com P(OFF)=0,606771 e `neural_certain=true`, porque o
+limite OFF calibrado pode aceitar confiança menor. Esta não é divergência
+de máscara deslocada, energia ou tempo de debounce.
+
+A autoridade canônica `F3HybridCheckAnalyzer` conserva D-065 para
+discordâncias fortes. Apenas com geometria móvel válida, compara evidência
+na MESMA `MASK_ID`: físico same-mask autoritativo, núcleo fotométrico
+ON/OFF calibrado com referências locais de ambos os estados e
+`physical_state == core_state`, `physical_confidence` não inferior ao
+limiar ON de confiança forte **já configurado no modelo**, e confiança
+oposta da CNN *abaixo* desse limiar. Nessa condição, a fonte física já
+reconhecida domina a CNN fraca. `neural_certain` e `neural_confidence`
+originais continuam auditáveis; `semantic_certain` e o estado final vêm
+da mesma autoridade híbrida. Nenhum novo threshold global, CHECK específico,
+máscara hardcoded ou consenso majoritário.
+
+Quando a CNN também tem evidência forte, quando faltam referências
+ON/OFF ou quando o núcleo discorda da física, mantém `INCERTO` conforme
+D-065/D-082. A regra só depende do estado observado, nunca do
+`expected`, logo tanto ON indevido quanto OFF indevido continuam NG
+quando o estado é provado. Tracking OFF, F2, energy gate, CHECKs, CNN ONNX
+e captura não foram alterados. Reteste com H1 bom, BLUE NG MASK_024, ON
+indevido e reflexos físicos é obrigatório antes de declarar liberado.

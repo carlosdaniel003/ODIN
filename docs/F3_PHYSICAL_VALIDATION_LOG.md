@@ -7390,3 +7390,26 @@ com múltiplas placas e BLUE NG segmentado para provar precisão/sensibilidade.
 execução com 72 testes; caso de NG por ON indevido também adicionado em suíte
 focada. A execução ampla de isolamento mantém as 7 falhas/1 erro históricas.
 Reteste da câmera física continua PENDENTE e não pode ser substituído pela CI.
+
+## 23/10/2026 09:43 -04:00 — Reteste D-082 H1 FAIL por MASK_020 / D-083
+
+**Modo** tracking ON, CM_500_L, H1 de ~3 segundos; placa presente, energia
+confirmada e gate liberado. **FAIL:** H1 29/30 e permaneceu AGUARDANDO.
+Worker produtivo frame 3349 vs captura diagnóstica frame 3380; ambos
+indicaram CHECK H1, mas não são o mesmo frame.
+
+**Máscara pendente:** MASK_020, esperado ON, híbrido INCERTO com
+`strong_source_conflict`. CNN OFF 0,606771 `certain=true`;
+físico same-mask ON 0,9883, separação 0,9965; prova núcleo ON
+(`inner_v_mean=251,0306`, OFF máximo 0, ON mínimo 106,2529).
+`MASK_021` agora passou OFF pelo consenso CNN + físico + núcleo.
+O diagnóstico exato do frame 3380 encontrou H1 30/30 (score 0,9534),
+mas não participa do OK/NG. Nenhuma evidência de debounce ou gate impedido.
+
+**Causa comprovada:** limite calibrado OFF permite CNN marcada certa
+mesmo com evidência de apenas 60,68%; fusão anterior bloqueia mesmo
+quando físico e emissão local fornecem ON forte e coerente.
+**Alteração:** D-083 no proprietário híbrido, desempate conservador
+somente contra CNN fraca; preserva discordância forte, NG e tracking OFF.
+**Estado:** código pendente de reteste em JIG; repetir H1 OK, BLUE NG
+com MASK_024 apagada e ON indevido. Sem declarar PASS físico antecipado.

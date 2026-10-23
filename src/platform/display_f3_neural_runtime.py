@@ -1209,6 +1209,13 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             and str(item.get("mask_id") or "")
         }
 
+        # A calibração ON do próprio modelo define o piso de evidência
+        # neural forte. O limite OFF pode ser muito permissivo (ex.: OFF
+        # rotulado "certo" com apenas 60,7%). Não inventar outro threshold
+        # fixo de H1, nem modificar o modelo ONNX/metadados.
+        neural_strong_confidence = float(
+            model_status["on_min_on_probability"]
+        )
         results = []
         for row, observation in zip(rows, observations):
             neural_state = str(
@@ -1233,6 +1240,7 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             physical_core_emission = {}
             physical_local_authoritative = False
             physical_disagreed_with_core = False
+            calibrated_physical_over_weak_neural = False
             if isinstance(physical, dict):
                 physical_state = str(
                     physical.get("classified") or ""
@@ -1286,6 +1294,29 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 )
                 if physical_disagreed_with_core:
                     physical_local_authoritative = False
+                # O par físico ON/OFF DA MESMA MÁSCARA deve confirmar também
+                # a emissão real no núcleo. Sob geometria rastreada, isso
+                # permite resolver apenas CNN com evidência fraca, mesmo que
+                # seu limiar OFF permissivo tenha marcado 'certain=True'.
+                # Sem esse triplo acordo, uma discordância continua INCERTA.
+                calibrated_physical_over_weak_neural = bool(
+                    use_geometry_override
+                    and physical_local_authoritative
+                    and not physical_disagreed_with_core
+                    and physical_state in (
+                        DISPLAY_CHECK_STATE_ON,
+                        DISPLAY_CHECK_STATE_OFF,
+                    )
+                    and calibrated_core == physical_state
+                    and physical_core_emission.get("reason")
+                    == "same_mask_physical_core_ranges"
+                    and int(physical_core_emission.get("reference_on_count") or 0) > 0
+                    and int(physical_core_emission.get("reference_off_count") or 0) > 0
+                    and neural_certain
+                    and neural_state != physical_state
+                    and neural_confidence < neural_strong_confidence
+                    and physical_confidence >= neural_strong_confidence
+                )
 
             final_state = neural_state
             semantic_certain = bool(neural_certain)
@@ -1309,6 +1340,13 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 final_state = neural_state
                 semantic_certain = True
                 hybrid_resolution = "neural_confirmed_by_same_mask_core"
+            elif calibrated_physical_over_weak_neural:
+                # Mesmo contrato esperado != observado -> NG; não depende
+                # da MASK_ID nem do estado esperado do CHECK.
+                final_state = physical_state
+                semantic_certain = True
+                final_confidence = physical_confidence
+                hybrid_resolution = "calibrated_core_resolved_weak_neural"
             elif (
                 physical_local_authoritative
                 and physical_state == "low_light"
@@ -1407,6 +1445,9 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 "physical_core_emission": deepcopy(physical_core_emission),
                 "physical_disagreed_with_core": bool(
                     physical_disagreed_with_core
+                ),
+                "calibrated_physical_over_weak_neural": bool(
+                    calibrated_physical_over_weak_neural
                 ),
                 "physical_distances": deepcopy(
                     physical.get("distances") or {}

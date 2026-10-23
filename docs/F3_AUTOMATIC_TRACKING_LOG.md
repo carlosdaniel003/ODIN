@@ -2748,3 +2748,15 @@ BLUE NG MASK_024, segmento ON indevido e baixa emissão.
 **CI D-082:** suíte neural/same-mask no tracking branch (72 PASS antes de
 adicionar caso explícito de ON indevido). NG em segmento esperado ON, conflito
 forte preservado e H1 com halo simulado passaram. JIG permanece pendente.
+
+## 23/10/2026 09:43 -04:00 — Reteste D-082 FAIL; D-083 arbitragem fraca
+
+H1 ainda 29/30, mas a máscara problemática mudou de MASK_021 (agora
+correta) para MASK_020. Lock/alinhamento e energia OK. Híbrido travou
+com físico ON 0,9883 + núcleo 251,0306 (ON ref ≥106,2529, OFF ≤0),
+CNN OFF fraco 0,606771 marcado `certain=true` pelo limiar OFF.
+D-083 usa o limiar ON forte já calibrado no modelo para diferenciar
+CNN fraca de desacordo realmente forte e priorizar físico same-mask
+corroborado pelo núcleo, apenas com tracking ON. Não usar estado esperado
+para arbitragem; NG real permanece. Nenhuma fonte nova ou loop.
+**Estado:** reteste físico ainda pendente.
