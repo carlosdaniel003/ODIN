@@ -2294,6 +2294,44 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         # remove apenas a trava óptica convencional do primeiro segmento ON.
         self.assertIn("decidir_analise_display_f3(", source)
 
+    def test_no_lock_board_off_requires_three_physical_observations_not_check(self):
+        import src.platform.display_f3_runtime_authorities as physical
+
+        app = SimpleNamespace(
+            _display_f3_physical_pending_key="",
+            _display_f3_physical_pending_frames=0,
+        )
+        authority = physical.F3RuntimeAuthorities.__new__(
+            physical.F3RuntimeAuthorities
+        )
+        authority.app = app
+        authority.repository = object()
+        authority._matcher = object()
+        authority._stable_key = ""
+        authority._stable_state = None
+        authority._pending_key = ""
+        authority._pending_frames = 0
+
+        raw_off = {
+            "kind": "off",
+            "physical_state_key": "off",
+            "board_references_complete": True,
+        }
+        with patch.object(
+            physical.transition_module,
+            "classificar_estado_fisico_referencias_f3",
+            return_value=raw_off,
+        ):
+            observations = [
+                authority.observe_unlocked_support(_frame(), "CM_500_L")
+                for _ in range(3)
+            ]
+        self.assertEqual(["unknown", "unknown", "off"],
+                         [state["kind"] for state in observations])
+        self.assertIn("CONFIRMANDO", observations[0]["text"])
+        self.assertIn("DESLIGADA", observations[-1]["text"])
+        self.assertTrue(all(not state["allow_auto"] for state in observations))
+
     def test_unlocked_camera_and_readout_share_no_live_evidence(self):
         import src.platform.display_f3_object_tracking as tracking
 
