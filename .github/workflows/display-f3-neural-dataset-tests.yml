@@ -75,3 +75,14 @@ jobs:
           name: f3-real-snapshots-report
           path: f3_snapshot_diagnostic.json
           if-no-files-found: warn
+
+      - name: Archive public F3 replay source and six actual PNG fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f3-replay-source-and-photos
+          path: |
+            src/
+            scripts/avaliar_f3_fotos_reais.py
+            tests/fixtures/display_f3/CM_500_L/
+          if-no-files-found: error
