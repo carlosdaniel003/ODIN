@@ -1293,6 +1293,51 @@ class DisplayF3RuntimeAuthoritiesTests(unittest.TestCase):
         self.assertEqual(2, owner.power.evaluate.call_count)
         self.assertEqual(2, owner.build_count)
 
+    def test_unlocked_support_observation_recognizes_off_without_allowing_check(self):
+        # Mesmo sem pose da placa, as fotos físicas já cadastradas podem
+        # identificar OFF. Isso não habilita análise semântica nem CHECK.
+        owner = SimpleNamespace(
+            _matcher=object(),
+            repository=object(),
+            _stabilize_physical_state=lambda state: state,
+        )
+        raw = {"kind": "off", "text": "IDENTIFICANDO..."}
+        with patch.object(
+            authorities.transition_module,
+            "classificar_estado_fisico_referencias_f3",
+            return_value=raw,
+        ) as classifier:
+            state = authorities.F3RuntimeAuthorities.observe_unlocked_support(
+                owner, _Frame(), "CM_500_L"
+            )
+        self.assertEqual("off", state["kind"])
+        self.assertIn("DESLIGADA", state["text"])
+        self.assertFalse(state["allow_auto"])
+        self.assertEqual("f3_unlocked_support_observation", state["source"])
+        self.assertEqual(1, classifier.call_count)
+
+    def test_unlocked_support_does_not_promote_check_from_reference_matching(self):
+        owner = SimpleNamespace(
+            _matcher=object(),
+            repository=object(),
+            _stabilize_physical_state=lambda state: state,
+        )
+        with patch.object(
+            authorities.transition_module,
+            "classificar_estado_fisico_referencias_f3",
+            return_value={"kind": "check", "check_id": "H1"},
+        ), patch.object(
+            authorities.physical_policy_module,
+            "corrigir_falso_check_ligado_pelas_mascaras_f3",
+            return_value={"kind": "check", "check_id": "H1"},
+        ):
+            state = authorities.F3RuntimeAuthorities.observe_unlocked_support(
+                owner, _Frame(), "CM_500_L"
+            )
+        self.assertEqual("unknown", state["kind"])
+        self.assertFalse(state["allow_auto"])
+        self.assertNotIn("CHECK", state["text"])
+
     def test_authority_module_owns_no_timer_or_thread(self):
         source = inspect.getsource(authorities)
         self.assertNotIn("threading.Thread(", source)
