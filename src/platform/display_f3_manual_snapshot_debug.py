@@ -566,6 +566,9 @@ def _runtime_state_at_frame(app) -> dict:
         "first_green_snapshot": _safe_deepcopy(
             getattr(app, "_display_f3_first_green_snapshot_debug", None)
         ),
+        "terminal_rearm": _safe_deepcopy(
+            getattr(app, "_display_f3_terminal_rearm_trace", None)
+        ),
         "live_performance": _safe_deepcopy(
             getattr(app, "_display_f3_live_performance", None)
         ),
