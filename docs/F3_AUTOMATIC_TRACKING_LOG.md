@@ -2839,3 +2839,33 @@ privado, incluindo núcleo ON/OFF calibrado, decisão CNN, proveniência
 same-mask e motivo de bloqueio por MASK_ID. Preserva rastreamento OFF,
 analisador F3, gate físico, política de NG e executor único. Não
 considerar as 6 fotos aprovadas até novo replay real com o ZIP privado.
+
+## 26/10/2026 — Etapa 3: ZIP privado reanalisado e correção restrita ao rastreamento ON
+
+Arquivo privado `enviar(1).zip` recebido novamente e analisado **localmente**;
+não versionar configuração, JPEGs nem ONNX. SHA-256 dos pesos confere
+com os metadados. CHECKS salvos: H1, BLUE, USB, FM e AUX, 30 máscaras.
+
+Inspeção offline independente do código de produção, sobre **as cinco fotos
+de referência do próprio projeto** (não os seis snapshots reservados):
+CNN classificou conforme H1 23/30, BLUE 12/30, USB 15/30, FM 12/30 e AUX
+14/30. A maioria dos erros é ON real interpretado como INCERTO por causa
+do limite ON calibrado `0.809613`; não baixar esse limite.
+Todas as 27 máscaras que possuem par local ON/OFF apresentam separação
+de intensidade média medida sobre seus próprios ROIs nas referências;
+`MASK_020` não tem OFF e `MASK_002`/`MASK_003` não têm ON.
+Esses valores são diagnóstico de referências, **não validação dos seis
+snapshots de produção**.
+
+Mudança limitada: em `src/platform/display_f3_neural_runtime.py`, com
+geometria rastreada e par ON/OFF local fisicamente calibrado,
+`physical_low_light` pode ser reconciliado ao estado ON/OFF do núcleo
+quando não há veto neural forte. Se o núcleo indicar OFF em máscara
+esperada ON, mantém divergência NG; CNN forte contrária, falta de par,
+faixas sobrepostas e tracking OFF não ganham exceção. Não foram alterados
+pesos, thresholds, F2, sequência, gates, temporização nem executor.
+
+Pendente: executar as seis imagens reservadas do GitHub junto com o
+ZIP privado e geometrias da Etapa 2 para verificar se os bloqueios
+restantes podem ser resolvidos sem falso OK. A restrição de acesso
+binário às imagens do GitHub neste ambiente impediu esse replay.

@@ -1241,6 +1241,7 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             physical_local_authoritative = False
             physical_disagreed_with_core = False
             calibrated_physical_over_weak_neural = False
+            calibrated_core_over_low_light = False
             if isinstance(physical, dict):
                 physical_state = str(
                     physical.get("classified") or ""
@@ -1318,6 +1319,31 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                     and physical_confidence >= neural_strong_confidence
                 )
 
+                # Quando o classificador de brilho multifeature detecta
+                # "pouca luz" mas a emissão do NÚCLEO cai dentro da faixa
+                # ON/OFF calibrada da mesma máscara, essa evidência local
+                # pode resolver apenas com tracking ativo. Um veto neural
+                # realmente forte e oposto continua INCERTO.
+                # Não usar pool entre máscaras nem uma faixa incompleta.
+                calibrated_core_over_low_light = bool(
+                    use_geometry_override
+                    and physical_local_authoritative
+                    and physical_state == "low_light"
+                    and calibrated_core in (
+                        DISPLAY_CHECK_STATE_ON,
+                        DISPLAY_CHECK_STATE_OFF,
+                    )
+                    and physical_core_emission.get("reason")
+                    == "same_mask_physical_core_ranges"
+                    and int(physical_core_emission.get("reference_on_count") or 0) > 0
+                    and int(physical_core_emission.get("reference_off_count") or 0) > 0
+                    and (
+                        not neural_certain
+                        or neural_state == calibrated_core
+                        or neural_confidence < neural_strong_confidence
+                    )
+                )
+
             final_state = neural_state
             semantic_certain = bool(neural_certain)
             hybrid_resolution = "neural_only"
@@ -1347,6 +1373,14 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 semantic_certain = True
                 final_confidence = physical_confidence
                 hybrid_resolution = "calibrated_core_resolved_weak_neural"
+            elif calibrated_core_over_low_light:
+                # Não interpretar uma emissão ON comprovada como POUCA LUZ,
+                # nem aprovar uma máscara OFF quando o núcleo emite ON.
+                # Resultado divergente segue como NG pela política canônica.
+                final_state = str(physical_core_emission["state"])
+                semantic_certain = True
+                final_confidence = physical_confidence
+                hybrid_resolution = "same_mask_core_resolved_low_light"
             elif (
                 physical_local_authoritative
                 and physical_state == "low_light"
@@ -1448,6 +1482,9 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 ),
                 "calibrated_physical_over_weak_neural": bool(
                     calibrated_physical_over_weak_neural
+                ),
+                "calibrated_core_over_low_light": bool(
+                    calibrated_core_over_low_light
                 ),
                 "physical_distances": deepcopy(
                     physical.get("distances") or {}
