@@ -195,6 +195,70 @@ class DisplayF3Readout30MasksTests(unittest.TestCase):
             for value in indicator_states().values()
         ))
 
+    def test_perder_lock_remove_verdes_antigos_sem_perder_30_mascaras(self):
+        masks = _masks_30()
+        slots = mapear_slots_sete_segmentos_display(masks)
+        indicators = mapear_indicadores_circulares_display(masks)
+        data = {
+            "readout_mask_ids": [m["id"] for m in masks],
+            "readout_slot_mask_ids": slots,
+            "readout_indicator_mask_ids": indicators,
+            "live_luminous_only": True,
+            "live_visual_sample_ready": True,
+            "live_visual_mask_ids": ("MASK_001", "MASK_030"),
+            "live_visual_classifications": {
+                "MASK_001": "on", "MASK_030": "on"
+            },
+            "power_confirmed": True,
+            "energy_state": "powered",
+        }
+        window = _window(data)
+        original = window._display_readout_context
+        self.assertEqual(
+            "on",
+            window._display_readout_mask_state("MASK_001", original, True),
+        )
+        window.suspend_display_readout_live_evidence()
+        stopped = window._display_readout_context
+        self.assertEqual(30, len(stopped["mask_ids"]))
+        self.assertEqual(tuple(slots), stopped["mask_slots"])
+        self.assertEqual(indicators, stopped["indicator_mask_ids"])
+        self.assertFalse(stopped["live_visual_mask_ids"])
+        self.assertFalse(stopped["power_confirmed"])
+        for mask_id in stopped["mask_ids"]:
+            self.assertEqual(
+                "neutral",
+                window._display_readout_mask_state(mask_id, stopped, False),
+                mask_id,
+            )
+
+        # O próximo contexto com LOCK recuperado reativa SOMENTE os segmentos
+        # realmente reconhecidos na amostra publicada pela câmera.
+        data["live_visual_mask_ids"] = ("MASK_024",)
+        data["live_visual_classifications"] = {"MASK_024": "on"}
+        window.set_display_readout_context(data)
+        restored = window._display_readout_context
+        self.assertEqual(
+            "on",
+            window._display_readout_mask_state("MASK_024", restored, True),
+        )
+        self.assertEqual(
+            "neutral",
+            window._display_readout_mask_state("MASK_001", restored, True),
+        )
+
+    def test_congelamento_terminal_preserva_evidencia_vermelha(self):
+        window = _window({
+            "readout_mask_ids": [m["id"] for m in _masks_30()],
+            "live_luminous_only": True,
+            "effective_confirmed_failed_mask_ids": ("MASK_024",),
+        })
+        previous = window._display_readout_context
+        window._display_readout_frozen = True
+        window.suspend_display_readout_live_evidence()
+        self.assertIs(previous, window._display_readout_context)
+        self.assertEqual({"MASK_024"}, previous["failed_mask_ids"])
+
     def test_projeto_legado_de_28_mascaras_preserva_dois_pontos_neutros(self):
         masks = [m for m in _masks_30() if m["id"] not in {"MASK_029", "MASK_030"}]
         self.assertEqual(28, len(mapear_slots_sete_segmentos_display(masks)))
