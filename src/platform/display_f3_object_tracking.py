@@ -7371,6 +7371,9 @@ def _clear_tracking_runtime_transients(
     app._display_f3_semantic_future = None
     app._display_f3_tracking_queued_frame_token = None
     app._display_f3_semantic_pipeline_status = None
+    app._display_f3_tracking_last_verified_pose_s = 0.0
+    app._display_f3_tracking_last_verified_pose_frame_token = None
+    app._display_f3_first_green_snapshot_debug = None
     app._display_f3_tracking_prefetch_submissions = 0
     app._display_f3_tracking_prefetch_replacements = 0
     app._display_auto_precomputed_payload = None
@@ -8825,6 +8828,135 @@ def _submit_live_semantic_job(
     return future
 
 
+def _submit_first_green_from_preview(app, raw_frame) -> bool:
+    """Fotografa o frame que ACABOU de ficar verde, sem refazer ORB/warp.
+
+    A preview já calculou a evidência luminosa na geometria que ela exibiu.
+    Essa mesma amostra e o RAW exato viram uma requisição ao único executor
+    semântico. Usa pose previamente validada somente por uma janela curta;
+    sem LOCK fresco segue o rastreamento normal, nunca aprova por verde.
+    """
+    if not _valid_frame(raw_frame):
+        return False
+    if (
+        getattr(app, "_display_f3_semantic_future", None) is not None
+        or bool(getattr(app, "_display_f3_waiting_empty_rearm", False))
+        or bool(getattr(app, "_display_f3_waiting_new_board_after_empty", False))
+        or bool(getattr(app, "_display_f3_tracking_config_open", False))
+    ):
+        return False
+
+    geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    if (
+        not isinstance(geometry, dict)
+        or not bool(geometry.get("locked"))
+        or not geometry.get("masks")
+        or (
+            bool(geometry.get("alignment_required"))
+            and not bool(geometry.get("spatial_alignment_ready"))
+        )
+    ):
+        return False
+
+    last_pose_s = float(
+        getattr(app, "_display_f3_tracking_last_verified_pose_s", 0.0) or 0.0
+    )
+    pose_age_ms = (time.perf_counter() - last_pose_s) * 1000.0
+    if last_pose_s <= 0.0 or not (0.0 <= pose_age_ms <= 600.0):
+        return False
+
+    context_fn = getattr(app, "_display_auto_current_context", None)
+    if not callable(context_fn):
+        return False
+    context = context_fn()
+    if not isinstance(context, dict):
+        return False
+    project_name = str(context.get("project_name") or "")
+    check_id = str(context.get("check_id") or "")
+    if not project_name or not check_id:
+        return False
+    if str(geometry.get("check_id") or "") != check_id:
+        return False
+
+    token_fn = getattr(app, "_display_auto_frame_token", None)
+    if not callable(token_fn):
+        return False
+    frame_token = token_fn(raw_frame)
+    pose_token = getattr(
+        app, "_display_f3_tracking_last_verified_pose_frame_token", None
+    )
+    gap = _camera_frame_gap(pose_token, frame_token)
+    if gap is None or gap > 10:
+        return False
+
+    window = getattr(app, "display_f3_window", None)
+    visual = getattr(window, "_display_last_overlay_context", None)
+    if not isinstance(visual, dict):
+        return False
+    if (
+        not bool(visual.get("tracking_active"))
+        or not bool(visual.get("tracking_locked"))
+        or not bool(visual.get("live_visual_sample_ready"))
+        or str(visual.get("project_name") or "") != project_name
+        or str(visual.get("check_id") or "") != check_id
+        or visual.get("live_visual_frame_token") != frame_token
+    ):
+        return False
+
+    # Apenas verdes amostrados no frame recém-exibido, não estado ON
+    # resgatado de analysis/stale. A amostra que gerou o VERDE é a captura.
+    cache = getattr(window, "_display_f3_live_visual_sample_cache", None)
+    if not isinstance(cache, dict):
+        return False
+    key = cache.get("key")
+    sample = cache.get("value")
+    if (
+        not isinstance(key, tuple)
+        or len(key) < 4
+        or key[0] != repr(frame_token)
+        or key[1] != project_name
+        or key[2] != check_id
+        or key[3] != repr(("tracked", id(geometry)))
+        or not isinstance(sample, dict)
+        or not bool(sample.get("ready"))
+    ):
+        return False
+    mask_ids = tuple(sorted({
+        str(mask_id) for mask_id in (sample.get("mask_ids") or ())
+        if str(mask_id)
+    }))
+    if not mask_ids:
+        return False
+
+    # Imagem FULL HD copiada exatamente uma vez; o snapshot mantém sua
+    # geometria/identidade, mesmo que a câmera avance durante a CNN.
+    frozen_raw = raw_frame.copy()
+    payload = {
+        "raw_frame": frozen_raw,
+        "frame_token": frame_token,
+        "age_ms": pose_age_ms,
+        "geometry": deepcopy(geometry),
+        "snapshot_capture_trigger": {
+            "ready": True,
+            "triggered": True,
+            "mask_ids": mask_ids,
+            "source": "same_preview_first_green_snapshot",
+        },
+    }
+    future = _submit_live_semantic_job(app, frozen_raw, payload)
+    if future is None:
+        return False
+    app._display_f3_first_green_snapshot_debug = {
+        "captured": True,
+        "frame_token": deepcopy(frame_token),
+        "check_id": check_id,
+        "mask_ids": mask_ids,
+        "pose_age_ms": round(pose_age_ms, 2),
+        "capture_path": "preview_green_direct_to_semantic",
+    }
+    return True
+
+
 def _camera_frame_gap(source_token, current_token) -> int | None:
     if (
         isinstance(source_token, tuple)
@@ -9521,6 +9653,32 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         current_context,
                         current_token,
                     )
+                    # Somente a POSE estrutural RECÉM-VALIDADA autoriza
+                    # foto rápida no preview. Nenhuma foto acelera o tracker
+                    # usando lock mantido/stale de uma placa anterior.
+                    if (
+                        operational_fresh
+                        and isinstance(payload.get("geometry"), dict)
+                        and bool((payload.get("geometry") or {}).get("locked"))
+                        and (
+                            not bool(
+                                (payload.get("geometry") or {}).get(
+                                    "alignment_required"
+                                )
+                            )
+                            or bool(
+                                (payload.get("geometry") or {}).get(
+                                    "spatial_alignment_ready"
+                                )
+                            )
+                        )
+                    ):
+                        self._display_f3_tracking_last_verified_pose_s = (
+                            time.perf_counter()
+                        )
+                        self._display_f3_tracking_last_verified_pose_frame_token = (
+                            deepcopy(payload.get("frame_token"))
+                        )
 
                     if (
                         (operational_fresh or intermittent_snapshot)
@@ -9613,7 +9771,16 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
         previous_frame = getattr(self, "camera_frame_atual", None)
         self._display_f3_tracking_instance_frame_prepared = bool(use_tracking)
         try:
-            return previous_preview()
+            rendered = previous_preview()
+            if (
+                use_tracking
+                and _valid_frame(raw_latest)
+                and bool(getattr(self, "display_f3_ativo", False))
+            ):
+                # A cor verde já foi desenhada desta imagem neste repaint.
+                # Capture AGORA, não depois de outro ORB/warp pesado.
+                _submit_first_green_from_preview(self, raw_latest)
+            return rendered
         finally:
             self._display_f3_tracking_instance_frame_prepared = False
             self._display_f3_skip_auto_analysis_this_preview = False

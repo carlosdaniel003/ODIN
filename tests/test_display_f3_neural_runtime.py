@@ -1090,6 +1090,135 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             )
             self.assertEqual("ok", decision["decision"])
 
+    def test_preview_first_green_fast_handoff_uses_same_visual_frame(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        raw = np.zeros((96, 160, 3), dtype=np.uint8)
+        geometry = {
+            "locked": True, "check_id": "CHECK_001",
+            "alignment_required": True, "spatial_alignment_ready": True,
+            "resolution": (160, 96),
+            "masks": [
+                {"id": "MASK_001", "type": "circle",
+                 "cx": 42, "cy": 48, "radius": 10},
+            ],
+        }
+        token = ("camera", 110)
+        captured = {}
+        now = tracking.time.perf_counter()
+        cache = {
+            "key": (
+                repr(token), "DISPLAY A", "CHECK_001",
+                repr(("tracked", id(geometry))), raw.shape,
+            ),
+            "value": {"ready": True, "mask_ids": ("MASK_001",)},
+        }
+        window = SimpleNamespace(
+            _display_last_overlay_context={
+                "tracking_active": True, "tracking_locked": True,
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+                "live_visual_sample_ready": True,
+                "live_visual_frame_token": token,
+            },
+            _display_f3_live_visual_sample_cache=cache,
+        )
+        app = SimpleNamespace(
+            _display_f3_tracking_live_geometry=geometry,
+            _display_f3_tracking_last_verified_pose_s=now,
+            _display_f3_tracking_last_verified_pose_frame_token=("camera", 109),
+            _display_f3_semantic_future=None,
+            display_f3_window=window,
+            _display_auto_current_context=lambda: {
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+            },
+            _display_auto_frame_token=lambda _frame: token,
+        )
+
+        def capture(_app, image, payload):
+            captured["image"] = image
+            captured["payload"] = payload
+            return object()
+
+        with patch.object(tracking, "_submit_live_semantic_job",
+                          side_effect=capture) as submit:
+            self.assertTrue(
+                tracking._submit_first_green_from_preview(app, raw)
+            )
+            submit.assert_called_once()
+        self.assertIsNot(raw, captured["image"])
+        self.assertTrue(np.array_equal(raw, captured["image"]))
+        self.assertEqual(token, captured["payload"]["frame_token"])
+        self.assertEqual(geometry, captured["payload"]["geometry"])
+        self.assertEqual(
+            "same_preview_first_green_snapshot",
+            captured["payload"]["snapshot_capture_trigger"]["source"],
+        )
+
+    def test_preview_fast_handoff_rejects_stale_pose_and_dark_or_other_check(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        raw = np.zeros((96, 160, 3), dtype=np.uint8)
+        geometry = {
+            "locked": True,
+            "check_id": "CHECK_001",
+            "masks": [{"id": "MASK_001"}],
+        }
+        token = ("camera", 110)
+        window = SimpleNamespace(
+            _display_last_overlay_context={
+                "tracking_active": True,
+                "tracking_locked": True,
+                "live_visual_sample_ready": True,
+                "live_visual_frame_token": token,
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+            },
+            _display_f3_live_visual_sample_cache={
+                "key": (
+                    repr(token), "DISPLAY A", "CHECK_001",
+                    repr(("tracked", id(geometry))), raw.shape,
+                ),
+                "value": {"ready": True, "mask_ids": ("MASK_001",)},
+            },
+        )
+        app = SimpleNamespace(
+            _display_f3_tracking_live_geometry=geometry,
+            _display_f3_tracking_last_verified_pose_s=(
+                tracking.time.perf_counter() - 3.0
+            ),
+            _display_f3_tracking_last_verified_pose_frame_token=("camera", 109),
+            _display_f3_semantic_future=None,
+            display_f3_window=window,
+            _display_auto_current_context=lambda: {
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+            },
+            _display_auto_frame_token=lambda _frame: token,
+        )
+        with patch.object(tracking, "_submit_live_semantic_job") as submit:
+            self.assertFalse(
+                tracking._submit_first_green_from_preview(app, raw)
+            )
+            app._display_f3_tracking_last_verified_pose_s = (
+                tracking.time.perf_counter()
+            )
+            window._display_f3_live_visual_sample_cache["value"] = {
+                "ready": True, "mask_ids": (),
+            }
+            self.assertFalse(
+                tracking._submit_first_green_from_preview(app, raw)
+            )
+            window._display_f3_live_visual_sample_cache["value"] = {
+                "ready": True, "mask_ids": ("MASK_001",),
+            }
+            geometry["check_id"] = "CHECK_002"
+            self.assertFalse(
+                tracking._submit_first_green_from_preview(app, raw)
+            )
+            submit.assert_not_called()
+
     def test_first_green_capture_uses_same_tracked_raw_and_masks(self):
         import src.platform.display_f3_object_tracking as tracking
 

@@ -7702,3 +7702,28 @@ modelo, threshold ou persistência de imagem.
 **Validação física: PENDENTE**: verificar H1 OK em até três segundos,
 BLUE OK, BLUE NG MASK_024 e retrigger após voltar da análise. Incluir
 identidade de frame de captura e idade no DEBUG de produção.
+
+## 26/10/2026 — Reteste D-084: operador informou que captura não mudou o comportamento
+
+**Resultado físico informado:** "Acho que não foi não, continua a mesma
+coisa". **FAIL funcional relatado**, sem novo DEBUG/frame ID. O commit D-084
+passou nos testes, porém o gatilho estava somente dentro de
+`_run_live_tracking_heavy_job`, DEPOIS de `align_frame_for_f3` e warp.
+Portanto a detecção de verde não eliminava o custo de localização pesada;
+a preview latest-frame já conhecia o verde enquanto a análise aguardava.
+
+**Correção do caminho quente (somente tracking ON):** após renderizar o
+preview, usa exatamente a amostra luminosa cacheada da imagem exibida.
+Se a geometria pertencer ao CHECK atual, estiver validada há no máximo
+600 ms / 10 frames, e houver pelo menos um verde amostrado no mesmo
+token, congela uma cópia do RAW e envia imediatamente para o mesmo
+executor semântico HIGH com ROIs do último tracking confirmado.
+Sem repetir ORB/warp nessa captura; sem outro worker, nem nova aprovação.
+Frames escuros/sem lock/pose stale continuam no caminho de tracking pesado.
+O retorno continua versionado e passa pelos gates produtivos habituais.
+
+**PENDENTE reteste físico:** registrar `_display_f3_first_green_snapshot_debug`
+(`capture_path=preview_green_direct_to_semantic`) e
+`_display_auto_last_decision_trace.frozen_tracking_snapshot`, medir
+H1 e verificar BLUE NG MASK_024. A correção não garante o primeiro LOCK
+quando ele próprio custar mais que a janela de H1.
