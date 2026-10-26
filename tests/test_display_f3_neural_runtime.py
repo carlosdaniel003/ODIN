@@ -1090,6 +1090,85 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             )
             self.assertEqual("ok", decision["decision"])
 
+    def test_first_green_capture_uses_same_tracked_raw_and_masks(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        raw = np.zeros((96, 160, 3), dtype=np.uint8)
+        raw[35:61, 28:57] = 255
+        geometry = {
+            "locked": True, "check_id": "CHECK_001",
+            "alignment_required": True, "spatial_alignment_ready": True,
+            "resolution": (160, 96),
+            "masks": [
+                {"id": f"MASK_{i:03d}", "type": "circle",
+                 "cx": cx, "cy": 48, "radius": 13}
+                for i, cx in enumerate((42, 75, 110), start=1)
+            ],
+        }
+        trigger = tracking._f3_first_green_snapshot_trigger(
+            raw, geometry
+        )
+        self.assertTrue(trigger["ready"])
+        self.assertTrue(trigger["triggered"])
+        self.assertIn("MASK_001", trigger["mask_ids"])
+
+        raw_dark = np.zeros_like(raw)
+        no_trigger = tracking._f3_first_green_snapshot_trigger(
+            raw_dark, geometry
+        )
+        self.assertFalse(no_trigger["triggered"])
+
+        no_lock = tracking._f3_first_green_snapshot_trigger(
+            raw, {**geometry, "locked": False}
+        )
+        self.assertFalse(no_lock["triggered"])
+
+        no_align = tracking._f3_first_green_snapshot_trigger(
+            raw, {**geometry, "spatial_alignment_ready": False}
+        )
+        self.assertFalse(no_align["triggered"])
+
+    def test_first_green_snapshot_pipeline_is_tracking_opt_in_and_one_shot(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        submit_code = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        worker_code = inspect.getsource(
+            tracking._run_live_tracking_heavy_job
+        )
+        semantic_code = inspect.getsource(
+            tracking._run_live_semantic_job
+        )
+        auto_code = inspect.getsource(
+            DisplayAutomaticCheckF3Mixin._process_display_auto_check
+        )
+        self.assertIn("_f3_first_green_snapshot_trigger(", worker_code)
+        self.assertIn('"snapshot_capture_trigger": snapshot_capture_trigger', worker_code)
+        self.assertIn('capture_trigger.get("triggered")', submit_code)
+        self.assertIn("_submit_live_semantic_job(", submit_code)
+        self.assertIn("and semantic_future is None", submit_code)
+        self.assertIn('"raw_frame": raw_frame', semantic_code)
+        self.assertIn("frozen_tracking_capture", auto_code)
+        self.assertIn("and not frozen_tracking_capture", auto_code)
+        self.assertIn("return previous_preview()", submit_code)
+        self.assertIn("if use_tracking and _valid_frame(raw_latest)", submit_code)
+
+    def test_first_green_trigger_held_lock_cannot_invent_capture(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        raw = np.ones((60, 100, 3), dtype=np.uint8) * 255
+        result = SimpleNamespace(
+            evidence_current=False,
+            source_type="luminous_segment_grid",
+            luminous_validated_mask_ids=("MASK_001",),
+        )
+        self.assertFalse(
+            tracking._f3_first_green_snapshot_trigger(
+                raw, None, result
+            )["triggered"]
+        )
+
     def test_tracking_h1_mask_020_real_near_on_overrides_coinflip_off(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, h1, _ = _repository(Path(temp))

@@ -8444,6 +8444,90 @@ def _draw_tracking_geometry_visual(
 
 
 
+def _f3_first_green_snapshot_trigger(
+    raw_frame,
+    geometry: dict | None,
+    tracking_result=None,
+) -> dict:
+    """Detecta primeiro verde para capturar, sem conceder autoridade OK/NG.
+
+    A amostra leve usa o RAW e as ROIs do MESMO job rastreado. Nunca usa
+    expected ou outro frame. Apenas libera o job semântico canônico.
+    """
+    unavailable = {
+        "ready": False,
+        "triggered": False,
+        "mask_ids": (),
+        "source": "tracked_same_frame_live_green",
+        "reason": "tracking_geometry_unavailable",
+    }
+    if (
+        not _valid_frame(raw_frame)
+        or not isinstance(geometry, dict)
+        or not bool(geometry.get("locked"))
+        or not geometry.get("masks")
+    ):
+        return unavailable
+    if (
+        bool(geometry.get("alignment_required"))
+        and not bool(geometry.get("spatial_alignment_ready"))
+    ):
+        return {**unavailable, "reason": "tracking_alignment_not_ready"}
+
+    from src.platform.display_f3_preview_clarity_fix import (
+        detectar_emissao_visual_ao_vivo_f3,
+    )
+
+    sample = detectar_emissao_visual_ao_vivo_f3(
+        raw_frame,
+        {
+            "resolution": geometry.get("resolution"),
+            "masks": geometry.get("masks"),
+        },
+    )
+    if bool(sample.get("ready")):
+        lit = tuple(sorted({
+            str(mask_id)
+            for mask_id in (sample.get("mask_ids") or ())
+            if str(mask_id)
+        }))
+        return {
+            "ready": True,
+            "triggered": bool(lit),
+            "mask_ids": lit,
+            "source": "tracked_same_frame_live_green",
+            "reason": "first_luminous_mask" if lit else "all_masks_dark",
+        }
+
+    # Somente quando o sampler indisponível: aproveita núcleos luminosos
+    # atuais da própria pose, nunca o lock mantido de um frame anterior.
+    if (
+        tracking_result is not None
+        and bool(getattr(tracking_result, "evidence_current", False))
+        and str(getattr(tracking_result, "source_type", "") or "")
+        == "luminous_segment_grid"
+    ):
+        lit = tuple(sorted({
+            str(mask_id)
+            for mask_id in (
+                getattr(tracking_result, "luminous_validated_mask_ids", ()) or ()
+            )
+            if str(mask_id)
+        }))
+        if lit:
+            return {
+                "ready": True,
+                "triggered": True,
+                "mask_ids": lit,
+                "source": "tracked_same_frame_luminous_core",
+                "reason": "validated_luminous_tracking_core",
+            }
+    return {
+        **unavailable,
+        "reason": str(sample.get("reason") or "no_valid_luminous_evidence"),
+    }
+
+
 def _run_live_tracking_heavy_job(
     app,
     raw_frame,
@@ -8498,6 +8582,10 @@ def _run_live_tracking_heavy_job(
             0.0,
             (time.perf_counter() - warp_started) * 1000.0,
         )
+    # O gatilho é avaliado no próprio worker de tracking: nunca no Tk.
+    snapshot_capture_trigger = _f3_first_green_snapshot_trigger(
+        raw_frame, geometry, result
+    )
     current_generation = int(
         getattr(app, "_display_f3_tracking_job_generation", 0) or 0
     )
@@ -8526,6 +8614,7 @@ def _run_live_tracking_heavy_job(
         "result": result,
         "geometry": geometry,
         "analysis_frame": analysis_frame,
+        "snapshot_capture_trigger": snapshot_capture_trigger,
     }
 
 
@@ -8689,6 +8778,17 @@ def _submit_live_semantic_job(
         frame_snapshot = analysis_frame.copy()
     except Exception:
         frame_snapshot = analysis_frame
+
+    capture_trigger = tracking_payload.get("snapshot_capture_trigger")
+    if not isinstance(capture_trigger, dict):
+        capture_trigger = {}
+    context = dict(context)
+    context["snapshot_capture_trigger"] = {
+        "ready": bool(capture_trigger.get("ready")),
+        "triggered": bool(capture_trigger.get("triggered")),
+        "mask_ids": tuple(capture_trigger.get("mask_ids") or ()),
+        "source": str(capture_trigger.get("source") or ""),
+    }
 
     generation = int(
         getattr(app, "_display_f3_tracking_job_generation", 0) or 0
@@ -8936,6 +9036,21 @@ def _intermittent_snapshot_acceptable(
         return _analysis_has_positive_on_evidence(analysis)
 
     geometry = payload.get("geometry")
+    trigger = payload.get("snapshot_capture_trigger")
+    if (
+        isinstance(trigger, dict)
+        and bool(trigger.get("ready"))
+        and bool(trigger.get("triggered"))
+        and trigger.get("mask_ids")
+        and isinstance(geometry, dict)
+        and bool(geometry.get("locked"))
+        and (
+            not bool(geometry.get("alignment_required"))
+            or bool(geometry.get("spatial_alignment_ready"))
+        )
+        and str(geometry.get("check_id") or "") == check_id
+    ):
+        return True
     if isinstance(geometry, dict):
         geometry_check_id = str(geometry.get("check_id") or "")
         if geometry_check_id and geometry_check_id != check_id:
@@ -9185,6 +9300,11 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                 ),
                 "context": deepcopy(ready_semantic.get("context") or {}),
                 "analysis": deepcopy(ready_semantic.get("analysis") or {}),
+                "snapshot_capture_trigger": deepcopy(
+                    (ready_semantic.get("context") or {}).get(
+                        "snapshot_capture_trigger"
+                    ) or {}
+                ),
             }
             self._display_auto_analysis_frame_override = ready_semantic.get(
                 "analysis_frame"
@@ -9409,7 +9529,19 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         self._display_f3_tracking_analysis_frame = None
                         self._display_f3_tracking_pending_raw_frame = None
                         self._display_f3_tracking_analysis_pending = False
-                        if getattr(self, "_display_f3_semantic_future", None) is None:
+                        capture_trigger = payload.get(
+                            "snapshot_capture_trigger"
+                        )
+                        if (
+                            isinstance(capture_trigger, dict)
+                            and bool(capture_trigger.get("triggered"))
+                            and getattr(self, "_display_f3_semantic_future", None)
+                            is None
+                        ):
+                            # UMA foto: depois do primeiro VERDE, o modelo
+                            # analisa o RAW e a pose preservados deste token.
+                            # Com tudo escuro, não executa CNN. Após terminar,
+                            # o próximo tracking pode congelar uma foto nova.
                             _submit_live_semantic_job(
                                 self,
                                 analysis_frame,

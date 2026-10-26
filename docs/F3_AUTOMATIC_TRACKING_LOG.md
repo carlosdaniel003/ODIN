@@ -2929,3 +2929,38 @@ exibir explicitamente a MASK_ID INCERTA no início da faixa.
 **Validação física PENDENTE**: repetir H1 real e BLUE NG/024 antes
 de considerar a correção liberada. Testes de contrato não representam
 validação com câmeras reais.
+
+## 26/10/2026 — D-084 / Foto congelada por primeiro verde (F3 tracking ON)
+
+**Solicitação de produção:** ao surgir pelo menos uma máscara verde na
+câmera ao vivo, capturar o frame (não salvar JPEG nem tirar foto com outra
+câmera), analisar ON/OFF das 30 máscaras congeladas, e voltar a acompanhar
+a câmera após a decisão. Em H1 de cerca de três segundos, não esperar
+um lote de leituras pesadas sobre frames escuros; para BLUE intermitente,
+preservar a fase luminosa capturada mesmo que o preview já tenha apagado.
+
+**Contrato implementado:** somente rastreamento ON e geometria com LOCK /
+alinhamento válido. No *único worker HIGH* de tracking, a amostra leve
+existente de emissão da câmera calcula os verdes do RAW e ROIs daquele
+mesmo frame. Zero verdes -> não enfileira CNN. Primeiro verde ->
+snapshot RAW + geometria + frame de análise + token imutáveis, enviado ao
+único worker semântico; não recebe mais jobs semânticos enquanto houver
+outro em voo. Ao receber resultado, o runtime avalia a captura congelada
+para presença/energia e julgamento, sem substituir a câmera latest-frame.
+Na próxima oportunidade, pode capturar novo frame. Em CHECK intermitente,
+o snapshot com evidência luminosa explícita mantém o hold temporal já
+limitado por idade/gap e CHECK atual.
+
+**Segurança:** o primeiro verde dispara CAPTURA, **não aprovação**. As regras
+de 30/30, falha inesperada ON, proteção contra OFF/transição, confirmação
+de defeito intermitente, segregação terminal e rearmamento permanecem.
+Um frame inicial com apenas um LED ON pode estar no meio do acendimento;
+por isso não dispensar confirmação produtiva de NG. O primeiro snapshot
+válido pula apenas a espera artificial de transição para a análise do
+CHECK; não pula gate físico/energia, manual entry, nem critérios semânticos.
+Tracking OFF e F2 preservados. Nenhum novo timer, thread, câmera, fila,
+modelo, threshold ou persistência de imagem.
+
+**Validação física: PENDENTE**: verificar H1 OK em até três segundos,
+BLUE OK, BLUE NG MASK_024 e retrigger após voltar da análise. Incluir
+identidade de frame de captura e idade no DEBUG de produção.

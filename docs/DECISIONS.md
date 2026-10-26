@@ -5841,3 +5841,16 @@ análoga, ON indevido → NG, conflito neural realmente forte → INCERTO e
 referência fotométrica ausente → INCERTO. Suíte de isolamento F3
 run 39964479008 mantém os 7 FAIL + 1 ERROR históricos sem novos erros.
 Nenhum teste automatizado substitui reteste da câmera física.
+
+## D-084 — Disparo óptico de captura congelada F3 tracking ON
+
+**Status:** Accepted para implementação; validação física pendente.
+
+O primeiro segmento luminoso reconhecido no frame RAW com geometria
+rastreadas é apenas gatilho para captura imutável. A análise semântica
+recebe o RAW e a geometria daquele MESMO frame; seu resultado, não o
+gatilho visual, controla OK/NG. Sem luminosidade não agendar o motor
+semântico. Não criar scheduler, executor ou segunda autoridade. Respeitar
+janela intermitente e não condenar frame de transição com um LED aceso;
+CHECK convencional mantém debounce NG e BLUE mantém prova persistente.
+Modo tracking OFF e domínio F2 continuam intactos.

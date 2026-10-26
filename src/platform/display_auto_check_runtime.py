@@ -1407,6 +1407,17 @@ class DisplayAutomaticCheckF3Mixin:
             return
 
         precomputed = getattr(self, "_display_auto_precomputed_payload", None)
+        frozen_trigger = (
+            precomputed.get("snapshot_capture_trigger")
+            if isinstance(precomputed, dict)
+            and isinstance(precomputed.get("snapshot_capture_trigger"), dict)
+            else {}
+        )
+        frozen_tracking_capture = bool(
+            frozen_trigger.get("triggered")
+            and frozen_trigger.get("mask_ids")
+            and getattr(self, "_display_f3_tracking_instance_frame_prepared", False)
+        )
         precomputed_raw_frame = (
             precomputed.get("raw_frame")
             if isinstance(precomputed, dict)
@@ -1489,7 +1500,7 @@ class DisplayAutomaticCheckF3Mixin:
                 else self.DISPLAY_AUTO_TRANSITION_FRAMES
             )
 
-        if self._display_auto_transition_frames > 0:
+        if self._display_auto_transition_frames > 0 and not frozen_tracking_capture:
             self._display_auto_transition_frames -= 1
             self._display_auto_set_preview_status(
                 (
@@ -1719,6 +1730,13 @@ class DisplayAutomaticCheckF3Mixin:
                 continue
         self._display_auto_last_decision_trace = {
             "frame_token": deepcopy(frame_token),
+            "frozen_tracking_snapshot": bool(frozen_tracking_capture),
+            "snapshot_trigger_on_mask_ids": tuple(
+                str(mask_id)
+                for mask_id in (frozen_trigger.get("mask_ids") or ())
+                if str(mask_id)
+            ),
+            "snapshot_trigger_source": str(frozen_trigger.get("source") or ""),
             "project_name": str(context.get("project_name") or ""),
             "check_id": str(context.get("check_id") or ""),
             "check_name": str(context.get("check_name") or ""),

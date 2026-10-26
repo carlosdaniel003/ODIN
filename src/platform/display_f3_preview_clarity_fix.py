@@ -1000,8 +1000,9 @@ def _live_visual_core_values(
 def detectar_emissao_visual_ao_vivo_f3(frame, context: dict | None) -> dict:
     """Detecta emissão apenas para apresentação no MESMO frame do preview.
 
-    O resultado nunca entra em energia, analyzer, OK/NG ou sequência. A decisão
-    produtiva continua desacoplada e pesada no executor canônico.
+    O resultado visual NÃO é autoridade de energia, ON/OFF semântico, OK/NG
+    ou sequência. Com tracking ON, o sinal pode somente DISPARAR a captura de
+    um snapshot RAW+geometria, julgado depois pelo executor produtivo.
     """
     if frame is None or getattr(frame, "size", 0) == 0:
         return {"ready": False, "mask_ids": (), "reason": "frame_invalido"}
