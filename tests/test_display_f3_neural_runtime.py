@@ -1090,6 +1090,58 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             )
             self.assertEqual("ok", decision["decision"])
 
+    def test_tracked_renderer_obeys_first_green_visual_hold_before_repaint(self):
+        # O renderer instalado na instância F3 ignora o método de desenho da
+        # classe Window. O hold deve ser aplicado no próprio renderer ativo.
+        import src.platform.display_f3_object_tracking as tracking
+
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        tracked = source.split("def tracked_window_update(", 1)[1].split(
+            "window.update_camera_preview = MethodType(", 1
+        )[0]
+        self.assertIn("_f3_snapshot_preview_hold_active(app)", tracked)
+        self.assertIn('"visual_hold_no_repaint"', tracked)
+        self.assertLess(
+            tracked.index("_f3_snapshot_preview_hold_active(app)"),
+            tracked.index("geometry = getattr("),
+        )
+        self.assertLess(
+            tracked.index('"visual_hold_no_repaint"'),
+            tracked.index("self_window.update_preview("),
+        )
+        self.assertIn(
+            'text="FOTO CONGELADA • ANALISANDO CHECK"',
+            tracked,
+        )
+
+    def test_tracking_green_preview_and_capture_share_exact_cache_identity(self):
+        # Quando aparece verde na câmera, a geometria e o frame-token
+        # precisam ser exatamente os que o capturador verifica. Um id puro
+        # em vez da tupla ('tracked', id) impedia o congelamento rápido.
+        import src.platform.display_f3_object_tracking as tracking
+
+        source = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        tracked = source.split("def tracked_window_update(", 1)[1].split(
+            "window.update_camera_preview = MethodType(", 1
+        )[0]
+        capture_source = inspect.getsource(
+            tracking._submit_first_green_from_preview
+        )
+        self.assertIn(
+            'geometry_token=("tracked", id(geometry))', tracked,
+        )
+        self.assertIn(
+            'self_window._display_last_overlay_context = dict(', tracked,
+        )
+        self.assertIn('repr(("tracked", id(geometry)))', capture_source)
+        self.assertIn('visual.get("live_visual_frame_token") != frame_token', capture_source)
+        self.assertIn("raw_frame.copy()", capture_source)
+        self.assertIn("_submit_live_semantic_job(", capture_source)
+
     def test_preview_freeze_is_only_visual_and_clears_after_semantic(self):
         import src.platform.display_live_roi_overlay as overlay
 
