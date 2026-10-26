@@ -96,3 +96,14 @@ Os `--geometry-dir` com poses reais validadas continuam prioritários.
 **Validação do ZIP temporário:** o teste de regressão verifica que caminhos
 Windows de fotos de referência são resolvidos apenas na cópia local e
 que o diretório temporário é eliminado ao concluir o replay.
+
+## 26/10/2026 — Resultado real com ZIP privado
+
+Reprodução completa das seis fotos com ONNX/CM_500_L foi executada
+fora da linha. Com as máscaras ajustadas por transformação afim,
+análise fotométrica auxiliar encontrou os cinco OK 30/30 e BLUE NG
+29/30 apenas MASK_024 (frações luminosas 0,952 no OK, 0,000 no NG).
+Esses números não são novas regras de produção. O híbrido atual retornou
+INCERTO para todas as seis fotos, inclusive BLUE NG. O julgamento não
+passou no teste de regressão real e ainda exige uma etapa de correção
+autorizada. Dados privados permaneceram fora do GitHub.

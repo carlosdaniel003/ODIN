@@ -7511,3 +7511,39 @@ OFFLINE. Isso indica discrepância séria na referência BLUE, mas NÃO
 é autorização para aplicar esta translação a todas as placas/fotos.
 Criado suporte de replay experimental com ZIP privado e pose estimada,
 sempre marcado PROVISÓRIO. Nenhuma regra produtiva alterada.
+
+## 26/10/2026 — Etapa 2: replay físico das 6 fotos com ZIP privado
+
+**Status:** TESTE OFFLINE, sem alteração do julgamento produtivo.
+Os seis PNGs do GitHub foram reunidos ao projeto CM_500_L, modelo ONNX
+e referências do ZIP privado. PNGs já rotacionados 180 graus; aplicou-se
+rotação de 180 graus somente às geometrias. Uma única translação não
+alinhava: foi necessário escalonamento X≈0,74, Y≈0,79 e translação.
+
+O BLUE NG usou a mesma geometria do BLUE OK com compensação interfoto
+aproximada de +6px horizontal e -55px vertical, sem ajustar a pose para
+esconder o defeito.
+
+**Resultado óptico auxiliar por máscaras alinhadas:** HSV V>=200 e
+fração de emissão da ROI >=0,20, exclusivamente para diagnóstico:
+- H1_OK: 7 ON + 23 OFF, 30/30.
+- BLUE_OK: 18 ON + 12 OFF, 30/30.
+- BLUE_NG_024: 17/18 ON + 12/12 OFF, 29/30; somente MASK_024 divergente.
+- USB_OK: 15 ON + 15 OFF, 30/30.
+- FM_OK: 17 ON + 13 OFF, 30/30.
+- AUX_OK: 16 ON + 14 OFF, 30/30.
+MASK_024 no BLUE OK: 0,952 de pixels V>=200; no BLUE NG: 0,000.
+O resultado permaneceu igual para limiares de fração de 0,10 a 0,60.
+Esses limiares são diagnósticos, nunca configuração aprovada para fábrica.
+
+**Autoridade híbrida real executada separadamente:** resultado INCERTO
+para todas as seis fotos, com 26/30 H1, 22/30 BLUE OK, 24/30 BLUE NG,
+24/30 USB, 27/30 FM, 25/30 AUX. A MASK_024 no BLUE NG também ficou
+INCERTA; portanto, o classificador atual não confirmou NG nesta imagem.
+Foram observados strong_source_conflict,
+neural_uncertain_without_local_physical e physical_low_light.
+
+**Conclusão:** as seis situações são distinguíveis fotometricamente após
+alinhamento, mas o híbrido atual não reproduz os rótulos conhecidos.
+Sem alteração de F3, F2, tracking desligado, ONNX ou thresholds.
+Necessária autorização para a próxima etapa de julgamento por snapshot.

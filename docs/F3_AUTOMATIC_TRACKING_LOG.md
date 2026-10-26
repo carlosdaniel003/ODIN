@@ -2812,3 +2812,17 @@ Requer evidência contrastante e rejeita giro ambíguo. Uma pose estimada
 não vira LOCK do runtime: resultados semânticos são `PROVISIONAL`, nunca
 validação de OK/NG industrial. ZIP privado é montado apenas em diretório
 temporário; não versionado. Sem mudanças em F2/produção F3.
+
+## 26/10/2026 — Etapa 2: 6 fotografias reais, geometria e híbrido
+
+Replay privado completo: cinco imagens boas 30/30 na leitura fotométrica
+diagnóstica, BLUE NG 29/30 somente MASK_024. Registro afim das máscaras
+exigiu rotação 180°, escala aproximada X 0,74 / Y 0,79 e deslocamento.
+Para o BLUE NG foi reutilizada a pose do BLUE OK, corrigindo apenas
+o movimento interfoto (+6,-55) pixels.
+
+A autoridade híbrida existente NÃO reproduziu os seis rótulos: ficou
+INCERTA em 6/6, inclusive na MASK_024 defeituosa do BLUE.
+Essa divergência não foi encoberta por thresholds ou aprovação de maioria.
+O replay confirma que capturar fotos por si só não corrige a fusão.
+Nenhum runtime produtivo foi alterado, e o ZIP não foi versionado.
