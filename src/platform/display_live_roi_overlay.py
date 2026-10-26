@@ -549,12 +549,26 @@ def montar_contexto_overlay_snapshot_display_f3(
             )
             tracking_snapshot_used = True
 
+    # D-085: snapshots NG com tracking ON precisam do mapa A..G do mesmo
+    # frame congelado. Sem isso, o visor usa a ordem MASK_001..028 e
+    # pinta a falha na barra errada, embora a câmera tenha a MASK_ID certa.
     readout_slot_mask_ids = ()
-    readout_indicator_mask_ids = (
-        mapear_indicadores_circulares_display(visual_masks, digit_count=4)
-        if tracking_snapshot_used
-        else {}
-    )
+    readout_indicator_mask_ids = {}
+    if tracking_snapshot_used:
+        try:
+            mapped_slots = mapear_slots_sete_segmentos_display(
+                visual_masks, digit_count=4
+            )
+            if len(mapped_slots) == 28 and len(set(mapped_slots)) == 28:
+                readout_slot_mask_ids = tuple(mapped_slots)
+                readout_indicator_mask_ids = (
+                    mapear_indicadores_circulares_display(
+                        visual_masks, digit_count=4
+                    )
+                )
+        except (TypeError, ValueError, KeyError):
+            readout_slot_mask_ids = ()
+            readout_indicator_mask_ids = {}
     if not tracking_snapshot_used:
         # D-074 / tracking OFF: o VISOR precisa usar a MESMA topologia física
         # A..G da geometria fixa exibida na câmera. A ordem numérica dos
@@ -694,8 +708,7 @@ def montar_contexto_overlay_snapshot_display_f3(
         "visual_rotation": rotation,
         "intermittent": bool(check.get("intermittent", False)),
         "readout_mask_ids": readout_mask_ids,
-        # Somente tracking OFF recebe o mapa físico fixo nesta etapa.
-        # Tracking ON permanece exatamente com o contrato anterior.
+        # Tracking ON e OFF usam a geometria que desenhou o frame.
         "readout_slot_mask_ids": readout_slot_mask_ids,
         "readout_indicator_mask_ids": readout_indicator_mask_ids,
         "tracking_active": bool(tracking_snapshot_used),
