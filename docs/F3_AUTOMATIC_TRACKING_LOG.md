@@ -2775,3 +2775,14 @@ comparação BLUE com registro translacional diagnóstico; sem política OK/NG
 nova e sem alterar runtime. A configuração canônica, CNN e poses geométricas
 por fotografia não estão no repositório; por isso o replay semântico fica
 BLOCKED de modo explícito, até fornecer esses recursos de engenharia.
+
+## 26/10/2026 — Replay offline real: dataset íntegro, modelo/config ausentes
+
+Run 40316106768: 81/81 PASS, seis imagens FullHD e rotação adicional 0°.
+BLUE OK 40022 pixels V>=200, BLUE NG 32699; deslocamento relativo estimado
+6,09/-55,086 pixels pela correlação luminosa. A diferença física existe,
+mas a identidade MASK_024 exige geometria real para vincular a variação.
+Classificação produtiva offline bloqueada: arquivo `odin_display_projects.json`
+e assets privados (ONNX, CHECK photos e poses por imagem) ausentes.
+Regra das duas tentativas: não alterar novos thresholds sem reproduzir
+o defeito usando a foto real e o projeto/modelo originais.

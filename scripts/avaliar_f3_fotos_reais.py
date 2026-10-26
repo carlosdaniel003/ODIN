@@ -141,6 +141,24 @@ def _prepare_semantic_replay(config_path: Path | None) -> tuple:
     model_path = f3_neural_model_path_for_repository(repository, "CM_500_L")
     if not model_path.is_file() or not model_path.with_suffix(".json").is_file():
         return None, None, "trained_cnn_and_metadata_missing"
+    # A autoridade híbrida compara as fotografias reais de treinamento
+    # da mesma MASK_ID. Não fazer um replay CNN-only por falta desses
+    # ativos e chamá-lo de validação da mesma autoridade de produção.
+    from src.platform.display_check_presence_reference import (
+        DisplayCheckPresenceReferenceStore,
+    )
+    reference_store = DisplayCheckPresenceReferenceStore(repository)
+    checks = {
+        str(item.get("name") or "").upper(): str(item.get("id") or "")
+        for item in repository.listar_checks("CM_500_L")
+    }
+    for name in ("H1", "BLUE", "USB", "FM", "AUX"):
+        check_id = checks.get(name)
+        if not check_id:
+            return None, None, f"check_missing:{name}"
+        metadata = reference_store.get("CM_500_L", check_id) or {}
+        if not Path(str(metadata.get("image_path") or "")).is_file():
+            return None, None, f"check_reference_photo_missing:{name}"
     return repository, F3HybridCheckAnalyzer(repository), ""
 
 

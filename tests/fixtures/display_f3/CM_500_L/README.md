@@ -49,3 +49,16 @@ autoridade nova de OK/NG nem altera o modo tracking OFF.
 
 O conjunto tem 5 fotos OK e 1 NG. É suficiente para reprodução inicial,
 mas não para demonstrar generalização ou ausência de falso OK em produção.
+
+## Medições iniciais (CI 40316106768)
+
+Todas as capturas são PNG 1920×1080; quatro novos testes físicos
+PASS, junto de 77 testes anteriores (81/81). Pixels V>=200:
+H1 15477, BLUE OK 40022, BLUE NG 32699, USB 33071, FM 39754, AUX 33864.
+Registro luminoso BLUE OK→NG: deslocamento relativo
+[6,09, -55,086] px (resposta 0,65074). São diagnósticos de pixels,
+não identificação automática de MASK_024.
+
+A CI publica o relatório detalhado como artefato
+`f3-real-snapshots-report`. Até existir configuração/ONNX e pose por
+fotografia, os seis vereditos semânticos permanecem BLOQUEADOS.

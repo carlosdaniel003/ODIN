@@ -7439,3 +7439,29 @@ Nenhuma alteração em tracking, CNN, híbrido ou estado produtivo.
 **Próximo reteste:** importar configuração/modelo e geometria por snapshot
 para permitir classificar efetivamente 5 OK + 1 NG offline; somente depois
 planejar gatilho de snapshot no runtime tracking ON.
+
+## 26/10/2026 — Resultado CI Etapa 2 de snapshots reais (semântico bloqueado por ativos locais)
+
+**Cenário:** seis PNGs de câmera CM_500_L já rotacionados 180°; projeto no
+GitHub `display-tracking-on`; run
+`Display F3 neural dataset tests` 40316106768. **PASS de integridade
+do acervo e sinais ópticos:** 81 testes passaram, incluindo quatro novos
+testes de snapshots físicos. Todas as imagens 1920x1080 e distintas.
+
+**Medições de brilho V>=200:** H1_OK 15477 px; BLUE_OK 40022;
+BLUE_NG_024 32699; USB_OK 33071; FM_OK 39754; AUX_OK 33864.
+BLUE NG apresenta ~18,3% menos pixels de alto brilho que BLUE OK,
+mas isso NÃO constitui prova de `MASK_024` sem geometria. Registro
+diagnóstico de translação BLUE NG versus OK: dx=+6,09 px;
+dy=-55,086 px; resposta 0,65074; componente de luz ausente maior
+que componente adicional após registro.
+
+**Julgamento real:** `BLOCKED/display_project_config_missing`.
+`odin_display_projects.json`, modelo ONNX + metadados, referências
+locais do CHECK e geometrias rastreadas por foto não estão no repositório.
+**Nenhum PASS/FAIL semântico foi inferido** das métricas de brilho.
+Sem mudança no julgamento F3, captura e F2.
+
+**Próxima ação dentro da Etapa 2:** disponibilizar ativos de engenharia
+e testar 5 OK + 1 BLUE NG pela autoridade híbrida, verificando
+MASK_024; testes produtivos continuam pendentes.
