@@ -1170,6 +1170,106 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         self.assertFalse(overlay._f3_snapshot_preview_hold_active(app, now))
         self.assertIsNone(app._display_f3_first_green_visual_hold)
 
+    def test_tracking_worker_first_green_paints_snapshot_before_visual_hold(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        raw = np.full((64, 100, 3), 42, dtype=np.uint8)
+        geometry = {
+            "locked": True, "check_id": "CHECK_001",
+            "masks": [{"id": "MASK_008", "type": "circle",
+                       "cx": 50, "cy": 30, "radius": 6}],
+        }
+        earlier_geometry = {"locked": True, "old": True}
+        render = []
+
+        def display(image, visual_rotation=0):
+            render.append((
+                image, visual_rotation, app._display_f3_tracking_live_geometry
+            ))
+            return True
+
+        app = SimpleNamespace(
+            display_f3_window=SimpleNamespace(update_camera_preview=display),
+            _display_f3_tracking_live_geometry=earlier_geometry,
+            _display_auto_current_context=lambda: {
+                "project_name": "DISPLAY A", "check_id": "CHECK_001",
+            },
+            _obter_rotacao_visual_display_f3=lambda: 180,
+        )
+        payload = {
+            "raw_frame": raw, "geometry": geometry,
+            "frame_token": ("camera", 71),
+            "snapshot_capture_trigger": {
+                "triggered": True,
+                "mask_ids": ("MASK_008",),
+                "source": "tracked_same_frame_live_green",
+            },
+        }
+        future = SimpleNamespace(done=lambda: False)
+        with patch.object(tracking.time, "perf_counter", return_value=50.0):
+            self.assertTrue(
+                tracking._show_worker_green_snapshot_during_analysis(
+                    app, payload, future
+                )
+            )
+        self.assertEqual(1, len(render))
+        self.assertIs(render[0][0], raw)
+        self.assertEqual(180, render[0][1])
+        self.assertIs(render[0][2], geometry)
+        self.assertIs(
+            earlier_geometry, app._display_f3_tracking_live_geometry
+        )
+        self.assertEqual(
+            ("camera", 71),
+            app._display_f3_first_green_visual_hold["frame_token"],
+        )
+        self.assertTrue(
+            app._display_f3_first_green_snapshot_debug["visual_hold_applied"]
+        )
+        self.assertEqual(
+            "tracking_worker_same_frame_green_to_semantic",
+            app._display_f3_first_green_snapshot_debug["capture_path"],
+        )
+
+    def test_tracking_worker_dark_or_unaligned_never_starts_visual_hold(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        raw = np.zeros((32, 48, 3), dtype=np.uint8)
+        window = SimpleNamespace(update_camera_preview=Mock(return_value=True))
+        app = SimpleNamespace(
+            display_f3_window=window,
+            _display_auto_current_context=lambda: {
+                "project_name": "DISPLAY A", "check_id": "CHECK_001",
+            },
+        )
+        future = SimpleNamespace(done=lambda: False)
+        payload = {
+            "raw_frame": raw,
+            "frame_token": ("camera", 77),
+            "geometry": {
+                "locked": False,
+                "check_id": "CHECK_001",
+                "masks": [{"id": "MASK_008"}],
+            },
+            "snapshot_capture_trigger": {"triggered": True},
+        }
+        self.assertFalse(
+            tracking._show_worker_green_snapshot_during_analysis(
+                app, payload, future
+            )
+        )
+        payload["geometry"]["locked"] = True
+        payload["snapshot_capture_trigger"]["triggered"] = False
+        self.assertFalse(
+            tracking._show_worker_green_snapshot_during_analysis(
+                app, payload, future
+            )
+        )
+        window.update_camera_preview.assert_not_called()
+        self.assertIsNone(
+            getattr(app, "_display_f3_first_green_visual_hold", None)
+        )
+
     def test_preview_first_green_fast_handoff_uses_same_visual_frame(self):
         import src.platform.display_f3_object_tracking as tracking
 
