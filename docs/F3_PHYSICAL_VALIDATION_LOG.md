@@ -7778,3 +7778,36 @@ classificação produtiva, F2 ou tracking OFF.
 **Validação:** julgamento OK e NG físico PASS; sincronização do novo visor
 ainda PENDENTE de reteste no equipamento, principalmente a barra MASK_024
 no BLUE NG e o desenho nos ângulos 0°/180°.
+
+## 26/10/2026 — D-086: rearme NG continua congelado após nova foto de suporte vazio
+
+**Relato físico:** após BLUE NG reconhecido corretamente na MASK_024,
+operador retirou/trocou a placa e recapturou a referência visual de
+`PLACA FORA DO SUPORTE`, porém o NG anterior continuou congelado.
+A referência escura por si só não explica o problema: o código do
+tracking também podia impedir o detector de retirada.
+
+**Causa de controle encontrada no código:** em
+`instalar_runtime_rastreamento_objetos_display_f3`, o
+`process_with_tracking_guard` descartava um ciclo antes do detector
+de rearme se o rastreador ainda reportasse `locked=True` e
+`evidence_current=False`. Um LOCK mantido da placa anterior é
+normal depois da retirada, mas NÃO prova placa presente. Esse retorno
+antecipado podia impedir `_atualizar_rearme_terminal_f3` de observar
+o suporte vazio e liberar o latch NG.
+
+**Correção D-086:** com rastreamento automático F3 ativo e fase
+`waiting_empty`/ `waiting_new_board`, o processamento encaminha
+primeiro a captura RAW ao caminho canônico de rearme, independentemente
+do lock antigo. O detector de EMPTY, duas confirmações físicas e
+liberação canônica continuam intactos. **Nunca** liberar NG por
+timeout, ausência de verde, lock perdido ou mera troca de foto.
+
+**Diagnóstico adicional:** `terminal_rearm` em DEBUG TÉCNICO registra
+fase antes/depois, frame da câmera, estado físico e confirmação EMPTY,
+permitindo distinguir falta de imagem nova de ausência de prova óptica.
+
+**Status:** correção em GitHub com testes de contrato; **reteste físico
+ainda pendente**. Se a câmera não registrar dois frames sucessivos do
+suporte efetivamente vazio, o bloqueio deve permanecer para impedir
+contabilização duplicada.
