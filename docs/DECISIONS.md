@@ -5941,3 +5941,41 @@ perda do LOCK; testes de identificação informativa OFF com `allow_auto=False`,
 sem promoção de CHECK; CI neural D-088 e regressões visuais. Ainda requer
 reteste no JIG com a referência PLACA DESLIGADA NO SUPORTE, além de H1 e
 BLUE NG/024 reais.
+
+## D-089 — HOLD visual obrigatório também para o snapshot capturado no worker de tracking
+
+**Relato físico:** terceira placa CM_500_L, H1 com LOCK, sete verdes na
+câmera, estado produtivo 29/30 (MASK_008 INCERTA), sem avanço e sem
+congelamento perceptível. DEBUG `Texto colado(20261026-180802).txt`:
+`auto_decision_trace.frozen_tracking_snapshot=true`, origem
+`tracked_same_frame_live_green`, mas `first_green_snapshot=null`.
+As outras duas placas haviam concluído corretamente (OK e BLUE NG).
+
+**Causa:** dois caminhos de captura chegam ao mesmo worker semântico. A
+captura rápida acionada depois do repaint armava o hold da câmera;
+a captura já pronta do worker de tracking acionava diretamente a semântica
+e, como ocupava `_display_f3_semantic_future`, impedia a captura rápida
+de armar seu hold. A decisão usava foto congelada, mas a janela continuava
+exibindo latest-frame, dando aparência de pisca.
+
+**Correção:** no consumidor Tk do resultado de tracking HIGH, quando o
+gatilho mesmo-frame indicou verde e o job semântico foi aceito, apresentar
+uma única vez **o RAW e as máscaras geométricas exatas desse snapshot**
+por `update_camera_preview` antes de armar o hold visual já existente.
+É somente repaint/diagnóstico; não reler câmera, não reexecutar tracking,
+não mexer em energia, presença, CNN, sequência ou critérios de NG.
+A próxima iteração não repinta enquanto a semântica estiver pendente, com
+o limite de segurança de apresentação existente. Sem verde, sem LOCK,
+geometria inválida, NG terminal ou rearme não arma o congelamento.
+
+**Resultado do diagnóstico semântico:** MASK_008 ficou INCERTA, não
+defeituosa confirmada: CNN P(ON)=0.578524; fonte física OFF confiança
+0.5039 / separação 0.0079; núcleo ON/OFF saturado com gap V=0.2644,
+insuficiente como evidência calibrada. A referência exata H1 30/30 é
+somente diagnóstica, não alternativa permissiva para declarar OK.
+Preservar os critérios de 30/30 e de NG real.
+
+**Validação:** regressões adicionadas para ordem "pintar foto → segurar
+foto" e não congelar sem verde/LOCK. Suíte neural 113/113 PASS no CI.
+Validação física do congelamento e resolução da incerteza MASK_008
+continuam pendentes.
