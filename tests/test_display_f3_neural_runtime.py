@@ -1395,7 +1395,10 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
                 )
             self.assertFalse(result["approved"])
             self.assertFalse(result["mask_results"][0]["calibrated_core_over_low_light"])
-            self.assertEqual("physical_low_light", result["mask_results"][0]["hybrid_resolution"])
+            self.assertTrue(result["mask_results"][0]["strong_low_light_core_conflict"])
+            self.assertEqual("uncertain", result["mask_results"][0]["classified"])
+            self.assertEqual("strong_neural_core_low_light_conflict",
+                             result["mask_results"][0]["hybrid_resolution"])
 
     def test_tracking_off_low_light_cannot_use_new_core_resolution(self):
         with tempfile.TemporaryDirectory() as temp:

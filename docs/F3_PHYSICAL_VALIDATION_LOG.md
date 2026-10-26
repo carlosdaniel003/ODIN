@@ -7597,3 +7597,13 @@ Pendente: executar as seis imagens reservadas do GitHub junto com o
 ZIP privado e geometrias da Etapa 2 para verificar se os bloqueios
 restantes podem ser resolvidos sem falso OK. A restrição de acesso
 binário às imagens do GitHub neste ambiente impediu esse replay.
+
+### Etapa 3 — salvaguarda de conflito forte entre CNN e núcleo (26/10/2026)
+
+Na reconciliação de `low_light` com o núcleo local, a classificação
+`low_light` é tratada como estado intermediário e não como estado binário
+oposto. Quando a CNN é fortemente contrária ao núcleo, a nova ramificação
+`strong_neural_core_low_light_conflict` permanece **INCERTA** (não OK,
+nem NG). A regra nova continua restrita ao tracking ON com par same-mask
+completo. Acrescentados testes para caminho forte contrário e para o
+tracking OFF intacto.

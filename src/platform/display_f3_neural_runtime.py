@@ -1242,6 +1242,7 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             physical_disagreed_with_core = False
             calibrated_physical_over_weak_neural = False
             calibrated_core_over_low_light = False
+            strong_low_light_core_conflict = False
             if isinstance(physical, dict):
                 physical_state = str(
                     physical.get("classified") or ""
@@ -1348,6 +1349,23 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                     )
                 )
 
+                strong_low_light_core_conflict = bool(
+                    use_geometry_override
+                    and physical_local_authoritative
+                    and physical_state == "low_light"
+                    and calibrated_core in (
+                        DISPLAY_CHECK_STATE_ON,
+                        DISPLAY_CHECK_STATE_OFF,
+                    )
+                    and physical_core_emission.get("reason")
+                    == "same_mask_physical_core_ranges"
+                    and int(physical_core_emission.get("reference_on_count") or 0) > 0
+                    and int(physical_core_emission.get("reference_off_count") or 0) > 0
+                    and neural_certain
+                    and neural_state != calibrated_core
+                    and neural_confidence >= neural_strong_confidence
+                )
+
             final_state = neural_state
             semantic_certain = bool(neural_certain)
             hybrid_resolution = "neural_only"
@@ -1377,6 +1395,12 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 semantic_certain = True
                 final_confidence = physical_confidence
                 hybrid_resolution = "calibrated_core_resolved_weak_neural"
+            elif strong_low_light_core_conflict:
+                # CNN forte contrária ao núcleo local: não trocar o
+                # conflito por NG (nem OK) a partir de pouca luz.
+                final_state = F3_NEURAL_UNCERTAIN_STATE
+                semantic_certain = False
+                hybrid_resolution = "strong_neural_core_low_light_conflict"
             elif calibrated_core_over_low_light:
                 # Não interpretar uma emissão ON comprovada como POUCA LUZ,
                 # nem aprovar uma máscara OFF quando o núcleo emite ON.
@@ -1489,6 +1513,9 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 ),
                 "calibrated_core_over_low_light": bool(
                     calibrated_core_over_low_light
+                ),
+                "strong_low_light_core_conflict": bool(
+                    strong_low_light_core_conflict
                 ),
                 "physical_distances": deepcopy(
                     physical.get("distances") or {}
