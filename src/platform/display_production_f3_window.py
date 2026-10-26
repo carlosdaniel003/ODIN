@@ -660,6 +660,46 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             }
         self._redraw_display_readout()
 
+    def suspend_display_readout_live_evidence(self) -> None:
+        """Sem geometria atual, descarte luz antiga sem perder os 30 IDs/slots.
+
+        Apenas a apresentação muda: o próximo frame com LOCK válido publicará
+        novamente as cores da MESMA amostra usada pela câmera.
+        """
+        if bool(getattr(self, "_display_readout_frozen", False)):
+            return
+        current = getattr(self, "_display_readout_context", None)
+        if not isinstance(current, dict) or bool(current.get("terminal_segregated")):
+            return
+        if not (
+            current.get("live_visual_mask_ids")
+            or current.get("live_visual_classifications")
+            or current.get("luminous_mask_ids")
+            or current.get("classifications")
+            or current.get("failed_mask_ids")
+            or current.get("validating_mask_ids")
+            or current.get("power_confirmed")
+        ):
+            return
+
+        # A última pose pode continuar servindo de legenda geométrica, mas sua
+        # evidência de luz nunca pode sobreviver à perda do LOCK.
+        self.set_display_readout_context({
+            "readout_mask_ids": tuple(current.get("mask_ids") or ()),
+            "readout_slot_mask_ids": tuple(current.get("mask_slots") or ()),
+            "readout_indicator_mask_ids": dict(
+                current.get("indicator_mask_ids") or {}
+            ),
+            "live_luminous_only": True,
+            "live_visual_sample_ready": False,
+            "live_visual_mask_ids": (),
+            "live_visual_classifications": {},
+            "luminous_mask_ids": (),
+            "power_confirmed": False,
+            "power_off_confirmed": False,
+            "energy_state": "unconfirmed",
+        })
+
     def _draw_fixed_segment_number(
         self,
         x: float,
