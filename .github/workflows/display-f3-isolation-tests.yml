@@ -258,6 +258,14 @@ jobs:
         run: |
           python -m unittest tests.test_display_f3_30_mask_readout -v
 
+      - name: Run D-085 tracking ON camera / readout sync regressions
+        run: |
+          python -m unittest \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_snapshot_ng_tracking_on_preserva_slots_fisicos_do_visor \
+            tests.test_display_f3_live_roi_overlay.DisplayF3LiveRoiOverlayTests.test_freeze_ng_persiste_slots_e_estados_do_frame_atomico \
+            tests.test_display_f3_preview_clarity_fix.DisplayF3PreviewClarityFixTests.test_tracking_on_readout_maps_same_moving_rois_as_camera \
+            -v
+
       - name: Run D-074 tracking OFF visor and universal mask regressions
         run: |
           python -m unittest \
