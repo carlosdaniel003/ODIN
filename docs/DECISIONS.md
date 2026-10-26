@@ -5897,3 +5897,18 @@ classificação de CHECK e OK/NG até EMPTY confirmado e chegada de
 nova placa. Não remover os dois frames de debounce, não usar timeout
 como prova de retirada, nem usar a simples atualização da referência
 como evento de rearme. O F2 e o F3 tracking OFF não são alterados.
+
+## D-087 — Congelamento visual de análise pertence ao renderer real do F3
+
+**Status:** Implementado; validação física pendente.
+
+Com tracking ON o método `update_camera_preview` é substituído na
+instância. O hold de primeiro verde precisa atuar nesta instância
+antes de pintar novos frames, não apenas no método de classe.
+
+A cache key que gerou verde na câmera (`frame_token`, projeto,
+CHECK e `("tracked", id(geometry))`) deve ser exatamente a chave
+consultada na captura. Publicar o contexto desse mesmo frame antes
+de desenhá-lo permite cópia do RAW para a única análise semântica.
+O congelamento de análise não interfere na câmera física, nos
+gates nem no NG terminal; tracking OFF e F2 não mudam.
