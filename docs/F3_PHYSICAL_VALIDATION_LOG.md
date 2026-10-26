@@ -7811,3 +7811,35 @@ permitindo distinguir falta de imagem nova de ausência de prova óptica.
 ainda pendente**. Se a câmera não registrar dois frames sucessivos do
 suporte efetivamente vazio, o bloqueio deve permanecer para impedir
 contabilização duplicada.
+
+## 26/10/2026 — D-087: congelamento temporário de câmera deixou de aparecer
+
+Relato em equipamento: operador perguntou se a câmera deixara de
+**congelar a imagem quando pelo menos uma máscara ficava verde**.
+O esperado é captura de snapshot por primeiro segmento aceso, hold
+VISUAL durante a análise CNN/física e retorno à câmera assim que o
+CHECK é processado. Isto vale apenas para tracking automático ON;
+não se confunde com NG terminal, que aguarda retirada física.
+
+**Causa confirmada por leitura de código:** o renderer da instância
+`tracked_window_update` desenhava via `self_window.update_preview`
+diretamente, sem executar o hold que estava instalado somente no
+renderer de classe `display_live_roi_overlay.update_camera_preview`.
+O mesmo renderer publicava `geometry_token=id(geometry)` enquanto
+`_submit_first_green_from_preview` exigia a cache key com
+`repr(("tracked", id(geometry)))`, e não atualizava
+`_display_last_overlay_context` usado pelo capturador; essa rota
+rápida não tinha como casar a amostra verde ao mesmo frame/pose.
+
+**D-087:** o renderer real rastreado verifica
+`_f3_snapshot_preview_hold_active` antes de repintar, usa a mesma
+identidade `("tracked", id(geometry))` para cache/captura e publica
+o contexto visual enriquecido do próprio frame antes de pintar.
+O frame RAW e a pose continuam imutáveis no único worker semântico;
+o hold apenas impede repaint no Tk. Preservados os gates e o NG
+terminal, inclusive o rearme D-086.
+
+**Validação:** teste de contrato de integração adicionado; a
+ausência de repaint ainda exige reteste físico observando
+`FOTO CONGELADA • ANALISANDO CHECK`. Não alegar PASS físico
+com base em CI.
