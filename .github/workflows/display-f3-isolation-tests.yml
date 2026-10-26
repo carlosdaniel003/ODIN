@@ -110,6 +110,14 @@ jobs:
             tests/test_display_f3_geometry_adjustments.py \
             tests/test_display_f3_zoom.py
 
+      - name: Run D-086 terminal NG rearm despite stale F3 tracking lock
+        run: |
+          python -m unittest \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_tracking_stale_lock_never_blocks_terminal_rearm_after_ng \
+            tests.test_display_f3_final_rearm_guard.DisplayF3FinalRearmGuardTests.test_empty_confirmado_libera_freeze_ng_pelo_caminho_canonico \
+            tests.test_display_f3_rearm_live_refresh_fix \
+            -v
+
       - name: Run F3 live zoom map and crop regressions
         run: |
           python -m unittest tests.test_display_f3_zoom -v
