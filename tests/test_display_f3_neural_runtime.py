@@ -2294,6 +2294,21 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         # remove apenas a trava óptica convencional do primeiro segmento ON.
         self.assertIn("decidir_analise_display_f3(", source)
 
+    def test_unlocked_camera_and_readout_share_no_live_evidence(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        worker = inspect.getsource(tracking._run_live_tracking_heavy_job)
+        installer = inspect.getsource(
+            tracking.instalar_autoridade_final_instancia_rastreamento_f3
+        )
+        self.assertIn("owner, \"observe_unlocked_support\"", worker)
+        self.assertIn('"unlocked_support_state": unlocked_support_state', worker)
+        self.assertIn('payload.get("unlocked_support_state")', installer)
+        self.assertIn("operational_fresh", installer)
+        self.assertIn("window.set_operational_reference_status(", installer)
+        self.assertIn("self_window._display_last_overlay_context = None", installer)
+        self.assertIn("self_window.suspend_display_readout_live_evidence()", installer)
+
     def test_bootstrap_installs_neural_authority_after_conventional_layers(self):
         source = inspect.getsource(
             DesktopProductionApp.__init__
