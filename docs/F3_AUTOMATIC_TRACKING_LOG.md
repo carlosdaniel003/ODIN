@@ -3030,3 +3030,22 @@ antes de congelá-lo.
 
 **PENDENTE**: reteste físico de paridade câmera/visor em OK e NG/024.
 Nenhuma alteração no julgamento híbrido ou F2.
+
+## 26/10/2026 — D-086: NG congelado após troca e recaptura de EMPTY
+
+Operador confirmou BLUE NG MASK_024 e informou que o resultado permanecia
+congelado mesmo após atualizar a foto PLACA FORA DO SUPORTE.
+
+Análise do controle: o guard de rastreamento permitia retorno antecipado
+quando `locked=True` e `evidence_current=False`, antes de percorrer
+a verificação do suporte vazio durante rearme. A última pose de uma placa
+não significa ocupação atual do suporte. Durante o handoff terminal,
+`waiting_empty` e `waiting_new_board` agora precedem esse filtro:
+o frame RAW recente segue para a única autoridade física de rearme, sem
+recalcular CHECK nem restaurar estado de outra placa. Confirmação EMPTY
+em 2 leituras continua obrigatória; nenhuma simplificação de segurança.
+
+O DEBUG TÉCNICO agora expõe `terminal_rearm` para saber se a análise de
+EMPTY está realmente consumindo frames ou sem separação fotométrica.
+**Reteste físico pendente**, sobretudo caso de troca rápida em que
+nenhum frame de EMPTY é observado.
