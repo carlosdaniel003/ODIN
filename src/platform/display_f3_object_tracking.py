@@ -8859,6 +8859,84 @@ def _submit_live_semantic_job(
     return future
 
 
+def _show_worker_green_snapshot_during_analysis(app, payload: dict, future) -> bool:
+    """Exibe a MESMA captura do worker enquanto o CHECK é analisado.
+
+    O tracking HIGH já tirou uma foto verde e disparou a semântica. Renderizar
+    latest-frame nessa fase, em vez da captura, faz a tela piscar e impede
+    _submit_first_green_from_preview (a future semântica já existe).
+    Só altera câmera/visor; não recalcula decisão, energia nem gatilhos.
+    """
+    trigger = payload.get("snapshot_capture_trigger")
+    raw = payload.get("raw_frame")
+    geometry = payload.get("geometry")
+    window = getattr(app, "display_f3_window", None)
+    if (
+        future is None
+        or not isinstance(trigger, dict)
+        or not bool(trigger.get("triggered"))
+        or not _valid_frame(raw)
+        or not isinstance(geometry, dict)
+        or not bool(geometry.get("locked"))
+        or not bool(geometry.get("masks"))
+        or window is None
+        or bool(getattr(app, "_display_f3_ng_evidence_frozen", False))
+        or bool(getattr(app, "_display_f3_waiting_empty_rearm", False))
+        or bool(getattr(app, "_display_f3_waiting_new_board_after_empty", False))
+    ):
+        return False
+    context_fn = getattr(app, "_display_auto_current_context", None)
+    context = context_fn() if callable(context_fn) else None
+    check_id = str((context or {}).get("check_id") or "")
+    project_name = str((context or {}).get("project_name") or "")
+    if not check_id or not project_name or str(geometry.get("check_id") or "") != check_id:
+        return False
+
+    try:
+        rotation = int(app._obter_rotacao_visual_display_f3()) % 360
+    except (AttributeError, TypeError, ValueError):
+        rotation = 0
+
+    # A UI roda no callback Tk do resultado de tracking, não no worker.
+    # Apresentar primeiro o RAW/ROIs exatos do snapshot, depois segurar o
+    # repaint. Nunca segurar uma imagem escura anterior ao H1.
+    old_geometry = getattr(app, "_display_f3_tracking_live_geometry", None)
+    shown = False
+    try:
+        app._display_f3_tracking_live_geometry = geometry
+        shown = bool(window.update_camera_preview(raw, visual_rotation=rotation))
+    except Exception as exc:
+        app._display_f3_first_green_snapshot_debug = {
+            "captured": True,
+            "capture_path": "tracking_worker_same_frame_green_to_semantic",
+            "frame_token": deepcopy(payload.get("frame_token")),
+            "check_id": check_id,
+            "mask_ids": tuple(trigger.get("mask_ids") or ()),
+            "visual_hold_applied": False,
+            "visual_error_type": type(exc).__name__,
+        }
+    finally:
+        app._display_f3_tracking_live_geometry = old_geometry
+
+    if not shown:
+        return False
+    app._display_f3_first_green_visual_hold = {
+        "check_id": check_id,
+        "project_name": project_name,
+        "frame_token": deepcopy(payload.get("frame_token")),
+        "started_s": time.perf_counter(),
+    }
+    app._display_f3_first_green_snapshot_debug = {
+        "captured": True,
+        "capture_path": "tracking_worker_same_frame_green_to_semantic",
+        "frame_token": deepcopy(payload.get("frame_token")),
+        "check_id": check_id,
+        "mask_ids": tuple(trigger.get("mask_ids") or ()),
+        "visual_hold_applied": True,
+    }
+    return True
+
+
 def _submit_first_green_from_preview(app, raw_frame) -> bool:
     """Fotografa o frame que ACABOU de ficar verde, sem refazer ORB/warp.
 
@@ -9760,11 +9838,18 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                             # analisa o RAW e a pose preservados deste token.
                             # Com tudo escuro, não executa CNN. Após terminar,
                             # o próximo tracking pode congelar uma foto nova.
-                            _submit_live_semantic_job(
+                            semantic_job = _submit_live_semantic_job(
                                 self,
                                 analysis_frame,
                                 payload,
                             )
+                            # D-089: o worker foi a captura verde vencedora.
+                            # A rota rápida da preview fica bloqueada pelo
+                            # future; sem este espelho o operador vê blinking.
+                            if semantic_job is not None:
+                                _show_worker_green_snapshot_during_analysis(
+                                    self, payload, semantic_job
+                                )
                     else:
                         self._display_f3_tracking_analysis_frame = None
                         self._display_f3_tracking_pending_raw_frame = None
