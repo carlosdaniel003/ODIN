@@ -237,6 +237,32 @@ def _prepare_live_visual_mirror_context(
             )
             if app is not None:
                 app._display_f3_live_visual_mirror_debug = debug
+                # O espelho de brilho live permanece independente. Para
+                # rastreamento ON, acrescentar só a anotação das MASK_IDs
+                # incertas da última análise produtiva do CHECK atual.
+                # Não modifica o mapa luminoso nem produz OK/NG.
+                analysis = getattr(app, "_display_auto_last_analysis", None)
+                if (
+                    bool(context.get("tracking_active"))
+                    and bool(context.get("tracking_locked"))
+                    and isinstance(analysis, dict)
+                    and bool(analysis.get("ready"))
+                    and str(analysis.get("project_name") or "")
+                    == str(context.get("project_name") or "")
+                    and str(analysis.get("check_id") or "")
+                    == str(context.get("check_id") or "")
+                    and bool(analysis.get("ui_judgement_ready"))
+                ):
+                    pending = tuple(
+                        str(mask_id)
+                        for mask_id in (
+                            analysis.get("effective_uncertain_mask_ids") or ()
+                        )
+                        if str(mask_id)
+                    )
+                    if pending:
+                        result = dict(result)
+                        result["hybrid_pending_mask_ids"] = pending
             return result
     except Exception as exc:
         debug.update(

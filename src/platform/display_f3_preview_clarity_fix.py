@@ -1537,6 +1537,11 @@ def _render_classic_luminous_preview(
         )
         if str(mask_id)
     }
+    hybrid_pending_mask_ids = {
+        str(mask_id)
+        for mask_id in (context.get("hybrid_pending_mask_ids") or ())
+        if str(mask_id)
+    }
 
     # Câmera e visor recebem a mesma fonte visual composta. O mapa físico
     # permite mostrar os estados que o analyzer já reconheceu mesmo quando o
@@ -1666,6 +1671,32 @@ def _render_classic_luminous_preview(
                 geometry,
                 F3_PREVIEW_CLASSIC_LIGHT_BGR,
                 2,
+            )
+
+    if hybrid_pending_mask_ids and not bool(context.get("terminal_segregated")):
+        # Marcação de PENDÊNCIA do julgamento (amarelo), sem alterar
+        # o espelho verde ON/OFF extraído da câmera. Apenas tracking ON.
+        for mask in masks:
+            if not isinstance(mask, dict):
+                continue
+            mask_id = str(mask.get("id") or "")
+            if (
+                mask_id not in hybrid_pending_mask_ids
+                or mask_id in confirmed_failed_mask_ids
+            ):
+                continue
+            geometry = _mask_geometry(mask, sx, sy)
+            if geometry is None:
+                continue
+            _draw_contour(
+                result,
+                geometry,
+                F3_PREVIEW_CLEAR_COLORS["warning"],
+                3,
+            )
+            _draw_live_mask_number(
+                result, mask, sx, sy,
+                F3_PREVIEW_CLEAR_COLORS["warning"],
             )
 
     if alert_geometries:

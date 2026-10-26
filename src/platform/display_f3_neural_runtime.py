@@ -1241,6 +1241,7 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
             physical_local_authoritative = False
             physical_disagreed_with_core = False
             calibrated_physical_over_weak_neural = False
+            calibrated_near_on_core_over_weak_neural = False
             calibrated_core_over_low_light = False
             strong_low_light_core_conflict = False
             if isinstance(physical, dict):
@@ -1324,6 +1325,56 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                     and physical_confidence >= neural_strong_confidence
                 )
 
+                # Se a CNN marca OFF com uma probabilidade praticamente
+                # empatada, NÃO tratá-la como fonte forte contra emissão real.
+                # O núcleo pode estar ligeiramente abaixo do menor exemplo ON
+                # mesmo com brilho muito alto (H1 MASK_020: 251.0197 vs
+                # ON floor 252.1907). Resolver SOMENTE se:
+                # - par ON/OFF da mesma máscara disponível e bem separado;
+                # - classificação multifeature ON extremamente forte;
+                # - núcleo dentro do último 1% da faixa para ON;
+                # - CNN não apresenta evidência OFF forte;
+                # - geometria rastreada, sem recorrer ao estado esperado.
+                # A verificação é simétrica quanto ao CHECK: se esperar OFF,
+                # esta mesma evidência ON continuará NG, nunca OK.
+                if (
+                    use_geometry_override
+                    and physical_local_authoritative
+                    and physical_state == DISPLAY_CHECK_STATE_ON
+                    and calibrated_core == "uncertain"
+                    and physical_core_emission.get("reason")
+                    == "same_mask_physical_core_ranges"
+                    and int(physical_core_emission.get("reference_on_count") or 0) > 0
+                    and int(physical_core_emission.get("reference_off_count") or 0) > 0
+                    and neural_certain
+                    and neural_state == DISPLAY_CHECK_STATE_OFF
+                    and neural_confidence < neural_strong_confidence
+                    and float(
+                        (observation.get("probabilities") or {}).get("on") or 0.0
+                    ) >= 0.45
+                    and physical_confidence >= 0.95
+                    and float(physical_reference_separation or 0.0) >= 0.95
+                ):
+                    try:
+                        current_v = float(
+                            physical_core_emission["current_inner_v_mean"]
+                        )
+                        off_edge = float(
+                            physical_core_emission["off_reference_ceiling"]
+                        )
+                        on_edge = float(
+                            physical_core_emission["on_reference_floor"]
+                        )
+                        span = on_edge - off_edge
+                        calibrated_near_on_core_over_weak_neural = bool(
+                            span >= 100.0
+                            and current_v > off_edge
+                            and current_v < on_edge
+                            and (on_edge - current_v) <= (0.01 * span)
+                        )
+                    except (KeyError, TypeError, ValueError, OverflowError):
+                        calibrated_near_on_core_over_weak_neural = False
+
                 # Quando o classificador de brilho multifeature detecta
                 # "pouca luz" mas a emissão do NÚCLEO cai dentro da faixa
                 # ON/OFF calibrada da mesma máscara, essa evidência local
@@ -1395,6 +1446,11 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 semantic_certain = True
                 final_confidence = physical_confidence
                 hybrid_resolution = "calibrated_core_resolved_weak_neural"
+            elif calibrated_near_on_core_over_weak_neural:
+                final_state = physical_state
+                semantic_certain = True
+                final_confidence = physical_confidence
+                hybrid_resolution = "near_on_core_resolved_weak_neural"
             elif strong_low_light_core_conflict:
                 # CNN forte contrária ao núcleo local: não trocar o
                 # conflito por NG (nem OK) a partir de pouca luz.
@@ -1510,6 +1566,9 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                 ),
                 "calibrated_physical_over_weak_neural": bool(
                     calibrated_physical_over_weak_neural
+                ),
+                "calibrated_near_on_core_over_weak_neural": bool(
+                    calibrated_near_on_core_over_weak_neural
                 ),
                 "calibrated_core_over_low_light": bool(
                     calibrated_core_over_low_light

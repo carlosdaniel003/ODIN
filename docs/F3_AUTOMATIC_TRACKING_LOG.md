@@ -2897,3 +2897,35 @@ presença/energia, rastreamento OFF ou temporização.
 Estado de validação: **PENDENTE DE RETESTE FÍSICO** com H1 OK
 e BLUE NG MASK_024. Exigir registro da MASK_ID reprovada e
 eventual decisão NG/OK; CI unitária não substitui placa física.
+
+## 26/10/2026 — Reteste físico H1: bloqueio real MASK_020, não MASK_008
+
+Segundo DEBUG do operador `Texto colado(20261026-151312).txt`.
+A correção de saturação da MASK_008 teve efeito: essa máscara foi
+`physical_resolved_neural_uncertain` = ON. O novo bloqueio único foi
+**MASK_020**, expected ON, classificado INCERTO por
+`strong_source_conflict`; CNN dizia OFF com p_OFF=0.504946 e
+p_ON=0.495054, muito longe da evidência forte. Físico ON 0.9854,
+separação 0.9907, distância ON=6.7607 versus OFF=1447.1783.
+Núcleo estava em 251.0197, com OFF max 17.2862 e ON min 252.1907:
+apenas ~0.5% abaixo do limite inferior da faixa ON, mas mais de
+233 níveis acima da faixa OFF. Placa presente e energizada, 29/30,
+1 incerta. A autoridade `f3_current_check_exact_photo` indicava 30/30,
+porém é SOMENTE DIAGNÓSTICA e não entra na decisão. Visual live
+usava mapa físico independente, não o híbrido, ocultando a MASK_020
+da identificação na câmera.
+
+Correção: em tracking ON, apenas para ON físico muito forte (confiança
+>=0.95, separação >=0.95), com par ON/OFF local completo e fortemente
+separado (gap>=100 no canal V), núcleo nos últimos 1% da faixa para ON
+e CNN OFF realmente fraca (P_ON>=0.45 e confiança abaixo do ON
+calibrado), a fonte física ON resolve a discordância. Não usa estado
+esperado: ON inesperado continua NG. Sem par local, core insuficiente,
+neural forte, tracking OFF e segmento físico OFF não são promovidos.
+Mesmo frame segue exigindo prova de placa ligada; nenhum override de
+gate, temporização, sequência ou pesos CNN. Status visual passa a
+exibir explicitamente a MASK_ID INCERTA no início da faixa.
+
+**Validação física PENDENTE**: repetir H1 real e BLUE NG/024 antes
+de considerar a correção liberada. Testes de contrato não representam
+validação com câmeras reais.

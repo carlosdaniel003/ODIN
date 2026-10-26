@@ -135,6 +135,26 @@ def formatar_status_mascaras_f3(
         if neural_indeterminate
         else ("DETECTADO" if detected else "NÃO CONFIRMADO")
     )
+    if neural_indeterminate:
+        # Informar a MASK_ID com autoridade semântica, em vez de ocultar
+        # o único segmento incerto no fim da linha de contagens.
+        pending = tuple(
+            str(mask_id)
+            for mask_id in (analysis.get("effective_uncertain_mask_ids") or ())
+            if str(mask_id)
+        )
+        if not pending:
+            pending = tuple(
+                str(item.get("mask_id"))
+                for item in results
+                if str(item.get("mask_id") or "")
+                and (
+                    item.get("semantic_certain") is False
+                    or str(item.get("classified") or "").lower() == "uncertain"
+                )
+            )
+        if pending:
+            state_text += " " + ", ".join(sorted(set(pending))[:2])
     detail = " • ".join(readings)
 
     signature = analysis.get("segment_signature")
