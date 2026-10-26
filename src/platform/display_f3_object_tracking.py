@@ -10576,6 +10576,23 @@ def instalar_runtime_rastreamento_objetos_display_f3() -> None:
 
         def process_with_tracking_guard(self):
             if tracking_enabled(self):
+                # Prioridade absoluta ao rearme terminal: o LOCK da última
+                # placa pode continuar mantido (evidence_current=False) após
+                # a retirada. Não deixar esse LOCK bloquear o detector EMPTY
+                # nem manter o NG congelado indefinidamente. A camada final
+                # de rearme continua exigindo prova física de suporte vazio
+                # antes de liberar câmera, CHECKS e próximo ciclo.
+                if (
+                    bool(getattr(self, "_display_f3_waiting_empty_rearm", False))
+                    or bool(
+                        getattr(
+                            self,
+                            "_display_f3_waiting_new_board_after_empty",
+                            False,
+                        )
+                    )
+                ):
+                    return process_previous(self)
                 # Configuração aberta: mantenha a câmera viva, mas não execute
                 # ORB nem decisão automática em segundo plano. Isso evita disputar
                 # CPU com a janela de Projeto Display no Raspberry.
