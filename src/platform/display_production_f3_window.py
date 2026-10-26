@@ -1287,6 +1287,18 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             if isinstance(overlay_context, dict)
             else getattr(self, "_display_last_overlay_context", None)
         )
+        # D-085: a câmera NG usa o RAW/ROIs da captura atômica. O visor
+        # também deve usar esses mesmos 28 slots A..G e estados por MASK_ID,
+        # em vez de congelar as barras do último repaint live.
+        if (
+            isinstance(overlay_context, dict)
+            and len(tuple(overlay_context.get("readout_slot_mask_ids") or ())) == 28
+            and isinstance(
+                overlay_context.get("live_visual_classifications"), dict
+            )
+            and overlay_context.get("live_visual_classifications")
+        ):
+            self.set_display_readout_context(overlay_context)
         self._display_frozen_overlay_context = deepcopy(overlay_source)
         self._display_ng_evidence_frozen = True
         self._display_readout_frozen = True
