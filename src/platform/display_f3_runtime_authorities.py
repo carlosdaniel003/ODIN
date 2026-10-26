@@ -831,6 +831,53 @@ class F3RuntimeAuthorities:
         self.app._display_f3_physical_pending_frames = 0
         return deepcopy(raw_state)
 
+    def observe_unlocked_support(self, frame, project_name: str) -> dict:
+        """Observa OFF/EMPTY pela autoridade física, sem autorizar CHECK.
+
+        É chamado pelo executor HIGH já existente quando o tracking não
+        encontrou geometria. Sem LOCK não há ROI para leitura semântica, mas
+        isso não impede identificar a foto física do suporte.
+        """
+        raw = transition_module.classificar_estado_fisico_referencias_f3(
+            self._matcher, frame, str(project_name or "")
+        )
+        kind = str(raw.get("kind") or "unknown").lower()
+        if kind == "check":
+            # Evita tratar reflexos da placa desligada como CHECK aceso.
+            raw = physical_policy_module.corrigir_falso_check_ligado_pelas_mascaras_f3(
+                repository=self.repository,
+                matcher=self._matcher,
+                frame=frame,
+                project_name=str(project_name or ""),
+                state=raw,
+            )
+            kind = str(raw.get("kind") or "unknown").lower()
+
+        if kind == "check":
+            # Mesmo que a foto se pareça com um CHECK, sem LOCK não existe
+            # geometria válida para classificação/OK/NG.
+            return {
+                "kind": "unknown",
+                "text": "DISPLAY IDENTIFICADO • ALINHANDO RASTREAMENTO",
+                "color": operational_module.F3_OPERATIONAL_STATUS_COLORS["unknown"],
+                "allow_auto": False,
+                "source": "f3_unlocked_support_observation",
+            }
+
+        state = self._stabilize_physical_state(raw)
+        state = physical_policy_module.aplicar_contexto_ao_estado_fisico_f3(
+            state, current_check_id=""
+        )
+        if bool(state.get("physical_transition_pending")):
+            pending = str(state.get("pending_physical_state_key") or "")
+            if pending == "off":
+                state["text"] = "CONFIRMANDO PLACA DESLIGADA..."
+            elif pending == "empty":
+                state["text"] = "CONFIRMANDO SUPORTE VAZIO..."
+        state["allow_auto"] = False
+        state["source"] = "f3_unlocked_support_observation"
+        return state
+
     def _cache_signature(
         self,
         frame,
