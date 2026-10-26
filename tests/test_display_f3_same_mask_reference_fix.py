@@ -128,6 +128,73 @@ class DisplayF3SameMaskReferenceFixTests(unittest.TestCase):
             )["state"],
         )
 
+    def test_saturated_core_gap_does_not_veto_on_mask_008_h1(self):
+        from src.platform.display_f3_same_mask_reference_fix import (
+            _same_mask_core_emission_evidence,
+        )
+
+        def physical(v):
+            item = _features(v)
+            item.inner_v_mean = float(v)
+            return item
+
+        # Valores do DEBUG físico H1 26/10: OFF e ON saturados, lacuna
+        # nominal de apenas 0.2644 nível V, quadro corrente em 251.3566.
+        evidence = _same_mask_core_emission_evidence(
+            physical(251.3566),
+            [physical(251.7147), physical(252.0),
+             physical(252.1), physical(251.85)],
+            [physical(250.9), physical(251.4503)],
+        )
+        self.assertEqual("unavailable", evidence["state"])
+        self.assertEqual(
+            "same_mask_core_gap_below_reliable_separation",
+            evidence["reason"],
+        )
+        self.assertAlmostEqual(0.2644, evidence["core_gap_v"], places=4)
+        self.assertEqual(4, evidence["reference_on_count"])
+        self.assertEqual(2, evidence["reference_off_count"])
+
+    def test_core_range_gap_less_than_reference_drift_is_not_binary_proof(self):
+        from src.platform.display_f3_same_mask_reference_fix import (
+            _same_mask_core_emission_evidence,
+        )
+
+        def physical(v):
+            item = _features(v)
+            item.inner_v_mean = float(v)
+            return item
+
+        # ON/OFF formalmente não sobrepostos, porém com variação natural
+        # intra-classe maior que a folga entre os dois intervalos.
+        evidence = _same_mask_core_emission_evidence(
+            physical(68), [physical(70), physical(98)],
+            [physical(50), physical(60)],
+        )
+        self.assertEqual("unavailable", evidence["state"])
+        self.assertEqual(
+            "same_mask_core_gap_below_reliable_separation",
+            evidence["reason"],
+        )
+
+    def test_core_with_wide_local_gap_preserves_real_ng_off(self):
+        from src.platform.display_f3_same_mask_reference_fix import (
+            _same_mask_core_emission_evidence,
+        )
+
+        def physical(v):
+            item = _features(v)
+            item.inner_v_mean = float(v)
+            return item
+
+        evidence = _same_mask_core_emission_evidence(
+            physical(17),
+            [physical(190), physical(215)],
+            [physical(14), physical(22)],
+        )
+        self.assertEqual("off", evidence["state"])
+        self.assertEqual("same_mask_physical_core_ranges", evidence["reason"])
+
     def test_reflexo_legitimo_off_uses_same_physical_mask(self):
         result = classificar_mascara_por_referencias_locais_f3(
             current=_features(121),

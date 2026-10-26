@@ -2869,3 +2869,31 @@ Pendente: executar as seis imagens reservadas do GitHub junto com o
 ZIP privado e geometrias da Etapa 2 para verificar se os bloqueios
 restantes podem ser resolvidos sem falso OK. A restrição de acesso
 binário às imagens do GitHub neste ambiente impediu esse replay.
+
+## 26/10/2026 — Reteste real H1 (tracking ON): 29/30, MASK_008 — correção pontual
+
+Evidência do operador: `Texto colado(20261026-150130).txt` e captura
+1920x1080, H1 visivelmente aceso. Placa PRESENTE/energia CONFIRMADA,
+gate produtivo LIBERADO. Rastreamento H1 com 7/7 emissões associadas e
+homografia experimental ECC estável (a ECC não participa da decisão).
+Resultado H1: 29/30 máscaras, **MASK_008 INCERTA**, sem avanço.
+A máscara tinha expected ON, física ON confiança 0.841, CNN INCERTA
+P(ON)=0.626. O núcleo produziu OFF porque OFF ceiling=251.4503 e
+ON floor=251.7147 (gap 0.2644 no canal V 8-bit), com leitura atual
+251.3566. Esse núcleo quase saturado não fornece margem física
+suficiente para vetar a classificação local multifeature.
+
+Mudança restrita à qualificação `_same_mask_core_emission_evidence`:
+só aceitar o núcleo binário como veto quando seu intervalo ON/OFF
+contiver folga >=2 níveis V **e** >= à dispersão intra-classe observada
+nos exemplos locais da mesma MASK_ID. Intervalos formalmente separados
+mas mais estreitos do que essas variações são `unavailable` em vez de
+OFF/ON autoritativos; não forçam aprovação e deixam a CNN e a prova
+multifeature existente resolver sem falso veto. ON/OFF fisicamente
+bem separados preservam os julgamentos e NG, inclusive MASK_024.
+Sem mudança no limiar CNN, metadados, pesos, F2, clocks,
+presença/energia, rastreamento OFF ou temporização.
+
+Estado de validação: **PENDENTE DE RETESTE FÍSICO** com H1 OK
+e BLUE NG MASK_024. Exigir registro da MASK_ID reprovada e
+eventual decisão NG/OK; CI unitária não substitui placa física.

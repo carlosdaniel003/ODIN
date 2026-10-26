@@ -66,6 +66,13 @@ F3_LOW_LIGHT_MAX_INTERPOLATION = 0.72
 F3_LOW_LIGHT_MAX_BINARY_SEPARATION = 0.45
 F3_LOW_LIGHT_MIN_ENERGY_SPAN = 10.0
 
+# O núcleo V é medido em níveis de 8 bits (0..255) a partir de JPEGs de
+# referência. Gap inferior a dois níveis, ou menor que a variação observada
+# na própria classe, não pode servir como veto binário: esse contraste está
+# dentro da flutuação/quantização. Esta regra só qualifica o veto do núcleo,
+# não afrouxa a CNN nem introduz aprovação por gabarito esperado.
+F3_SAME_MASK_CORE_MIN_RELIABLE_GAP_V = 2.0
+
 
 def _feature_distance(current: LedFeatures, reference: LedFeatures) -> float:
     distance = 0.0
@@ -145,9 +152,11 @@ def _same_mask_core_emission_evidence(
 ) -> dict:
     """Referências REAIS da mesma máscara delimitam luz no núcleo do segmento.
 
-    Só produz ON/OFF quando todas as amostras físicas separam as faixas:
-    o ON mais fraco precisa superar o OFF mais claro. Intermediários ficam
-    inconclusivos. Não existe limiar novo nem transferência entre máscaras.
+    Só produz ON/OFF quando as faixas da mesma máscara estão afastadas
+    mais do que a resolução útil de brilho e a dispersão das referências.
+    Pequenos intervalos positivos produzidos pela saturação do núcleo não
+    são autoridade para contradizer a evidência física multifeature.
+    Intermediários ficam inconclusivos; nunca usa máscaras diferentes.
     """
     on = list(on_references or ())
     off = list(off_references or ())
@@ -164,12 +173,37 @@ def _same_mask_core_emission_evidence(
     if not all(isfinite(value) and value >= 0.0 for value in values):
         return {"state": "unavailable", "reason": "invalid_core_emission"}
     current_core = values[0]
-    on_floor = min(values[1:1 + len(on)])
-    off_ceiling = max(values[1 + len(on):])
+    on_values = values[1:1 + len(on)]
+    off_values = values[1 + len(on):]
+    on_floor = min(on_values)
+    off_ceiling = max(off_values)
     if on_floor <= off_ceiling:
         return {
             "state": "unavailable",
             "reason": "on_off_core_ranges_overlap",
+        }
+
+    # Um par com OFF=251.4503 e ON=251.7147 pode parecer formalmente
+    # separado, mas uma diferença de 0.2644 nível V não distingue emissão:
+    # ambas as classes estão saturadas. Considerar também o espalhamento
+    # intra-classe já observado, sem usar o estado esperado do CHECK.
+    core_gap = on_floor - off_ceiling
+    minimum_reliable_gap = max(
+        F3_SAME_MASK_CORE_MIN_RELIABLE_GAP_V,
+        max(on_values) - min(on_values),
+        max(off_values) - min(off_values),
+    )
+    if core_gap < minimum_reliable_gap:
+        return {
+            "state": "unavailable",
+            "reason": "same_mask_core_gap_below_reliable_separation",
+            "current_inner_v_mean": round(current_core, 4),
+            "off_reference_ceiling": round(off_ceiling, 4),
+            "on_reference_floor": round(on_floor, 4),
+            "core_gap_v": round(core_gap, 4),
+            "minimum_reliable_gap_v": round(minimum_reliable_gap, 4),
+            "reference_on_count": len(on),
+            "reference_off_count": len(off),
         }
     if current_core <= off_ceiling:
         state = DISPLAY_CHECK_STATE_OFF

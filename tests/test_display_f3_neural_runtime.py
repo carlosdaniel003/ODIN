@@ -1028,6 +1028,68 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertTrue(result["approved"])
             self.assertEqual(0, result["uncertain_mask_count"])
 
+    def test_tracking_h1_mask_008_saturated_core_does_not_block_real_on(self):
+        from src.models.led_features import LedFeatures
+        from src.platform.display_f3_same_mask_reference_fix import (
+            _same_mask_core_emission_evidence,
+        )
+
+        def core(v):
+            return LedFeatures(
+                inner_area_pixels=25,
+                inner_v_mean=float(v),
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            repository, h1, _blue = _repository(Path(temp))
+            analyzer = F3HybridCheckAnalyzer(repository)
+            analyzer.neural_detector.prepare = Mock(
+                return_value=_ready_model_status()
+            )
+            analyzer.neural_detector.predict = Mock(
+                return_value=_inference(["uncertain", "off"])
+            )
+            physical = _physical_analysis(["on", "off"], confidence=0.841)
+            physical["mask_results"][0]["core_emission_evidence"] = (
+                _same_mask_core_emission_evidence(
+                    core(251.3566),
+                    [core(251.7147), core(252.0),
+                     core(252.1), core(251.85)],
+                    [core(250.9), core(251.4503)],
+                )
+            )
+            with patch.object(
+                F3SameMaskReferenceAnalyzer, "analyze",
+                return_value=physical,
+            ):
+                result = analyzer.analyze(
+                    _frame(), "DISPLAY A", h1["id"],
+                    mask_geometry_override=[
+                        {"id": "MASK_001", "type": "circle",
+                         "cx": 42, "cy": 48, "radius": 9},
+                        {"id": "MASK_002", "type": "circle",
+                         "cx": 118, "cy": 48, "radius": 9},
+                    ],
+                    mask_geometry_resolution=(160, 96),
+                )
+            self.assertTrue(result["approved"])
+            self.assertEqual(2, result["matched_mask_count"])
+            row = result["mask_results"][0]
+            self.assertEqual("on", row["classified"])
+            self.assertFalse(row["physical_disagreed_with_core"])
+            self.assertEqual(
+                "physical_resolved_neural_uncertain",
+                row["hybrid_resolution"],
+            )
+            self.assertEqual(
+                "same_mask_core_gap_below_reliable_separation",
+                row["physical_core_emission"]["reason"],
+            )
+            decision = decidir_analise_display_f3(
+                result, reference_gate=True
+            )
+            self.assertEqual("ok", decision["decision"])
+
     def test_tracking_core_emission_resolves_false_physical_on_as_h1_off(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, h1, _blue = _repository(Path(temp))
