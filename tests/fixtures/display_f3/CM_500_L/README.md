@@ -92,3 +92,7 @@ busca correspondência entre luz e as máscaras canônicas em orientações 0/18
 translação, não um LOCK homologado de rastreamento. Os resultados são marcados
 `PROVISIONAL_*` ou `BLOCKED`; nunca justificam aprovar uma placa NG.
 Os `--geometry-dir` com poses reais validadas continuam prioritários.
+
+**Validação do ZIP temporário:** o teste de regressão verifica que caminhos
+Windows de fotos de referência são resolvidos apenas na cópia local e
+que o diretório temporário é eliminado ao concluir o replay.

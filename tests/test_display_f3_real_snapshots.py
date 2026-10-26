@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import unittest
+import json
+import tempfile
+from zipfile import ZipFile
 from pathlib import Path
 
 import cv2
@@ -99,6 +102,43 @@ class DisplayF3RealSnapshotsTests(unittest.TestCase):
         self.assertLessEqual(abs(report["translation_px"][0] + 20), 2)
         self.assertLessEqual(abs(report["translation_px"][1] - 24), 2)
         self.assertEqual(len(masks), len(estimate))
+
+
+    def test_staged_private_zip_rewrites_local_windows_reference_path(self):
+        from scripts.avaliar_f3_fotos_reais import staged_private_assets
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "example.zip"
+            records = {
+                "schema_version": 1,
+                "references": {
+                    "CM_500_L::CHECK_001": {
+                        "image_path": "data\\\\config\\\\display_check_presence\\\\cm_500_l_check_001.jpg"
+                    }
+                },
+            }
+            with ZipFile(archive, "w") as package:
+                package.writestr("enviar/odin_display_projects.json",
+                                 '{"projects":{"CM_500_L":{}}}')
+                package.writestr("enviar/odin_display_check_presence.json",
+                                 json.dumps(records))
+                package.writestr("enviar/cm_500_l_segments.onnx", b"model-bytes")
+                package.writestr("enviar/cm_500_l_segments.json", b"{}")
+                package.writestr("enviar/display_check_presence/cm_500_l_check_001.jpg",
+                                 b"reference-bytes")
+            with staged_private_assets(archive) as project_path:
+                reference_path = project_path.parent / "odin_display_check_presence.json"
+                saved = json.loads(reference_path.read_text(encoding="utf-8"))
+                photo_path = Path(
+                    saved["references"]["CM_500_L::CHECK_001"]["image_path"]
+                )
+                self.assertTrue(project_path.is_file())
+                self.assertTrue(photo_path.is_file())
+                self.assertEqual(b"reference-bytes", photo_path.read_bytes())
+                self.assertTrue(
+                    (project_path.parent / "models" / "f3_neural" /
+                     "cm_500_l_segments.onnx").is_file()
+                )
+            self.assertFalse(photo_path.exists())
 
     def test_offline_geometry_blocks_dark_frame(self):
         import numpy as np
