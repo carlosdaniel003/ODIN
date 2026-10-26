@@ -8553,6 +8553,35 @@ def _run_live_tracking_heavy_job(
         (time.perf_counter() - align_started) * 1000.0,
     )
 
+    # D-088: quando não há LOCK, a captura semântica permanece proibida.
+    # Porém a referência física OFF/EMPTY ainda pode ser reconhecida no
+    # mesmo executor HIGH, sem bloquear o Tk e sem criar segunda autoridade.
+    unlocked_support_state = None
+    if result is not None and not bool(result.locked) and _valid_frame(raw_frame):
+        now_s = time.perf_counter()
+        due_s = float(
+            getattr(app, "_display_f3_unlocked_support_probe_due_s", 0.0) or 0.0
+        )
+        if now_s >= due_s:
+            app._display_f3_unlocked_support_probe_due_s = now_s + 0.65
+            owner = getattr(app, "_display_f3_runtime_authorities", None)
+            observe = getattr(owner, "observe_unlocked_support", None)
+            repository = getattr(app, "display_project_repository", None)
+            if callable(observe) and repository is not None:
+                try:
+                    project_name = str(repository.obter_projeto_ativo() or "")
+                    if project_name:
+                        unlocked_support_state = observe(raw_frame, project_name)
+                except Exception as exc:
+                    unlocked_support_state = {
+                        "kind": "unknown",
+                        "text": "REFERÊNCIA FÍSICA • FALHA DE LEITURA",
+                        "color": "#FBBF24",
+                        "allow_auto": False,
+                        "source": "f3_unlocked_support_observation",
+                        "error_type": type(exc).__name__,
+                    }
+
     geometry = None
     analysis_frame = None
     geometry_elapsed_ms = 0.0
@@ -8619,6 +8648,7 @@ def _run_live_tracking_heavy_job(
         "geometry": geometry,
         "analysis_frame": analysis_frame,
         "snapshot_capture_trigger": snapshot_capture_trigger,
+        "unlocked_support_state": unlocked_support_state,
     }
 
 
@@ -9645,6 +9675,28 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         payload,
                         current_token,
                     )
+                    support_state = payload.get("unlocked_support_state")
+                    if (
+                        operational_fresh
+                        and result is not None
+                        and not bool(getattr(result, "locked", False))
+                        and isinstance(support_state, dict)
+                        and not bool(getattr(self, "_display_f3_ng_evidence_frozen", False))
+                    ):
+                        # Somente apresentação: não autoriza H1/OK/NG sem LOCK.
+                        self._display_f3_operational_state = deepcopy(support_state)
+                        self._display_f3_unlocked_support_status_debug = {
+                            "frame_token": deepcopy(payload.get("frame_token")),
+                            "kind": str(support_state.get("kind") or "unknown"),
+                            "source": str(support_state.get("source") or ""),
+                            "error_type": str(support_state.get("error_type") or ""),
+                        }
+                        window = getattr(self, "display_f3_window", None)
+                        if window is not None:
+                            window.set_operational_reference_status(
+                                str(support_state.get("text") or "IDENTIFICANDO..."),
+                                str(support_state.get("color") or "#FBBF24"),
+                            )
                     current_context = None
                     context_fn = getattr(
                         self,
@@ -10111,6 +10163,11 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             if not locked:
                 mirror_debug["stage"] = "tracking_not_locked"
                 mirror_debug["render_path"] = "raw_without_moving_rois"
+                # Sem geometria não existem ROIs verdes visíveis: suspenda
+                # imediatamente a evidência do visor do mesmo frame anterior.
+                # Preserve apenas os IDs/slots para manter o layout de 30 máscaras.
+                self_window._display_last_overlay_context = None
+                self_window.suspend_display_readout_live_evidence()
                 try:
                     from src.platform.display_visual_rotation import (
                         preparar_frame_visual_display,
@@ -10401,8 +10458,9 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         mirror_debug["render_path"] = (
                             "tracking_geometry_fallback"
                         )
+                        self_window._display_last_overlay_context = None
                         try:
-                            self_window.set_display_readout_context(None)
+                            self_window.suspend_display_readout_live_evidence()
                         except Exception as exc:
                             mirror_debug.update(
                                 {
@@ -10424,6 +10482,8 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                             "error": str(exc)[:240],
                         }
                     )
+                    self_window._display_last_overlay_context = None
+                    self_window.suspend_display_readout_live_evidence()
                     decorated = _draw_tracking_geometry_visual(
                         source,
                         geometry,
