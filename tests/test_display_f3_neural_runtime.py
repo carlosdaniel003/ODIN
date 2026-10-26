@@ -1302,7 +1302,7 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertEqual("same_mask_core_resolved_low_light",
                              mask["hybrid_resolution"])
 
-    def test_tracking_core_low_light_off_is_ng_not_false_ok(self):
+    def test_tracking_core_low_light_off_waits_for_power_evidence(self):
         with tempfile.TemporaryDirectory() as temp:
             repository, _h1, blue = _repository(Path(temp))
             analyzer = F3HybridCheckAnalyzer(repository)
@@ -1335,9 +1335,14 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             self.assertTrue(mask["semantic_certain"])
             self.assertEqual("off", mask["classified"])
             self.assertFalse(mask["matched"])
+            # A leitura OFF da MASK_002 é conclusiva, mas nenhuma outra
+            # máscara desse fixture BLUE está ON; por segurança, NG terminal
+            # aguarda evidência de placa alimentada no MESMO frame.
             decision = decidir_analise_display_f3(result, reference_gate=False)
-            self.assertEqual("ng", decision["decision"])
-            self.assertEqual("MASK_002", decision["failed_mask_id"])
+            self.assertEqual("searching", decision["decision"])
+            self.assertEqual("aguardando_evidencia_placa_ligada",
+                             decision["reason"])
+            self.assertEqual(["MASK_002"], decision["failed_mask_ids"])
 
     def test_tracking_core_low_light_no_complete_pair_cannot_resolve(self):
         with tempfile.TemporaryDirectory() as temp:
