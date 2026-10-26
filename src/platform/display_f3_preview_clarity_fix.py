@@ -278,6 +278,19 @@ def _project_preview_context(window, visual_rotation: int) -> dict | None:
                     raw_height,
                     int(visual_rotation or 0) % 360,
                 )
+                # D-085: o visor usa as MESMAS ROIs reprojetadas/rotacionadas
+                # que aparecem na câmera, não a ordem numérica dos MASK_IDs
+                # ou os slots de uma pose canônica diferente.
+                tracked_slots = mapear_slots_sete_segmentos_display(
+                    visual_masks, digit_count=4
+                )
+                if len(tracked_slots) == 28 and len(set(tracked_slots)) == 28:
+                    readout_slot_mask_ids = tuple(tracked_slots)
+                    readout_indicator_mask_ids = (
+                        mapear_indicadores_circulares_display(
+                            visual_masks, digit_count=4
+                        )
+                    )
             except Exception:
                 visual_masks = []
                 visual_board = []
