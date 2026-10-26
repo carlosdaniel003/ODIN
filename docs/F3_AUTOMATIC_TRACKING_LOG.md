@@ -3004,3 +3004,29 @@ nenhum processamento. Este hold de análise é distinto do freeze NG terminal.
 Se esse campo estiver ausente, não houve captura no caminho rápido; os
 logs de pose e de espelho live permitem investigar o bloqueio. **Ainda
 pendente de teste físico na máquina.**
+
+## 26/10/2026 — D-084 PASS físico / D-085 correção do espelho geométrico
+
+Testes reais do operador, com rastreamento automático F3 ligado e captura
+por primeiro segmento verde:
+- Tela `image(20261026-164525).png`: placa OK passou pelos cinco CHECKS;
+  Total 1 / OK 1 / NG 0, indicador PLACA APROVADA.
+- Tela `image(20261026-164637).png`: placa NG interrompida em BLUE,
+  H1 concluído, `29/30`, **MASK_024 esperado ON / detectado OFF**;
+  Total 2 / OK 1 / NG 1, indicador PLACA NG.
+
+**D-084 validada funcionalmente** para essa amostra de duas placas; não
+declarar latência medida, nem certificação estatística.
+
+**D-085**: o visor desenhava barras não correspondentes às que a câmera
+ao vivo exibia. A causa não era a CNN: o esquema A..G podia usar ordem
+numérica MASK_ID sem a topologia de barras da geometria rastreada. O
+snapshot NG com tracking ON não publicava `readout_slot_mask_ids`;
+no frame live, o mapeamento vinha da geometria canônica em vez da
+geometria móvel exibida. Agora o visor deriva os 28 slots da mesma
+lista `visual_masks` e da mesma rotação do frame para tracking ON live
+e frozen. O latch NG atualiza o visor com o snapshot visual atômico
+antes de congelá-lo.
+
+**PENDENTE**: reteste físico de paridade câmera/visor em OK e NG/024.
+Nenhuma alteração no julgamento híbrido ou F2.
