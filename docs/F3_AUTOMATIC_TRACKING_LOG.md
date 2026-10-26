@@ -2786,3 +2786,18 @@ Classificação produtiva offline bloqueada: arquivo `odin_display_projects.json
 e assets privados (ONNX, CHECK photos e poses por imagem) ausentes.
 Regra das duas tentativas: não alterar novos thresholds sem reproduzir
 o defeito usando a foto real e o projeto/modelo originais.
+
+## 26/10/2026 — Etapa 2: auditoria com configuração/ONNX real (somente offline)
+
+ZIP privado recebido: projeto CM_500_L de 30 máscaras/5 CHECKS,
+modelo ONNX íntegro e 5 fotos de referência. Replay CNN isolado sobre
+os **JPGs de referência**, não sobre os seis PNGs de fixtures:
+H1 26/30, BLUE 11/30, USB 30/30, FM 12/30, AUX 30/30.
+
+A foto de referência BLUE tem luminosidade em posição distinta de seus
+`mask_overrides_reference`: zero das 18 regiões ON contém pixels V>=200.
+O modelo ONNX sozinho também manteve segmentos luminosos do H1 e FM em
+INCERTO. A hipótese de 'foto congelada resolve tudo' não foi comprovada:
+além da captura, geometria e arbitragem same-mask continuam necessárias.
+Nenhuma alteração no runtime; não atualizar configuração produtiva com
+estes dados sem validar os próprios frames de produção.

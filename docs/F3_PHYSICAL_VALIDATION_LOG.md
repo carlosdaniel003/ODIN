@@ -7465,3 +7465,38 @@ Sem mudança no julgamento F3, captura e F2.
 **Próxima ação dentro da Etapa 2:** disponibilizar ativos de engenharia
 e testar 5 OK + 1 BLUE NG pela autoridade híbrida, verificando
 MASK_024; testes produtivos continuam pendentes.
+
+## 26/10/2026 — Etapa 2: auditoria de referências reais enviadas por ZIP
+
+**Entrada privada:** `enviar.zip` (não versionar). Contém configuração real
+`odin_display_projects.json` de CM_500_L, 30 máscaras e 5 CHECKS,
+`odin_display_check_presence.json`, cinco JPGs de referência,
+modelo `cm_500_l_segments.onnx` e metadados. SHA-256 do ONNX confere e
+OpenCV carregou o modelo. O operador já havia aplicado rotação de 180°
+aos **seis PNGs das fixtures**, não presumir mesma orientação/pose dos JPGs.
+
+**Auditoria CNN isolada nas 5 referências JPG do ZIP:**
+H1 26/30; BLUE 11/30; USB 30/30; FM 12/30; AUX 30/30.
+Esses números não são julgamento híbrido produtivo nem classificação dos
+6 PNGs independentes do GitHub. A extração imitou o tensor RGB + máscara
+binária de 48x48 e o limiar calibrado do mesmo ONNX.
+
+**Achado geométrico relevante:** `CHECK_002` BLUE espera 18 máscaras ON,
+mas nenhuma das 18 regiões `mask_overrides_reference` na foto
+`cm_500_l_check_002.jpg` contém pixels com V>=200, embora os dígitos
+sejam luminosos fora dessas regiões. A referência JPEG BLUE e a geometria
+local persistida parecem representar poses diferentes. Essa discrepância
+precisa ser verificada na configuração da fotografia original antes de
+atribuir o bloqueio do BLUE exclusivamente à CNN. Outros JPGs apresentaram
+luz nos ON: H1 7/7; USB 15/15; FM 17/17; AUX 16/16.
+
+**H1/FM:** H1 teve 4 máscaras fisicamente brilhantes e incertas pela CNN;
+FM teve 17 máscaras esperadas ON brilhantes, mas CNN isolada produziu muitas
+leituras incertas. Não equivale a NG real; julgamento híbrido e fotos
+independentes são necessários para comprovar desempenho produtivo.
+
+**Estado:** diagnóstico offline parcial; sem alterar thresholds, geometria
+salva ou modo tracking OFF/ON. Falta reproduzir o julgamento híbrido nas
+seis PNGs com a geometria projetada/validada de cada fotografia e as
+referências físicas. Os arquivos do ZIP são privados e não foram
+publicados no repositório. Sem declarar 5 OK/1 NG concluídos.

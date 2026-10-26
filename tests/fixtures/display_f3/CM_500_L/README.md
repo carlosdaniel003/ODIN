@@ -62,3 +62,19 @@ não identificação automática de MASK_024.
 A CI publica o relatório detalhado como artefato
 `f3-real-snapshots-report`. Até existir configuração/ONNX e pose por
 fotografia, os seis vereditos semânticos permanecem BLOQUEADOS.
+
+## Auditoria posterior ao ZIP real — 26/10/2026
+
+O operador forneceu separadamente arquivos privados do projeto, da CNN e
+fotos JPG de referência. O teste do modelo sobre os cinco **JPGs** (não
+os seis PNGs do repositório) revelou CNN-only H1 26/30, BLUE 11/30,
+USB 30/30, FM 12/30, AUX 30/30. A foto referência BLUE e as máscaras
+`mask_overrides_reference` parecem desalinhadas: 0/18 máscaras ON do
+CHECK_002 apresentam brilho V>=200 dentro da ROI, embora existam
+segmentos luminosos na imagem fora delas.
+
+**Não incorporar arquivos privados do ZIP aqui** sem autorização explícita.
+Os PNGs seguem exigindo cálculo validado das poses por imagem para um
+replay híbrido seguro. Os números acima são diagnósticos da CNN isolada
+em fotos que podem ter participado do treinamento, não resultados
+industriais independentes OK/NG.
