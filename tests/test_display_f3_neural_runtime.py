@@ -1128,6 +1128,50 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         )
         self.assertFalse(no_align["triggered"])
 
+    def test_frozen_green_snapshot_keeps_intermittent_on_phase_temporarily(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        payload = {
+            "age_ms": 1400.0,
+            "frame_token": ("camera", 200),
+            "geometry": {
+                "locked": True, "check_id": "CHECK_002",
+                "alignment_required": True,
+                "spatial_alignment_ready": True,
+            },
+            "snapshot_capture_trigger": {
+                "ready": True, "triggered": True,
+                "mask_ids": ("MASK_024",),
+            },
+        }
+        check = {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_002", "intermittent": True,
+        }
+        self.assertTrue(
+            tracking._intermittent_snapshot_acceptable(
+                payload, check, ("camera", 238)
+            )
+        )
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                payload, {**check, "check_id": "CHECK_001"},
+                ("camera", 238),
+            )
+        )
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                payload, {**check, "intermittent": False},
+                ("camera", 238),
+            )
+        )
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                {**payload, "age_ms": 2600.0},
+                check, ("camera", 238),
+            )
+        )
+
     def test_first_green_snapshot_pipeline_is_tracking_opt_in_and_one_shot(self):
         import src.platform.display_f3_object_tracking as tracking
 
