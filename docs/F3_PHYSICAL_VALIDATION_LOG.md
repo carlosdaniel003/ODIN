@@ -7742,3 +7742,39 @@ nenhum processamento. Este hold de análise é distinto do freeze NG terminal.
 Se esse campo estiver ausente, não houve captura no caminho rápido; os
 logs de pose e de espelho live permitem investigar o bloqueio. **Ainda
 pendente de teste físico na máquina.**
+
+## 26/10/2026 — Validação física PASS: captura por primeiro verde, OK e NG BLUE/024
+
+Rastreamento automático F3 **ligado**; operador testou duas placas no
+projeto CM_500_L com a nova captura de snapshot durante a fase luminosa.
+
+- **Placa OK:** fluxo dos cinco CHECKS concluiu; a interface indicou
+  `PLACA APROVADA`, Total=1, OK=1, NG=0.
+  Evidência: `image(20261026-164525).png`.
+- **Placa NG:** H1 concluiu; em BLUE, 29/30 máscaras conformes;
+  divergência **MASK_024** (esperado ACESO, detectado APAGADO);
+  interface `PLACA NG / RETIRE A PLACA`, Total=2, OK=1, NG=1.
+  Evidência: `image(20261026-164637).png`.
+- Sucesso físico comunicado explicitamente pelo operador: **"Deu certo"**.
+  Não foram informados tempos independentes por CHECK; não extrapolar
+  ganho quantitativo de latência com base nos dois prints.
+
+### Pendência visual encontrada nos prints — D-085
+
+O visor esquemático de quatro dígitos não correspondia às barras da câmera,
+embora OK/NG e MASK_024 estivessem corretamente identificados. Diagnóstico
+por código: ausência de `readout_slot_mask_ids` no snapshot NG com tracking ON,
+o que ativava fallback ordenado numericamente por MASK_ID. Também no preview
+rastreado os slots vinham da pose canônica, em vez das ROIs projetadas na
+imagem exibida.
+
+Correção D-085: calcular mapeamento A..G para os quatro dígitos com
+`mapear_slots_sete_segmentos_display` das **mesmas máscaras geométricas**
+desenhadas na câmera; em NG usar os slots do snapshot atômico para preencher
+o visor **antes** do latch de congelamento. Os dois círculos FM e decimal
+preservam suas respectivas MASK_IDs. Nenhuma mudança em CNN, gates,
+classificação produtiva, F2 ou tracking OFF.
+
+**Validação:** julgamento OK e NG físico PASS; sincronização do novo visor
+ainda PENDENTE de reteste no equipamento, principalmente a barra MASK_024
+no BLUE NG e o desenho nos ângulos 0°/180°.
