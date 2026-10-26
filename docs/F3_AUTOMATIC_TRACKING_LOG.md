@@ -3096,3 +3096,37 @@ da foto real e a paridade visual durante acendimento continuam **PENDENTES
 DE RETESTE** no JIG. A referência pode permanecer INDEFINIDA se suas
 evidências físicas não forem suficientes; não forçar `OFF` por ausência
 de luz ou por simples ausência de LOCK.
+
+## 26/10/2026 — D-089: terceiro H1 não segura foto; MASK_008 ainda incerta
+
+**Evidência:** screenshot `image(20261026-180759).png` e DEBUG
+`Texto colado(20261026-180802).txt`. Operador testou uma placa OK
+aprovada, uma NG reprovada e terceira OK aguardando H1. A tela mostra
+LOCK, sete segmentos verdes, 29/30 conformes e MASK_008 incerta.
+`first_green_snapshot=null` mesmo com
+`auto_decision_trace.frozen_tracking_snapshot=true` e
+`snapshot_trigger_source=tracked_same_frame_live_green`.
+
+**Causa:** a foto do tracking HIGH foi enviada antes do próximo repaint
+da preview; somente a captura rápida pós-repaint criava
+`_display_f3_first_green_visual_hold`. A future semântica já existente
+bloqueava a rota rápida, portanto a análise usava snapshot mas a câmera
+visual continuava viva/piscando.
+
+**D-089:** antes de armar o hold visual, publicar na janela a foto RAW do
+mesmo payload junto com a geometria exata do próprio worker. Depois disso
+o renderer existente suspende repaints até retorno semântico ou timeout
+visual de segurança. As duas rotas de captura usam o mesmo mecanismo
+visual, com diagnóstico `capture_path` distinguindo worker/preview.
+
+**Outro achado independente:** MASK_008 não fecha H1 por incerteza
+genuína da autoridade híbrida. A foto de CHECK exato 30/30 não pode
+substituir o híbrido sem regressão de NG. Nenhuma mudança de rótulo ou
+threshold foi feita sem prova física. H1 deve repetir captura verde após
+resultado SEARCHING, não esperar indefinidamente na captura antiga.
+
+**CI:** 113/113 testes da suíte neural aprovados; as falhas de workflow
+de arquitetura/ROI e Windows permanecem iguais às anteriores.
+**Reteste real:** confirmar "FOTO CONGELADA • ANALISANDO CHECK" na
+captura H1 e avanço OK; se continuar 29/30, avaliar nova evidência
+da MASK_008 em frames reais, separadamente do hold visual.
