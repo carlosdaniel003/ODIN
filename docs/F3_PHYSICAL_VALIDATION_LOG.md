@@ -7843,3 +7843,33 @@ terminal, inclusive o rearme D-086.
 ausência de repaint ainda exige reteste físico observando
 `FOTO CONGELADA • ANALISANDO CHECK`. Não alegar PASS físico
 com base em CI.
+
+## 26/10/2026 — D-088: PLACA DESLIGADA com tracking sem LOCK e visor divergente
+
+- **CHECK/cenário:** CM_500_L, placa no suporte com display apagado, F3
+  com rastreamento automático ativado.
+- **Resultado antes da correção:** **FAIL** de apresentação.
+- **Evidência:** screenshot `image(20261026-173944).png`; câmera sem
+  geometria/máscaras, legenda `h1_fast_acquisition_unlocked`, rótulo
+  `IDENTIFICANDO...`, embora o operador tenha capturado referência de
+  PLACA DESLIGADA aparentemente igual à imagem; visor mostra várias
+  barras verdes sem correspondente na câmera.
+- **Causas pelo código:** o status OFF/EMPTY não era renovado durante o
+  guard sem LOCK; o renderer RAW não limpava o contexto luminoso do visor.
+  Sem DEBUG/score da referência, não é possível afirmar que o matcher
+  classificaria a foto como OFF — somente que a avaliação informativa
+  não estava ocorrendo naquele caminho.
+- **Alteração D-088:** estado OFF/EMPTY informativo observado pela
+  autoridade física canônica no worker existente (amostra limitada),
+  com debounce e filtro de idade; status sem liberação de CHECK. Ao
+  perder LOCK, câmera sem máscara e visor com 30 IDs porém evidência
+  luminosa neutra. Recuperação de LOCK restaura amostra visual comum.
+  Congelamento NG terminal e rearme não foram alterados.
+- **Próximo reteste:** (1) placa desligada parada no suporte, confirmar
+  rótulo PLACA NO SUPORTE • DESLIGADA e 30 máscaras apagadas no visor;
+  (2) ligar H1, confirmar verdes simultâneos câmera/visor e avanço do
+  CHECK sem perda de tempo; (3) BLUE com MASK_024 apagada deve encerrar
+  NG somente na máscara correspondente; (4) retirar placa e testar
+  rearme físico, sem conservar segmentos da placa anterior.
+- **Status após correção:** **PENDENTE DE RETESTE FÍSICO**. Sem tempos
+  medidos, não declarar melhoria quantitativa nem PASS industrial.
