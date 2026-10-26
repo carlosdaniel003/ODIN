@@ -104,6 +104,43 @@ class DisplayF3RealSnapshotsTests(unittest.TestCase):
         self.assertEqual(len(masks), len(estimate))
 
 
+
+    def test_offline_geometry_rotates_masks_not_pre_rotated_photo(self):
+        import numpy as np
+        from scripts.avaliar_f3_fotos_reais import estimate_snapshot_geometry
+        height, width = 240, 480
+        image = np.zeros((height, width, 3), dtype=np.uint8)
+        positions = [
+            (70, 40), (120, 70), (220, 50), (320, 80), (100, 120),
+            (275, 140), (360, 120), (60, 160), (240, 170),
+        ]
+        masks = [
+            {"id": f"MASK_{i:03d}", "type": "circle",
+             "cx": cx, "cy": cy, "radius": 8}
+            for i, (cx, cy) in enumerate(positions, start=1)
+        ]
+        off_ids = {"MASK_002", "MASK_006", "MASK_009"}
+        states = {m["id"]: ("off" if m["id"] in off_ids else "on")
+                  for m in masks}
+        for mask in masks:
+            if states[mask["id"]] == "on":
+                cv2.circle(
+                    image,
+                    (width - 1 - mask["cx"] + 6,
+                     height - 1 - mask["cy"] - 8),
+                    8, (255, 255, 255), -1,
+                )
+        result, report = estimate_snapshot_geometry(
+            image, {"masks": masks}, {"mask_states": states},
+            orientations=(0, 180), reduction=2,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual("DIAGNOSTIC_ONLY", report["status"])
+        self.assertEqual(180, report["orientation_masks_degrees"])
+        self.assertEqual(0, report["additional_photo_rotation_degrees"])
+        self.assertLessEqual(abs(report["translation_px"][0] - 6), 2)
+        self.assertLessEqual(abs(report["translation_px"][1] + 8), 2)
+
     def test_staged_private_zip_rewrites_local_windows_reference_path(self):
         from scripts.avaliar_f3_fotos_reais import staged_private_assets
         with tempfile.TemporaryDirectory() as temporary:
