@@ -3065,3 +3065,34 @@ e a publicação da mesma amostra à captura. Não criar segundo timer/
 worker, não alterar ON/OFF, NG/OK, referências, F2 ou tracking OFF.
 **Reteste físico pendente** para verificar se o hold é visível nas
 capturas rápidas e se libera após decisão ou após 2,5 s de proteção.
+
+## 26/10/2026 — D-088 / estado OFF sem LOCK e visor com luz fantasma
+
+**Relato real:** captura `image(20261026-173944).png` com a placa no suporte
+e display apagado, aparentemente igual à referência de PLACA DESLIGADA.
+A câmera dizia `RASTREAMENTO F3 • PROCURANDO PLACA • h1_fast_acquisition_unlocked`
+e não mostrava nenhuma máscara; o estado continuava `IDENTIFICANDO...`,
+enquanto o visor esquemático exibia várias barras verdes de uma amostra
+anterior. **FAIL físico de apresentação**, sem DEBUG de identidade/score.
+
+**Causas verificadas no código:**
+1. Com tracking ligado, a ausência de LOCK bloqueia o processo semântico por
+segurança, mas também deixa de atualizar normalmente o rótulo informativo da
+referência física OFF/EMPTY.
+2. O caminho `tracked_window_update` desenhava RAW sem ROIs quando não havia
+LOCK, porém não invalidava a memória luminosa do `VISOR DO DISPLAY`.
+Assim surgiam verdes sem qualquer máscara correspondente na câmera.
+
+**Correção D-088:** o visor neutraliza a evidência luminosa imediatamente na
+perda de LOCK, mantendo o arranjo de 28 barras + FM + decimal. A autoridade
+física existente observa OFF/EMPTY no worker HIGH já instalado, no máximo
+uma vez a cada 650 ms, publicando a informação no Tk somente a partir de
+resultado recente e mantendo `allow_auto=False`. Um candidato de CHECK sem
+LOCK não é promovido a decisão; não há novo classificador, executor ou
+mudança em CNN, conformidade e segurança de NG/rearme.
+
+**Estado:** testes de código aprovados na suíte neural; o reconhecimento
+da foto real e a paridade visual durante acendimento continuam **PENDENTES
+DE RETESTE** no JIG. A referência pode permanecer INDEFINIDA se suas
+evidências físicas não forem suficientes; não forçar `OFF` por ausência
+de luz ou por simples ausência de LOCK.
