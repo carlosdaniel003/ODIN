@@ -939,6 +939,66 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
             ),
         )
 
+    def test_tracking_on_readout_maps_same_moving_rois_as_camera(self):
+        from src.platform.display_mask_geometry import (
+            mapear_slots_sete_segmentos_display,
+        )
+        positions = (
+            (0, -48), (28, -24), (28, 24), (0, 48),
+            (-28, 24), (-28, -24), (0, 0),
+        )
+        masks = [
+            {"id": f"MASK_{i*7+j+1:03d}", "type": "circle",
+             "cx": (90, 250, 470, 630)[i] + dx,
+             "cy": 90 + dy, "radius": 8}
+            for i in range(4)
+            for j, (dx, dy) in enumerate(positions)
+        ]
+        class Repo:
+            @staticmethod
+            def obter_projeto_ativo(): return "P"
+            @staticmethod
+            def carregar_projeto(_):
+                return {
+                    "name": "P", "master_resolution": (720, 180),
+                    "masks": masks,
+                    "checks": [{
+                        "id": "CHECK_001",
+                        "mask_states": {item["id"]: "on" for item in masks},
+                    }],
+                }
+        class Runtime:
+            @staticmethod
+            def snapshot(): return {"current_check": {"id": "CHECK_001"}}
+        app = SimpleNamespace(
+            display_project_repository=Repo(),
+            display_check_runtime=Runtime(),
+            _display_f3_tracking_live_geometry={
+                "locked": True,
+                "resolution": (720, 180),
+                "masks": masks,
+                "board_points": (),
+                "check_id": "CHECK_001",
+            },
+            _display_f3_object_tracking_enabled=True,
+        )
+        window = SimpleNamespace()
+        with patch.object(
+            clarity.overlay_module, "_app_from_window", return_value=app
+        ), patch(
+            "src.platform.display_f3_object_tracking.tracking_enabled",
+            return_value=True,
+        ):
+            context = clarity._project_preview_context(window, 180)
+        self.assertTrue(context["tracking_active"])
+        self.assertEqual(
+            tuple(mapear_slots_sete_segmentos_display(
+                context["masks"], digit_count=4,
+            )),
+            tuple(context["readout_slot_mask_ids"]),
+        )
+        self.assertEqual(28, len(context["readout_slot_mask_ids"]))
+
     def test_tracking_off_geometria_live_vem_somente_da_secao_mascaras(self):
         project = {
             "name": "P1",
