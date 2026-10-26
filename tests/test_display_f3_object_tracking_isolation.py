@@ -608,7 +608,12 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         self.assertGreater(renderer_pos, readout_pos)
         self.assertIn("live_frame_token", source)
         self.assertIn('geometry_token=("fixed", rotation)', source)
-        self.assertIn("geometry_token=id(geometry)", source)
+        # D-087: não basta compartilhar o frame, o gatilho de captura
+        # exige a MESMA identidade de geometria que o cache visual.
+        self.assertIn('geometry_token=("tracked", id(geometry))', source)
+        self.assertIn(
+            "self_window._display_last_overlay_context = dict(", source
+        )
 
     def test_tracking_off_final_nao_bypassa_espelho_visual(self):
         source = inspect.getsource(
