@@ -5879,3 +5879,21 @@ tracking OFF ou sequência H1→BLUE→USB→FM→AUX.
 **Verificação:** testes de mapeamento e congelamento de snapshot
 tracking ON nas rotações 0° e 180°. Reteste físico da paridade visual
 ainda necessário.
+
+## D-086 — Prioridade do rearme físico sobre LOCK de tracking mantido
+
+**Status:** Implementado, validação física pendente.
+
+Um resultado terminal NG só pode liberar câmera/visor e aceitar outra
+placa depois de prova física `EMPTY` e novo ciclo. Durante a retirada,
+um LOCK geométrico `evidence_current=False` pode continuar apontando
+a pose da última placa. O guard do rastreador **não pode impedir** a
+autoridade de rearme de consumir o RAW atual só porque o LOCK é held.
+
+Em F3 tracking ON, as fases `waiting_empty` e
+`waiting_new_board` têm precedência sobre a validação de LOCK para
+**somente** processar transição física. Essas fases ainda bloqueiam
+classificação de CHECK e OK/NG até EMPTY confirmado e chegada de
+nova placa. Não remover os dois frames de debounce, não usar timeout
+como prova de retirada, nem usar a simples atualização da referência
+como evento de rearme. O F2 e o F3 tracking OFF não são alterados.
