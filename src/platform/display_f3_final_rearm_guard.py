@@ -115,6 +115,41 @@ def _atualizar_rearme_terminal_f3(self) -> str:
         state = dict(getattr(self, "_display_f3_operational_state", {}) or {})
 
     phase_after = fase_rearme_terminal_f3(self)
+    # Telemetria de rearme: ler sempre o frame atualizado, sem confundir
+    # contorno/LOCK mantido da última placa com prova de presença atual.
+    # Se EMPTY não for reconhecido, a inspeção informa o motivo, em vez de
+    # parecer que o aplicativo parou de receber imagens.
+    presence = (
+        state.get("board_presence_evidence")
+        if isinstance(state, dict) else None
+    )
+    self._display_f3_terminal_rearm_trace = {
+        "phase_before": phase_before,
+        "phase_after": phase_after,
+        "camera_frame_id": getattr(self, "camera_ultimo_frame_id", None),
+        "physical_kind": (
+            str(state.get("kind") or "") if isinstance(state, dict) else ""
+        ),
+        "empty_confirmed": bool(
+            isinstance(state, dict)
+            and (
+                state.get("rearm_empty_confirmed")
+                or (isinstance(presence, dict) and presence.get("empty_confirmed"))
+            )
+        ),
+        "rearm_empty_pending_frames": (
+            int(state.get("rearm_empty_pending_frames") or 0)
+            if isinstance(state, dict) else 0
+        ),
+        "cycle_rearm_waiting": bool(
+            state.get("cycle_rearm_waiting")
+            if isinstance(state, dict) else False
+        ),
+        "tracked_lock_is_not_empty_proof": True,
+        "ng_frozen": bool(
+            getattr(self, "_display_f3_ng_evidence_frozen", False)
+        ),
+    }
     window = getattr(self, "display_f3_window", None)
     runtime = getattr(self, "display_check_runtime", None)
     try:
