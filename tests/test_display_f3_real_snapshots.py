@@ -193,6 +193,85 @@ class DisplayF3RealSnapshotsTests(unittest.TestCase):
         self.assertIsNone(geometry)
         self.assertEqual("BLOCKED", report["status"])
 
+    def test_evidence_report_exposes_root_conflict_without_judging_it(self):
+        from scripts.avaliar_f3_fotos_reais import summarize_hybrid_snapshot_evidence
+
+        observations = [
+            {
+                "mask_id": "MASK_020", "expected": "on",
+                "classified": "uncertain", "matched": None,
+                "semantic_certain": False,
+                "hybrid_resolution": "strong_source_conflict",
+                "neural_classified": "off", "neural_certain": True,
+                "neural_confidence": 0.91,
+                "neural_probabilities": {"on": 0.09, "off": 0.91},
+                "physical_classified": "on", "physical_confidence": 0.98,
+                "physical_local_authoritative": True,
+                "physical_reference_source": "f3_check_photos_same_mask",
+                "physical_reference_separation": 0.95,
+                "physical_core_emission": {
+                    "state": "on", "reason": "same_mask_physical_core_ranges",
+                    "current_inner_v_mean": 251.0,
+                    "off_reference_ceiling": 0.0,
+                    "on_reference_floor": 106.0,
+                    "reference_on_count": 5, "reference_off_count": 1,
+                    "image_path": "DO_NOT_EXPORT.jpg",
+                },
+            },
+            {
+                "mask_id": "MASK_024", "expected": "on",
+                "classified": "uncertain", "matched": None,
+                "semantic_certain": False,
+                "hybrid_resolution": "neural_uncertain_without_local_physical",
+                "neural_classified": "uncertain",
+                "physical_classified": "off", "physical_local_authoritative": False,
+                "physical_reference_source": "f3_check_photos_class_pool",
+                "physical_core_emission": {
+                    "state": "unavailable", "reason": "local_pair_incomplete"
+                },
+            },
+            {
+                "mask_id": "MASK_030", "expected": "off",
+                "classified": "off", "matched": True,
+                "semantic_certain": True,
+                "hybrid_resolution": "neural_physical_consensus",
+            },
+        ]
+        evidence = summarize_hybrid_snapshot_evidence(observations)
+        self.assertEqual({
+            "neural_physical_consensus": 1,
+            "neural_uncertain_without_local_physical": 1,
+            "strong_source_conflict": 1,
+        }, evidence["hybrid_resolution_counts"])
+        self.assertEqual({"MASK_020", "MASK_024"},
+                         set(evidence["unresolved_mask_evidence"]))
+        self.assertEqual(
+            "on", evidence["unresolved_mask_evidence"]["MASK_020"]["core_state"]
+        )
+        self.assertEqual(
+            "local_pair_incomplete",
+            evidence["unresolved_mask_evidence"]["MASK_024"]["core_reason"],
+        )
+        self.assertEqual(
+            0.91, evidence["mask_details"][0]["neural_probabilities"]["off"]
+        )
+        self.assertNotIn("DO_NOT_EXPORT.jpg", json.dumps(evidence))
+
+    def test_evidence_report_keeps_missing_core_inconclusive(self):
+        from scripts.avaliar_f3_fotos_reais import summarize_hybrid_snapshot_evidence
+
+        evidence = summarize_hybrid_snapshot_evidence([{
+            "mask_id": "MASK_029", "expected": "on",
+            "classified": "uncertain", "semantic_certain": False,
+            "hybrid_resolution": "neural_uncertain_without_local_physical",
+            "physical_core_emission": None,
+        }])
+        self.assertIsNone(
+            evidence["unresolved_mask_evidence"]["MASK_029"]["core_state"]
+        )
+        self.assertFalse(evidence["mask_details"][0]["semantic_certain"])
+        self.assertEqual(1, sum(evidence["hybrid_resolution_counts"].values()))
+
     def test_already_rotated_images_and_missing_assets_fail_closed(self):
         self.assertEqual(
             180,

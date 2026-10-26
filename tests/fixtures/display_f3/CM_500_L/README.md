@@ -107,3 +107,19 @@ Esses números não são novas regras de produção. O híbrido atual retornou
 INCERTO para todas as seis fotos, inclusive BLUE NG. O julgamento não
 passou no teste de regressão real e ainda exige uma etapa de correção
 autorizada. Dados privados permaneceram fora do GitHub.
+
+## 26/10/2026 — Etapa 3: discriminação dos bloqueios da fusão (diagnóstico)
+
+Antes de alterar novamente o classificador, o replay privado agora emite
+`hybrid_resolution_counts`, `unresolved_mask_evidence` e
+`mask_details` para cada CHECK. O relatório preserva a decisão real da
+CNN, a origem e confiança física same-mask, evidência de emissão do núcleo,
+disponibilidade do par local ON/OFF e motivo do conflito por MASK_ID.
+Não grava imagem, caminhos de fotos privadas, geometria nem pesos no JSON.
+
+Esse diagnóstico não modifica produção, limiares ONNX, rastreamento OFF ou
+o status semântico. A CI sem ativos privados valida somente a integridade
+dos seis PNGs e a extração de evidências com entradas artificiais;
+**não** executa os seis julgamentos reais. O bloqueio do replay híbrido
+reportado na Etapa 2 permanece e precisa ser resolvido por evidência por
+máscara, não por aprovação majoritária.

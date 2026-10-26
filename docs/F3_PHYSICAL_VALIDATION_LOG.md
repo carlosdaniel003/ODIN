@@ -7547,3 +7547,23 @@ neural_uncertain_without_local_physical e physical_low_light.
 alinhamento, mas o híbrido atual não reproduz os rótulos conhecidos.
 Sem alteração de F3, F2, tracking desligado, ONNX ou thresholds.
 Necessária autorização para a próxima etapa de julgamento por snapshot.
+
+## 26/10/2026 — Etapa 3: instrumentação offline após falha do replay
+
+**Estado:** DIAGNÓSTICO SOFTWARE; validação física não executada.
+
+A Etapa 2 demonstrou 5 fotos OK e BLUE NG MASK_024 por medição luminosa,
+mas o julgamento híbrido manteve todas INCERTAS. D-082/D-083 já haviam
+tratado conflitos semelhantes; a regra das duas tentativas impede nova
+mudança de thresholds/fusão sem uma evidência por máscara.
+
+Atualizado apenas o relatório de `scripts/avaliar_f3_fotos_reais.py`:
+decisão CNN e probabilidade ON/OFF, classificação e proveniência física,
+disponibilidade de referência local ON/OFF, faixas de emissão do núcleo,
+motivos `hybrid_resolution` e lista das máscaras sem certeza. O JSON
+não inclui fotos, pesos ONNX ou caminhos locais de referências.
+
+**Critério pendente da Etapa 3:** com ZIP privado e geometrias validadas,
+demonstrar 5/5 OK 30/30 e BLUE NG exclusivamente MASK_024, com provas
+inversas de ON indevido e OFF real, sem regressão no tracking OFF.
+Nenhuma decisão produtiva foi modificada nesta tentativa.

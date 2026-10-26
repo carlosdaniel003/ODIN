@@ -383,6 +383,77 @@ def _prepare_semantic_replay(config_path: Path | None) -> tuple:
     return repository, F3HybridCheckAnalyzer(repository), ""
 
 
+def summarize_hybrid_snapshot_evidence(mask_results: list[dict]) -> dict:
+    """Exibe o motivo do bloqueio sem criar uma segunda decisão OK/NG.
+
+    A fonte de verdade continua sendo o F3HybridCheckAnalyzer. O relatório
+    registra somente metadados já calculados (sem ROIs, imagens ou pesos).
+    """
+    reasons = {}
+    blockers = {}
+    details = []
+    for item in mask_results:
+        mask_id = str(item.get("mask_id") or "")
+        resolution = str(item.get("hybrid_resolution") or "unknown")
+        reasons[resolution] = reasons.get(resolution, 0) + 1
+        core = item.get("physical_core_emission")
+        if not isinstance(core, dict):
+            core = {}
+        neural_probabilities = item.get("neural_probabilities")
+        if not isinstance(neural_probabilities, dict):
+            neural_probabilities = {}
+        detail = {
+            "mask_id": mask_id,
+            "expected": item.get("expected"),
+            "classified": item.get("classified"),
+            "matched": item.get("matched"),
+            "semantic_certain": item.get("semantic_certain") is True,
+            "hybrid_resolution": resolution,
+            "neural_classified": item.get("neural_classified"),
+            "neural_certain": item.get("neural_certain"),
+            "neural_confidence": item.get("neural_confidence"),
+            "neural_probabilities": {
+                key: neural_probabilities.get(key)
+                for key in ("on", "off")
+                if key in neural_probabilities
+            },
+            "physical_classified": item.get("physical_classified"),
+            "physical_confidence": item.get("physical_confidence"),
+            "physical_reference_source": item.get("physical_reference_source"),
+            "physical_reference_separation": item.get("physical_reference_separation"),
+            "physical_local_authoritative": item.get("physical_local_authoritative"),
+            "physical_disagreed_with_core": item.get("physical_disagreed_with_core"),
+            "physical_core_emission": {
+                key: core.get(key)
+                for key in (
+                    "state", "reason", "current_inner_v_mean",
+                    "off_reference_ceiling", "on_reference_floor",
+                    "reference_on_count", "reference_off_count",
+                )
+                if key in core
+            },
+            "calibrated_physical_over_weak_neural": item.get(
+                "calibrated_physical_over_weak_neural"
+            ),
+        }
+        details.append(detail)
+        if item.get("semantic_certain") is not True:
+            blockers[mask_id] = {
+                "hybrid_resolution": resolution,
+                "neural_classified": detail["neural_classified"],
+                "physical_classified": detail["physical_classified"],
+                "physical_reference_source": detail["physical_reference_source"],
+                "physical_local_authoritative": detail["physical_local_authoritative"],
+                "core_state": detail["physical_core_emission"].get("state"),
+                "core_reason": detail["physical_core_emission"].get("reason"),
+            }
+    return {
+        "hybrid_resolution_counts": dict(sorted(reasons.items())),
+        "unresolved_mask_evidence": blockers,
+        "mask_details": details,
+    }
+
+
 def _semantic_replay(analyzer, repository, image, case: dict, masks: list) -> dict:
     checks = repository.listar_checks("CM_500_L")
     match = next(
@@ -430,17 +501,7 @@ def _semantic_replay(analyzer, repository, image, case: dict, masks: list) -> di
         "active_mask_count": result.get("active_mask_count"),
         "uncertain_mask_ids": uncertain,
         "incorrect_mask_ids": incorrect,
-        "mask_details": [
-            {
-                "mask_id": row.get("mask_id"),
-                "expected": row.get("expected"),
-                "classified": row.get("classified"),
-                "matched": row.get("matched"),
-                "hybrid_resolution": row.get("hybrid_resolution"),
-                "neural_confidence": row.get("neural_confidence"),
-                "physical_confidence": row.get("physical_confidence"),
-            } for row in masks_result
-        ],
+        **summarize_hybrid_snapshot_evidence(masks_result),
     }
 
 

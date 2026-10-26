@@ -2826,3 +2826,16 @@ INCERTA em 6/6, inclusive na MASK_024 defeituosa do BLUE.
 Essa divergência não foi encoberta por thresholds ou aprovação de maioria.
 O replay confirma que capturar fotos por si só não corrige a fusão.
 Nenhum runtime produtivo foi alterado, e o ZIP não foi versionado.
+
+## 26/10/2026 — Snapshots F3 Etapa 3: evidência por máscara antes da fusão
+
+Os seis PNGs físicos do projeto CM_500_L já foram medidos na Etapa 2:
+5 OK 30/30 em fotometria e BLUE NG 29/30 (MASK_024), mas 6/6
+INCERTO na fusão híbrida. Uma translação isolada não resolve a pose,
+que exigiu orientação das máscaras 180 graus e escala X/Y distintas.
+
+A primeira intervenção da Etapa 3 é somente diagnóstico no replay
+privado, incluindo núcleo ON/OFF calibrado, decisão CNN, proveniência
+same-mask e motivo de bloqueio por MASK_ID. Preserva rastreamento OFF,
+analisador F3, gate físico, política de NG e executor único. Não
+considerar as 6 fotos aprovadas até novo replay real com o ZIP privado.
