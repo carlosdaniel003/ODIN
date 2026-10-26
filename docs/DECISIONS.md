@@ -5854,3 +5854,28 @@ semântico. Não criar scheduler, executor ou segunda autoridade. Respeitar
 janela intermitente e não condenar frame de transição com um LED aceso;
 CHECK convencional mantém debounce NG e BLUE mantém prova persistente.
 Modo tracking OFF e domínio F2 continuam intactos.
+
+## D-085 — Visor F3 com rastreamento ativo segue slots A–G da câmera
+
+**Status:** Implementado; reteste físico do VISOR pendente. **Motivação:**
+teste real D-084 confirmou uma placa totalmente OK e outra NG no BLUE
+(MASK_024 apagada), mas o visor esquemático indicava barras diferentes
+da câmera, embora a decisão por máscara estivesse correta.
+
+**Decisão:** no tracking ON, mapear os 28 segmentos A–G a partir das
+ROIs já reprojetadas e orientadas do mesmo frame visual, em vez de
+ordenar MASK_IDs ou aproveitar mapeamento de outra geometria. Repetir
+o mapeamento no snapshot terminal de NG e atualizar o visor com as
+classificações/slots do frame atômico **antes de travar** câmera e visor.
+Manter círculos FM/decimal por MASK_ID. Se o mapeamento não é válido,
+não usar esse mapa como prova de conformidade; o motor de decisão já
+permanece separado do visor.
+
+**Invariantes:** a câmera e o visor exibem a mesma classificação do
+mesmo MASK_ID, na barra física correspondente; a identidade da falha
+MASK_024 é mantida no BLUE NG. Não modificar CNN, gates, debounce, F2,
+tracking OFF ou sequência H1→BLUE→USB→FM→AUX.
+
+**Verificação:** testes de mapeamento e congelamento de snapshot
+tracking ON nas rotações 0° e 180°. Reteste físico da paridade visual
+ainda necessário.
