@@ -7873,3 +7873,38 @@ com base em CI.
   rearme físico, sem conservar segmentos da placa anterior.
 - **Status após correção:** **PENDENTE DE RETESTE FÍSICO**. Sem tempos
   medidos, não declarar melhoria quantitativa nem PASS industrial.
+
+## 26/10/2026 — D-089: terceiro evento H1 e congelamento visual
+
+**Relato do operador:** primeira placa OK concluiu, segunda placa NG
+concluiu (Total=2, OK=1, NG=1); terceira placa declarada OK demora
+no H1. A captura apresenta 7 segmentos verdes e visor correspondente,
+estado físico PLACA PRESENTE e ENERGIA CONFIRMADA, LOCK estável.
+
+**DEBUG:** frame manual 7076; rastreador frame 7050 com 7/7 landmarks;
+espelho de vídeo frame 7057 com 7 verdes; decisão produtiva snapshot
+frame 7046, `frozen_tracking_snapshot=true`,
+`snapshot_trigger_source=tracked_same_frame_live_green`.
+A captura visual rápida não ocorreu (`first_green_snapshot=null`).
+A CNN/híbrido identificou 29/30: MASK_008 INCERTA, razão
+`neural_uncertain_without_local_physical`, P(ON)=0.578524, evidência
+física OFF fraca (confiança 0.5039, separação 0.0079) e núcleo
+ON/OFF calibrado indisponível (gap=0.2644). Decisão `searching`,
+sem registro OK/NG, corretamente fail-safe.
+Foto exata H1 30/30 consta como DIAGNÓSTICO, não decisão.
+
+**Alteração:** D-089 cobre o caminho de captura verde do worker: primeiro
+pinta na câmera/visor o próprio snapshot e só então ativa o hold visual
+pré-existente. Sem rastreamento extra, segundo worker, decisão alternativa
+ou remoção das verificações de 30/30. A incerteza de MASK_008 continua
+independente e não deve ser escondida por prova apenas visual do visor.
+
+**Automação:** 113 testes neurais aprovados; testes de sincronização
+D-085 e rearme D-086 aprovados em etapas do CI. Pipelines gerais ainda
+têm falhas anteriores, sem novas falhas detectadas nessas execuções.
+
+**Pendente no JIG:** câmera deve exibir a imagem exata que está sendo
+analisada, congelar com status FOTO CONGELADA e liberar após resultado.
+Confirmar H1 OK dentro da janela física de 3s, BLUE NG MASK_024 e
+rearme; se MASK_008 continuar INCERTA, investigar/calibrar a fonte
+semântica local com novos dados, nunca promover automaticamente ON.
