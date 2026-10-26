@@ -29,6 +29,71 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
         return tracking.F3TrackingConfigStore(repository)
 
 
+    def test_tracking_stale_lock_never_blocks_terminal_rearm_after_ng(self):
+        """EMPTY/rearme executa mesmo com LOCK da placa anterior mantido."""
+        from contextlib import ExitStack
+        from src.platform.display_production_f3 import DisplayProductionF3Mixin
+
+        calls = []
+        def old_process(owner):
+            calls.append(owner)
+            return "rearm_detector_called"
+
+        with ExitStack() as patches:
+            patches.enter_context(
+                patch.object(
+                    auto_runtime.DisplayAutomaticCheckF3Mixin,
+                    "_process_display_auto_check", old_process,
+                )
+            )
+            patches.enter_context(
+                patch.object(
+                    auto_runtime.DisplayAutomaticCheckF3Mixin,
+                    "_atualizar_preview_display_f3", lambda _self: None,
+                )
+            )
+            for name in (
+                "registrar_resultado_check_display_f3",
+                "_atualizar_preview_display_f3",
+                "_ativar_tela_producao_display_f3",
+            ):
+                patches.enter_context(
+                    patch.object(
+                        DisplayProductionF3Mixin, name,
+                        lambda *_args, **_kwargs: None,
+                    )
+                )
+            patches.enter_context(
+                patch.object(tracking, "tracking_enabled", return_value=True)
+            )
+            patches.enter_context(
+                patch.object(
+                    tracking,
+                    "_h1_cycle_geometry_usable_for_current_check",
+                    return_value=False,
+                )
+            )
+            tracking.instalar_runtime_rastreamento_objetos_display_f3()
+            process = auto_runtime.DisplayAutomaticCheckF3Mixin._process_display_auto_check
+            owner = SimpleNamespace(
+                _display_f3_waiting_empty_rearm=True,
+                _display_f3_waiting_new_board_after_empty=False,
+                _display_f3_tracking_config_open=False,
+                _display_f3_object_tracking_last_status={
+                    "locked": True, "evidence_current": False,
+                },
+            )
+            self.assertEqual("rearm_detector_called", process(owner))
+            self.assertEqual([owner], calls)
+            # Sem rearme o guard de LOCK stale continua impedindo análise.
+            owner._display_f3_waiting_empty_rearm = False
+            self.assertIsNone(process(owner))
+            self.assertEqual([owner], calls)
+            # Aguardar NOVA PLACA após EMPTY também deve consumir câmera RAW.
+            owner._display_f3_waiting_new_board_after_empty = True
+            self.assertEqual("rearm_detector_called", process(owner))
+            self.assertEqual(2, len(calls))
+
     def test_h1_luminous_pose_is_reused_only_after_h1_and_reset_on_new_plate(self):
         from unittest.mock import Mock
 
