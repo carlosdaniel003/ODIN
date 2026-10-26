@@ -7374,6 +7374,7 @@ def _clear_tracking_runtime_transients(
     app._display_f3_tracking_last_verified_pose_s = 0.0
     app._display_f3_tracking_last_verified_pose_frame_token = None
     app._display_f3_first_green_snapshot_debug = None
+    app._display_f3_first_green_visual_hold = None
     app._display_f3_tracking_prefetch_submissions = 0
     app._display_f3_tracking_prefetch_replacements = 0
     app._display_auto_precomputed_payload = None
@@ -8946,6 +8947,12 @@ def _submit_first_green_from_preview(app, raw_frame) -> bool:
     future = _submit_live_semantic_job(app, frozen_raw, payload)
     if future is None:
         return False
+    app._display_f3_first_green_visual_hold = {
+        "check_id": check_id,
+        "project_name": project_name,
+        "frame_token": frame_token,
+        "started_s": time.perf_counter(),
+    }
     app._display_f3_first_green_snapshot_debug = {
         "captured": True,
         "frame_token": deepcopy(frame_token),
@@ -9416,6 +9423,7 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     ready_semantic = payload
 
         if isinstance(ready_semantic, dict):
+            self._display_f3_first_green_visual_hold = None
             # O snapshot semântico pode ter sido capturado durante a fase ON
             # de BLUE e chegar depois de a câmera latest-frame entrar em OFF.
             # O gate físico deve avaliar o RAW da MESMA captura que produziu

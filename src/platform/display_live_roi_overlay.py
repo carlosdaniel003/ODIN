@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import time
 
 import cv2
 import numpy as np
@@ -46,6 +47,33 @@ def _normalizar_rotacao(rotacao) -> int:
 def _app_from_window(window):
     callback = getattr(window, "on_configure", None)
     return getattr(callback, "__self__", None)
+
+
+def _f3_snapshot_preview_hold_active(app, now_s: float | None = None) -> bool:
+    """Segura só a IMAGEM exibida durante a inspeção da foto congelada.
+
+    O camera service continua capturando para presença/energia; só evita
+    repintar a região visual enquanto o worker semântico usa esse snapshot.
+    Timeout protege o operador se um job ficar lento ou pendurado.
+    """
+    if app is None:
+        return False
+    hold = getattr(app, "_display_f3_first_green_visual_hold", None)
+    if not isinstance(hold, dict):
+        return False
+    future = getattr(app, "_display_f3_semantic_future", None)
+    now = time.perf_counter() if now_s is None else float(now_s)
+    check_id = _current_check_id(app)
+    active = bool(
+        future is not None
+        and not future.done()
+        and check_id
+        and check_id == str(hold.get("check_id") or "")
+        and 0.0 <= now - float(hold.get("started_s") or 0.0) <= 2.5
+    )
+    if not active:
+        app._display_f3_first_green_visual_hold = None
+    return active
 
 
 def _config_signature(repository) -> tuple[int, int]:
@@ -863,6 +891,17 @@ def instalar_overlay_rois_ao_vivo_display_f3() -> None:
         if bool(getattr(self, "_display_ng_evidence_frozen", False)):
             # A aquisição física continua fora da janela, mas o canvas permanece
             # exatamente no frame que confirmou o NG.
+            return True
+        app = _app_from_window(self)
+        if _f3_snapshot_preview_hold_active(app):
+            # A primeira amostra verde já foi desenhada ANTES da captura.
+            # Segurar essa imagem mostra qual foto a CNN está julgando.
+            # Não bloqueia captura RAW nem worker nem gate de energia.
+            if self.preview_legend.cget("text") != "FOTO CONGELADA • ANALISANDO CHECK":
+                self.preview_legend.configure(
+                    text="FOTO CONGELADA • ANALISANDO CHECK",
+                    fg=self.PREVIEW_MUTED,
+                )
             return True
         if frame is None or getattr(frame, "size", 0) == 0:
             return original_update(self, frame, visual_rotation=visual_rotation)

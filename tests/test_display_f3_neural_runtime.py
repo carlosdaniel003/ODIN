@@ -1090,6 +1090,34 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
             )
             self.assertEqual("ok", decision["decision"])
 
+    def test_preview_freeze_is_only_visual_and_clears_after_semantic(self):
+        import src.platform.display_live_roi_overlay as overlay
+
+        now = 110.0
+        future = SimpleNamespace(done=lambda: False)
+        class _Check:
+            def snapshot(self):
+                return {"current_check": {"id": "CHECK_001"}}
+        app = SimpleNamespace(
+            display_check_runtime=_Check(),
+            _display_f3_semantic_future=future,
+            _display_f3_first_green_visual_hold={
+                "check_id": "CHECK_001", "started_s": 109.9,
+            },
+        )
+        self.assertTrue(overlay._f3_snapshot_preview_hold_active(app, now))
+        self.assertIsNotNone(app._display_f3_first_green_visual_hold)
+        self.assertFalse(
+            overlay._f3_snapshot_preview_hold_active(app, now + 2.8)
+        )
+        self.assertIsNone(app._display_f3_first_green_visual_hold)
+        app._display_f3_first_green_visual_hold = {
+            "check_id": "CHECK_001", "started_s": now,
+        }
+        app._display_f3_semantic_future = SimpleNamespace(done=lambda: True)
+        self.assertFalse(overlay._f3_snapshot_preview_hold_active(app, now))
+        self.assertIsNone(app._display_f3_first_green_visual_hold)
+
     def test_preview_first_green_fast_handoff_uses_same_visual_frame(self):
         import src.platform.display_f3_object_tracking as tracking
 

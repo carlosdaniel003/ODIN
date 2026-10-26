@@ -7727,3 +7727,18 @@ O retorno continua versionado e passa pelos gates produtivos habituais.
 `_display_auto_last_decision_trace.frozen_tracking_snapshot`, medir
 H1 e verificar BLUE NG MASK_024. A correção não garante o primeiro LOCK
 quando ele próprio custar mais que a janela de H1.
+
+### Complemento do reteste D-084 — hold visual e telemetria da foto rápida
+
+A fotografia agora usa a amostra de verde do preview com frame/token iguais.
+Quando `preview_green_direct_to_semantic` dispara, o último frame exibido
+fica **visualmente congelado** durante a CNN; camera service e gates
+continuam processando RAW/latest. A imagem libera ao término do worker,
+na troca do CHECK ou após 2,5 s de limite de apresentação, sem suspender
+nenhum processamento. Este hold de análise é distinto do freeze NG terminal.
+
+`DEBUG TÉCNICO` agora coleta `first_green_snapshot` do runtime com
+`capture_path`, `frame_token`, `pose_age_ms` e `mask_ids`.
+Se esse campo estiver ausente, não houve captura no caminho rápido; os
+logs de pose e de espelho live permitem investigar o bloqueio. **Ainda
+pendente de teste físico na máquina.**
