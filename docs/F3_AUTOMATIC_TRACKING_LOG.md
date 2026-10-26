@@ -3049,3 +3049,19 @@ O DEBUG TÉCNICO agora expõe `terminal_rearm` para saber se a análise de
 EMPTY está realmente consumindo frames ou sem separação fotométrica.
 **Reteste físico pendente**, sobretudo caso de troca rápida em que
 nenhum frame de EMPTY é observado.
+
+## 26/10/2026 — D-087 / falha visual do congelamento por primeiro verde
+
+A função `_f3_snapshot_preview_hold_active` havia sido colocada na
+classe Window, porém o tracking ON instala diretamente
+`tracked_window_update` na instância real e ignora a versão da
+classe. Assim a imagem continuava sendo redesenhada apesar de haver
+snapshot em análise. Outra inconsistência: `geometry_token=id(geometry)`
+produzia uma cache key incompatível com a exigida no disparo rápido
+(`("tracked", id(geometry))`), e o contexto não era salvo na janela.
+
+Corrigida a precedência do hold no renderer ativo, o token compartilhado
+e a publicação da mesma amostra à captura. Não criar segundo timer/
+worker, não alterar ON/OFF, NG/OK, referências, F2 ou tracking OFF.
+**Reteste físico pendente** para verificar se o hold é visível nas
+capturas rápidas e se libera após decisão ou após 2,5 s de proteção.
