@@ -5912,3 +5912,32 @@ consultada na captura. Publicar o contexto desse mesmo frame antes
 de desenhá-lo permite cópia do RAW para a única análise semântica.
 O congelamento de análise não interfere na câmera física, nos
 gates nem no NG terminal; tracking OFF e F2 não mudam.
+
+## D-088 — Estado físico sem LOCK e paridade visual câmera/visor
+
+**Status:** Implementado em código; reteste físico pendente.
+
+A câmera rastreada pode exibir o RAW sem máscaras enquanto aguarda LOCK. Nesse
+estado, o visor não pode conservar LEDs verdes provenientes da última pose,
+nem o status físico pode ficar indefinidamente no placeholder inicial por
+depender de uma análise semântica que foi corretamente bloqueada sem geometria.
+
+**Decisão:** ao perder LOCK, o renderer F3 descarta o contexto de captura
+visual anterior e suspende imediatamente ON/OFF/falhas do visor, preservando
+apenas os IDs e slots das 30 máscaras. O próximo LOCK válido restaura as
+classificações da mesma amostra visual que a câmera apresenta. NG congelado
+continua intocado.
+
+Enquanto não houver LOCK, a **autoridade física canônica**
+`F3RuntimeAuthorities` pode reconhecer apenas o estado informativo
+OFF/EMPTY por suas referências já cadastradas, usando o executor HIGH de
+tracking existente e amostragem limitada. A observação passa pelo debounce
+físico existente, é entregue ao Tk na conclusão do worker e **nunca**
+autoriza CHECK, OK ou NG sem alinhamento. Não criar segundo matcher,
+scheduler ou thread. Dados antigos do worker não atualizam a faixa de status.
+
+**Validação:** testes de preservação de 30 máscaras e ausência de verde após
+perda do LOCK; testes de identificação informativa OFF com `allow_auto=False`,
+sem promoção de CHECK; CI neural D-088 e regressões visuais. Ainda requer
+reteste no JIG com a referência PLACA DESLIGADA NO SUPORTE, além de H1 e
+BLUE NG/024 reais.
