@@ -1291,6 +1291,10 @@ class F3HybridCheckAnalyzer(F3SameMaskReferenceAnalyzer):
                         DISPLAY_CHECK_STATE_ON,
                         DISPLAY_CHECK_STATE_OFF,
                     )
+                    and physical_state in (
+                        DISPLAY_CHECK_STATE_ON,
+                        DISPLAY_CHECK_STATE_OFF,
+                    )
                     and physical_state != calibrated_core
                 )
                 if physical_disagreed_with_core:
