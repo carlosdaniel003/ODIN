@@ -9818,6 +9818,26 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
             }
             app._display_f3_live_visual_mirror_debug = mirror_debug
 
+            # D-087: este renderer rastreado chama update_preview diretamente,
+            # sem passar pelo overlay.update_camera_preview que já possui o
+            # hold visual de FOTO CONGELADA. Respeitar o MESMO latch antes
+            # de pintar outra imagem; a câmera RAW e o worker seguem ativos.
+            if tracking_is_enabled:
+                from src.platform.display_live_roi_overlay import (
+                    _f3_snapshot_preview_hold_active,
+                )
+                if _f3_snapshot_preview_hold_active(app):
+                    mirror_debug["stage"] = "frozen_first_green_snapshot"
+                    mirror_debug["render_path"] = "visual_hold_no_repaint"
+                    try:
+                        self_window.preview_legend.configure(
+                            text="FOTO CONGELADA • ANALISANDO CHECK",
+                            fg=self_window.PREVIEW_MUTED,
+                        )
+                    except Exception:
+                        pass
+                    return True
+
             # Nunca renderize o frame que entrou em worker. O argumento recebido
             # é o camera_frame_atual e é a autoridade visual latest-frame.
             source = frame
@@ -10144,7 +10164,7 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                         visual,
                         int(visual_rotation or 0) % 360,
                         frame_token=live_frame_token,
-                        geometry_token=id(geometry),
+                        geometry_token=("tracked", id(geometry)),
                     )
                     mirror_debug["context_ready"] = isinstance(
                         semantic_context,
@@ -10360,6 +10380,13 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                                 }
                             )
 
+                        # A foto rápida usa o MESMO mapa visual/cache
+                        # que acabou de pintar as máscaras verdes neste frame.
+                        # Sem esta publicação, o capturador encontra um
+                        # contexto ausente ou antigo e nunca dispara.
+                        self_window._display_last_overlay_context = dict(
+                            semantic_context
+                        )
                         mirror_debug["stage"] = "camera_overlay_render"
                         decorated = renderizar_preview_claro_display_f3(
                             visual,
