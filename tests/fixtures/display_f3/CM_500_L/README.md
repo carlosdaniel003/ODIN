@@ -78,3 +78,17 @@ Os PNGs seguem exigindo cálculo validado das poses por imagem para um
 replay híbrido seguro. Os números acima são diagnósticos da CNN isolada
 em fotos que podem ter participado do treinamento, não resultados
 industriais independentes OK/NG.
+
+## Replay experimental com o ZIP privado (somente no computador local)
+
+```bash
+python scripts/avaliar_f3_fotos_reais.py --asset-zip /caminho/enviar.zip --estimate-geometry --report diagnostico_f3_local.json
+```
+
+O ZIP e os modelos NÃO são enviados ao GitHub: o comando utiliza diretório
+temporário e ajusta somente as referências da cópia temporária. O estimador
+busca correspondência entre luz e as máscaras canônicas em orientações 0/180
+**das máscaras**, sem rotacionar os PNGs já orientados. É uma hipótese de
+translação, não um LOCK homologado de rastreamento. Os resultados são marcados
+`PROVISIONAL_*` ou `BLOCKED`; nunca justificam aprovar uma placa NG.
+Os `--geometry-dir` com poses reais validadas continuam prioritários.

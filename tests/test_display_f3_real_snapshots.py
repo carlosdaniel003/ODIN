@@ -67,6 +67,55 @@ class DisplayF3RealSnapshotsTests(unittest.TestCase):
         self.assertGreater(report["missing_brightness_sum"], 0)
         # Não atribuir identidade MASK_024 sem geometria real rastreada.
 
+
+    def test_offline_geometry_estimates_translation_and_respects_photo_orientation(self):
+        import numpy as np
+        from scripts.avaliar_f3_fotos_reais import estimate_snapshot_geometry
+        from src.platform.display_f3_neural_dataset import _rasterizar_mascara
+        from src.platform.display_mask_geometry import pontos_mascara_display
+
+        image = np.zeros((240, 480, 3), dtype=np.uint8)
+        masks = []
+        states = {}
+        for idx, (x, y) in enumerate(
+            [(170, 35), (230, 35), (290, 35), (170, 90),
+             (230, 90), (290, 90), (170, 145), (230, 145),
+             (290, 145)], start=1
+        ):
+            mask = {"id": f"MASK_{idx:03d}", "type": "circle",
+                    "cx": x, "cy": y, "radius": 8}
+            masks.append(mask)
+            states[mask["id"]] = "off" if idx in {3, 6} else "on"
+            if states[mask["id"]] == "on":
+                cv2.circle(image, (x - 20, y + 24), 8, (255, 255, 255), -1)
+        estimate, report = estimate_snapshot_geometry(
+            image, {"masks": masks}, {"mask_states": states},
+            orientations=(0,),
+            reduction=2,
+        )
+        self.assertEqual("DIAGNOSTIC_ONLY", report["status"])
+        self.assertEqual(0, report["orientation_masks_degrees"])
+        self.assertEqual(0, report["additional_photo_rotation_degrees"])
+        self.assertLessEqual(abs(report["translation_px"][0] + 20), 2)
+        self.assertLessEqual(abs(report["translation_px"][1] - 24), 2)
+        self.assertEqual(len(masks), len(estimate))
+
+    def test_offline_geometry_blocks_dark_frame(self):
+        import numpy as np
+        from scripts.avaliar_f3_fotos_reais import estimate_snapshot_geometry
+        masks = [
+            {"id": f"MASK_{i:03d}", "type": "circle",
+             "cx": 50 + i * 30, "cy": 70, "radius": 8}
+            for i in range(1, 8)
+        ]
+        geometry, report = estimate_snapshot_geometry(
+            np.zeros((180, 320, 3), dtype=np.uint8),
+            {"masks": masks},
+            {"mask_states": {m["id"]: "on" for m in masks}},
+        )
+        self.assertIsNone(geometry)
+        self.assertEqual("BLOCKED", report["status"])
+
     def test_already_rotated_images_and_missing_assets_fail_closed(self):
         self.assertEqual(
             180,

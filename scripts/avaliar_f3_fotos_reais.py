@@ -12,7 +12,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from contextlib import contextmanager
+from copy import deepcopy
+from math import ceil
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from zipfile import ZipFile
 
 import cv2
 import numpy as np
@@ -107,6 +112,222 @@ def blue_pair_diagnostics(blue_ok: np.ndarray, blue_ng: np.ndarray) -> dict:
         ),
         "note": "Diferencas luminosas nao sao classificacao de MASK_024 nem prova OK/NG",
     }
+
+
+
+@contextmanager
+def staged_private_assets(archive: Path):
+    """Monta ZIP local em diretório temporário, sem versionar ativos privados."""
+    with TemporaryDirectory(prefix="f3-snapshot-offline-") as workdir:
+        root = Path(workdir)
+        source_prefix = "enviar/"
+        required = (
+            "odin_display_projects.json",
+            "odin_display_check_presence.json",
+            "cm_500_l_segments.onnx",
+            "cm_500_l_segments.json",
+        )
+        with ZipFile(archive) as package:
+            names = set(package.namelist())
+            for item in required:
+                if source_prefix + item not in names:
+                    raise ValueError(f"ZIP sem ativo obrigatorio: {item}")
+            (root / "display_check_presence").mkdir()
+            (root / "models" / "f3_neural").mkdir(parents=True)
+            (root / "odin_display_projects.json").write_bytes(
+                package.read(source_prefix + "odin_display_projects.json")
+            )
+            for suffix in (".onnx", ".json"):
+                (root / "models" / "f3_neural" / ("cm_500_l_segments" + suffix)).write_bytes(
+                    package.read(source_prefix + "cm_500_l_segments" + suffix)
+                )
+            references = json.loads(
+                package.read(source_prefix + "odin_display_check_presence.json")
+            )
+            for row in (references.get("references") or {}).values():
+                if not isinstance(row, dict):
+                    continue
+                filename = Path(
+                    str(row.get("image_path") or "").replace("\\", "/")
+                ).name
+                path_in_zip = source_prefix + "display_check_presence/" + filename
+                if filename and path_in_zip in names:
+                    dest = root / "display_check_presence" / filename
+                    dest.write_bytes(package.read(path_in_zip))
+                    row["image_path"] = str(dest)
+            (root / "odin_display_check_presence.json").write_text(
+                json.dumps(references, ensure_ascii=False), encoding="utf-8"
+            )
+        yield root / "odin_display_projects.json"
+
+
+def _mask_map_for_orientation(project: dict, image_shape: tuple, degrees: int):
+    """Converte geometria canônica para a orientação da FOTO, sem girá-la."""
+    from src.platform.display_mask_geometry import (
+        converter_mascara_legada_para_editor,
+        pontos_mascara_display,
+    )
+
+    height, width = image_shape[:2]
+    masks = []
+    for original in project.get("masks") or ():
+        mask = converter_mascara_legada_para_editor(deepcopy(original))
+        if degrees == 180:
+            if str(mask.get("type") or "") == "circle":
+                mask["cx"] = width - 1 - float(mask["cx"])
+                mask["cy"] = height - 1 - float(mask["cy"])
+            else:
+                points = pontos_mascara_display(mask)
+                mask = {
+                    "id": mask["id"],
+                    "type": "polygon",
+                    "points": [[width - 1 - float(x), height - 1 - float(y)]
+                               for x, y in points],
+                }
+        masks.append(mask)
+    return masks
+
+
+def _draw_mask_reduced(target, mask: dict, reduction: int) -> None:
+    """Rasterização com OpenCV, exclusiva do teste offline."""
+    from src.platform.display_mask_geometry import pontos_mascara_display
+
+    if str(mask.get("type") or "") == "circle":
+        cv2.circle(
+            target,
+            (int(round(float(mask["cx"]) / reduction)),
+             int(round(float(mask["cy"]) / reduction))),
+            max(1, int(round(float(mask["radius"]) / reduction))),
+            255, -1,
+        )
+    else:
+        points = pontos_mascara_display(mask)
+        if len(points) >= 3:
+            polygon = np.rint(
+                np.asarray(points, dtype=np.float32) / reduction
+            ).astype(np.int32)
+            cv2.fillPoly(target, [polygon], 255)
+
+
+def _apply_translation_to_masks(masks: list[dict], dx: float, dy: float) -> list[dict]:
+    translated = deepcopy(masks)
+    from src.platform.display_mask_geometry import pontos_mascara_display
+    for mask in translated:
+        if str(mask.get("type") or "") == "circle":
+            mask["cx"] = float(mask["cx"]) + dx
+            mask["cy"] = float(mask["cy"]) + dy
+        else:
+            points = pontos_mascara_display(mask)
+            mask["type"] = "polygon"
+            mask["points"] = [
+                [float(x) + dx, float(y) + dy] for x, y in points
+            ]
+    return translated
+
+
+def estimate_snapshot_geometry(
+    image: np.ndarray, project: dict, check: dict, *,
+    orientations: tuple[int, ...] = (0, 180),
+    reduction: int = 4,
+) -> tuple[list[dict] | None, dict]:
+    """Hipótese de pose por luz: apenas diagnóstico OFFLINE, nunca autoridade.
+
+    Procura translação no espaço do PNG e testa orientação DAS MÁSCARAS,
+    não gira imagem. O score usa todas as máscaras, ON positivo e OFF
+    negativo, para reduzir encaixe artificial no padrão esperado. Uma
+    segmentação NG pode perder um ON: não exige presença de 100% das luzes.
+    """
+    if image is None or image.ndim != 3 or reduction < 1:
+        return None, {"status": "BLOCKED", "reason": "invalid_photo"}
+    h, w = image.shape[:2]
+    size = (w // reduction, h // reduction)
+    value = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:, :, 2]
+    lowres = cv2.resize(value, size, interpolation=cv2.INTER_AREA)
+    emission = np.clip((lowres.astype(np.float32) - 155.0) / 90.0, 0.0, 1.0)
+    states = check.get("mask_states") or {}
+    observations = []
+    for degrees in orientations:
+        masks = _mask_map_for_orientation(project, image.shape, degrees)
+        on_full = np.zeros((size[1], size[0]), dtype=np.uint8)
+        off_full = np.zeros_like(on_full)
+        on_count = 0
+        for mask in masks:
+            state = states.get(str(mask.get("id") or ""))
+            if state == "on":
+                _draw_mask_reduced(on_full, mask, reduction)
+                on_count += 1
+            elif state == "off":
+                _draw_mask_reduced(off_full, mask, reduction)
+        combined = cv2.bitwise_or(on_full, off_full)
+        ys, xs = np.nonzero(combined)
+        if not len(xs) or on_count < 3:
+            continue
+        x1, x2 = int(xs.min()), int(xs.max()) + 1
+        y1, y2 = int(ys.min()), int(ys.max()) + 1
+        on = on_full[y1:y2, x1:x2].astype(np.float32) / 255.0
+        off = off_full[y1:y2, x1:x2].astype(np.float32) / 255.0
+        if on.shape[1] > size[0] or on.shape[0] > size[1]:
+            continue
+        on_scores = cv2.matchTemplate(emission, on, cv2.TM_CCORR) / max(
+            1.0, float(on.sum())
+        )
+        off_scores = cv2.matchTemplate(emission, off, cv2.TM_CCORR) / max(
+            1.0, float(off.sum())
+        )
+        objective = on_scores - 0.40 * off_scores
+        row, col = np.unravel_index(int(np.argmax(objective)), objective.shape)
+        on_value = float(on_scores[row, col])
+        off_value = float(off_scores[row, col])
+        dx = float((int(col) - x1) * reduction)
+        dy = float((int(row) - y1) * reduction)
+        observations.append({
+            "orientation_masks_degrees": degrees,
+            "shift_px": [dx, dy],
+            "score": float(objective[row, col]),
+            "mean_expected_on": on_value,
+            "mean_expected_off": off_value,
+            "masks": masks,
+            "on_count": on_count,
+        })
+    observations.sort(key=lambda row: row["score"], reverse=True)
+    if not observations:
+        return None, {"status": "BLOCKED", "reason": "no_luminous_geometry"}
+    best = observations[0]
+    margin = (
+        best["score"] - observations[1]["score"]
+        if len(observations) > 1 else None
+    )
+    # Só medições suficientemente separáveis são reportadas como
+    # pose preliminar; todos os demais casos falham fechados.
+    sufficient = (
+        best["mean_expected_on"] >= 0.65
+        and best["mean_expected_on"] - best["mean_expected_off"] >= 0.40
+        and best["score"] >= 0.50
+    )
+    # Outro giro parecido na mesma fotografia pode ser indistinguível.
+    # Não fabricar pose determinada nesse cenário.
+    ambiguous = bool(margin is not None and margin < 0.04)
+    report = {
+        "status": "DIAGNOSTIC_ONLY" if sufficient and not ambiguous else "BLOCKED",
+        "reason": ("estimated_luminous_translation" if sufficient and not ambiguous
+                   else "ambiguous_orientation" if ambiguous
+                   else "insufficient_luminous_support"),
+        "orientation_masks_degrees": best["orientation_masks_degrees"],
+        "additional_photo_rotation_degrees": 0,
+        "translation_px": best["shift_px"],
+        "on_brightness": round(best["mean_expected_on"], 5),
+        "off_brightness": round(best["mean_expected_off"], 5),
+        "objective": round(best["score"], 5),
+        "orientation_margin": None if margin is None else round(margin, 5),
+        "method": "expected_state_luminous_correlation_offline_only",
+        "warning": "Pose estimada pelas luzes esperadas; NG nao pode ser aprovado por ela",
+    }
+    if report["status"] == "BLOCKED":
+        return None, report
+    masks = _apply_translation_to_masks(
+        best["masks"], best["shift_px"][0], best["shift_px"][1]
+    )
+    return masks, report
 
 
 def _geometry_for_snapshot(directory: Path, filename: str, shape: tuple) -> tuple:
@@ -228,6 +449,7 @@ def evaluate_snapshots(
     manifest_path: Path = MANIFEST_PATH,
     project_config: Path | None = None,
     geometry_dir: Path | None = None,
+    estimate_geometry: bool = False,
 ) -> dict:
     doc = read_manifest(manifest_path)
     folder = Path(manifest_path).parent
@@ -247,14 +469,34 @@ def evaluate_snapshots(
         }
         if blocker:
             record["semantic_replay"] = {"status": "BLOCKED", "reason": blocker}
-        elif geometry_dir is None:
-            record["semantic_replay"] = {
-                "status": "BLOCKED", "reason": "tracked_geometry_missing"
-            }
         else:
-            masks, geometry_error = _geometry_for_snapshot(
-                geometry_dir, case["filename"], image.shape
-            )
+            if geometry_dir is not None:
+                masks, geometry_error = _geometry_for_snapshot(
+                    geometry_dir, case["filename"], image.shape
+                )
+                record["geometry"] = {
+                    "status": "VALIDATED_INPUT" if not geometry_error else "BLOCKED",
+                    "reason": geometry_error,
+                }
+            elif estimate_geometry:
+                project = repository.carregar_projeto("CM_500_L") or {}
+                check = next(
+                    (item for item in repository.listar_checks("CM_500_L")
+                     if str(item.get("name") or "").upper() == case["check"]),
+                    None,
+                )
+                masks, estimation = (
+                    estimate_snapshot_geometry(image, project, check)
+                    if isinstance(check, dict)
+                    else (None, {"status": "BLOCKED", "reason": "check_not_configured"})
+                )
+                record["geometry"] = estimation
+                geometry_error = (
+                    "" if masks is not None
+                    else str(estimation.get("reason") or "geometry_not_estimated")
+                )
+            else:
+                masks, geometry_error = None, "tracked_geometry_missing"
             if geometry_error:
                 record["semantic_replay"] = {
                     "status": "BLOCKED", "reason": geometry_error
@@ -263,6 +505,14 @@ def evaluate_snapshots(
                 record["semantic_replay"] = _semantic_replay(
                     analyzer, repository, image, case, masks
                 )
+                if estimate_geometry and geometry_dir is None:
+                    predicted = record["semantic_replay"]
+                    predicted["status"] = (
+                        "PROVISIONAL_" + str(predicted["status"])
+                    )
+                    predicted["warning"] = (
+                        "Diagnostico sobre pose estimada. Nao valida OK/NG produtivo."
+                    )
         results.append(record)
     pair = blue_pair_diagnostics(
         decoded["BLUE_OK.png"], decoded["BLUE_NG_024.png"]
@@ -287,14 +537,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=MANIFEST_PATH)
     parser.add_argument("--project-config", type=Path)
+    parser.add_argument("--asset-zip", type=Path,
+                        help="ZIP privado enviar.zip; usado apenas em pasta temporaria")
+    parser.add_argument("--estimate-geometry", action="store_true",
+                        help="Somente diagnostico de pose luminosa, nunca prova OK/NG")
     parser.add_argument("--geometry-dir", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    data = evaluate_snapshots(
-        manifest_path=args.manifest,
-        project_config=args.project_config,
-        geometry_dir=args.geometry_dir,
-    )
+    if args.asset_zip:
+        with staged_private_assets(args.asset_zip) as staged:
+            data = evaluate_snapshots(
+                manifest_path=args.manifest,
+                project_config=staged,
+                geometry_dir=args.geometry_dir,
+                estimate_geometry=args.estimate_geometry,
+            )
+    else:
+        data = evaluate_snapshots(
+            manifest_path=args.manifest,
+            project_config=args.project_config,
+            geometry_dir=args.geometry_dir,
+            estimate_geometry=args.estimate_geometry,
+        )
     text = json.dumps(data, ensure_ascii=False, indent=2)
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)

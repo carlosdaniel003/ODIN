@@ -7500,3 +7500,14 @@ salva ou modo tracking OFF/ON. Falta reproduzir o julgamento híbrido nas
 seis PNGs com a geometria projetada/validada de cada fotografia e as
 referências físicas. Os arquivos do ZIP são privados e não foram
 publicados no repositório. Sem declarar 5 OK/1 NG concluídos.
+
+## 26/10/2026 — Diagnóstico: BLUE referência com pose incompatível
+
+Nos cinco JPGs do ZIP, correlação entre máscaras e luz real encontra a
+geometria BLUE com translação estimada de (-420,-292) px em relação aos
+`mask_overrides_reference` registrados. A sobreposição luminosa ON
+subiu aproximadamente de 0,8% para 78,3%, em cálculo diagnóstico
+OFFLINE. Isso indica discrepância séria na referência BLUE, mas NÃO
+é autorização para aplicar esta translação a todas as placas/fotos.
+Criado suporte de replay experimental com ZIP privado e pose estimada,
+sempre marcado PROVISÓRIO. Nenhuma regra produtiva alterada.

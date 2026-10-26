@@ -2801,3 +2801,14 @@ INCERTO. A hipótese de 'foto congelada resolve tudo' não foi comprovada:
 além da captura, geometria e arbitragem same-mask continuam necessárias.
 Nenhuma alteração no runtime; não atualizar configuração produtiva com
 estes dados sem validar os próprios frames de produção.
+
+## 26/10/2026 — Etapa 2: estimador OFFLINE de geometria em snapshots
+
+Para eliminar dependência de digitação manual das poses dos 6 PNGs, o
+avaliador offline agora consegue estimar translação de geometria canônica
+por correlação entre pixels luminosos e máscaras ON/OFF esperadas, avaliando
+orientação 0/180 DAS MÁSCARAS, não da fotografia já rotacionada.
+Requer evidência contrastante e rejeita giro ambíguo. Uma pose estimada
+não vira LOCK do runtime: resultados semânticos são `PROVISIONAL`, nunca
+validação de OK/NG industrial. ZIP privado é montado apenas em diretório
+temporário; não versionado. Sem mudanças em F2/produção F3.
