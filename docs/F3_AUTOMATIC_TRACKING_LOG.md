@@ -2764,3 +2764,14 @@ para arbitragem; NG real permanece. Nenhuma fonte nova ou loop.
 **Validação automática de D-083:** 77/77 testes neurais PASS (run 39964478950).
 Suíte F3 ampla com 7 falhas e 1 erro preexistentes (run 39964479008).
 Reteste real de H1 com rastreamento ON e BLUE NG MASK_024 continua pendente.
+
+## 26/10/2026 — Etapa 2: fotografias reais com tracking opt-in
+
+Seis PNGs reais de CM_500_L em
+`tests/fixtures/display_f3/CM_500_L/` (commit `ac69c2a4`),
+5 OK e 1 BLUE NG MASK_024. O operador já aplicou rotação de 180°.
+Adicionados manifesto, teste de integridade, métricas fotométricas e
+comparação BLUE com registro translacional diagnóstico; sem política OK/NG
+nova e sem alterar runtime. A configuração canônica, CNN e poses geométricas
+por fotografia não estão no repositório; por isso o replay semântico fica
+BLOCKED de modo explícito, até fornecer esses recursos de engenharia.

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "project_name": "CM_500_L",
+  "acquisition": "camera_physical_snapshot",
+  "source_commit": "ac69c2a454323b4bf4a702f3f4718b5e9f61442e",
+  "source_camera_resolution": [
+    1920,
+    1080
+  ],
+  "orientation": {
+    "already_applied_rotation_degrees": 180,
+    "additional_rotation_degrees_for_replay": 0,
+    "description": "As PNG ja estao orientadas 180 graus pelo operador. Nao rotacionar novamente."
+  },
+  "cases": [
+    {
+      "filename": "H1_OK.png",
+      "check": "H1",
+      "ground_truth": "OK",
+      "failed_mask_ids": []
+    },
+    {
+      "filename": "BLUE_OK.png",
+      "check": "BLUE",
+      "ground_truth": "OK",
+      "failed_mask_ids": []
+    },
+    {
+      "filename": "BLUE_NG_024.png",
+      "check": "BLUE",
+      "ground_truth": "NG",
+      "failed_mask_ids": [
+        "MASK_024"
+      ],
+      "capture_phase": "ON"
+    },
+    {
+      "filename": "USB_OK.png",
+      "check": "USB",
+      "ground_truth": "OK",
+      "failed_mask_ids": []
+    },
+    {
+      "filename": "FM_OK.png",
+      "check": "FM",
+      "ground_truth": "OK",
+      "failed_mask_ids": []
+    },
+    {
+      "filename": "AUX_OK.png",
+      "check": "AUX",
+      "ground_truth": "OK",
+      "failed_mask_ids": []
+    }
+  ]
+}

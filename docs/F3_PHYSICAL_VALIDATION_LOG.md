@@ -7418,3 +7418,24 @@ com MASK_024 apagada e ON indevido. Sem declarar PASS físico antecipado.
 (run 39964478950), com testes para ON real/NG e conflito forte.
 Isolamento F3 permanece 7 FAIL + 1 ERROR do baseline
 (run 39964479008). **JIG: PENDENTE DE RETESTE.**
+
+## 26/10/2026 — Dataset real CM_500_L (Etapa 2, diagnóstico offline)
+
+**Cenário:** 5 fotografias OK (H1, BLUE, USB, FM, AUX) e 1 fotografia NG
+(BLUE, MASK_024 apagada), enviadas pelo operador no commit `ac69c2a4`.
+Todas já possuem rotação de 180° aplicada pelo operador; replay NÃO
+aplica mais 180°.
+
+**Status:** IMAGENS RECEBIDAS / TESTES OFFLINE EM CONSTRUÇÃO; ainda não é
+PASS/FAIL de classificação física do ODIN. O GitHub não contém a configuração
+persistida do Projeto Display, geometrias rastreadas por snapshot e artefatos
+ONNX da instalação (ignorados no .gitignore). Nenhuma fotografia isolada
+comprova a semântica das 30 máscaras sem essas informações.
+
+**Alteração de escopo:** testes e diagnóstico de imagem em fixtures reais,
+incluindo comparação de luminosidade BLUE OK/NG, integrados ao workflow neural.
+Nenhuma alteração em tracking, CNN, híbrido ou estado produtivo.
+
+**Próximo reteste:** importar configuração/modelo e geometria por snapshot
+para permitir classificar efetivamente 5 OK + 1 NG offline; somente depois
+planejar gatilho de snapshot no runtime tracking ON.

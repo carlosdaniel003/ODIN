@@ -43,6 +43,8 @@ jobs:
             tests/test_display_f3_neural_dataset.py \
             tests/test_display_f3_neural_runtime.py \
             tests/test_display_f3_same_mask_reference_fix.py \
+            tests/test_display_f3_real_snapshots.py \
+            scripts/avaliar_f3_fotos_reais.py \
             tests/test_display_f3_neural_training.py \
             tests/test_display_f3_debug_clarity_fix.py
 
@@ -56,6 +58,20 @@ jobs:
             tests.test_display_f3_neural_dataset \
             tests.test_display_f3_neural_runtime \
             tests.test_display_f3_same_mask_reference_fix \
+            tests.test_display_f3_real_snapshots \
             tests.test_display_f3_neural_training \
             tests.test_display_f3_debug_clarity_fix \
             -v
+
+      - name: Report actual F3 camera snapshots (diagnostic only)
+        if: always()
+        run: |
+          python scripts/avaliar_f3_fotos_reais.py --report f3_snapshot_diagnostic.json
+
+      - name: Archive F3 physical snapshot diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: f3-real-snapshots-report
+          path: f3_snapshot_diagnostic.json
+          if-no-files-found: warn
