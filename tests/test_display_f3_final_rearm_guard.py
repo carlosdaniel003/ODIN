@@ -172,6 +172,13 @@ class DisplayF3FinalRearmGuardTests(unittest.TestCase):
         self.assertEqual(1, app.release_calls)
         self.assertFalse(app._display_f3_ng_evidence_frozen)
         self.assertEqual(1, app.display_f3_window.waiting_calls)
+        self.assertEqual(
+            F3_REARM_PHASE_WAIT_NEW_BOARD,
+            app._display_f3_terminal_rearm_trace["phase_after"],
+        )
+        self.assertTrue(
+            app._display_f3_terminal_rearm_trace["empty_confirmed"]
+        )
 
     def test_instalador_reaplica_builder_dedicado_antes_do_guard_final(self):
         source = inspect.getsource(instalar_guard_rearme_terminal_final_display_f3)
