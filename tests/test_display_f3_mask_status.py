@@ -145,6 +145,26 @@ class DisplayF3MaskStatusTests(unittest.TestCase):
         self.assertNotIn("3/3 CONFORMES", text)
         self.assertEqual(F3_MASK_STATUS_COLORS["partial"], color)
 
+    def test_status_neural_exibe_mask_id_pendente_no_inicio(self):
+        context = {"project_name": "P", "check_id": "h1", "check_name": "H1"}
+        analysis = {
+            "ready": True, "project_name": "P", "check_id": "h1",
+            "neural_visual_authority": True,
+            "active_mask_count": 2, "effective_matched_mask_count": 1,
+            "effective_classifications": {
+                "MASK_008": "on", "MASK_020": "uncertain",
+            },
+            "effective_uncertain_mask_ids": ("MASK_020",),
+            "mask_results": [
+                {"mask_id": "MASK_008", "classified": "on", "matched": True},
+                {"mask_id": "MASK_020", "classified": "uncertain",
+                 "matched": None, "semantic_certain": False},
+            ],
+        }
+        text, _color = formatar_status_mascaras_f3(analysis, context)
+        self.assertIn("H1 INDETERMINADO MASK_020", text)
+        self.assertIn("1/2 CONFORMES", text)
+
     def test_status_expoe_blue_bluf_quando_assinatura_diverge(self):
         context = {
             "project_name": "DISPLAY_TESTE",

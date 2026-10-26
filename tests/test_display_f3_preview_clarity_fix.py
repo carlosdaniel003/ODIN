@@ -721,6 +721,40 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         self.assertGreater(int(lit[1]), int(lit[0]))
         self.assertLess(int(dark[0]) + int(dark[1]) + int(dark[2]), 20)
 
+    def test_visor_camera_destaca_pendencia_hibrida_sem_apagar_espelho_live(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        base = self._live_visual_test_context()
+        base.update(
+            live_visual_sample_ready=True,
+            live_visual_mask_ids=("MASK_002",),
+            live_visual_classifications={
+                "MASK_001": "off", "MASK_002": "on",
+                "MASK_003": "off", "MASK_004": "off",
+            },
+        )
+        standard = clarity.renderizar_preview_claro_display_f3(
+            frame, dict(base)
+        )
+        pending = clarity.renderizar_preview_claro_display_f3(
+            frame, {**base, "hybrid_pending_mask_ids": ("MASK_002",)}
+        )
+        # Borda da MASK_ID pendente é amarela; seu núcleo visual
+        # continua verde ON, sem substituir o julgamento produtivo.
+        self.assertFalse(np.array_equal(pending, standard))
+        self.assertTrue(np.array_equal(pending[40, 60], standard[40, 60]))
+
+    def test_visual_sem_pendencia_nao_inventa_alerta_hibrido(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        context = self._live_visual_test_context()
+        context["live_visual_mask_ids"] = ("MASK_002",)
+        before = clarity.renderizar_preview_claro_display_f3(
+            frame, context
+        )
+        after = clarity.renderizar_preview_claro_display_f3(
+            frame, {**context, "hybrid_pending_mask_ids": ()}
+        )
+        self.assertTrue(np.array_equal(before, after))
+
     def test_fallback_de_classificacao_aceita_somente_o_check_atual(self):
         right = clarity._classifications_from_analysis(
             {
