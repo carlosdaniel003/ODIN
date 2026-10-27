@@ -3210,3 +3210,31 @@ de NG terminal confirmado.
 Suíte neural CI 119/119 PASS incluindo fluxo real de 4 entradas
 101,101,102,103 (primeira repetida) ⇒ somente 3 evidências.
 Reteste físico ainda pendente.
+
+## 27/10/2026 — D-093 / FAIL físico D-092: apenas uma foto CNN H1
+
+**Evidência real:** `image(20261027-124745).png` e DEBUG
+`Texto colado(20261027-124750).txt`. H1 28/30 com 17/20 OFF;
+`fast_ng_consensus=true`, apenas 1/3;
+`registration_attempted=false`. O RAW decidido foi token 414,
+a energia/espelho ao vivo registraram tokens posteriores, como
+417/424, e a auditoria manual clicada usa frame 457 com outra energia.
+Não é falha da CNN nem prova de que a placa está desligada.
+
+**Causa da tentativa anterior:** D-092 ainda esperava três CNNs
+frescas e independentes na janela física H1 de ~3 segundos.
+A captura pelo primeiro verde é atômica e o caminho de CNN/track
+é assíncrono; não há garantia de entregar três resultados.
+
+**Correção D-093:** a mesma autoridade física canônica preserva,
+em histórico limitado de 18 frames, votos same-mask que ela já
+avalia no preview. O decisor de CHECK só usa a sequência como
+corroboração de um snapshot CNN híbrido que já deu NG certo:
+três tokens posteriores a ele, mesmo H1, energia/pose confirmados
+e idêntico padrão por máscara, sem reclassificar cena ou repetir CNN.
+Um retorno tardio do snapshot RAW ao gate não sobrescreve frames
+físicos mais novos. Não criar loops/jobs/cache de imagem nem reduzir
+segurança de BLUE, presença, H1 desligado ou tracking OFF.
+
+**CI neural:** 121/121 PASS, incluindo pipeline terminal e retorno
+de RAW antigo. **Reteste físico D-093 pendente.**
