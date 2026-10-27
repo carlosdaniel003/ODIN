@@ -1973,6 +1973,10 @@ class DisplayAutomaticCheckF3Mixin:
                     self, "_display_f3_power_history_diagnostics", None
                 )) if fast_ng_active else None
             )
+            trace["fast_ng_raw_burst_diagnostics"] = (
+                deepcopy(getattr(self, "_display_f3_h1_burst_debug", None))
+                if fast_ng_active else None
+            )
             trace["fast_ng_combined_frame_tokens"] = tuple(
                 sorted(combined_tokens, key=lambda token: token[1])
             ) if fast_ng_active else ()
