@@ -361,7 +361,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             fills.count(DisplayProductionF3Window.DISPLAY_READOUT_WARNING),
         )
 
-    def test_ng_confirmado_pinta_somente_mascara_defeituosa_vermelha_no_preview_classico(self):
+    def test_ng_terminal_pinta_somente_mascara_defeituosa_vermelha_no_preview_classico(self):
         frame = np.zeros((80, 180, 3), dtype=np.uint8)
         context = {
             "resolution": (180, 80),
@@ -379,6 +379,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
                 "MASK_028": "off",
             },
             "effective_confirmed_failed_mask_ids": ("MASK_024",),
+            "terminal_ng_evidence": True,
             "board_points": (),
         }
 
@@ -399,7 +400,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
         self.assertGreater(int(off_pixel[1]), int(off_pixel[0]))
         self.assertNotEqual(tuple(ng_pixel), tuple(off_pixel))
 
-    def test_visor_live_prioriza_falha_confirmada_em_vermelho(self):
+    def test_visor_ng_terminal_prioriza_falha_confirmada_em_vermelho(self):
         class _Canvas:
             def __init__(self):
                 self.polygons = []
@@ -420,6 +421,7 @@ class DisplayF3LiveRoiOverlayTests(unittest.TestCase):
             "classifications": {},
             "expected_states": {},
             "failed_mask_ids": {"MASK_004"},
+            "terminal_ng_evidence": True,
             "validating_mask_ids": set(),
             "ui_mask_authority": "effective_mask_results_v1",
             "live_luminous_only": True,
