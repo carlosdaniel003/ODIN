@@ -7956,3 +7956,33 @@ nas duas vistas; ao apagar novamente, ambas acompanham a mudança.
 Verificar também BLUE intermitente, NG verdadeiro MASK_024 em vermelho
 no snapshot e rearme físico. Sem fotos reais posteriores, não
 declarar PASS produtivo.
+
+## 27/10/2026 — D-092 / melhorar NG H1 com MASK_017 e MASK_020 apagadas
+
+**Placa real:** CM_500_L CHECK_001/H1, esperado ON 7, observado ON 5,
+OFF 25, conformidade 28/30. Operador atestou NG real com máscaras
+MASK_017 e MASK_020 defeituosas. Janela mostrou
+`AUTO • H1 • 28/30 NG confirmado • 3/6` sem encerrar na janela útil.
+
+**Evidência de runtime:** `last_auto_analysis` atribuiu OFF
+com `neural_physical_consensus` às duas máscaras; MASK_017:
+P_neural(OFF)=0,820059, físico OFF confiança 0,941;
+MASK_020: P_neural(OFF)=0,82518, físico OFF confiança 0,8977.
+`auto_decision_trace.policy_decision=ng` e energia
+produtiva confirmada 5 votos / limiar 4. O relatório manual
+isolado capturou frame diferente e retornou energia não
+confirmada: não confundir com runtime.
+
+**Implementação:** consenso H1 rastreado sem incertezas agora exige
+3 frames RAW de IDs distintos com MESMAS MASK_ID confirmadas, maioria
+dos LEDs ON, duplo acordo CNN/físico same-mask. Ao falhar algum gate,
+debounce normal 6; nunca aprova OK parcial. BLUE segue sem ajuste.
+A apresentação diz validando NG até a confirmação final.
+
+**CI:** neural 119/119 PASS, incluindo teste de execução do runtime
+que ignora token repetido. **PENDENTE JIG:** passar H1 OK (30/30),
+NG H1 com 17/20 OFF (28/30 ⇒ NG terminal sem avançar BLUE),
+placa desligada (não condenar), H1 transitório parcial
+(não acusar NG), BLUE NG/024 (não regredir confirmação de fase ON),
+retirada e rearme de próxima placa. Medir tempo físico de NG;
+não afirmar que finaliza dentro dos ~3 s sem teste.
