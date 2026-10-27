@@ -622,6 +622,9 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 "terminal_segregated": bool(
                     context.get("terminal_segregated")
                 ),
+                "terminal_ng_evidence": bool(
+                    context.get("terminal_ng_evidence")
+                ),
                 "luminous_mask_ids": {
                     str(mask_id)
                     for mask_id in (context.get("luminous_mask_ids") or ())
@@ -765,8 +768,16 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             return "ng"
 
         failed = set(context.get("failed_mask_ids") or ())
-        if mask_id in failed:
-            # Falha terminal confirmada prevalece sobre qualquer luz amostrada.
+        # Um resultado semântico de outro frame pode continuar no status do
+        # CHECK USB/BLUE enquanto a câmera já mostra a fase apagada.
+        # Isso não é vermelho de NG: durante preview live o visor obedece
+        # somente à mesma amostra luminosa usada na câmera. O NG terminal
+        # verdadeiro mantém a prioridade vermelha até o rearme físico.
+        if mask_id in failed and (
+            not bool(context.get("live_luminous_only"))
+            or bool(context.get("terminal_ng_evidence"))
+            or bool(getattr(self, "_display_ng_evidence_frozen", False))
+        ):
             return "ng"
 
         if bool(context.get("live_luminous_only")):
@@ -1258,6 +1269,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
                 continue
             context["failed_mask_ids"] = set(confirmed_set)
             context["effective_confirmed_failed_mask_ids"] = confirmed
+            context["terminal_ng_evidence"] = True
 
         for attr in (
             "_display_last_overlay_context",
@@ -1267,6 +1279,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             if not isinstance(context, dict):
                 continue
             context["effective_confirmed_failed_mask_ids"] = confirmed
+            context["terminal_ng_evidence"] = True
 
         self._redraw_display_readout()
 
