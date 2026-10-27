@@ -2774,7 +2774,7 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
     def test_power_owner_retains_distinct_frames_for_h1_without_new_classifiers(self):
         from src.platform.display_f3_runtime_authorities import F3PowerAuthority
         from src.platform.display_f3_ng_fast_confirmation import (
-            contar_corrobacoes_fisicas_h1,
+            tokens_corrobacao_fisica_h1,
         )
         board = SimpleNamespace()
         power = F3PowerAuthority(board)
@@ -2816,24 +2816,24 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
             int(item["frame_token"][1]) for item in history
         ])
         self.assertEqual(
-            3, contar_corrobacoes_fisicas_h1(
+            3, len(tokens_corrobacao_fisica_h1(
                 case, failed, history, snapshot_token=("camera", 414)
-            ),
+            )),
         )
         # Frame duplicado não vira confirmação independente.
         duplicate = [history[0], history[1], history[1]]
         self.assertEqual(
-            2, contar_corrobacoes_fisicas_h1(
+            2, len(tokens_corrobacao_fisica_h1(
                 case, failed, duplicate, snapshot_token=("camera", 414)
-            ),
+            )),
         )
         corrupted = [dict(item) for item in history]
         corrupted[-1]["mask_classifications"] = dict(physical_states)
         corrupted[-1]["mask_classifications"]["MASK_020"] = "on"
         self.assertEqual(
-            0, contar_corrobacoes_fisicas_h1(
+            0, len(tokens_corrobacao_fisica_h1(
                 case, failed, corrupted, snapshot_token=("camera", 414)
-            ),
+            )),
         )
         wrong_check = power.apply(
             {}, {"board_present": True, "empty_confirmed": False},
@@ -2846,33 +2846,7 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         power.reset()
         self.assertEqual([], board._display_f3_recent_power_mask_frames)
 
-    def test_h1_physical_history_confirms_one_cnn_photo_in_runtime(self):
-        from src.platform.display_f3_ng_fast_confirmation import (
-            contar_corrobacoes_fisicas_h1,
-        )
-        case = self._case()
-        physical_states = {
-            row["mask_id"]: row["classified"]
-            for row in case["mask_results"]
-        }
-        history = [
-            {
-                "frame_token": ("camera", frame_id),
-                "project_name": "DISPLAY A",
-                "check_id": "CHECK_001",
-                "board_present": True,
-                "powered_confirmed": True,
-                "decision_allowed": True,
-                "spatial_alignment_ready": True,
-                "same_mask_comparison": True,
-                "mask_classifications": physical_states,
-            }
-            for frame_id in (415, 416, 417)
-        ]
-        self.assertEqual(3, contar_corrobacoes_fisicas_h1(
-            case, ("MASK_017", "MASK_020"), history,
-            snapshot_token=("camera", 414)
-        ))
+    def _make_h1_production_runtime(self, history):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app.display_f3_ativo = True
         app.display_f3_result_after_id = None
@@ -2921,6 +2895,36 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
             return {"event": "board_ng"}
         app.registrar_resultado_check_display_f3 = register
         context = app._display_auto_current_context()
+        return app, registered, context
+
+    def test_h1_physical_history_confirms_one_cnn_photo_in_runtime(self):
+        from src.platform.display_f3_ng_fast_confirmation import (
+            tokens_corrobacao_fisica_h1,
+        )
+        case = self._case()
+        physical_states = {
+            row["mask_id"]: row["classified"]
+            for row in case["mask_results"]
+        }
+        history = [
+            {
+                "frame_token": ("camera", frame_id),
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+                "board_present": True,
+                "powered_confirmed": True,
+                "decision_allowed": True,
+                "spatial_alignment_ready": True,
+                "same_mask_comparison": True,
+                "mask_classifications": physical_states,
+            }
+            for frame_id in (415, 416, 417)
+        ]
+        self.assertEqual(3, len(tokens_corrobacao_fisica_h1(
+            case, ("MASK_017", "MASK_020"), history,
+            snapshot_token=("camera", 414)
+        )))
+        app, registered, context = self._make_h1_production_runtime(history)
         app._display_auto_precomputed_payload = {
             "frame_token": ("camera", 414),
             "context": context,
@@ -2944,12 +2948,98 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
             proof["fast_h1_ng_confirmation_source"],
         )
 
+    def test_h1_duas_cnns_mais_um_frame_fisico_distinto_finalizam_ng(self):
+        # Reteste físico D-093: 2 snapshots CNN + 1 frame físico = 2/3
+        # porque o runtime usava max(), em vez da união de tokens.
+        case = self._case()
+        states = {row["mask_id"]: row["classified"] for row in case["mask_results"]}
+        physical = {
+            "frame_token": ("camera", 369),
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_001",
+            "board_present": True,
+            "powered_confirmed": True,
+            "decision_allowed": True,
+            "spatial_alignment_ready": True,
+            "same_mask_comparison": True,
+            "mask_classifications": states,
+        }
+        app, registered, context = self._make_h1_production_runtime([physical])
+        for i, frame_id in enumerate((365, 368)):
+            app._display_auto_precomputed_payload = {
+                "frame_token": ("camera", frame_id),
+                "context": context,
+                "analysis": case,
+                "raw_frame": app.camera_frame_atual.copy(),
+                "snapshot_capture_trigger": {
+                    "triggered": True, "mask_ids": ("MASK_008",),
+                },
+            }
+            app._process_display_auto_check()
+            if i == 0:
+                self.assertFalse(registered)
+        self.assertEqual(1, len(registered))
+        approved, frame_id, proof = registered[0]
+        self.assertIs(approved, False)
+        self.assertEqual(368, frame_id)
+        self.assertEqual(3, proof["stable_frames"])
+        self.assertEqual(1, proof["fast_h1_ng_physical_frames"])
+        self.assertEqual(
+            (("camera", 365), ("camera", 368), ("camera", 369)),
+            proof["fast_h1_ng_distinct_frame_tokens"],
+        )
+        self.assertEqual(
+            "hybrid_semantic_plus_physical_frames",
+            proof["fast_h1_ng_confirmation_source"],
+        )
+
+    def test_h1_evidencia_fisica_repetida_antiga_ou_divergente_nao_fecha_ng(self):
+        case = self._case()
+        states = {row["mask_id"]: row["classified"] for row in case["mask_results"]}
+        for invalid in ("duplicate", "stale", "different_mask", "power_off"):
+            with self.subTest(invalid=invalid):
+                physical = {
+                    "frame_token": ("camera", 369),
+                    "project_name": "DISPLAY A",
+                    "check_id": "CHECK_001",
+                    "board_present": True,
+                    "powered_confirmed": True,
+                    "decision_allowed": True,
+                    "spatial_alignment_ready": True,
+                    "same_mask_comparison": True,
+                    "mask_classifications": dict(states),
+                }
+                if invalid == "duplicate":
+                    physical["frame_token"] = ("camera", 368)
+                elif invalid == "stale":
+                    physical["frame_token"] = ("camera", 300)
+                elif invalid == "different_mask":
+                    physical["mask_classifications"]["MASK_020"] = "on"
+                elif invalid == "power_off":
+                    physical["powered_confirmed"] = False
+                app, registered, context = self._make_h1_production_runtime([physical])
+                for frame_id in (365, 368):
+                    app._display_auto_precomputed_payload = {
+                        "frame_token": ("camera", frame_id),
+                        "context": context,
+                        "analysis": case,
+                        "raw_frame": app.camera_frame_atual.copy(),
+                        "snapshot_capture_trigger": {
+                            "triggered": True, "mask_ids": ("MASK_008",),
+                        },
+                    }
+                    app._process_display_auto_check()
+                self.assertEqual([], registered)
+                self.assertEqual(
+                    2, app._display_auto_last_decision_trace["fast_ng_distinct_frames"]
+                )
+
     def test_h1_fast_requires_three_distinct_camera_frames_no_duplicate(self):
         # Contrato temporal: apenas tokens de captura independentes contam.
         source = inspect.getsource(DisplayAutomaticCheckF3Mixin._process_display_auto_check)
         self.assertIn("assinatura_ng_h1_consenso(", source)
         self.assertIn("if token_key not in seen:", source)
-        self.assertIn("contar_corrobacoes_fisicas_h1(", source)
+        self.assertIn("tokens_corrobacao_fisica_h1(", source)
         self.assertIn("semantic_frame_count", source)
         self.assertIn("DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES", source)
         self.assertEqual(
