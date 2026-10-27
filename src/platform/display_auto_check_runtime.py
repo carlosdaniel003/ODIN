@@ -1968,6 +1968,11 @@ class DisplayAutomaticCheckF3Mixin:
             trace["fast_ng_physical_history_diagnostics"] = (
                 deepcopy(physical_diagnostics) if fast_ng_active else None
             )
+            trace["fast_ng_physical_sampling_diagnostics"] = (
+                deepcopy(getattr(
+                    self, "_display_f3_power_history_diagnostics", None
+                )) if fast_ng_active else None
+            )
             trace["fast_ng_combined_frame_tokens"] = tuple(
                 sorted(combined_tokens, key=lambda token: token[1])
             ) if fast_ng_active else ()
