@@ -8835,6 +8835,7 @@ def _run_live_semantic_job(
     frame_token,
     source_age_ms: float,
     submitted_at_s: float,
+    h1_power_sampler=None,
 ) -> dict:
     """Classificação pesada do CHECK fora do thread Tk.
 
@@ -8867,6 +8868,18 @@ def _run_live_semantic_job(
             check_id=str(context.get("check_id") or ""),
             visual_rotation=int(visual_rotation or 0),
         )
+    # D-098: depois da CNN, o mesmo executor valida duas fotos RAW distintas
+    # capturadas pelo scheduler enquanto este job estava em execução.
+    # Não consulta a câmera live nem processa novas imagens no Tk.
+    h1_physical_observations = []
+    if h1_power_sampler is not None:
+        try:
+            h1_physical_observations = h1_power_sampler.confirm_h1_captured_frames(
+                context, frame_token, analysis, visual_rotation,
+                getattr(analyzer, "repository", None),
+            )
+        except Exception:
+            h1_physical_observations = []
     finished_at = time.perf_counter()
     elapsed_ms = max(
         0.0,
@@ -8897,6 +8910,7 @@ def _run_live_semantic_job(
         "tracking_geometry": deepcopy(tracking_geometry),
         "context": deepcopy(context),
         "analysis": analysis,
+        "h1_physical_observations": h1_physical_observations,
     }
 
 
@@ -8961,6 +8975,12 @@ def _submit_live_semantic_job(
     submitted_at_s = time.perf_counter()
     source_age_ms = float(tracking_payload.get("age_ms", 0.0) or 0.0)
     frame_token = tracking_payload.get("frame_token")
+    owner = getattr(app, "_display_f3_runtime_authorities", None)
+    h1_power_sampler = getattr(owner, "power", None)
+    begin_h1 = getattr(h1_power_sampler, "begin_h1_confirmation_capture", None)
+    if callable(begin_h1):
+        begin_h1(context, frame_token)
+
     # Estes dois objetos nasceram no MESMO _run_live_tracking_heavy_job.
     # Não substitua por campos do app: camera_frame_atual/geometry podem já
     # pertencer a outro frame quando o job semântico começar.
@@ -8979,6 +8999,7 @@ def _submit_live_semantic_job(
             frame_token,
             source_age_ms,
             submitted_at_s,
+            h1_power_sampler,
         ),
         priority=F3HeavyWorkPriority.HIGH,
         name="f3-live-semantic",
@@ -9697,6 +9718,18 @@ def instalar_autoridade_final_instancia_rastreamento_f3(app) -> None:
                     ready_semantic = payload
 
         if isinstance(ready_semantic, dict):
+            # D-098: só o proprietário de energia incorpora votos físicos
+            # pós-snapshot, antes de o decisor consumir o resultado da CNN.
+            physical_samples = ready_semantic.get("h1_physical_observations") or []
+            owner = getattr(self, "_display_f3_runtime_authorities", None)
+            power = getattr(owner, "power", None)
+            append = getattr(power, "append_h1_confirmed_samples", None)
+            if callable(append) and physical_samples:
+                append(
+                    physical_samples,
+                    ready_semantic.get("context") or {},
+                    ready_semantic.get("frame_token"),
+                )
             self._display_f3_first_green_visual_hold = None
             # O snapshot semântico pode ter sido capturado durante a fase ON
             # de BLUE e chegar depois de a câmera latest-frame entrar em OFF.
