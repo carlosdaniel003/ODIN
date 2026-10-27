@@ -3278,3 +3278,30 @@ a homografia/afim candidata do filtro atual. Não usar
 retângulo genérico como prova, nem mostrar máscara fixa
 durante SEARCHING. Reteste e tempo até primeiro LOCK
 continuam pendentes.
+
+## 27/10/2026 — D-095 FAIL parcial; D-096 diagnóstico do quórum de H1
+
+Na foto real `image(20261027-140743).png` o sistema já
+congelou captura H1, exibiu cinco acesos e reconheceu
+MASK_017/MASK_020 OFF. O rastreamento foi obtido no
+frame 341 (LOCK luminoso, cinco anchors, 227,53 ms de
+worker), mas a decisão produtiva documentada é de frame
+106, `policy_decision=ng`, com somente dois tokens
+distintos de confirmação: câmera 106 e 122 (1 CNN + 1
+físico). Não confundir frame manual 355 com o snapshot
+do motor produtivo.
+
+D-095 resolveu pelo menos a falta de LOCK naquele instante,
+mas não encerrou o NG H1 no equipamento. A análise repetida
+já superou duas tentativas: aplicar o protocolo de parada
+de `AGENTS.md`, sem mudar thresholds, exigir novo
+reconhecimento do texto H1 nem criar outra autoridade.
+
+D-096 instrumenta o método canônico existente
+`tokens_corrobacao_fisica_h1` com diagnóstico opcional,
+somente leitura: contagem/tokens do histórico recente,
+primeiro token rejeitado, motivos objetivos (idade
+>45 frames, energia, presença, alinhamento, same-mask,
+divergência de segmento), e tokens aceitos. A informação
+aparece no `auto_decision_trace`. O cálculo e retorno
+dos votos permanecem idênticos. Reteste físico pendente.
