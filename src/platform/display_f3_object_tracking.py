@@ -3934,6 +3934,98 @@ def _fit_luminous_pose(
     return best
 
 
+
+def _fit_luminous_filter_core_acquisition(
+    frame,
+    canonical_board,
+    expected_rows,
+    filter_points,
+    coarse_matrices,
+    threshold_v,
+) -> dict:
+    """Aquisição H1 por núcleo luminoso quando blooming elimina componentes.
+
+    O contorno do filtro propõe a pose, mas SOMENTE a luz no núcleo exato de
+    máscaras ON e landmarks identificados autoriza a geometria. Nenhuma
+    máscara OFF é usada como prova, e nenhum gate semântico é alterado.
+    """
+    try:
+        threshold = float(threshold_v)
+    except (TypeError, ValueError):
+        return {"available": False, "reason": "filter_core_threshold_missing"}
+    if not math.isfinite(threshold) or threshold < 45.0:
+        return {"available": False, "reason": "filter_core_threshold_invalid"}
+
+    accepted = []
+    for coarse in coarse_matrices:
+        core = _validate_luminous_pose_core_support(
+            frame, expected_rows, coarse, threshold,
+        )
+        # A exigência existente de 55% dos segmentos ON (mínimo três) é
+        # preservada, mesmo que o detector global não encontre componentes.
+        if not core.get("enforced") or not core.get("available"):
+            continue
+        local = _detect_expected_on_luminous_landmarks(
+            frame, filter_points, expected_rows, coarse, threshold,
+        )
+        if not local.get("available"):
+            continue
+        diagnostics = {}
+        fit = _fit_id_anchored_luminous_pose(
+            canonical_board, expected_rows, local.get("details") or (),
+            coarse, diagnostics=diagnostics,
+        )
+        if fit is None:
+            continue
+        refined = fit.get("matrix")
+        if refined is None:
+            continue
+        refined_core = _validate_luminous_pose_core_support(
+            frame, expected_rows, refined, threshold,
+        )
+        if not refined_core.get("enforced") or not refined_core.get("available"):
+            continue
+        # O refinamento não pode obter validação deslocando o filtro para uma
+        # iluminação vizinha, tampouco perder os núcleos já identificados.
+        guard_ok, guard = _luminous_refinement_within_coarse_guard(
+            refined, coarse, canonical_board,
+        )
+        if not guard_ok:
+            continue
+        if int(refined_core.get("validated_count", 0)) < int(core.get("validated_count", 0)):
+            continue
+        candidate = dict(fit)
+        candidate.update({
+            "core_validated_mask_ids": list(refined_core.get("validated_mask_ids") or ()),
+            "core_validated_count": int(refined_core.get("validated_count", 0)),
+            "core_required_count": int(refined_core.get("required_count", 0)),
+            "local_luminous_landmark_count": len(local.get("centers") or ()),
+            "fit_landmark_source": "filter_core_id_anchored_acquisition",
+            "fine_fit_mode": str(fit.get("fine_fit_mode") or "filter_core_id_anchored"),
+            "fit_diagnostics": diagnostics,
+            "filter_core_refinement_guard": guard,
+        })
+        # O score só ordena hipóteses já verificadas no mesmo frame.
+        candidate["score"] = (
+            float(candidate["core_validated_count"]) * 10.0
+            + float(candidate.get("matched_count", 0))
+            - float(candidate.get("median_error_px", 0.0)) * 0.1
+        )
+        accepted.append(candidate)
+    if not accepted:
+        return {"available": False, "reason": "filter_core_no_validated_pose"}
+
+    accepted.sort(key=lambda candidate: float(candidate["score"]), reverse=True)
+    # Uma placa escura com pontos reflexivos não pode escolher arbitrariamente
+    # entre duas orientações visualmente indistinguíveis.
+    if len(accepted) > 1 and (
+        accepted[0]["core_validated_count"] == accepted[1]["core_validated_count"]
+        and abs(accepted[0]["score"] - accepted[1]["score"]) < 0.25
+    ):
+        return {"available": False, "reason": "filter_core_orientation_ambiguous"}
+    return {"available": True, **accepted[0]}
+
+
 def _find_luminous_segment_pose(
     frame,
     canonical_board,
@@ -4084,8 +4176,47 @@ def _find_luminous_segment_pose(
             if normalized_base_transform is None:
                 fit = global_fit
         elif normalized_base_transform is None:
-            attempt["fit_diagnostics"] = {}
-            attempt["fit"] = False
+            # D-095: no H1, blooming pode fundir 5 LEDs acesos em um blob
+            # grande rejeitado pelo detector global de componentes. O filtro
+            # preto já foi encontrado: teste suas hipóteses de orientação
+            # usando a luz no núcleo EXATO das máscaras, sem AKAZE Full-HD.
+            recovered = _fit_luminous_filter_core_acquisition(
+                frame, canonical_board, expected_rows, filter_points,
+                coarse_matrices, luminous.get("threshold_v"),
+            )
+            attempt["filter_core_acquisition_reason"] = str(
+                recovered.get("reason") or ""
+            )
+            if recovered.get("available"):
+                attempt.update({
+                    "fit": True,
+                    "fit_landmark_source": recovered["fit_landmark_source"],
+                    "local_luminous_landmark_count": int(
+                        recovered.get("local_luminous_landmark_count", 0)
+                    ),
+                    "matched_count": int(recovered.get("matched_count", 0)),
+                    "required_match_count": int(
+                        recovered.get("core_required_count", 0)
+                    ),
+                    "fit_diagnostics": deepcopy(recovered.get("fit_diagnostics") or {}),
+                    "fit_failure_stage": "",
+                })
+                candidate = {
+                    **{k: v for k, v in recovered.items() if k != "available"},
+                    "filter_points": deepcopy(filter_points),
+                    "filter_source": str(
+                        filter_candidate.get("source") or "dark_filter_detector"
+                    ),
+                    "filter_score": float(filter_candidate.get("score", 0) or 0),
+                    "luminous_component_count": 0,
+                    "threshold_v": luminous.get("threshold_v"),
+                    "dynamic_range": luminous.get("dynamic_range"),
+                }
+                if best is None or float(candidate["score"]) > float(best["score"]):
+                    best = candidate
+            else:
+                attempt["fit_diagnostics"] = {}
+                attempt["fit"] = False
             attempts.append(attempt)
             continue
 
