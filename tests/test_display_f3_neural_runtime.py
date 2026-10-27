@@ -2688,6 +2688,89 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         unsupported["effective_confirmed_failed_mask_ids"] = ("MASK_017",)
         self.assertEqual((), evaluate(unsupported))
 
+    def test_runtime_h1_ng_termina_em_tres_fotos_distintas_sem_repetir(self):
+        app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
+        app.display_f3_ativo = True
+        app.display_f3_result_after_id = None
+        app.camera_frame_atual = np.zeros((16, 16, 3), dtype=np.uint8)
+        app.camera_ultimo_frame_id = 103
+        app._display_f3_tracking_instance_frame_prepared = True
+        app._display_auto_analysis_frame_override = None
+        app._display_auto_signature = ("DISPLAY A", "CHECK_001")
+        app._display_auto_last_decision = None
+        app._display_auto_stable_frames = 0
+        app._display_auto_last_frame_token = None
+        app._display_auto_transition_frames = 0
+        app._display_auto_manual_entry_signature = None
+        app._display_auto_manual_entry_label = ""
+        app._display_auto_h1_fast_ng_signature = None
+        app._display_auto_h1_fast_ng_frame_tokens = []
+        app._display_auto_configuration_open = lambda: False
+        app._display_auto_current_context = lambda: {
+            "project_name": "DISPLAY A",
+            "check_id": "CHECK_001",
+            "check_name": "H1",
+            "intermittent": False,
+        }
+        app._display_auto_is_reference_gate = lambda _context: True
+        app._display_auto_is_transient_check = lambda _context: False
+        app._display_auto_has_reference_power_evidence = lambda _analysis: True
+        app._display_auto_publish_effective_ui_authority = (
+            lambda analysis, judgement_ready: analysis
+        )
+        app._display_auto_publish_segment_signature = (
+            lambda _context, analysis: analysis
+        )
+        app._display_auto_update_intermittent_evidence = (
+            lambda _context, _analysis: (True, 0, 0)
+        )
+        app._display_auto_clear_manual_entry_gate = lambda: None
+        statuses = []
+        app._display_auto_set_preview_status = (
+            lambda text, color: statuses.append(str(text))
+        )
+        registered = []
+        def register(approved):
+            registered.append((
+                approved,
+                app._display_f3_pending_ng_frame_id,
+                dict(app._display_f3_pending_ng_runtime or {}),
+            ))
+            return {"event": "board_ng"}
+        app.registrar_resultado_check_display_f3 = register
+
+        analysis = self._case()
+        context = app._display_auto_current_context()
+        for i, frame_id in enumerate((101, 101, 102, 103)):
+            app._display_auto_precomputed_payload = {
+                "frame_token": ("camera", frame_id),
+                "context": dict(context),
+                "analysis": analysis,
+                "raw_frame": app.camera_frame_atual.copy(),
+                "snapshot_capture_trigger": {
+                    "triggered": True,
+                    "mask_ids": ("MASK_008",),
+                    "source": "tracked_same_frame_live_green",
+                },
+            }
+            app._process_display_auto_check()
+            if i < 3:
+                self.assertEqual([], registered)
+        self.assertEqual(1, len(registered))
+        approved, frame, proof = registered[0]
+        self.assertIs(approved, False)
+        self.assertEqual(103, frame)
+        self.assertEqual(3, proof["stable_frames"])
+        self.assertEqual(3, proof["required_stable_frames"])
+        self.assertEqual(
+            ("MASK_017", "MASK_020"), proof["fast_h1_ng_mask_ids"]
+        )
+        self.assertTrue(proof["fast_h1_ng_consensus"])
+        self.assertIn("validando NG • 1/3", statuses[0])
+        self.assertIn("validando NG • 1/3", statuses[1])
+        self.assertIn("validando NG • 2/3", statuses[2])
+        self.assertIn("NG confirmado • 3/3", statuses[3])
+
     def test_h1_fast_requires_three_distinct_camera_frames_no_duplicate(self):
         # Contrato temporal: apenas tokens de captura independentes contam.
         source = inspect.getsource(DisplayAutomaticCheckF3Mixin._process_display_auto_check)
