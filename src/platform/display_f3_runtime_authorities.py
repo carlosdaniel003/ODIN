@@ -448,6 +448,7 @@ class F3PowerAuthority:
         self._intermittent_latch = None
         self.app._display_f3_recent_power_mask_frames = []
         self.app._display_f3_recent_power_mask_signature = None
+        self.app._display_f3_power_history_diagnostics = None
 
     def evaluate(self, frame, project_name: str, context: dict | None) -> dict:
         return power_v2_module.avaliar_evidencia_energia_unificada_display_f3(
@@ -667,6 +668,45 @@ class F3PowerAuthority:
         output[contract_module.F3_DECISION_ALLOWED_KEY] = decision_allowed
         output[contract_module.F3_MASK_LIVE_KEY] = True
 
+        # D-097: medir a cadência efetiva da autoridade sem modificar votos.
+        # Os eventos são escalares pequenos, limitados e pertencem ao mesmo
+        # proprietário do histórico; não armazenam frames nem máscara inteira.
+        diagnostic_signature = (str(project_name or ""), str(check_id or ""))
+        history_debug = getattr(
+            self.app, "_display_f3_power_history_diagnostics", None
+        )
+        if (
+            not isinstance(history_debug, dict)
+            or tuple(history_debug.get("signature") or ()) != diagnostic_signature
+        ):
+            history_debug = {
+                "signature": diagnostic_signature,
+                "counts": {},
+                "events": [],
+            }
+
+        def record_history_event(action: str, token=None, *, reason="", evidence=None):
+            counts = history_debug["counts"]
+            counts[action] = int(counts.get(action, 0) or 0) + 1
+            item = {"action": action, "frame_token": deepcopy(token)}
+            if reason:
+                item["reason"] = reason
+            if isinstance(evidence, dict):
+                item.update({
+                    "powered_confirmed": evidence.get("powered_confirmed") is True,
+                    "spatial_alignment_ready": (
+                        evidence.get("spatial_alignment_ready") is True
+                    ),
+                    "same_mask_comparison": (
+                        evidence.get("same_mask_comparison") is True
+                        and evidence.get("primary_authority")
+                        == "same_physical_mask_on_off_learning"
+                    ),
+                    "mask_count": len(evidence.get("mask_classifications") or {}),
+                })
+            item["decision_allowed"] = bool(decision_allowed)
+            history_debug["events"] = (history_debug["events"] + [item])[-16:]
+
         # D-093: reter apenas a telemetria já produzida pela MESMA autoridade
         # física em frames distintos. O analyzer semântico consulta o histórico
         # para corroborar um NG H1 já decidido pela CNN. Isso não decide NG,
@@ -681,6 +721,17 @@ class F3PowerAuthority:
             or not check_id
             or signature != previous_signature
         ):
+            old_history = getattr(
+                self.app, "_display_f3_recent_power_mask_frames", ()) or ()
+            record_history_event(
+                "history_reset",
+                reason=(
+                    "empty_confirmed" if bool(presence.get("empty_confirmed"))
+                    else "presence_not_confirmed" if not bool(presence.get("board_present"))
+                    else "check_missing" if not check_id
+                    else "project_check_changed"
+                ),
+            )
             self.app._display_f3_recent_power_mask_frames = []
         self.app._display_f3_recent_power_mask_signature = (
             signature if bool(presence.get("board_present")) else None
@@ -732,9 +783,24 @@ class F3PowerAuthority:
                 frame_id, last_id = -1, -1
             if frame_id > last_id:
                 history.append(observation)
+                record_history_event("frame_added", token, evidence=source_evidence)
             elif frame_id == last_id and history:
                 history[-1] = observation
+                record_history_event("frame_replaced", token, evidence=source_evidence)
+            else:
+                record_history_event(
+                    "frame_not_newer", token, evidence=source_evidence
+                )
             self.app._display_f3_recent_power_mask_frames = history[-18:]
+        else:
+            record_history_event("frame_token_unavailable", token, evidence=source_evidence)
+        history_debug["history_frame_tokens"] = tuple(
+            item.get("frame_token")
+            for item in (
+                getattr(self.app, "_display_f3_recent_power_mask_frames", ()) or ()
+            )
+        )
+        self.app._display_f3_power_history_diagnostics = history_debug
         self.app._display_f3_power_authority_status = {
             "source": F3_RUNTIME_AUTHORITIES_SOURCE,
             "board_present": bool(presence.get("board_present")),
