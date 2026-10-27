@@ -661,6 +661,58 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         self.assertEqual("off", first["live_visual_classifications"]["MASK_003"])
         self.assertEqual("off", first["live_visual_classifications"]["MASK_004"])
 
+    def test_visor_nao_herda_luz_fisica_de_frame_anterior(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        context = self._live_visual_test_context()
+        context["visual_physical_classifications"] = {
+            "MASK_001": "on", "MASK_002": "on"
+        }
+        context["visual_physical_frame_token"] = ("camera", 10)
+
+        with patch.object(
+            clarity,
+            "detectar_emissao_visual_ao_vivo_f3",
+            return_value={
+                "ready": False, "mask_ids": (),
+                "sampled_mask_ids": (),
+                "reason": "amostras_insuficientes",
+            },
+        ):
+            live = clarity.aplicar_emissao_visual_ao_vivo_f3(
+                SimpleNamespace(), frame, context,
+                frame_token=("camera", 11),
+                geometry_token=("tracked", 777),
+            )
+        self.assertEqual((), live["live_visual_mask_ids"])
+        self.assertEqual({}, live["live_visual_classifications"])
+
+    def test_amostragem_parcial_nao_pinta_mascara_antiga_nao_medida(self):
+        frame = np.zeros((80, 160, 3), dtype=np.uint8)
+        context = self._live_visual_test_context()
+        context["visual_physical_classifications"] = {
+            "MASK_001": "on", "MASK_004": "on",
+        }
+        context["visual_physical_frame_token"] = ("camera", 51)
+
+        with patch.object(
+            clarity,
+            "detectar_emissao_visual_ao_vivo_f3",
+            return_value={
+                "ready": True,
+                "mask_ids": (),
+                "sampled_mask_ids": ("MASK_001", "MASK_002", "MASK_003"),
+                "reason": "ok",
+            },
+        ):
+            live = clarity.aplicar_emissao_visual_ao_vivo_f3(
+                SimpleNamespace(), frame, context,
+                frame_token=("camera", 51),
+                geometry_token=("tracked", 778),
+            )
+        self.assertEqual("on", live["live_visual_classifications"]["MASK_001"])
+        self.assertNotIn("MASK_004", live["live_visual_classifications"])
+        self.assertEqual(("MASK_001",), live["live_visual_mask_ids"])
+
     def test_mesmo_frame_fisico_semantico_prevalece_sobre_falso_on_do_sampler(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
         window = SimpleNamespace()
