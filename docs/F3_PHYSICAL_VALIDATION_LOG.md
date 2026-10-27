@@ -8170,3 +8170,11 @@ a falha atual.
 **Validação automatizada:** compilação dos módulos F3 e 3 testes direcionados D-098 PASS no GitHub Actions. A suite integral F3 continua com falha independente pré-existente de geometria tracking OFF (`test_tracking_off_geometria_live_vem_somente_da_secao_mascaras`); isso não demonstra a aprovação física desta mudança.
 
 **Estado:** D-098 **PENDENTE DE RETESTE FÍSICO**. Critério positivo: H1 017/020 NG terminal 3/3 de capturas únicas e corretas; H1 30/30 OK; fase OFF não fecha NG; BLUE MASK_024 NG e rearme. Sem confirmação física, não liberar inspeção desassistida.
+
+## 27/10/2026 — D-099 experimento H1 com NG 1/1 + sinalização de avanço (PENDENTE DE RETESTE)
+
+**Contexto:** após várias tentativas com H1 real defeituoso em `MASK_017` e `MASK_020`, o operador solicitou explicitamente um teste de reprovação com **uma única captura**, em vez da exigência de três. Também solicitou confirmação visual imediatamente na câmera da direita quando um CHECK for realmente aprovado e a sequência avançar.
+
+**Modificação experimental:** limite `DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES` ajustado de 3 para 1 apenas na via NG rápido de consenso CNN + físico same-mask, com gates de presença/energia/alinhamento/assinatura inalterados. Via normal de NG permanece em seis análises; H1 OK continua requerendo conformidade integral em uma captura. Captura adicional D-098 não é agendada no modo 1/1. Tarja verde de aprovação/novo CHECK (1,7 s) nasce exclusivamente do evento de avanço da máquina de estados sobre o canvas da câmera direita.
+
+**Validação:** testes unitários direcionados para H1 forte 1/1, veto de H1 sem consenso, compatibilidade regressiva com três capturas, e aviso visual foram adicionados ao CI. **Ainda não existe resultado físico de D-099.** Retestar H1 com 017/020 OFF, H1 perfeito, OFF sem energia, BLUE NG 024, transições e rearme; monitorar falsos NG antes de considerar redução definitiva do limite.
