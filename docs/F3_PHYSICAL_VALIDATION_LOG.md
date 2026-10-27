@@ -7928,3 +7928,31 @@ Não houve mudança na CNN nem na temporização do processo físico.
 Validação: 115 testes neurais PASS e regressões BLUE PASS.
 PENDENTE JIG: observar BLUE congelado ao acender, BLUE OK e
 BLUE NG/024, verificar avanço e rearme após retirar a placa.
+
+## 27/10/2026 — D-091 / correção visual sem mexer no julgamento USB
+
+**Observação do operador:** imagem da câmera ao vivo sem segmentos
+físicos acesos, porém várias máscaras vermelhas tanto sobre a câmera
+quanto no VISOR DO DISPLAY. Status: PLACA NO SUPORTE • LIGADA •
+ANALISANDO USB; 17/30 conformes, 18 acesos e 12 apagados; não se
+tratava de NG terminal. Rastreamento preservava geometria H1 para a
+mesma placa sem nova prova óptica. Operador aprovou a qualidade do
+julgamento e solicitou apenas paridade visual.
+
+**Causa:** vermelho de evidência semântica de análise anterior invadia
+o overlay live e o readout; fallback físico sem frame-token atual
+também podia reutilizar luz antiga.
+
+**Correção D-091:** no live, as máscaras e o visor mostram a emissão
+real do mesmo frame: verde para ON, escuro/neutro para OFF ou sem
+evidência, sem vermelho herdado do julgamento. No NG terminal
+congelado, o snapshot com `terminal_ng_evidence` preserva a
+marca vermelha exclusivamente na MASK_ID que reprovou; SEGREGAR
+permanece independente. CNN, gates e controle de ciclo inalterados.
+
+**Reteste pendente:** em USB apagado, nenhuma barra vermelha/verde
+antiga; ao ligar USB, exatamente as máscaras acesas ficam verdes
+nas duas vistas; ao apagar novamente, ambas acompanham a mudança.
+Verificar também BLUE intermitente, NG verdadeiro MASK_024 em vermelho
+no snapshot e rearme físico. Sem fotos reais posteriores, não
+declarar PASS produtivo.
