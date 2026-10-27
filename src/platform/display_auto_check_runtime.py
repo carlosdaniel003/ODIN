@@ -1905,6 +1905,7 @@ class DisplayAutomaticCheckF3Mixin:
         )
         fast_ng_active = bool(fast_ng_key is not None)
         physical_tokens = ()
+        physical_diagnostics: dict = {}
         semantic_tokens = tuple(
             getattr(self, "_display_auto_h1_fast_ng_frame_tokens", ()) or ()
         )
@@ -1929,6 +1930,7 @@ class DisplayAutomaticCheckF3Mixin:
                 signature_history,
                 snapshot_token=frame_token,
                 required=self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES,
+                diagnostics=physical_diagnostics,
             )
             # H1 dura ~3 s; votos semânticos antigos não podem atravessar
             # outra apresentação de H1 no mesmo CHECK lógico.
@@ -1961,6 +1963,11 @@ class DisplayAutomaticCheckF3Mixin:
                 semantic_frame_count if fast_ng_active else 0
             )
             trace["fast_ng_physical_frames"] = physical_corrob_frames
+            # D-096: por que os frames de energia físicos NÃO entraram no
+            # quórum; apenas telemetria, não interfere no NG / fluxo.
+            trace["fast_ng_physical_history_diagnostics"] = (
+                deepcopy(physical_diagnostics) if fast_ng_active else None
+            )
             trace["fast_ng_combined_frame_tokens"] = tuple(
                 sorted(combined_tokens, key=lambda token: token[1])
             ) if fast_ng_active else ()
