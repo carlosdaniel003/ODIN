@@ -69,8 +69,10 @@ class DisplayAutomaticCheckF3Mixin:
     # a leitura. NG continua deliberadamente mais conservador e independente.
     DISPLAY_AUTO_OK_STABLE_FRAMES = 1
     DISPLAY_AUTO_NG_STABLE_FRAMES = 6
-    # Apenas H1 com prova CNN+física local em 3 frames RAW distintos.
-    DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 3
+    # D-099 EXPERIMENTO: somente H1 com consenso CNN + físico same-mask
+    # pode emitir NG a partir de UM snapshot RAW. Os demais NG seguem 6.
+    # Reverter para 3 após reteste comparativo se houver falsos NG.
+    DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 1
     DISPLAY_AUTO_TRANSITION_FRAMES = 1
     DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES = 3
     DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO = 0.55
@@ -1845,8 +1847,8 @@ class DisplayAutomaticCheckF3Mixin:
             return
 
         # NG H1 de alta certeza: mantém o mesmo classificador híbrido e a
-        # confirmação temporal, mas usa 3 CAPTURAS DISTINTAS quando todas as
-        # falhas têm consenso CNN + físico same-mask e maioria dos LEDs ON.
+        # confirmação temporal configurável (D-099: 1 snapshot em teste)
+        # quando todas as falhas têm consenso CNN + físico same-mask e maioria ON.
         # Qualquer dúvida, troca de máscara, ausência de tracking ou BLUE
         # retorna ao debounce NG clássico de 6 análises, sem atalho.
         fast_ng_ids = assinatura_ng_h1_consenso(
@@ -1911,8 +1913,8 @@ class DisplayAutomaticCheckF3Mixin:
         )
         if fast_ng_active:
             required = min(required, self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES)
-            # Um único quórum de 3 capturas RAW distintas aceita CNN híbrida
-            # e/ou corroboração física same-mask, sem contar um frame duas vezes.
+            # O quórum pertence somente ao H1 híbrido elegível. D-099
+            # permite 1 frame no teste; tokens duplicados nunca viram votos.
             # D-093 usava max(semânticas, físicas), desperdiçando o caso
             # industrial observado de 2 CNNs + 1 física válida.
             history = getattr(self, "_display_f3_recent_power_mask_frames", ())
@@ -1924,13 +1926,18 @@ class DisplayAutomaticCheckF3Mixin:
                 and str(item.get("check_id") or "")
                     == str(context.get("check_id") or "")
             ]
-            physical_tokens = tokens_corrobacao_fisica_h1(
-                analysis,
-                fast_ng_ids,
-                signature_history,
-                snapshot_token=frame_token,
-                required=self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES,
-                diagnostics=physical_diagnostics,
+            # No modo de captura única, a prova CNN+física já está na
+            # mesma imagem; não há necessidade de buscar um segundo frame.
+            physical_tokens = (
+                tokens_corrobacao_fisica_h1(
+                    analysis,
+                    fast_ng_ids,
+                    signature_history,
+                    snapshot_token=frame_token,
+                    required=self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES,
+                    diagnostics=physical_diagnostics,
+                )
+                if required > 1 else ()
             )
             # H1 dura ~3 s; votos semânticos antigos não podem atravessar
             # outra apresentação de H1 no mesmo CHECK lógico.
@@ -1955,6 +1962,9 @@ class DisplayAutomaticCheckF3Mixin:
         trace = self._display_auto_last_decision_trace
         if isinstance(trace, dict):
             trace["fast_ng_consensus"] = bool(fast_ng_active)
+            trace["fast_ng_single_frame_experiment"] = bool(
+                fast_ng_active and required == 1
+            )
             trace["fast_ng_mask_ids"] = fast_ng_ids
             trace["fast_ng_distinct_frames"] = (
                 stable_count if fast_ng_active else 0
