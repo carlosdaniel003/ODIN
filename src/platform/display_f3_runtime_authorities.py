@@ -8,7 +8,8 @@ analyzer de CHECK e máquina de sequência.
 """
 
 from copy import deepcopy
-from types import MethodType
+from types import MethodType, SimpleNamespace
+from threading import Condition
 import time
 
 import src.platform.display_f3_cycle_rearm_release_fix as cycle_rearm_module
@@ -443,12 +444,187 @@ class F3PowerAuthority:
     def __init__(self, app) -> None:
         self.app = app
         self._intermittent_latch: dict | None = None
+        self._h1_condition = Condition()
+        self._h1_capture = None
 
     def reset(self) -> None:
+        with self._h1_condition:
+            self._h1_capture = None
+            self._h1_condition.notify_all()
         self._intermittent_latch = None
         self.app._display_f3_recent_power_mask_frames = []
         self.app._display_f3_recent_power_mask_signature = None
         self.app._display_f3_power_history_diagnostics = None
+
+
+    def begin_h1_confirmation_capture(self, context: dict, snapshot_token) -> None:
+        """Janela de até dois RAW extras durante uma inferência semântica H1."""
+        sid = _camera_frame_id_from_token(snapshot_token)
+        valid = bool(
+            isinstance(context, dict) and context.get("current_index") == 0
+            and not context.get("intermittent") and sid is not None
+            and not getattr(self.app, "_display_f3_waiting_empty_rearm", False)
+            and not getattr(self.app, "_display_f3_waiting_new_board_after_empty", False)
+        )
+        with self._h1_condition:
+            self._h1_capture = (
+                {"signature": (str(context.get("project_name") or ""),
+                               str(context.get("check_id") or "")),
+                 "snapshot_id": sid, "samples": []}
+                if valid else None
+            )
+            self._h1_condition.notify_all()
+
+    def capture_h1_confirmation_raw(self, frame, frame_token, geometry) -> None:
+        """No render-only, congela duas imagens; não executa classificação no Tk."""
+        fid = _camera_frame_id_from_token(frame_token)
+        if fid is None or not _valid_frame(frame):
+            return
+        with self._h1_condition:
+            w = self._h1_capture
+            if not isinstance(w, dict):
+                return
+            samples = w["samples"]
+            if (
+                not (w["snapshot_id"] < fid <= w["snapshot_id"] + 24)
+                or len(samples) >= 2
+                or (samples and fid - samples[-1]["frame_id"] < 2)
+                or not isinstance(geometry, dict)
+                or geometry.get("locked") is not True
+                or geometry.get("spatial_alignment_ready") is not True
+            ):
+                return
+            samples.append({
+                "frame_id": fid, "frame": frame.copy(),
+                "geometry": deepcopy(geometry),
+            })
+            self._h1_condition.notify_all()
+
+    def confirm_h1_captured_frames(
+        self, context: dict, snapshot_token, analysis: dict,
+        visual_rotation: int, repository,
+    ) -> list[dict]:
+        """Mesma autoridade física same-mask no executor HIGH existente."""
+        from src.platform.display_auto_check_policy import decidir_analise_display_f3
+        from src.platform.display_f3_ng_fast_confirmation import (
+            assinatura_ng_h1_consenso, tokens_corrobacao_fisica_h1,
+        )
+        import src.platform.display_f3_same_mask_reference_fix as same_mask
+
+        policy = decidir_analise_display_f3(analysis, reference_gate=True)
+        trigger = context.get("snapshot_capture_trigger") or {}
+        failed = assinatura_ng_h1_consenso(
+            context, analysis, policy, reference_gate=True,
+            tracking_snapshot=bool(trigger.get("triggered")),
+        )
+        sig = (str(context.get("project_name") or ""),
+               str(context.get("check_id") or ""))
+        sid = _camera_frame_id_from_token(snapshot_token)
+        with self._h1_condition:
+            w = self._h1_capture
+            if not failed or not isinstance(w, dict) or (
+                w["signature"] != sig or w["snapshot_id"] != sid
+            ):
+                self._h1_capture = None
+                return []
+            self._h1_condition.wait_for(
+                lambda: self._h1_capture is None
+                or len(self._h1_capture["samples"]) >= 2,
+                timeout=0.22,
+            )
+            w = self._h1_capture
+            samples = list(w["samples"]) if isinstance(w, dict) else []
+            self._h1_capture = None
+
+        proxy = SimpleNamespace(
+            display_project_repository=repository,
+            _display_f3_object_tracking_enabled=True,
+            _display_f3_generic_power_analyzer=(
+                same_mask.F3SameMaskReferenceAnalyzer(repository)
+            ),
+            _obter_rotacao_visual_display_f3=lambda: int(visual_rotation),
+        )
+        observations = []
+        for sample in samples:
+            proxy._display_f3_tracking_live_geometry = sample["geometry"]
+            try:
+                ev = power_v2_module._generic_live_mask_energy(
+                    proxy, sample["frame"], sig[0], context,
+                )
+            except Exception:
+                continue
+            if not isinstance(ev, dict):
+                continue
+            powered = bool(
+                ev.get("powered_confirmed") is True
+                and ev.get("raw_analysis_ready") is True
+                and ev.get("primary_authority")
+                == "same_physical_mask_on_off_learning"
+                and ev.get("mask_geometry_source") == "tracking_live_geometry_raw"
+            )
+            observations.append({
+                "frame_token": ("camera", sample["frame_id"]),
+                "project_name": sig[0], "check_id": sig[1],
+                "board_present": powered, "powered_confirmed": powered,
+                "decision_allowed": powered,
+                "spatial_alignment_ready": True,
+                "same_mask_comparison": powered,
+                "mask_classifications": dict(ev.get("mask_classifications") or {}),
+                "source": "h1_worker_post_snapshot_same_mask",
+            })
+
+        # Já rejeita qualquer captura com OFF inesperado, falta de energia,
+        # mudança de fase, ou segmentação distinta do NG da CNN.
+        accepted = set(tokens_corrobacao_fisica_h1(
+            analysis, failed, observations,
+            snapshot_token=snapshot_token, required=3,
+        ))
+        return [row for row in observations if tuple(row["frame_token"]) in accepted]
+
+    def append_h1_confirmed_samples(
+        self, observations: list[dict], context: dict, snapshot_token,
+    ) -> None:
+        """Incorpora apenas medições verificadas ao histórico canônico D-093."""
+        if not observations or not isinstance(context, dict):
+            return
+        sig = (str(context.get("project_name") or ""),
+               str(context.get("check_id") or ""))
+        get_current = getattr(self.app, "_display_auto_current_context", None)
+        current = get_current() if callable(get_current) else None
+        if (
+            not isinstance(current, dict)
+            or sig != (str(current.get("project_name") or ""),
+                       str(current.get("check_id") or ""))
+            or getattr(self.app, "_display_f3_waiting_empty_rearm", False)
+            or getattr(self.app, "_display_f3_waiting_new_board_after_empty", False)
+            or tuple(getattr(self.app, "_display_f3_recent_power_mask_signature", ()) or ()) != sig
+        ):
+            return
+        sid = _camera_frame_id_from_token(snapshot_token)
+        if sid is None:
+            return
+        history = list(getattr(self.app, "_display_f3_recent_power_mask_frames", ()) or ())
+        seen = {
+            _camera_frame_id_from_token(row.get("frame_token"))
+            for row in history if isinstance(row, dict)
+        }
+        for row in observations:
+            fid = _camera_frame_id_from_token(row.get("frame_token"))
+            if (
+                fid is None or fid in seen
+                or not sid < fid <= sid + 24
+                or row.get("source") != "h1_worker_post_snapshot_same_mask"
+                or not all(row.get(k) is True for k in (
+                    "board_present", "powered_confirmed", "decision_allowed",
+                    "spatial_alignment_ready", "same_mask_comparison",
+                ))
+                or not isinstance(row.get("mask_classifications"), dict)
+            ):
+                continue
+            history.append(deepcopy(row))
+            seen.add(fid)
+        history.sort(key=lambda row: _camera_frame_id_from_token(row.get("frame_token")) or -1)
+        self.app._display_f3_recent_power_mask_frames = history[-18:]
 
     def evaluate(self, frame, project_name: str, context: dict | None) -> dict:
         return power_v2_module.avaliar_evidencia_energia_unificada_display_f3(
