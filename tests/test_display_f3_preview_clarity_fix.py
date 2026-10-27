@@ -542,19 +542,11 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
                 geometry_token=("fixed", "P1"),
             )
 
-        self.assertEqual(("MASK_001",), mirrored["live_visual_mask_ids"])
-        self.assertEqual(
-            "on",
-            mirrored["live_visual_classifications"]["MASK_001"],
-        )
-        self.assertEqual(
-            "off",
-            mirrored["live_visual_classifications"]["MASK_002"],
-        )
-        self.assertEqual(
-            "low_light",
-            mirrored["live_visual_classifications"]["MASK_003"],
-        )
+        # A consulta diagnóstica continua independente do CHECK. Porém,
+        # sem token físico do MESMO frame, nunca pode virar luz live:
+        # a fase escura do USB não herda o ON de AUX.
+        self.assertEqual((), mirrored["live_visual_mask_ids"])
+        self.assertEqual({}, mirrored["live_visual_classifications"])
 
     def test_renderer_visual_pinta_on_fisico_mesmo_se_detector_latest_frame_vazio(self):
         frame = np.zeros((80, 160, 3), dtype=np.uint8)
