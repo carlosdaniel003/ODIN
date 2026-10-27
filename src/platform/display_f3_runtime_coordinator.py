@@ -388,6 +388,27 @@ class F3RuntimeCoordinator:
             return "full_cycle", "analysis_due_new_frame"
         return "render_only", "analysis_not_due"
 
+    def _render_with_h1_raw_confirmation(self, frame_token):
+        """Copia no máximo dois RAW do H1; jamais classifica no thread Tk."""
+        future = getattr(self.app, "_display_f3_semantic_future", None)
+        if (
+            future is not None
+            and not future.done()
+            and not self._rearm_pending()
+            and not self._configuration_open()
+            and bool(getattr(self.app, "_display_f3_object_tracking_enabled", False))
+        ):
+            owner = getattr(self.app, "_display_f3_runtime_authorities", None)
+            power = getattr(owner, "power", None)
+            sample = getattr(power, "capture_h1_confirmation_raw", None)
+            if callable(sample):
+                sample(
+                    getattr(self.app, "camera_frame_atual", None),
+                    frame_token,
+                    getattr(self.app, "_display_f3_tracking_live_geometry", None),
+                )
+        return self._render_once()
+
     def _tick(self) -> None:
         self._after_id = None
         self.app.display_f3_after_id = None
@@ -412,7 +433,9 @@ class F3RuntimeCoordinator:
                 self._run_with_f3_runtime_frame(self._full_cycle)
             else:
                 self._render_only_count += 1
-                self._run_with_f3_runtime_frame(self._render_once)
+                self._run_with_f3_runtime_frame(
+                    lambda: self._render_with_h1_raw_confirmation(frame_token)
+                )
         finally:
             elapsed_ms = max(
                 0.0,
