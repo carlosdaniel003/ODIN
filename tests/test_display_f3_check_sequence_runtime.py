@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from unittest.mock import Mock
 
 from src.platform.display_check_sequence_runtime import DisplayCheckSequenceRuntime
 from src.platform.display_production_f3 import DisplayProductionF3Mixin
@@ -266,6 +267,69 @@ class DisplayF3CheckSequenceRuntimeTests(unittest.TestCase):
         self.assertIsNone(obter_feedback_espera_display_f3(snapshot))
         self.assertEqual(antes_f2, (app.operacao_total, app.operacao_ok, app.operacao_ng))
         self.assertEqual(1, len(app.display_f3_window.results))
+
+    def test_avanco_real_emite_banner_sobre_camera_direita(self):
+        app = DisplayProductionF3Mixin.__new__(DisplayProductionF3Mixin)
+        app.display_check_runtime = DisplayCheckSequenceRuntime()
+        app.display_check_runtime.configurar_checks(CHECKS)
+        app.display_f3_result_after_id = None
+        app.root = _FakeRoot()
+        app.display_f3_window = _FakeWindow()
+        app.display_f3_window.show_check_advance_notice = Mock()
+        app._renderizar_fluxo_checks_display_f3 = Mock()
+
+        event = app.registrar_resultado_check_display_f3(True)
+        self.assertEqual("check_advanced", event["event"])
+        app.display_f3_window.show_check_advance_notice.assert_called_once_with(
+            "H1", "BLUE",
+        )
+        self.assertEqual("BLUE", event["snapshot"]["current_check"]["name"])
+
+        app.display_f3_window.show_check_advance_notice.reset_mock()
+        app.registrar_resultado_check_display_f3(True)
+        app.display_f3_window.show_check_advance_notice.assert_called_once_with(
+            "BLUE", "AUX",
+        )
+        app.registrar_resultado_check_display_f3(True)
+        app.display_f3_window.show_check_advance_notice.reset_mock()
+        final_event = app.registrar_resultado_check_display_f3(True)
+        self.assertEqual("plate_ok", final_event["event"])
+        app.display_f3_window.show_check_advance_notice.assert_not_called()
+
+    def test_banner_sobre_camera_tem_ciclo_de_vida_sem_timer_periodico(self):
+        banner = Mock()
+        root = _FakeRoot()
+        screen = DisplayProductionF3Window.__new__(DisplayProductionF3Window)
+        screen.root = root
+        screen.check_advance_banner = banner
+        screen._check_advance_hide_after_id = None
+        screen._display_ng_evidence_frozen = False
+        screen._display_terminal_waiting_removal = False
+        screen.container = Mock()
+        screen.show_check_advance_notice("H1", "BLUE")
+        banner.configure.assert_called_with(
+            text="H1 APROVADO  •  PRÓXIMO: BLUE",
+        )
+        self.assertEqual(1700, root.after_calls[-1][1])
+        self.assertEqual(0.94, banner.place.call_args.kwargs["relwidth"])
+
+        first_id = root.after_calls[-1][0]
+        screen.show_check_advance_notice("BLUE", "AUX")
+        self.assertIn(first_id, root.cancel_calls)
+        screen.hide()
+        self.assertIn(root.after_calls[-1][0], root.cancel_calls)
+        banner.place_forget.assert_called()
+        screen.container.place_forget.assert_called_once()
+
+    def test_banner_nao_sobrepoe_estado_terminal_ng(self):
+        screen = DisplayProductionF3Window.__new__(DisplayProductionF3Window)
+        screen.root = _FakeRoot()
+        screen.check_advance_banner = Mock()
+        screen._check_advance_hide_after_id = None
+        screen._display_ng_evidence_frozen = True
+        screen._display_terminal_waiting_removal = False
+        screen.show_check_advance_notice("H1", "BLUE")
+        screen.check_advance_banner.place.assert_not_called()
 
     def test_janela_f3_tem_tecla_1_e_botao_de_descarte(self):
         fonte = inspect.getsource(DisplayProductionF3Window.__init__)
