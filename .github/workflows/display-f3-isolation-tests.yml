@@ -110,6 +110,13 @@ jobs:
             tests/test_display_f3_geometry_adjustments.py \
             tests/test_display_f3_zoom.py
 
+      - name: Run D-095 H1 filter-core acquisition regression
+        run: |
+          python -m unittest \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_h1_filter_core_acquires_five_on_without_global_components \
+            tests.test_display_f3_object_tracking_isolation.F3ObjectTrackingIsolationTests.test_dark_filter_without_emission_does_not_search_off_segments \
+            -v
+
       - name: Run D-086 terminal NG rearm despite stale F3 tracking lock
         run: |
           python -m unittest \
