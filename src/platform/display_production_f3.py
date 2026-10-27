@@ -756,6 +756,9 @@ class DisplayProductionF3Mixin:
                 "effective_failed_mask_ids": failed,
                 "effective_confirmed_failed_mask_ids": confirmed,
                 "effective_validating_mask_ids": validating,
+                # Somente esta repintura usa a captura que efetivamente
+                # encerrou o NG; não é a câmera de inspeção ao vivo.
+                "terminal_ng_evidence": True,
                 "ui_mask_authority": str(
                     analysis.get("ui_mask_authority") or ""
                 ),
@@ -982,6 +985,9 @@ class DisplayProductionF3Mixin:
         # do mesmo snapshot. Energia é copiada somente como estado de
         # apresentação; não participa novamente da decisão.
         if isinstance(terminal_overlay_context, dict):
+            # Snapshot atômico que confirmou NG, distinto de um frame live
+            # contendo divergências ainda não terminalizadas.
+            terminal_overlay_context["terminal_ng_evidence"] = True
             existing_readout = (
                 getattr(janela, "_display_readout_context", None)
                 if janela is not None
