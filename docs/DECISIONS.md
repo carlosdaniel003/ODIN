@@ -6192,3 +6192,53 @@ as duas fontes compõem o quórum.
 **Validação:** testes neurais incluem caso 2+1 e negativas
 (repetição, token antigo, máscaras contraditórias, energia OFF),
 além dos testes D-092/093. Reteste produtivo pendente.
+
+## D-095 — Aquisição H1 pelos núcleos ON quando componentes luminosos globais desaparecem
+
+**Estado:** implementado no código, validação automática/industrial em andamento (27/10/2026).
+
+**FAIL físico do reteste D-094:** imagem `image(20261027-134825).png`;
+DEBUG `Texto colado(20261027-134823).txt`.
+A placa CM_500_L/H1 já mostra emissão luminosa na câmera, mas
+`object_tracking.locked=false`, `reason=h1_fast_acquisition_unlocked`;
+o painel fica sem contorno nem máscaras. O frame do worker 625 consumiu
+202,06 ms; detector do filtro escuro achou um candidato, mas a busca
+luminosa global devolveu `luminous_component_count=0`,
+`threshold_v=105,3`, `dynamic_range=235`. Preview do frame
+629: `tracking_not_locked`, `geometry_mask_count=0`. O último
+snapshot semântico era o frame 332 (H1 híbrido NG 017/020, 1 foto
+CNN + 1 física, total 2/3): não inferir que o gate manual do frame
+629 invalide esse snapshot anterior.
+
+**Causa:** no H1 curto, o caminho `fast_acquire` não executa
+AKAZE/template absolutos pesados. O fallback luminoso também
+dependia de `_detect_luminous_segment_centers` encontrar
+componentes alongados separados. Blooming saturado pode fundir
+vários segmentos em um único bloco, ou transformá-los em blobs
+rejeitados pela forma, embora o filtro esteja presente e haja
+pixels ON reais nos centros das máscaras.
+
+**Decisão:** extensão da função canônica
+`_find_luminous_segment_pose`:
+se o filtro foi localizado mas a detecção global não tem
+componentes válidos, testar as hipóteses geométricas já construídas
+pelo filtro via núcleo luminoso estrito das máscaras esperadas ON.
+Somente hipóteses com suporte no núcleo de pelo menos 55% dos ON
+(mínimo 3), landmarks locais identificados por máscara, fit
+ID-ancorado, guarda de escala/rotação/deslocamento e suporte
+confirmado **após** refinamento geram uma pose. Orientações
+visualmente ambíguas não são escolhidas arbitrariamente.
+`luminous_component_count=0` continua registrado para explicar
+a recuperação local.
+
+Não usar o contorno escuro sozinho para autorizar CHECK;
+não relaxar energia, máscara OFF, CNN, consenso NG,
+imobilidade de UI, tracking OFF ou sequência; sem workers,
+timers, cache extra ou varredura Full-HD adicional de AKAZE.
+
+**Validação:** teste sintético com 5 máscaras acesas,
+2 apagadas, detector global sem componentes e filtro
+localizado. Negativa com display sem luz. Execução no
+dispositivo físico pendente: capturar início de H1, verificar
+primeira máscara verde antes de fim do H1, H1 NG 017/020,
+H1 OK, placa OFF, BLUE NG/024 e rearme físico.
