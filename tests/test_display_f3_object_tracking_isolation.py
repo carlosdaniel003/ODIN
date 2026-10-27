@@ -3203,6 +3203,77 @@ class F3ObjectTrackingIsolationTests(unittest.TestCase):
             float(np.median(coarse_error)),
         )
 
+    def test_h1_filter_core_acquires_five_on_without_global_components(self):
+        # D-095: H1 real de curta duração com 17/20 apagados e blooming
+        # que transforma os cinco segmentos saudáveis em componentes inválidos.
+        board = [[100.0, 120.0], [540.0, 120.0],
+                 [540.0, 330.0], [100.0, 330.0]]
+        centers = [[180., 175.], [230., 250.], [285., 175.],
+                   [340., 250.], [390., 175.], [445., 250.], [490., 175.]]
+        rows = []
+        frame = np.full((480, 640, 3), 170, dtype=np.uint8)
+        cv2.fillConvexPoly(
+            frame, np.rint(np.asarray(board)).astype(np.int32),
+            (18, 18, 18),
+        )
+        for index, center in enumerate(centers):
+            cx, cy = center
+            rows.append({
+                "mask_id": f"MASK_{index + 1:03d}",
+                "center": center,
+                "mask": {
+                    "id": f"MASK_{index + 1:03d}",
+                    "type": "polygon",
+                    "points": [[cx - 14, cy - 7], [cx + 14, cy - 7],
+                               [cx + 14, cy + 7], [cx - 14, cy + 7]],
+                },
+            })
+            if index < 5:
+                cv2.rectangle(
+                    frame, (int(cx) - 10, int(cy) - 4),
+                    (int(cx) + 10, int(cy) + 4), (250, 250, 250), -1,
+                )
+        no_global_segments = {
+            "available": False,
+            "reason": "luminous_components_insufficient",
+            "centers": [],
+            "threshold_v": 120.0,
+            "dynamic_range": 220.0,
+        }
+        with patch.object(
+            tracking, "_detect_dark_filter_candidates",
+            return_value=[{"points": board, "score": 3.5,
+                           "source": "dark_filter_detector"}],
+        ), patch.object(
+            tracking, "_detect_luminous_segment_centers",
+            return_value=no_global_segments,
+        ):
+            found = tracking._find_luminous_segment_pose(
+                frame, board, rows, (640, 480),
+            )
+            self.assertTrue(found["available"], found)
+            self.assertEqual(
+                "filter_core_id_anchored_acquisition",
+                found["fit_landmark_source"],
+            )
+            self.assertEqual(0, found["luminous_component_count"])
+            self.assertGreaterEqual(found["core_validated_count"], 4)
+            self.assertGreaterEqual(found["matched_count"], 4)
+            self.assertEqual(
+                {"MASK_006", "MASK_007"},
+                set(found["missing_expected_on_mask_ids"]),
+            )
+            dark = frame.copy()
+            for cx, cy in centers[:5]:
+                cv2.rectangle(
+                    dark, (int(cx) - 12, int(cy) - 6),
+                    (int(cx) + 12, int(cy) + 6), (18, 18, 18), -1,
+                )
+            blocked = tracking._find_luminous_segment_pose(
+                dark, board, rows, (640, 480),
+            )
+            self.assertFalse(blocked["available"], blocked)
+
     def test_luminous_grid_survives_missing_expected_on_and_extra_light(self):
         (
             frame,
