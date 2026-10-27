@@ -3130,3 +3130,29 @@ de arquitetura/ROI e Windows permanecem iguais às anteriores.
 **Reteste real:** confirmar "FOTO CONGELADA • ANALISANDO CHECK" na
 captura H1 e avanço OK; se continuar 29/30, avaliar nova evidência
 da MASK_008 em frames reais, separadamente do hold visual.
+
+## 27/10/2026 — D-090 / primeiro verde BLUE intermitente
+
+Pedido: fotografar o primeiro segmento verde também no BLUE, congelar
+a imagem apresentada e analisar as 30 máscaras do snapshot para evitar
+observar a piscada durante o processamento.
+
+Diagnóstico: os capturadores D-084 e D-089 já eram genéricos para o
+CHECK atual, inclusive BLUE; já havia aceite temporal de snapshot
+luminoso quando a fase ao vivo volta a OFF. Os dois caminhos armavam
+latches visuais separados e dependiam de repaint adicional para
+mostrar FOTO CONGELADA.
+
+Mudança: uma rotina compartilhada de hold para preview e worker,
+com legenda imediata, frame-token e máscara imutáveis e DEBUG
+intermittent/trace de origem. Sem novo timer, job, thread, CNN,
+limiar de aprovação ou alteração de persistência.
+
+Segurança: uma foto com verde não basta para concluir BLUE NG
+se outros segmentos ainda estiverem acendendo. Permanece a
+autoridade semântica de fase ON íntegra e três confirmações de NG
+em amostras ON. Testes verificam foto BLUE exibida antes do hold
+e aceite da foto ON do mesmo CHECK durante a fase OFF posterior,
+rejeitando CHECK diferente ou amostra atrasada.
+
+CI neural 115/115 PASS. Reteste físico pendente.
