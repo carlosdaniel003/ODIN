@@ -7908,3 +7908,23 @@ analisada, congelar com status FOTO CONGELADA e liberar após resultado.
 Confirmar H1 OK dentro da janela física de 3s, BLUE NG MASK_024 e
 rearme; se MASK_008 continuar INCERTA, investigar/calibrar a fonte
 semântica local com novos dados, nunca promover automaticamente ON.
+
+## 27/10/2026 — D-090 / foto e hold no BLUE intermitente
+
+O operador solicitou aplicar ao BLUE o disparo do H1: identificar ao
+menos uma máscara verde, congelar o próprio frame luminoso e analisar
+o snapshot em vez de acompanhar o pisca na interface.
+
+D-090 compartilha o mesmo latch de fotografia nos caminhos direto e
+worker, torna FOTO CONGELADA visível imediatamente, registra no DEBUG
+o CHECK e se é intermitente. O pipeline já aceitava foto ON durante
+a fase OFF posterior, desde que fresca e do mesmo CHECK.
+
+Critérios de segurança preservados: primeiro verde captura, fase ON
+completa decide OK, divergência certa persistente em três amostras ON
+decide NG; fase de transição e foto de outro CHECK não fazem julgamento.
+Não houve mudança na CNN nem na temporização do processo físico.
+
+Validação: 115 testes neurais PASS e regressões BLUE PASS.
+PENDENTE JIG: observar BLUE congelado ao acender, BLUE OK e
+BLUE NG/024, verificar avanço e rearme após retirar a placa.
