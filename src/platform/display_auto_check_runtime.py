@@ -1700,6 +1700,8 @@ class DisplayAutomaticCheckF3Mixin:
         if reference_gate and not reference_judgement_ready:
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
+            self._display_auto_h1_fast_ng_signature = None
+            self._display_auto_h1_fast_ng_frame_tokens = []
             self._display_auto_set_preview_status(
                 "AUTO • H1 • aguardando placa ligada / segmento aceso confirmado",
                 "#FDE68A",
@@ -1710,6 +1712,8 @@ class DisplayAutomaticCheckF3Mixin:
             if not self._display_auto_has_manual_entry_evidence(analysis):
                 self._display_auto_last_decision = None
                 self._display_auto_stable_frames = 0
+                self._display_auto_h1_fast_ng_signature = None
+                self._display_auto_h1_fast_ng_frame_tokens = []
                 target = self._display_auto_manual_entry_label or context["check_name"]
                 self._display_auto_set_preview_status(
                     f"AUTO • {target} • aguardando botão / mudança de função",
@@ -1824,6 +1828,8 @@ class DisplayAutomaticCheckF3Mixin:
         if decision == DISPLAY_AUTO_DECISION_SEARCHING:
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
+            self._display_auto_h1_fast_ng_signature = None
+            self._display_auto_h1_fast_ng_frame_tokens = []
             self._display_auto_set_preview_status(
                 (
                     f"AUTO • {context['check_name']} • "
