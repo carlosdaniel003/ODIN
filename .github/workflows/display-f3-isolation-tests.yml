@@ -110,6 +110,14 @@ jobs:
             tests/test_display_f3_geometry_adjustments.py \
             tests/test_display_f3_zoom.py
 
+      - name: Run D-098 H1 post-snapshot corroboration tests
+        run: |
+          python -m unittest \
+            tests.test_display_f3_neural_runtime.DisplayF3H1ConsensusNGTests.test_h1_d098_captures_two_new_raw_frames_and_same_mask_verifies \
+            tests.test_display_f3_neural_runtime.DisplayF3H1ConsensusNGTests.test_h1_d098_never_accepts_wrong_mask_or_changed_check \
+            tests.test_display_f3_runtime_coordinator.F3RuntimeCoordinatorTests.test_busy_semantic_render_only_collects_raw_without_second_heavy_job \
+            -v
+
       - name: Run D-095 H1 filter-core acquisition regression
         run: |
           python -m unittest \
