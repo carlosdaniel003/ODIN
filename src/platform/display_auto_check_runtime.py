@@ -17,6 +17,7 @@ from src.platform.display_mask_geometry import (
 )
 from src.platform.display_f3_ng_fast_confirmation import (
     assinatura_ng_h1_consenso,
+    contar_corrobacoes_fisicas_h1,
 )
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
@@ -1895,10 +1896,35 @@ class DisplayAutomaticCheckF3Mixin:
             )
         )
         fast_ng_active = bool(fast_ng_key is not None)
+        physical_corrob_frames = 0
         if fast_ng_active:
             required = min(required, self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES)
+            # O F3 fotografa primeiro verde UMA vez e pode consumir quase
+            # toda a janela H1 no worker. O proprietário da energia já
+            # observou outros RAWs físicos enquanto a CNN era executada.
+            # Só aceitamos 3 confirmações same-mask em tokens posteriores
+            # que mantenham o EXATO padrão ON/OFF do H1 congelado.
+            history = getattr(self, "_display_f3_recent_power_mask_frames", ())
+            signature_history = [
+                item for item in (history or ())
+                if isinstance(item, dict)
+                and str(item.get("project_name") or "")
+                    == str(context.get("project_name") or "")
+                and str(item.get("check_id") or "")
+                    == str(context.get("check_id") or "")
+            ]
+            physical_corrob_frames = contar_corrobacoes_fisicas_h1(
+                analysis,
+                fast_ng_ids,
+                signature_history,
+                snapshot_token=frame_token,
+                required=self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES,
+            )
+        semantic_frame_count = len(
+            getattr(self, "_display_auto_h1_fast_ng_frame_tokens", ())
+        )
         stable_count = (
-            len(self._display_auto_h1_fast_ng_frame_tokens)
+            max(semantic_frame_count, physical_corrob_frames)
             if fast_ng_active
             else self._display_auto_stable_frames
         )
@@ -1908,6 +1934,17 @@ class DisplayAutomaticCheckF3Mixin:
             trace["fast_ng_mask_ids"] = fast_ng_ids
             trace["fast_ng_distinct_frames"] = (
                 stable_count if fast_ng_active else 0
+            )
+            trace["fast_ng_semantic_frames"] = (
+                semantic_frame_count if fast_ng_active else 0
+            )
+            trace["fast_ng_physical_frames"] = physical_corrob_frames
+            trace["fast_ng_confirmation_source"] = (
+                "canonical_power_same_mask_history"
+                if fast_ng_active and physical_corrob_frames >= required
+                else "distinct_semantic_snapshots"
+                if fast_ng_active and semantic_frame_count >= required
+                else "pending"
             )
         matched = int(analysis.get("matched_mask_count", 0) or 0)
         total = int(analysis.get("active_mask_count", 0) or 0)
@@ -1952,6 +1989,13 @@ class DisplayAutomaticCheckF3Mixin:
                 "required_stable_frames": int(required),
                 "fast_h1_ng_consensus": bool(fast_ng_active),
                 "fast_h1_ng_mask_ids": tuple(fast_ng_ids),
+                "fast_h1_ng_physical_frames": int(physical_corrob_frames),
+                "fast_h1_ng_confirmation_source": (
+                    "canonical_power_same_mask_history"
+                    if fast_ng_active and physical_corrob_frames >= required
+                    else "distinct_semantic_snapshots"
+                    if fast_ng_active else "classic_debounce"
+                ),
                 "transition_frames": int(self._display_auto_transition_frames),
                 "physical_stable_key": getattr(
                     self,
