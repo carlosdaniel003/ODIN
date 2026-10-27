@@ -6140,3 +6140,55 @@ rejeição de token repetido, OFF conflitante, reset ao mudar CHECK e
 replay antigo 414). Isolamento F3/F2/câmera conserva falhas
 preexistentes no CI. Pendente teste real H1 NG/017+020, H1 OK,
 placa desligada, BLUE NG/024 e rearme.
+
+## D-094 — Confirmação temporal H1 contabiliza UNIÃO de tokens CNN/físico
+
+**Estado:** correção implementada, teste físico pendente (27/10/2026).
+
+**Reteste D-093 FAIL:** `image(20261027-130031).png` e
+`Texto colado(20261027-130040).txt` no projeto CM_500_L,
+CHECK H1. O operador confirmou duas falhas reais em
+`MASK_017` e `MASK_020`, display 28/30,
+`AUTO • H1 • 28/30 validando NG • 2/3`, contadores
+TOTAL=0, OK=0, NG=0. No DEBUG produtivo, snapshot
+`('camera', 368)`, `policy_decision=ng`,
+`policy_reason=h1_hibrido_divergencia_confirmada`,
+`fast_ng_consensus=true`,
+`fast_ng_semantic_frames=2`, `fast_ng_physical_frames=1`,
+`fast_ng_distinct_frames=2`, `registration_attempted=false`.
+O clique em ANALISAR capturou foto 398, posterior e com gate
+de energia não confirmado naquele outro instante; não substituir
+a evidência produtiva.
+
+**Causa exata no código:** D-093 calculava
+`stable_count=max(semantic_frame_count, physical_corrob_frames)`.
+As provas dos dois caminhos são independentes e têm `frame_token`,
+mas o `max` descartava a confirmação física quando havia duas CNNs.
+
+**Correção:** o proprietário da decisão utiliza
+`set(semantic_tokens) | set(physical_tokens)`, com chaves
+canônicas `('camera', frame_id)`, sem duplicatas nem arredondamento.
+O repositório físico informa os IDs das observações aprovadas por
+seus gates de energia, alinhamento, fonte same-mask, padrão da
+máscara completa e frescor (frames posteriores ao snapshot e no
+máximo 45 frames de distância). As provas semânticas individuais
+já exigem a assinatura híbrida forte D-092 e são restritas aos
+45 frames anteriores ao snapshot produtivo atual. O terminal NG
+só ocorre com três RAWs distintos do mesmo projeto/CHECK,
+sem promover status de preview a julgamento. Exemplo industrial:
+duas CNNs NG em frames 365/368 mais um token físico válido
+em 369 => quórum 3, não 2.
+
+Não mudou a CNN, o julgamento por máscara, a comparação física,
+presença, energia, sequência, luz no renderer, BLUE intermitente,
+tracking OFF ou o requisito estrito de 30/30 para OK. Nenhuma
+thread, timer ou executor novo.
+
+**Telemetria:** `fast_ng_combined_frame_tokens`,
+`fast_ng_semantic_frames`, `fast_ng_physical_frames`;
+origem final `hybrid_semantic_plus_physical_frames` quando
+as duas fontes compõem o quórum.
+
+**Validação:** testes neurais incluem caso 2+1 e negativas
+(repetição, token antigo, máscaras contraditórias, energia OFF),
+além dos testes D-092/093. Reteste produtivo pendente.
