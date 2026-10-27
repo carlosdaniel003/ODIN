@@ -2688,8 +2688,9 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         unsupported["effective_confirmed_failed_mask_ids"] = ("MASK_017",)
         self.assertEqual((), evaluate(unsupported))
 
-    def test_runtime_h1_ng_termina_em_tres_fotos_distintas_sem_repetir(self):
+    def test_runtime_h1_ng_em_tres_fotos_quando_quorum_configurado_tres(self):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
+        app.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 3  # modo anterior de regressão
         app.display_f3_ativo = True
         app.display_f3_result_after_id = None
         app.camera_frame_atual = np.zeros((16, 16, 3), dtype=np.uint8)
@@ -3055,6 +3056,7 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
 
     def _make_h1_production_runtime(self, history):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
+        app.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 3  # regressões de D-094
         app.display_f3_ativo = True
         app.display_f3_result_after_id = None
         app.camera_frame_atual = np.zeros((16, 16, 3), dtype=np.uint8)
@@ -3241,8 +3243,51 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
                     2, app._display_auto_last_decision_trace["fast_ng_distinct_frames"]
                 )
 
-    def test_h1_fast_requires_three_distinct_camera_frames_no_duplicate(self):
-        # Contrato temporal: apenas tokens de captura independentes contam.
+    def test_d099_h1_ng_forte_finaliza_em_um_snapshot_sem_historico_fisico(self):
+        app, registered, context = self._make_h1_production_runtime([])
+        app.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 1
+        app._display_auto_precomputed_payload = {
+            "frame_token": ("camera", 414),
+            "context": context,
+            "analysis": self._case(),
+            "raw_frame": app.camera_frame_atual.copy(),
+            "snapshot_capture_trigger": {
+                "triggered": True, "mask_ids": ("MASK_008",),
+            },
+        }
+        app._process_display_auto_check()
+        self.assertEqual(1, len(registered))
+        approved, frame_id, proof = registered[0]
+        self.assertIs(approved, False)
+        self.assertEqual(414, frame_id)
+        self.assertEqual(1, proof["stable_frames"])
+        self.assertEqual(1, proof["required_stable_frames"])
+        self.assertEqual(("MASK_017", "MASK_020"), proof["fast_h1_ng_mask_ids"])
+        self.assertEqual(0, proof["fast_h1_ng_physical_frames"])
+        self.assertEqual(
+            (("camera", 414),), proof["fast_h1_ng_distinct_frame_tokens"],
+        )
+
+    def test_d099_h1_sem_consenso_forte_nao_libera_ng_em_um_frame(self):
+        app, registered, context = self._make_h1_production_runtime([])
+        app.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 1
+        analysis = self._case()
+        analysis["mask_results"][16]["physical_local_authoritative"] = False
+        app._display_auto_precomputed_payload = {
+            "frame_token": ("camera", 414), "context": context,
+            "analysis": analysis,
+            "raw_frame": app.camera_frame_atual.copy(),
+            "snapshot_capture_trigger": {
+                "triggered": True, "mask_ids": ("MASK_008",),
+            },
+        }
+        app._process_display_auto_check()
+        self.assertEqual([], registered)
+        self.assertFalse(app._display_auto_last_decision_trace["fast_ng_consensus"])
+        self.assertEqual(6, app.DISPLAY_AUTO_NG_STABLE_FRAMES)
+
+    def test_h1_fast_has_one_frame_trial_but_preserves_classic_six_frame_gate(self):
+        # D-099: um snapshot forte basta; o fallback NG conserva seis análises.
         source = inspect.getsource(DisplayAutomaticCheckF3Mixin._process_display_auto_check)
         self.assertIn("assinatura_ng_h1_consenso(", source)
         self.assertIn("if token_key is not None and token_key not in seen:", source)
@@ -3254,7 +3299,7 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
             6, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_NG_STABLE_FRAMES
         )
         self.assertEqual(
-            3, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES
+            1, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES
         )
 
 
