@@ -1294,6 +1294,19 @@ def aplicar_emissao_visual_ao_vivo_f3(
         and frame_token is not None
         and repr(physical_frame_token) == repr(frame_token)
     )
+    # Não recuperar verdes de um frame anterior quando o USB/BLUE já apagou.
+    # A própria amostra da imagem exibida é a fonte prioritária; o estado
+    # físico só é aceito como fallback se possuir token do MESMO frame.
+    # Quando a amostragem é parcial, máscaras não medidas ficam neutras,
+    # nunca ON/OFF herdado de uma análise anterior.
+    if not same_physical_frame:
+        visual_states = {}
+    elif ready:
+        visual_states = {
+            mask_id: state
+            for mask_id, state in visual_states.items()
+            if mask_id in sampled_mask_ids
+        }
     if ready:
         for mask_id in sampled_mask_ids:
             if same_physical_frame and mask_id in visual_states:
