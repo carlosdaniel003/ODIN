@@ -3156,3 +3156,32 @@ e aceite da foto ON do mesmo CHECK durante a fase OFF posterior,
 rejeitando CHECK diferente ou amostra atrasada.
 
 CI neural 115/115 PASS. Reteste físico pendente.
+
+## 27/10/2026 — D-091 / câmera e visor com vermelho stale no USB
+
+**Evidência:** screenshot `image(20261027-120108).png`; display no
+frame ao vivo visualmente apagado, geometria H1 mantida para a mesma
+placa, fase USB ainda analisando, status de conformidade 17/30 com
+divergências. Sobreposição da câmera e visor mostravam diversas barras
+vermelhas, mas operador confirmou que NÃO era placa NG e que a decisão
+produtiva estava correta.
+
+**Causa no código:** em `_render_classic_luminous_preview` as máscaras
+de `effective_confirmed_failed_mask_ids` tinham prioridade vermelha
+sobre o estado óptico de `live_visual_mask_ids`, mesmo em preview live.
+`_display_readout_mask_state` fazia a mesma coisa antes de consultar
+a amostragem visual. Além disso, `aplicar_emissao_visual_ao_vivo_f3`
+preenchia máscaras sem evidência atual usando mapas físicos obtidos
+de outros frames/sem token.
+
+**Correção:** D-091 reserva vermelho somente ao snapshot NG terminal
+por `terminal_ng_evidence`, publicado no fluxo de freeze e repintura
+terminal. A câmera ao vivo e o visor mantêm a mesma amostra de luz do
+frame; OFF atual não conserva divergência vermelha antiga nem verde
+físico de amostra defasada. ROIs não amostradas ficam neutras,
+salvo evidência física comprovada do mesmo frame. Indicadores FM/decimal
+seguem o mesmo contrato. Sem alteração de autoridade semântica.
+
+**Validação:** regressões para render USB desligado, sem red/stale,
+NG terminal vermelho, readout de 30 máscaras e exclusão de classes
+físicas sem token de mesmo frame. Requer reteste físico na máquina.
