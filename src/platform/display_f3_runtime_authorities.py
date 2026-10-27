@@ -467,6 +467,12 @@ class F3PowerAuthority:
             and not getattr(self.app, "_display_f3_waiting_new_board_after_empty", False)
         )
         with self._h1_condition:
+            self.app._display_f3_h1_burst_debug = {
+                "snapshot_token": deepcopy(snapshot_token),
+                "status": "started" if valid else "ineligible",
+                "captured_tokens": [],
+                "accepted_tokens": [],
+            }
             self._h1_capture = (
                 {"signature": (str(context.get("project_name") or ""),
                                str(context.get("check_id") or "")),
@@ -507,6 +513,12 @@ class F3PowerAuthority:
                 "frame_id": fid, "frame": frozen,
                 "geometry": deepcopy(geometry),
             })
+            debug = getattr(self.app, "_display_f3_h1_burst_debug", None)
+            if isinstance(debug, dict):
+                debug["status"] = "capturing"
+                debug["captured_tokens"] = [
+                    ("camera", sample["frame_id"]) for sample in samples
+                ]
             self._h1_condition.notify_all()
 
     def confirm_h1_captured_frames(
@@ -534,6 +546,11 @@ class F3PowerAuthority:
             if not failed or not isinstance(w, dict) or (
                 w["signature"] != sig or w["snapshot_id"] != sid
             ):
+                debug = getattr(self.app, "_display_f3_h1_burst_debug", None)
+                if isinstance(debug, dict):
+                    debug["status"] = (
+                        "semantic_not_consensus" if not failed else "wrong_capture_session"
+                    )
                 self._h1_capture = None
                 return []
             self._h1_condition.wait_for(
@@ -588,7 +605,19 @@ class F3PowerAuthority:
             analysis, failed, observations,
             snapshot_token=snapshot_token, required=3,
         ))
-        return [row for row in observations if tuple(row["frame_token"]) in accepted]
+        confirmed = [
+            row for row in observations if tuple(row["frame_token"]) in accepted
+        ]
+        debug = getattr(self.app, "_display_f3_h1_burst_debug", None)
+        if isinstance(debug, dict):
+            debug["status"] = "verified" if confirmed else "no_verified_samples"
+            debug["physically_evaluated_tokens"] = [
+                row["frame_token"] for row in observations
+            ]
+            debug["accepted_tokens"] = [
+                row["frame_token"] for row in confirmed
+            ]
+        return confirmed
 
     def append_h1_confirmed_samples(
         self, observations: list[dict], context: dict, snapshot_token,
