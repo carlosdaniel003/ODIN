@@ -2897,6 +2897,62 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         power.reset()
         self.assertEqual([], board._display_f3_recent_power_mask_frames)
 
+    def test_power_history_debug_explains_sparse_frames_without_creating_votes(self):
+        from src.platform.display_f3_runtime_authorities import F3PowerAuthority
+
+        app = SimpleNamespace()
+        owner = F3PowerAuthority(app)
+        def apply(frame, *, present=True):
+            return owner.apply(
+                {},
+                {"board_present": present, "empty_confirmed": False},
+                {
+                    "frame_token": ("camera", frame),
+                    "powered_confirmed": True,
+                    "spatial_alignment_ready": True,
+                    "same_mask_comparison": True,
+                    "primary_authority": "same_physical_mask_on_off_learning",
+                    "mask_classifications": {"MASK_017": "off", "MASK_020": "off"},
+                },
+                project_name="DISPLAY A",
+                context={"check_id": "CHECK_001", "check_name": "H1"},
+            )
+
+        apply(288)
+        apply(300)
+        apply(300)
+        apply(290)  # retorno semantico atrasado: nao conta novo frame
+        self.assertEqual(
+            [288, 300],
+            [item["frame_token"][1]
+             for item in app._display_f3_recent_power_mask_frames],
+        )
+        diagnostic = app._display_f3_power_history_diagnostics
+        self.assertEqual(2, diagnostic["counts"]["frame_added"])
+        self.assertEqual(1, diagnostic["counts"]["frame_replaced"])
+        self.assertEqual(1, diagnostic["counts"]["frame_not_newer"])
+        self.assertEqual(
+            (("camera", 288), ("camera", 300)),
+            diagnostic["history_frame_tokens"],
+        )
+
+        apply(310, present=False)
+        self.assertEqual([], app._display_f3_recent_power_mask_frames)
+        diagnostic = app._display_f3_power_history_diagnostics
+        self.assertEqual("history_reset", diagnostic["events"][-2]["action"])
+        self.assertEqual(
+            "presence_not_confirmed", diagnostic["events"][-2]["reason"],
+        )
+        apply(320)
+        self.assertEqual(
+            [320],
+            [item["frame_token"][1]
+             for item in app._display_f3_recent_power_mask_frames],
+        )
+        self.assertEqual(1, diagnostic["counts"]["history_reset"])
+        owner.reset()
+        self.assertIsNone(app._display_f3_power_history_diagnostics)
+
     def _make_h1_production_runtime(self, history):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app.display_f3_ativo = True
