@@ -180,6 +180,70 @@ class DisplayF3PreviewClarityFixTests(unittest.TestCase):
         self.assertGreater(int(center[1]), int(center[2]))
         self.assertGreater(int(center[1]), int(center[0]))
 
+    def test_usb_live_apagado_nao_reaproveita_vermelho_semantico_anterior(self):
+        # O julgamento USB mantém divergências enquanto o frame ao vivo já
+        # está fisicamente apagado. Isso não é evidência terminal de NG.
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        mask = {
+            "id": "MASK_001", "type": "segment",
+            "cx": 50, "cy": 50, "width": 30,
+            "height": 12, "angle": 0.0,
+        }
+        live = {
+            "resolution": (100, 100),
+            "masks": (mask,),
+            "live_luminous_only": True,
+            "live_visual_sample_ready": True,
+            "live_visual_mask_ids": (),
+            "live_visual_classifications": {"MASK_001": "off"},
+            "effective_classifications": {"MASK_001": "on"},
+            "expected_states": {"MASK_001": "off"},
+            "effective_confirmed_failed_mask_ids": ("MASK_001",),
+            "effective_failed_mask_ids": ("MASK_001",),
+            "has_any_on": True,
+        }
+        neutral = clarity.renderizar_preview_claro_display_f3(
+            frame, {**live, "effective_confirmed_failed_mask_ids": ()}
+        )
+        actual = clarity.renderizar_preview_claro_display_f3(frame, live)
+        self.assertTrue(np.array_equal(neutral, actual))
+
+        # O mesmo frame terminal de NG permanece vermelho, por flag explícita.
+        frozen = clarity.renderizar_preview_claro_display_f3(
+            frame, {**live, "terminal_ng_evidence": True}
+        )
+        self.assertFalse(np.array_equal(actual, frozen))
+        self.assertGreater(int(frozen[50, 50, 2]), int(frozen[50, 50, 1]))
+
+    def test_usb_live_passagem_on_off_usa_somente_luz_do_frame(self):
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        base = {
+            "resolution": (100, 100),
+            "masks": ({
+                "id": "MASK_001", "type": "segment",
+                "cx": 50, "cy": 50, "width": 30,
+                "height": 12, "angle": 0.0,
+            },),
+            "live_luminous_only": True,
+            "live_visual_sample_ready": True,
+            "effective_confirmed_failed_mask_ids": ("MASK_001",),
+        }
+        on = clarity.renderizar_preview_claro_display_f3(
+            frame, {
+                **base, "live_visual_mask_ids": ("MASK_001",),
+                "live_visual_classifications": {"MASK_001": "on"},
+            }
+        )
+        off = clarity.renderizar_preview_claro_display_f3(
+            frame, {
+                **base, "live_visual_mask_ids": (),
+                "live_visual_classifications": {"MASK_001": "off"},
+            }
+        )
+        self.assertGreater(int(on[50, 50, 1]), int(on[50, 50, 2]))
+        self.assertGreater(int(on[50, 50].sum()), int(off[50, 50].sum()))
+        self.assertLess(int(off[50, 50, 2]), int(on[50, 50, 1]))
+
     def test_guia_de_tracking_sem_energia_e_cinza_neutra(self):
         b, g, r = clarity.F3_PREVIEW_TRACKING_GUIDE_BGR
         self.assertLess(abs(int(b) - int(g)), 30)
