@@ -482,6 +482,9 @@ def _runtime_state_at_frame(app) -> dict:
             "power_authority_status": _safe_deepcopy(
                 runtime_debug.get("power_authority_status")
             ),
+            "power_history_sampling": _safe_deepcopy(
+                runtime_debug.get("power_history_sampling")
+            ),
             "last_auto_analysis": _safe_deepcopy(evidence.get("analysis")),
             "auto_last_frame_token": _safe_deepcopy(
                 runtime_debug.get("auto_last_frame_token")
@@ -574,6 +577,12 @@ def _runtime_state_at_frame(app) -> dict:
         ),
         "power_authority_status": _safe_deepcopy(
             getattr(app, "_display_f3_power_authority_status", None)
+        ),
+        # D-097: fotografia/decisão semântica pode ser mais antiga que o
+        # último evento físico. Ler o diagnóstico ATUAL aqui mostra resets
+        # e lacunas posteriores sem reconstruir nenhum julgamento.
+        "power_history_sampling": _safe_deepcopy(
+            getattr(app, "_display_f3_power_history_diagnostics", None)
         ),
         "last_auto_analysis": _safe_deepcopy(
             getattr(app, "_display_auto_last_analysis", None)
