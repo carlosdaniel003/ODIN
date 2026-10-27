@@ -8090,3 +8090,45 @@ de energia e pose. Prova final NG permanece D-094.
 **Status:** implementação feita; validação física
 pendente. Medir primeiro LOCK, primeira máscara verde,
 3/3 NG, teste H1 OK e OFF, BLUE 024 NG, reset.
+
+## 27/10/2026 — D-095 reteste físico FAIL (NG H1 17/20 não fecha); D-096 instrumentação
+
+**Evidência:** `image(20261027-140743).png`,
+`Texto colado(20261027-140739).txt`, projeto CM_500_L,
+CHECK_001/H1. O equipamento exibe apenas a forma parcial do H1,
+com MASK_017 e MASK_020 realmente apagadas. Operador informa
+que o ODIN não contabilizou NG: tela `AGUARDANDO H1`,
+`28/30 CONFORMES`, `5 ACESOS`, `25 APAGADOS`,
+TOTAL=OK=NG=0.
+
+**DEBUG produtivo:** `auto_decision_trace.frame_token=camera/106`,
+`policy_decision=ng`, `policy_reason=h1_hibrido_divergencia_confirmada`,
+`fast_ng_consensus=true`, MASK_017 + MASK_020,
+`fast_ng_semantic_frames=1`, `fast_ng_physical_frames=1`,
+`fast_ng_distinct_frames=2`, tokens 106 e 122.
+O snapshot do primeiro verde registrado após isso usa token 341
+e está em `FOTO CONGELADA • ANALISANDO CHECK`. O tracking do
+frame 341 encontrou LOCK luminoso, 5 ON das 7 esperadas,
+`luminous_component_count=0` global, com 5 anchors locais válidos.
+A leitura MANUAL do frame 355 mostra energia não confirmada;
+não corresponde ao frame 106 julgado pela CNN.
+
+**Diagnóstico ainda aberto:** a terceira evidência física não entrou
+na janela de quórum; falta conhecer o primeiro motivo de rejeição
+(energia, alinhamento, estado da máscara, frame antigo, ausência
+de histórico ou handoff). Não é justificável baixar o quórum de
+3 para 2, aceitar só a forma parcial do caractere como normal,
+nem relaxar NG sem essa evidência.
+
+**D-096 — apenas instrumentação:** o decisor passa a registrar
+`fast_ng_physical_history_diagnostics` com quantidade/tokens
+disponíveis, primeira razão de interrupção e gates/IDs responsáveis.
+Sem alterar julgamentos, classificadores, contadores, workers,
+scheduler ou timeouts.
+
+**Resultado:** D-095 não aprovado em produção: LOCK visual
+passou no frame documentado, mas terminal NG permaneceu FAIL.
+D-096 **PENDENTE DE RETESTE FÍSICO** com o mesmo H1 017/020
+até capturar a causa do terceiro voto. Depois validar OK 30/30,
+H1 OFF/transição e BLUE NG MASK_024, somente após explicar
+a falha atual.
