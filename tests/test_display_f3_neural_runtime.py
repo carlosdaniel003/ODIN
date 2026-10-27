@@ -2610,6 +2610,7 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
                 "expected": expected,
                 "classified": observed,
                 "matched": observed == expected,
+                "confidence": 0.99,
                 "semantic_certain": True,
             }
             if number in missing:
