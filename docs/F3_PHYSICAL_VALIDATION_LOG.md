@@ -8026,3 +8026,38 @@ passar BLUE, em vez de ficar em 1/3. H1 OK 30/30 continua
 aprovando, OFF/transição H1 não pode ser condenado.
 Depois retestar BLUE NG MASK_024 e suporte vazio/rearme,
 registrando tempo e fonte de confirmação no DEBUG.
+
+## 27/10/2026 — D-093 FAIL real (2/3); D-094 correção de quórum
+
+**Evidência:** imagem `image(20261027-130031).png` e DEBUG
+`Texto colado(20261027-130040).txt`, CM_500_L,
+CHECK_001/H1, máscara 17 e 20 realmente apagadas.
+Tela `AGUARDANDO H1`, 28/30, 5 ON/25 OFF,
+`validando NG • 2/3`, Total=OK=NG=0.
+
+No relatório produtivo, frame CNN 368, H1 NG por
+`h1_hibrido_divergencia_confirmada`, lista confirmada
+MASK_017/MASK_020 sem INCERTO, 2 frames semânticos,
+1 físico, `fast_ng_distinct_frames=2`,
+`registration_attempted=false`.
+A auditoria MANUAL de frame 398 mostrou energia não
+confirmada naquele clique, mas não representa a decisão
+produtiva do frame 368, que tinha gate powered.
+
+**Diagnóstico:** contagem D-093 utilizava
+`max(semanticos, fisicos)`, não união de seus IDs. Ainda
+que cada fonte apresentasse provas válidas independentes,
+o total de votos não as combinava.
+
+**Correção D-094:** conjunto único de `frame_token`
+sem duplicatas para CNN e fonte física same-mask. Exige
+3 RAWs realmente diferentes, com janela de frescor,
+mesmo projeto, CHECK H1, energia/LOCK e máscara NG
+consensual. Não reduzir número de votos para 2.
+
+**Status:** D-093 FAIL físico confirmado;
+D-094 **PENDENTE DE RETESTE JIG**.
+Cenários de reteste: H1 NG 017+020 deve encerrar terminal
+sem avançar BLUE, H1 OK deve aprovar 30/30, H1 desligado
+ou parcial não pode gerar NG, BLUE NG/024 sem regressão,
+retirada/rearme sem duplicar contadores.
