@@ -6081,3 +6081,62 @@ do runtime demonstra H1 101,101,102,103 ⇒ conta 1,1,2,3 e registra
 NG uma única vez; testes de exclusão abrangem BLUE, tracking OFF,
 H1 parcialmente aceso, divergência ambígua e mesma-máscara sem consenso.
 Pendente reteste com H1 OK, H1 NG/017+020, H1 OFF e BLUE NG/024.
+
+## D-093 — NG H1 congelado corroborado por histórico físico canônico, sem três CNNs
+
+**Estado:** implementado no código; suíte neural CI 121/121 PASS; validação física pendente.
+
+**Falha física D-092, 27/10/2026:** tela `AGUARDANDO H1`, H1 28/30,
+NG 1/3 e nenhuma contagem terminal. DEBUG
+`Texto colado(20261027-124750).txt` mostra foto semântica token
+`('camera', 414)`, `fast_ng_consensus=true`,
+`fast_ng_mask_ids=(MASK_017,MASK_020)`,
+`fast_ng_distinct_frames=1`, `registration_attempted=false`.
+O tracking fotografou uma vez o primeiro verde e as próximas
+capturas semânticas requerem novos jobs; exigir 3 CNNs sucessivas
+dentro de ~3 segundos de H1 não é garantido. A autoridade física
+produtiva já havia observado frames posteriores, incluindo 417/424,
+com 5 LEDs ON, 2 segmentos esperados ON apagados e energia confirmada.
+O clique manual em ANALISAR capturou frame 457, com energia não
+confirmada; esse frame NÃO substitui a autoridade do snapshot 414.
+
+**Decisão:** preservar SEM ALTERAÇÃO a prova híbrida D-092 que
+reconheceu NG com consenso CNN/físico same-mask, gate powered/pose,
+sem INCERTO e maioria de LEDs esperados realmente ON. Não promover
+a fotografia de primeiro verde sozinha a NG. A autoridade de energia
+`F3PowerAuthority` mantém um buffer pequeno e limitado às 18
+observações de frames RAW físicos recentes, com token e classes
+ON/OFF que ela já calcula. Não faz inferência adicional.
+
+Ao julgar o snapshot CNN, o único proprietário da decisão
+`DisplayAutomaticCheckF3Mixin` pode satisfazer a confirmação
+temporal de 3 tokens também com 3 observações físicas distintas,
+POSTERIORES à fotografia: mesmo projeto/CHECK, placa presente,
+energia confirmada, alinhamento válido, mesma fonte física same-mask,
+exato conjunto de segmentos defeituosos OFF, demais máscaras
+observadas no estado configurado (incluindo todos os ON saudáveis),
+sem estados inesperados. Evidência parcial ou uma leitura discordante
+interrompe a sequência; tokens duplicados, anteriores ou a mais de
+45 frames da foto são rejeitados. O RAW da CNN (token original)
+continua sendo a evidência de congelamento terminal D-072.
+
+Ao processar o RAW congelado para o gate D-081, não inserir token
+antigo depois dos frames latest-frame: armazenagem do histórico
+segue somente IDs crescentes, e o replay idêntico substitui só o
+último registro. Histórico é invalidado ao perder placa, na troca de
+CHECK/projeto e no reset. O atalho D-092 de 3 snapshots semânticos
+distintos permanece possível como fallback sem sumir com proteção;
+na falta de prova rápida, prevalece NG clássico de 6 análises.
+
+Não criar segunda autoridade, classe temporal de NG, novo timer,
+worker ou corrida de UI. BLUE intermitente mantém suas próprias
+fases ON e proteção NG, OK permanece 30/30. O debug distingue
+`fast_ng_semantic_frames`, `fast_ng_physical_frames` e a origem da
+confirmação `canonical_power_same_mask_history`.
+
+**Validação:** 121/121 testes neurais PASS (inclui integração NG
+terminal com apenas um RAW CNN 414 + evidências físicas 415/416/417,
+rejeição de token repetido, OFF conflitante, reset ao mudar CHECK e
+replay antigo 414). Isolamento F3/F2/câmera conserva falhas
+preexistentes no CI. Pendente teste real H1 NG/017+020, H1 OK,
+placa desligada, BLUE NG/024 e rearme.
