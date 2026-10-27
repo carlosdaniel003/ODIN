@@ -7986,3 +7986,43 @@ placa desligada (não condenar), H1 transitório parcial
 (não acusar NG), BLUE NG/024 (não regredir confirmação de fase ON),
 retirada e rearme de próxima placa. Medir tempo físico de NG;
 não afirmar que finaliza dentro dos ~3 s sem teste.
+
+## 27/10/2026 — D-092 FAIL físico / D-093 aguardando reteste
+
+**Cenário:** placa CM_500_L com defeito real H1 nos segmentos
+MASK_017 e MASK_020 apagados. Tela
+`image(20261027-124745).png`: H1 28/30, 5 acesos,
+25 apagados, `AUTO • H1 • 28/30 validando NG • 1/3`,
+`TOTAL=0, OK=0, NG=0`, sem avançar.
+
+**DEBUG:** arquivo `Texto colado(20261027-124750).txt`.
+Frame semântico 414: `policy_decision=ng`,
+`policy_reason=h1_hibrido_divergencia_confirmada`,
+`fast_ng_consensus=true`, falhas 017/020 sem INCERTO,
+`fast_ng_distinct_frames=1`,
+`registration_attempted=false`. Havia LOCK e energia
+produtiva confirmada no caminho semântico. O manual capturou
+frame 457 e indicou energia não confirmada nessa OUTRA imagem,
+não no RAW julgado; presença da placa continuava confirmada.
+
+**Status:** **D-092 FAIL**. A exigência de três snapshots CNN
+independentes não fechou na curta janela real. A D-093 passou
+a usar leituras físicas por máscara que a autoridade canônica
+já registra em frames novos (somente após NG híbrido certo).
+Condições: mesma placa/CHECK, energia e geometria confirmadas,
+mesmos segmentos OFF, outros ON/OFF sem divergências,
+3 tokens físicos distintos posteriores à foto congelada.
+O decisor terminal preserva RAW e MASK_ID da foto original.
+Sem relaxar BLUE/OK nem introduzir segundo classificador.
+
+**CI:** suíte neural 121/121 PASS, com integração H1 usando
+1 foto CNN + 3 frames físicos, teste de rejeição de frame
+duplicado/antigo e reset na troca de CHECK. Falhas gerais
+preexistentes do projeto mantidas.
+
+**PRÓXIMO RETESTE / PENDENTE:** NG H1 017/020 deve entrar
+em resultado terminal NG vermelho e incrementar contagem sem
+passar BLUE, em vez de ficar em 1/3. H1 OK 30/30 continua
+aprovando, OFF/transição H1 não pode ser condenado.
+Depois retestar BLUE NG MASK_024 e suporte vazio/rearme,
+registrando tempo e fonte de confirmação no DEBUG.
