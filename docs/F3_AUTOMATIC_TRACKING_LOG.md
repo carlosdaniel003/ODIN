@@ -3185,3 +3185,28 @@ seguem o mesmo contrato. Sem alteração de autoridade semântica.
 **Validação:** regressões para render USB desligado, sem red/stale,
 NG terminal vermelho, readout de 30 máscaras e exclusão de classes
 físicas sem token de mesmo frame. Requer reteste físico na máquina.
+
+## 27/10/2026 — D-092 / H1 28/30 reconhecido mas parado em NG 3/6
+
+Relato: H1 real NG por MASK_017 e MASK_020 apagadas. No RAW rastreado
+com análise produtiva o motor já confirmou 28/30 (5 ON / 25 OFF);
+`auto_decision_trace.policy_decision=ng`,
+`policy_reason=h1_hibrido_divergencia_confirmada`, energia produtiva
+confirmada (5 votos, mínimo 4). A auditoria manual faz sua PRÓPRIA
+reclassificação do frame posterior e mostrou gate bloqueado,
+não representando o gate produtivo desse NG. O gargalo real era
+`DISPLAY_AUTO_NG_STABLE_FRAMES=6`, longo para H1 ~3s.
+
+Correção: módulo de prova `display_f3_ng_fast_confirmation.py`
+independente da classificação. H1 com rastreamento e consenso
+CNN + fonte física same-mask nas mesmas falhas, maioria dos ON
+esperados realmente ON e sem qualquer INCERTO pode finalizar NG
+em 3 tokens distintos, mesmo conjunto de falhas. Sem prova plena
+recaí na confirmação normal de 6. BLUE mantém proteção intermitente;
+nenhum threshold ONNX alterado; fotos antigas ou repetidas não
+viram votos novos. Status intermediário diferencia validando NG
+de NG terminal confirmado.
+
+Suíte neural CI 119/119 PASS incluindo fluxo real de 4 entradas
+101,101,102,103 (primeira repetida) ⇒ somente 3 evidências.
+Reteste físico ainda pendente.
