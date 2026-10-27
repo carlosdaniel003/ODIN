@@ -15,6 +15,9 @@ from src.platform.display_auto_check_policy import (
 from src.platform.display_mask_geometry import (
     mapear_slots_sete_segmentos_display,
 )
+from src.platform.display_f3_ng_fast_confirmation import (
+    assinatura_ng_h1_consenso,
+)
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
     DISPLAY_CHECK_STATE_ON,
@@ -65,6 +68,8 @@ class DisplayAutomaticCheckF3Mixin:
     # a leitura. NG continua deliberadamente mais conservador e independente.
     DISPLAY_AUTO_OK_STABLE_FRAMES = 1
     DISPLAY_AUTO_NG_STABLE_FRAMES = 6
+    # Apenas H1 com prova CNN+física local em 3 frames RAW distintos.
+    DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 3
     DISPLAY_AUTO_TRANSITION_FRAMES = 1
     DISPLAY_AUTO_INTERMITTENT_FAILURE_SAMPLES = 3
     DISPLAY_AUTO_INTERMITTENT_ON_PHASE_RATIO = 0.55
@@ -92,6 +97,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_signature = None
         self._display_auto_last_decision = None
         self._display_auto_stable_frames = 0
+        self._display_auto_h1_fast_ng_signature = None
+        self._display_auto_h1_fast_ng_frame_tokens = []
         self._display_auto_transition_frames = self.DISPLAY_AUTO_TRANSITION_FRAMES
         self._display_auto_last_frame_token = None
         self._display_auto_last_analysis = None
@@ -137,6 +144,8 @@ class DisplayAutomaticCheckF3Mixin:
         self._display_auto_signature = None
         self._display_auto_last_decision = None
         self._display_auto_stable_frames = 0
+        self._display_auto_h1_fast_ng_signature = None
+        self._display_auto_h1_fast_ng_frame_tokens = []
         self._display_auto_last_frame_token = None
         self._display_auto_last_analysis = None
         self._display_auto_intermittent_signature = None
@@ -1491,6 +1500,8 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_auto_intermittent_last_phase_analysis = None
             self._display_auto_last_decision = None
             self._display_auto_stable_frames = 0
+            self._display_auto_h1_fast_ng_signature = None
+            self._display_auto_h1_fast_ng_frame_tokens = []
             # H1 e Bluetooth são transitórios. Um CHECK protegido pelo botão
             # físico também é observado imediatamente, porém sem permitir NG
             # até surgir evidência visual da nova função.
@@ -1826,6 +1837,30 @@ class DisplayAutomaticCheckF3Mixin:
         if decision not in (DISPLAY_AUTO_DECISION_OK, DISPLAY_AUTO_DECISION_NG):
             return
 
+        # NG H1 de alta certeza: mantém o mesmo classificador híbrido e a
+        # confirmação temporal, mas usa 3 CAPTURAS DISTINTAS quando todas as
+        # falhas têm consenso CNN + físico same-mask e maioria dos LEDs ON.
+        # Qualquer dúvida, troca de máscara, ausência de tracking ou BLUE
+        # retorna ao debounce NG clássico de 6 análises, sem atalho.
+        fast_ng_ids = assinatura_ng_h1_consenso(
+            context, analysis, policy,
+            reference_gate=reference_gate,
+            tracking_snapshot=bool(frozen_tracking_capture),
+        ) if not approved else ()
+        fast_ng_key = (
+            str(context.get("project_name") or ""),
+            str(context.get("check_id") or ""),
+            fast_ng_ids,
+        ) if fast_ng_ids and frame_token is not None else None
+        if fast_ng_key != getattr(self, "_display_auto_h1_fast_ng_signature", None):
+            self._display_auto_h1_fast_ng_signature = fast_ng_key
+            self._display_auto_h1_fast_ng_frame_tokens = []
+        if fast_ng_key is not None:
+            token_key = repr(frame_token)
+            seen = self._display_auto_h1_fast_ng_frame_tokens
+            if token_key not in seen:
+                seen.append(token_key)
+
         if approved == self._display_auto_last_decision:
             self._display_auto_stable_frames += 1
         else:
@@ -1853,6 +1888,21 @@ class DisplayAutomaticCheckF3Mixin:
                 else self.DISPLAY_AUTO_NG_STABLE_FRAMES
             )
         )
+        fast_ng_active = bool(fast_ng_key is not None)
+        if fast_ng_active:
+            required = min(required, self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES)
+        stable_count = (
+            len(self._display_auto_h1_fast_ng_frame_tokens)
+            if fast_ng_active
+            else self._display_auto_stable_frames
+        )
+        trace = self._display_auto_last_decision_trace
+        if isinstance(trace, dict):
+            trace["fast_ng_consensus"] = bool(fast_ng_active)
+            trace["fast_ng_mask_ids"] = fast_ng_ids
+            trace["fast_ng_distinct_frames"] = (
+                stable_count if fast_ng_active else 0
+            )
         matched = int(analysis.get("matched_mask_count", 0) or 0)
         total = int(analysis.get("active_mask_count", 0) or 0)
         persistent_now = tuple(
@@ -1871,25 +1921,31 @@ class DisplayAutomaticCheckF3Mixin:
             else (
                 "defeito persistente " + ",".join(persistent_now)
                 if transient_check and persistent_now
-                else "NG confirmado"
+                else (
+                    "NG confirmado"
+                    if stable_count >= required
+                    else "validando NG"
+                )
             )
         )
         self._display_auto_set_preview_status(
             (
                 f"AUTO • {context['check_name']} • {matched}/{total} {decision_text} • "
-                f"{self._display_auto_stable_frames}/{required}"
+                f"{stable_count}/{required}"
             ),
             "#86EFAC" if approved else "#FCA5A5",
         )
 
-        if self._display_auto_stable_frames < required:
+        if stable_count < required:
             return
 
         if not approved:
             self._display_f3_pending_ng_runtime = {
                 "last_decision": False,
-                "stable_frames": int(self._display_auto_stable_frames),
+                "stable_frames": int(stable_count),
                 "required_stable_frames": int(required),
+                "fast_h1_ng_consensus": bool(fast_ng_active),
+                "fast_h1_ng_mask_ids": tuple(fast_ng_ids),
                 "transition_frames": int(self._display_auto_transition_frames),
                 "physical_stable_key": getattr(
                     self,
@@ -1932,6 +1988,8 @@ class DisplayAutomaticCheckF3Mixin:
 
         self._display_auto_stable_frames = 0
         self._display_auto_last_decision = None
+        self._display_auto_h1_fast_ng_signature = None
+        self._display_auto_h1_fast_ng_frame_tokens = []
 
         if not approved:
             # D-072: preserve o snapshot RAW que gerou a análise, não o frame
