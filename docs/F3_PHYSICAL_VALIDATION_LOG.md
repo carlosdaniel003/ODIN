@@ -8132,3 +8132,15 @@ D-096 **PENDENTE DE RETESTE FÍSICO** com o mesmo H1 017/020
 até capturar a causa do terceiro voto. Depois validar OK 30/30,
 H1 OFF/transição e BLUE NG MASK_024, somente após explicar
 a falha atual.
+
+## 27/10/2026 — D-096 reteste físico FAIL: H1 017/020 persiste em 2/3; D-097 instrumentação
+
+**Resultado físico:** FAIL; equipamento mostra H1 parcial (somente H) com MASK_017 e MASK_020 apagadas. Contador TOTAL/NG continua em zero, tela AGUARDANDO H1, visual 28/30 conformes (cinco dos sete segmentos ON).
+
+**Evidência:** screenshot `image(20261027-151535).png`, DEBUG `Texto colado(20261027-151530).txt` (`CM_500_L`, `CHECK_001/H1`). Fonte produtiva: `auto_decision_trace.frame_token=camera/288`; `policy_decision=ng`, `policy_reason=h1_hibrido_divergencia_confirmada`, `fast_ng_consensus=true`, falhas MASK_017 e MASK_020. Apenas `2/3`: um frame semântico 288 e uma corroboração física 300.
+
+**D-096 revelou:** `fast_ng_physical_history_diagnostics.history_count=1`, token físico 300, `accepted_tokens=[camera/300]`, `stop_reason=history_exhausted_before_quorum`. Portanto, **não houve um terceiro token presente e rejeitado** pela função de quórum; a origem da escassez do histórico físico é a próxima pergunta. No instante do DEBUG manual, a câmera estava no frame 350 e a última prévia física/visual preservada foi o frame 300. A auditoria MANUAL do frame 350 indicou energia não confirmada; não é o snapshot produtivo 288 que reconheceu NG.
+
+**D-097 — observabilidade, sem modificar decisão:** a autoridade física existente registra eventos escalares limitados (`frame_added`, `frame_replaced`, `frame_not_newer`, `history_reset` com motivo e `frame_token_unavailable`) e histórico de tokens. Expostos somente quando o consenso NG rápido está ativo por `auto_decision_trace.fast_ng_physical_sampling_diagnostics`. Nenhuma nova captura, trabalhador, agenda, limiar, voto ou transição foi introduzida.
+
+**Estado:** D-096 FAIL de produção; D-097 PENDENTE DE RETESTE FÍSICO. Retestar H1 NG 017/020, copiar DEBUG e comparar eventos de amostragem com o instante em que o frame H1 deixa de estar ativo. Somente após identificar se existe atraso de coleta, falta de ciclo ou limpeza por presença é aceitável alterar a cadência/fluxo. Exigir ainda H1 OK, H1 OFF, BLUE MASK_024 NG e rearme antes de liberar.
