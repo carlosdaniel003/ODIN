@@ -98,6 +98,7 @@ def tokens_corrobacao_fisica_h1(
     *,
     snapshot_token,
     required: int = 3,
+    diagnostics: dict | None = None,
 ) -> tuple[tuple[str, int], ...]:
     """Obtém IDs de frames RAW físicos que corroboram um NG H1 híbrido.
 
@@ -105,6 +106,29 @@ def tokens_corrobacao_fisica_h1(
     mesma leitura persiste nos frames físicos já coletados pelo proprietário
     de energia. Não executa CNN, tracking ou matching adicional.
     """
+    # Observabilidade D-096: registrar onde o quórum físico parou, sem
+    # calcular outro voto, modificar a seleção ou relaxar o gate temporal.
+    debug = diagnostics if isinstance(diagnostics, dict) else None
+    if debug is not None:
+        debug.clear()
+        debug.update({
+            "snapshot_token": snapshot_token,
+            "history_count": len(observations) if isinstance(observations, (list, tuple)) else 0,
+            "history_frame_tokens": tuple(
+                item.get("frame_token") if isinstance(item, dict) else None
+                for item in (observations or ())[-18:]
+            ) if isinstance(observations, (list, tuple)) else (),
+            "accepted_tokens": (),
+        })
+
+    def note(reason: str, *, frame_token=None, details=None):
+        if debug is not None:
+            debug["stop_reason"] = reason
+            if frame_token is not None:
+                debug["stop_frame_token"] = frame_token
+            if details is not None:
+                debug["stop_details"] = details
+
     if (
         not failed_mask_ids
         or not isinstance(snapshot_token, (list, tuple))
@@ -112,58 +136,75 @@ def tokens_corrobacao_fisica_h1(
         or snapshot_token[0] != "camera"
         or not isinstance(observations, (list, tuple))
     ):
+        note("invalid_snapshot_or_history")
         return ()
     try:
         snapshot_id = int(snapshot_token[1])
     except (TypeError, ValueError):
+        note("invalid_snapshot_frame_id")
         return ()
 
     expected = {}
     for row in analysis.get("mask_results") or ():
         if not isinstance(row, dict):
+            note("invalid_semantic_mask_row")
             return ()
         mid = str(row.get("mask_id") or "")
         state = str(row.get("expected") or "")
         if not mid or state not in ("on", "off") or mid in expected:
+            note("invalid_semantic_mask_states")
             return ()
         expected[mid] = state
     if not set(failed_mask_ids).issubset(expected):
+        note("failed_mask_not_in_semantic_expected")
         return ()
 
     seen = set()
     valid_tokens: list[tuple[str, int]] = []
     for item in reversed(observations):
         if not isinstance(item, dict):
+            note("invalid_history_entry")
             break
         token = item.get("frame_token")
         if not isinstance(token, (list, tuple)) or len(token) < 2 or token[0] != "camera":
+            note("invalid_history_frame_token", frame_token=token)
             break
         try:
             frame_id = int(token[1])
         except (TypeError, ValueError):
+            note("invalid_history_frame_id", frame_token=token)
             break
         if frame_id <= snapshot_id:
+            note("history_not_newer_than_semantic", frame_token=token)
             break
         # H1 dura aproximadamente 3 segundos; nunca herdar votos
         # indefinidamente de outra fase da placa.
         if frame_id - snapshot_id > 45:
+            note("history_exceeds_45_frame_window", frame_token=token,
+                 details={"frame_gap": frame_id - snapshot_id})
             break
         if frame_id in seen:
             continue
         seen.add(frame_id)
 
-        if (
-            item.get("powered_confirmed") is not True
-            or item.get("decision_allowed") is not True
-            or item.get("board_present") is not True
-            or item.get("spatial_alignment_ready") is not True
-            or item.get("same_mask_comparison") is not True
-        ):
+        failed_gates = tuple(
+            field for field in (
+                "powered_confirmed", "decision_allowed", "board_present",
+                "spatial_alignment_ready", "same_mask_comparison",
+            ) if item.get(field) is not True
+        )
+        if failed_gates:
+            note("physical_authority_gate_blocked", frame_token=token,
+                 details={"failed_gates": failed_gates})
             break
         states = item.get("mask_classifications")
         if not isinstance(states, dict):
+            note("physical_mask_classifications_missing", frame_token=token)
             break
-        if not all(states.get(mid) == "off" for mid in failed_mask_ids):
+        mismatched_failed = tuple(mid for mid in failed_mask_ids if states.get(mid) != "off")
+        if mismatched_failed:
+            note("failed_masks_not_off_in_physical", frame_token=token,
+                 details={"mask_ids": mismatched_failed})
             break
         # Nenhum outro ON esperado pode ficar apagado e nenhum OFF
         # esperado pode acender: um CHECK diferente não valida H1.
@@ -171,6 +212,9 @@ def tokens_corrobacao_fisica_h1(
             if mid in expected and str(state) != (
                 "off" if mid in failed_mask_ids else expected[mid]
             ):
+                note("other_mask_diverges_from_h1", frame_token=token,
+                     details={"mask_id": mid, "observed": str(state),
+                              "expected": "off" if mid in failed_mask_ids else expected[mid]})
                 break
         else:
             expected_on = [
@@ -180,7 +224,17 @@ def tokens_corrobacao_fisica_h1(
             if expected_on and all(states.get(mid) == "on" for mid in expected_on):
                 valid_tokens.append(("camera", frame_id))
                 if len(valid_tokens) >= required:
+                    note("quorum_reached", frame_token=token)
+                    if debug is not None:
+                        debug["accepted_tokens"] = tuple(valid_tokens)
                     return tuple(valid_tokens)
                 continue
+            missing_healthy = tuple(mid for mid in expected_on if states.get(mid) != "on")
+            note("healthy_on_masks_not_confirmed", frame_token=token,
+                 details={"mask_ids": missing_healthy})
         break
+    if debug is not None:
+        debug["accepted_tokens"] = tuple(valid_tokens)
+        if "stop_reason" not in debug:
+            note("history_exhausted_before_quorum")
     return tuple(valid_tokens)
