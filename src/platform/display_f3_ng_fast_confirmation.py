@@ -91,15 +91,15 @@ def assinatura_ng_h1_consenso(
     return tuple(sorted(failures))
 
 
-def contar_corrobacoes_fisicas_h1(
+def tokens_corrobacao_fisica_h1(
     analysis: dict,
     failed_mask_ids: tuple[str, ...],
     observations: list[dict] | tuple[dict, ...] | None,
     *,
     snapshot_token,
     required: int = 3,
-) -> int:
-    """Confirma NG de snapshot híbrido com leituras físicas de frames NOVOS.
+) -> tuple[tuple[str, int], ...]:
+    """Obtém IDs de frames RAW físicos que corroboram um NG H1 híbrido.
 
     A CNN decide a divergência no RAW congelado. Esta função só verifica se a
     mesma leitura persiste nos frames físicos já coletados pelo proprietário
@@ -112,26 +112,26 @@ def contar_corrobacoes_fisicas_h1(
         or snapshot_token[0] != "camera"
         or not isinstance(observations, (list, tuple))
     ):
-        return 0
+        return ()
     try:
         snapshot_id = int(snapshot_token[1])
     except (TypeError, ValueError):
-        return 0
+        return ()
 
     expected = {}
     for row in analysis.get("mask_results") or ():
         if not isinstance(row, dict):
-            return 0
+            return ()
         mid = str(row.get("mask_id") or "")
         state = str(row.get("expected") or "")
         if not mid or state not in ("on", "off") or mid in expected:
-            return 0
+            return ()
         expected[mid] = state
     if not set(failed_mask_ids).issubset(expected):
-        return 0
+        return ()
 
     seen = set()
-    consecutive = 0
+    valid_tokens: list[tuple[str, int]] = []
     for item in reversed(observations):
         if not isinstance(item, dict):
             break
@@ -178,9 +178,9 @@ def contar_corrobacoes_fisicas_h1(
                 if state == "on" and mid not in failed_mask_ids
             ]
             if expected_on and all(states.get(mid) == "on" for mid in expected_on):
-                consecutive += 1
-                if consecutive >= required:
-                    return required
+                valid_tokens.append(("camera", frame_id))
+                if len(valid_tokens) >= required:
+                    return tuple(valid_tokens)
                 continue
         break
-    return consecutive
+    return tuple(valid_tokens)
