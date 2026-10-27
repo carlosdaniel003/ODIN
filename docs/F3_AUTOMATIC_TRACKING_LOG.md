@@ -3305,3 +3305,11 @@ primeiro token rejeitado, motivos objetivos (idade
 divergência de segmento), e tokens aceitos. A informação
 aparece no `auto_decision_trace`. O cálculo e retorno
 dos votos permanecem idênticos. Reteste físico pendente.
+
+## 27/10/2026 — D-096 FAIL de campo, D-097 observabilidade da amostragem física
+
+No reteste com H1 parcial e tracking ON, a CNN + árbitro físico confirmaram NG pelos segmentos 017/020 (`camera/288`, 28/30). O estado permaneceu `validando NG 2/3`. A telemetria D-096 comprovou **apenas um registro físico posterior** no buffer, `camera/300`, aceito. `history_exhausted_before_quorum` significa falta de amostras disponíveis — não veto do terceiro frame. Na auditoria subsequente a câmera já estava no frame 350; a tela preservava evidência anterior. Não se deve usar o frame 350 manual para invalidar o NG produtivo do 288 nem ignorar a exigência de capturas independentes.
+
+Instrumentação D-097 no proprietário `F3PowerAuthority.apply`: eventos de append/substituição/atraso/reset/ausência de token, e contadores limitados por assinatura (projeto, CHECK). `auto_decision_trace.fast_ng_physical_sampling_diagnostics` os expõe. Dados são observacionais, sem alterar 3/3, CNN, energia, tracking, scheduler ou UI de produção.
+
+A próxima investigação deve distinguir se faltam chamadas físicas durante os ~3 s de H1, se o buffer está sendo limpo por presença não confirmada, ou se os frames disponíveis chegam após a fase H1. Não adicionar outro classificador ou reduzir quórum para 2. Reteste físico e isolamento de segurança pendentes.
