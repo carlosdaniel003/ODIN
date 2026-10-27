@@ -8158,3 +8158,15 @@ a falha atual.
 **Alteração aplicada neste reteste:** registro de diagnóstico apenas; nenhuma nova regra/worker/timer/trava foi inserida e nenhum critério NG foi afrouxado. **Correção D-098 pendente:** coletar evidência física same-mask de dois tokens RAW adicionais na janela H1, usando proprietário existente e sem visão pesada no Tk, sem fila histórica ilimitada nem reutilização do mesmo frame. Demonstrar os três votos em testes de integração antes de produção.
 
 **Próximo reteste:** H1 017/020 NG terminal 3/3 dentro dos ~3 segundos, H1 30/30 OK, H1 OFF, BLUE NG 024 e rearme. Continuar segregação/supervisão manual até a validação física.
+
+## 27/10/2026 — D-097 novo FAIL com histórico esparso; D-098 captura de confirmação implantada (RETESTE PENDENTE)
+
+**Teste real:** imagem `image(20261027-161846).png`, relatório `Texto colado(20261027-161922).txt`, projeto `CM_500_L`, CHECK H1. Duas falhas reais `MASK_017`/`MASK_020`; visor 28/30 e `validando NG 2/3`. **Resultado físico: FAIL**, não houve NG terminal.
+
+**DEBUG produtivo:** snapshot CNN `camera/707`, política `ng`, `h1_hibrido_divergencia_confirmada`, 28/30, IDs 017/020, confiança mínima 0,818214. Histórico D-097 físico `camera/120,218,304,721`: primeiros três tokens antecedem a foto semântica e não podem validá-la; só `camera/721` contou. `stop_reason=history_not_newer_than_semantic`; nenhum terceiro voto válido. Auditoria manual posterior do frame 721 informa energia não confirmada, evidenciando a necessidade de preservar proveniência e contexto do snapshot na coleta, não transferir o diagnóstico manual para a captura produtiva.
+
+**D-098 implantada para próximo reteste:** ao iniciar a inferência H1 rastreada, `F3PowerAuthority` abre uma janela de no máximo duas fotos RAW extras. O scheduler canônico copia essas fotos distintas durante o caminho `render_only` sem classificar no Tk: IDs maiores que o RAW semântico e até 24 frames após ele; distância mínima de dois frames; geometry LOCK + alinhamento, token estável durante cópia. No mesmo `F3HeavyVisionExecutor` da CNN, as fotos congeladas são classificadas pela fonte física same-mask já existente; `tokens_corrobacao_fisica_h1` verifica cada máscara esperada, as mesmas duas OFF NG e os gates físicos. Somente então o proprietário `F3PowerAuthority` acrescenta as observações ao histórico D-093 antes de o decisor processar o payload CNN. Não muda quórum 3/3, CNN, limites de frescor do tracking, F2, timers, workers ou saída XP. Novo `fast_ng_raw_burst_diagnostics` informa capturados/aceitos.
+
+**Validação automatizada:** compilação dos módulos F3 e 3 testes direcionados D-098 PASS no GitHub Actions. A suite integral F3 continua com falha independente pré-existente de geometria tracking OFF (`test_tracking_off_geometria_live_vem_somente_da_secao_mascaras`); isso não demonstra a aprovação física desta mudança.
+
+**Estado:** D-098 **PENDENTE DE RETESTE FÍSICO**. Critério positivo: H1 017/020 NG terminal 3/3 de capturas únicas e corretas; H1 30/30 OK; fase OFF não fecha NG; BLUE MASK_024 NG e rearme. Sem confirmação física, não liberar inspeção desassistida.
