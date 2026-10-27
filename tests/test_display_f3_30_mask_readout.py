@@ -184,6 +184,13 @@ class DisplayF3Readout30MasksTests(unittest.TestCase):
 
         window.display_readout_canvas = _Canvas()
         window._display_readout_context["failed_mask_ids"] = {"MASK_029"}
+        # Divergência da análise não pode pintar vermelho durante a fase OFF.
+        self.assertEqual(
+            window.DISPLAY_READOUT_OFF,
+            indicator_states()["display-readout-mask:MASK_029"],
+        )
+        window._display_readout_context["terminal_ng_evidence"] = True
+        window.display_readout_canvas = _Canvas()
         self.assertEqual(
             window.DISPLAY_READOUT_NG,
             indicator_states()["display-readout-mask:MASK_029"],
