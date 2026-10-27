@@ -2937,13 +2937,9 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         )
 
         apply(310, present=False)
-        # O owner atual ainda anexa amostra marcada com presenca falsa.
-        # D-097 observa o comportamento, sem alterar o historico original.
-        self.assertEqual(
-            [310],
-            [item["frame_token"][1]
-             for item in app._display_f3_recent_power_mask_frames],
-        )
+        # Presença não confirmada limpa o histórico e não fornece
+        # um token de energia para novos votos nesta iteração.
+        self.assertEqual([], app._display_f3_recent_power_mask_frames)
         diagnostic = app._display_f3_power_history_diagnostics
         self.assertEqual("history_reset", diagnostic["events"][-2]["action"])
         self.assertEqual(
