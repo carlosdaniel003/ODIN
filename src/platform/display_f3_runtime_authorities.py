@@ -494,8 +494,17 @@ class F3PowerAuthority:
                 or geometry.get("spatial_alignment_ready") is not True
             ):
                 return
+            # Confirma que o contador da câmera não mudou durante a cópia.
+            # Evita associar o token de um frame ao RAW de outro frame.
+            before = getattr(self.app, "camera_ultimo_frame_id", None)
+            if isinstance(before, int) and before != fid:
+                return
+            frozen = frame.copy()
+            after = getattr(self.app, "camera_ultimo_frame_id", None)
+            if isinstance(before, int) and isinstance(after, int) and after != before:
+                return
             samples.append({
-                "frame_id": fid, "frame": frame.copy(),
+                "frame_id": fid, "frame": frozen,
                 "geometry": deepcopy(geometry),
             })
             self._h1_condition.notify_all()
