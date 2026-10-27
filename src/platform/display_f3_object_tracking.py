@@ -8859,6 +8859,54 @@ def _submit_live_semantic_job(
     return future
 
 
+def _arm_first_green_visual_hold(
+    app,
+    *,
+    context: dict,
+    frame_token,
+    mask_ids,
+    capture_path: str,
+    pose_age_ms: float | None = None,
+) -> None:
+    """Um contrato visual para H1, BLUE intermitente e demais CHECKS.
+
+    O snapshot precisa estar pintado na câmera antes de chamar este método.
+    A captura e o julgamento não dependem do label nem do hold visual.
+    """
+    app._display_f3_first_green_visual_hold = {
+        "check_id": str(context.get("check_id") or ""),
+        "project_name": str(context.get("project_name") or ""),
+        "frame_token": deepcopy(frame_token),
+        "started_s": time.perf_counter(),
+    }
+    debug = {
+        "captured": True,
+        "frame_token": deepcopy(frame_token),
+        "check_id": str(context.get("check_id") or ""),
+        "mask_ids": tuple(mask_ids or ()),
+        "capture_path": capture_path,
+        "intermittent": bool(context.get("intermittent", False)),
+        "visual_hold_applied": True,
+    }
+    if pose_age_ms is not None:
+        debug["pose_age_ms"] = round(float(pose_age_ms), 2)
+    app._display_f3_first_green_snapshot_debug = debug
+
+    # D-090: marque o congelamento imediatamente. Se a fase ON do BLUE
+    # já terminou, o próximo repaint ficará bloqueado durante a análise;
+    # não dependa de outra piscada para o operador enxergar o status.
+    window = getattr(app, "display_f3_window", None)
+    legend = getattr(window, "preview_legend", None)
+    if legend is not None:
+        try:
+            legend.configure(
+                text="FOTO CONGELADA • ANALISANDO CHECK",
+                fg=window.PREVIEW_MUTED,
+            )
+        except Exception:
+            pass
+
+
 def _show_worker_green_snapshot_during_analysis(app, payload: dict, future) -> bool:
     """Exibe a MESMA captura do worker enquanto o CHECK é analisado.
 
@@ -8920,20 +8968,13 @@ def _show_worker_green_snapshot_during_analysis(app, payload: dict, future) -> b
 
     if not shown:
         return False
-    app._display_f3_first_green_visual_hold = {
-        "check_id": check_id,
-        "project_name": project_name,
-        "frame_token": deepcopy(payload.get("frame_token")),
-        "started_s": time.perf_counter(),
-    }
-    app._display_f3_first_green_snapshot_debug = {
-        "captured": True,
-        "capture_path": "tracking_worker_same_frame_green_to_semantic",
-        "frame_token": deepcopy(payload.get("frame_token")),
-        "check_id": check_id,
-        "mask_ids": tuple(trigger.get("mask_ids") or ()),
-        "visual_hold_applied": True,
-    }
+    _arm_first_green_visual_hold(
+        app,
+        context=context,
+        frame_token=payload.get("frame_token"),
+        mask_ids=trigger.get("mask_ids") or (),
+        capture_path="tracking_worker_same_frame_green_to_semantic",
+    )
     return True
 
 
@@ -9055,20 +9096,14 @@ def _submit_first_green_from_preview(app, raw_frame) -> bool:
     future = _submit_live_semantic_job(app, frozen_raw, payload)
     if future is None:
         return False
-    app._display_f3_first_green_visual_hold = {
-        "check_id": check_id,
-        "project_name": project_name,
-        "frame_token": frame_token,
-        "started_s": time.perf_counter(),
-    }
-    app._display_f3_first_green_snapshot_debug = {
-        "captured": True,
-        "frame_token": deepcopy(frame_token),
-        "check_id": check_id,
-        "mask_ids": mask_ids,
-        "pose_age_ms": round(pose_age_ms, 2),
-        "capture_path": "preview_green_direct_to_semantic",
-    }
+    _arm_first_green_visual_hold(
+        app,
+        context=context,
+        frame_token=frame_token,
+        mask_ids=mask_ids,
+        capture_path="preview_green_direct_to_semantic",
+        pose_age_ms=pose_age_ms,
+    )
     return True
 
 
