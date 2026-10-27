@@ -2771,6 +2771,57 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         self.assertIn("validando NG • 2/3", statuses[2])
         self.assertIn("NG confirmado • 3/3", statuses[3])
 
+    def test_h1_quorum_debug_explains_missing_third_frame_without_bypass(self):
+        from src.platform.display_f3_ng_fast_confirmation import (
+            tokens_corrobacao_fisica_h1,
+        )
+        case = self._case()
+        states = {row["mask_id"]: row["classified"] for row in case["mask_results"]}
+        def observed(frame_id, **changes):
+            return {
+                "frame_token": ("camera", frame_id),
+                "project_name": "DISPLAY A",
+                "check_id": "CHECK_001",
+                "board_present": True,
+                "powered_confirmed": True,
+                "decision_allowed": True,
+                "spatial_alignment_ready": True,
+                "same_mask_comparison": True,
+                "mask_classifications": states,
+                **changes,
+            }
+        diagnosed = {}
+        def check(history):
+            return tokens_corrobacao_fisica_h1(
+                case, ("MASK_017", "MASK_020"), history,
+                snapshot_token=("camera", 414), diagnostics=diagnosed,
+            )
+
+        # O frame mais novo bloqueado NÃO pode ser ignorado para saltar
+        # diretamente para três frames antigos válidos.
+        blocked = [observed(415), observed(416), observed(417, decision_allowed=False)]
+        self.assertEqual((), check(blocked))
+        self.assertEqual("physical_authority_gate_blocked", diagnosed["stop_reason"])
+        self.assertEqual(("camera", 417), diagnosed["stop_frame_token"])
+        self.assertIn("decision_allowed", diagnosed["stop_details"]["failed_gates"])
+        self.assertEqual(3, diagnosed["history_count"])
+
+        stale = [observed(415), observed(460)]
+        self.assertEqual((), check(stale))
+        self.assertEqual("history_exceeds_45_frame_window", diagnosed["stop_reason"])
+        self.assertEqual(46, diagnosed["stop_details"]["frame_gap"])
+
+        altered = dict(states)
+        altered["MASK_020"] = "on"
+        self.assertEqual((), check([observed(415), observed(416, mask_classifications=altered)]))
+        self.assertEqual("failed_masks_not_off_in_physical", diagnosed["stop_reason"])
+        self.assertEqual(("MASK_020",), diagnosed["stop_details"]["mask_ids"])
+
+        valid = [observed(415), observed(416), observed(417)]
+        self.assertEqual(3, len(check(valid)))
+        self.assertEqual("quorum_reached", diagnosed["stop_reason"])
+        self.assertEqual(3, len(diagnosed["accepted_tokens"]))
+
     def test_power_owner_retains_distinct_frames_for_h1_without_new_classifiers(self):
         from src.platform.display_f3_runtime_authorities import F3PowerAuthority
         from src.platform.display_f3_ng_fast_confirmation import (
