@@ -5979,3 +5979,30 @@ Preservar os critérios de 30/30 e de NG real.
 foto" e não congelar sem verde/LOCK. Suíte neural 113/113 PASS no CI.
 Validação física do congelamento e resolução da incerteza MASK_008
 continuam pendentes.
+
+## D-090 — Primeiro verde também no BLUE intermitente
+
+**Status:** Código e testes PASS; reteste físico pendente.
+
+A captura por primeiro verde não é exclusiva do H1. Quando o CHECK atual
+é BLUE intermitente, o rastreamento ON pode fotografar a primeira emissão
+positiva no RAW com geometria de mesmo frame; a CNN e as máscaras físicas
+analisam essa foto mesmo que a câmera continue piscando. A exceção
+temporal do snapshot exige identidade do projeto/CHECK e janela de
+frescor limitada.
+
+**Alteração D-090:** unificação do hold visual dos dois caminhos de
+captura (preview direta e tracking worker) em uma rotina, publicando
+imediatamente a legenda FOTO CONGELADA • ANALISANDO CHECK. O DEBUG
+registra se o CHECK é intermitente e a fonte da foto.
+
+**Segurança:** primeiro verde dispara foto, não aprovação/reprovação.
+Um frame de transição parcial não pode reprovar LEDs ainda acendendo.
+Para BLUE OK, fase ON completa no mesmo frame; para NG, três amostras
+independentes de fase ON com defeito certo permanecem necessárias.
+Não foi alterado o julgamento ON/OFF, a CNN, o worker, F2 ou tracking
+OFF. Não há promessa de decisão com só uma foto se as evidências são
+insuficientes. A confirmação temporal pode requerer pulsos adicionais.
+
+CI: suíte neural 115/115 PASS e testes isolados de BLUE e readout PASS.
+Reteste industrial BLUE OK, NG MASK_024 e rearme ainda necessário.
