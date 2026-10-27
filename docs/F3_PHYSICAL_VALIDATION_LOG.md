@@ -8061,3 +8061,32 @@ Cenários de reteste: H1 NG 017+020 deve encerrar terminal
 sem avançar BLUE, H1 OK deve aprovar 30/30, H1 desligado
 ou parcial não pode gerar NG, BLUE NG/024 sem regressão,
 retirada/rearme sem duplicar contadores.
+
+## 27/10/2026 — D-094 reteste FAIL (aquisição tardia); D-095 pendente
+
+**Relato físico:** screenshot `image(20261027-134825).png`
+e `Texto colado(20261027-134823).txt`. Operador observa
+H1 com duração ~3 s; máscaras só surgem no último segundo.
+No instante capturado, há emissão H1 na câmera, mas
+rastreamento procurando placa, sem máscara projetada.
+
+**DEBUG:** `camera_frame_id=629`, worker frame 625,
+`locked=false`, `reason=h1_fast_acquisition_unlocked`,
+`worker_elapsed_ms=202,06`, FPS ~14,73.
+Filtro escuro presente, detector luminoso global achou
+0 segmentos, `luminous_components_insufficient`.
+O snapshot semântico anterior 332 manteve
+`policy_decision=ng` para 017/020 e
+`fast_ng_distinct_frames=2` (1 semântica, 1 física).
+O diagnóstico manual capturou frame posterior com gate
+de energia OFF, não representa o snapshot 332.
+
+**Mudança D-095:** ao haver emissão suficiente nos
+núcleos físicos ON mas os blobs globais não serem
+aceitos, recuperar pose usando filtro candidato e
+landmarks locais, sem eliminar verificações
+de energia e pose. Prova final NG permanece D-094.
+
+**Status:** implementação feita; validação física
+pendente. Medir primeiro LOCK, primeira máscara verde,
+3/3 NG, teste H1 OK e OFF, BLUE 024 NG, reset.
