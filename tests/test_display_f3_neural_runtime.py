@@ -2803,6 +2803,18 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
             self.assertTrue(result["allow_auto"])
         history = board._display_f3_recent_power_mask_frames
         self.assertEqual(3, len(history))
+        # Handoff D-081 recarrega RAW antigo da foto; não pode substituir
+        # observações posteriores já coletadas pela autoridade de energia.
+        power.apply(
+            {}, {"board_present": True, "empty_confirmed": False},
+            {**energy, "frame_token": ("camera", 414)},
+            project_name="DISPLAY A",
+            context={"check_id": "CHECK_001", "check_name": "H1"},
+        )
+        history = board._display_f3_recent_power_mask_frames
+        self.assertEqual([415, 416, 417], [
+            int(item["frame_token"][1]) for item in history
+        ])
         self.assertEqual(
             3, contar_corrobacoes_fisicas_h1(
                 case, failed, history, snapshot_token=("camera", 414)
