@@ -3038,7 +3038,8 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         # Contrato temporal: apenas tokens de captura independentes contam.
         source = inspect.getsource(DisplayAutomaticCheckF3Mixin._process_display_auto_check)
         self.assertIn("assinatura_ng_h1_consenso(", source)
-        self.assertIn("if token_key not in seen:", source)
+        self.assertIn("if token_key is not None and token_key not in seen:", source)
+        self.assertIn("set(semantic_tokens) | set(physical_tokens)", source)
         self.assertIn("tokens_corrobacao_fisica_h1(", source)
         self.assertIn("semantic_frame_count", source)
         self.assertIn("DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES", source)
