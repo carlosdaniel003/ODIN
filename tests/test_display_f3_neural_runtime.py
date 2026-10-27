@@ -1170,6 +1170,121 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         self.assertFalse(overlay._f3_snapshot_preview_hold_active(app, now))
         self.assertIsNone(app._display_f3_first_green_visual_hold)
 
+    def test_blue_intermittent_green_freezes_same_snapshot_with_visible_status(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        raw = np.zeros((64, 100, 3), dtype=np.uint8)
+        raw[24:36, 40:52] = 250
+        geometry = {
+            "locked": True,
+            "check_id": "CHECK_002",
+            "masks": [{"id": "MASK_024", "type": "circle",
+                       "cx": 45, "cy": 30, "radius": 8}],
+        }
+        ledger = []
+        legend = SimpleNamespace(
+            configure=lambda **kw: ledger.append(("legend", kw))
+        )
+        window = SimpleNamespace(
+            update_camera_preview=lambda image, visual_rotation=0: (
+                ledger.append(("preview", image, visual_rotation)) or True
+            ),
+            preview_legend=legend,
+            PREVIEW_MUTED="#94A3B8",
+        )
+        app = SimpleNamespace(
+            display_f3_window=window,
+            _display_f3_tracking_live_geometry=None,
+            _display_auto_current_context=lambda: {
+                "project_name": "DISPLAY A", "check_id": "CHECK_002",
+                "check_name": "BLUE", "intermittent": True,
+            },
+            _obter_rotacao_visual_display_f3=lambda: 180,
+        )
+        payload = {
+            "raw_frame": raw,
+            "geometry": geometry,
+            "frame_token": ("camera", 801),
+            "snapshot_capture_trigger": {
+                "ready": True, "triggered": True,
+                "mask_ids": ("MASK_020",), "source": "tracked_same_frame_live_green",
+            },
+        }
+        future = SimpleNamespace(done=lambda: False)
+        self.assertTrue(
+            tracking._show_worker_green_snapshot_during_analysis(
+                app, payload, future
+            )
+        )
+        self.assertEqual("preview", ledger[0][0])
+        self.assertIs(raw, ledger[0][1])
+        self.assertEqual(180, ledger[0][2])
+        self.assertEqual("legend", ledger[1][0])
+        self.assertEqual(
+            "FOTO CONGELADA • ANALISANDO CHECK",
+            ledger[1][1]["text"],
+        )
+        self.assertEqual(
+            "CHECK_002", app._display_f3_first_green_visual_hold["check_id"]
+        )
+        self.assertTrue(
+            app._display_f3_first_green_snapshot_debug["intermittent"]
+        )
+        self.assertEqual(
+            ("MASK_020",),
+            app._display_f3_first_green_snapshot_debug["mask_ids"],
+        )
+
+    def test_blue_frozen_luminous_snapshot_survives_next_dark_phase_only_in_same_check(self):
+        import src.platform.display_f3_object_tracking as tracking
+
+        payload = {
+            "frame_token": ("camera", 100),
+            "age_ms": 1700.0,
+            "context": {"project_name": "DISPLAY A", "check_id": "CHECK_002"},
+            "analysis": {
+                "ready": True, "tracking_snapshot_explicit": True,
+                "project_name": "DISPLAY A", "check_id": "CHECK_002",
+                "mask_results": [
+                    {"mask_id": "MASK_020", "expected": "on",
+                     "classified": "on", "matched": True},
+                    {"mask_id": "MASK_024", "expected": "on",
+                     "classified": "off", "matched": False},
+                ],
+            },
+        }
+        blue = {
+            "project_name": "DISPLAY A", "check_id": "CHECK_002",
+            "check_name": "BLUE", "intermittent": True,
+        }
+        self.assertTrue(
+            tracking._intermittent_snapshot_acceptable(
+                payload, blue, ("camera", 155)
+            )
+        )
+        # A fase ON fotografada ainda deve passar ao julgamento do BLUE.
+        # Nem a fase OFF atual nem uma foto de outro CHECK ganham autoridade.
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                payload, {**blue, "check_id": "CHECK_004"}, ("camera", 155)
+            )
+        )
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                payload, {**blue, "intermittent": False}, ("camera", 155)
+            )
+        )
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                {**payload, "age_ms": 2600.0}, blue, ("camera", 155)
+            )
+        )
+        self.assertFalse(
+            tracking._intermittent_snapshot_acceptable(
+                payload, blue, ("camera", 225)
+            )
+        )
+
     def test_tracking_worker_first_green_paints_snapshot_before_visual_hold(self):
         import src.platform.display_f3_object_tracking as tracking
 
