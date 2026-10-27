@@ -3238,3 +3238,20 @@ segurança de BLUE, presença, H1 desligado ou tracking OFF.
 
 **CI neural:** 121/121 PASS, incluindo pipeline terminal e retorno
 de RAW antigo. **Reteste físico D-093 pendente.**
+
+## 27/10/2026 — D-094 / D-093 FAIL em 2/3 mesmo com fontes distintas
+
+O teste real CM_500_L/H1 mostra 28/30, MASK_017/MASK_020
+em OFF, sem contador NG. `auto_decision_trace` do snapshot
+frame 368: `fast_ng_consensus=true`, 2 tokens CNN e 1 token
+físico qualificado, mas `fast_ng_distinct_frames=2`.
+A D-093 já havia preservado evidência física, porém a soma
+por `max(2,1)` ignorava a identidade distinta dos frames.
+
+D-094 combina os tokens físicos e semânticos em um único
+conjunto para confirmação. Os 3 votos exigem 3 capturas RAW
+únicas e frescas do mesmo H1. A leitura física continua
+dependendo de mesma máscara, padrão e gate; CNN mantém
+consenso forte. Não usar 2/3 diretamente como NG.
+
+**Reteste industrial D-094:** aguarda execução.
