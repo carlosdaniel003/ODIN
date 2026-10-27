@@ -247,6 +247,46 @@ class DisplayF3Readout30MasksTests(unittest.TestCase):
             window._display_readout_mask_state("MASK_001", restored, True),
         )
 
+    def test_visor_usb_live_usa_mesma_luz_do_frame_e_nao_vermelho_stale(self):
+        # A divergência do CHECK USB continua no status, mas as barras
+        # do visor acompanham a luz física; o vermelho é terminal.
+        masks = _masks_30()
+        context = {
+            "readout_mask_ids": [m["id"] for m in masks],
+            "readout_slot_mask_ids": mapear_slots_sete_segmentos_display(masks),
+            "live_luminous_only": True,
+            "live_visual_sample_ready": True,
+            "live_visual_mask_ids": (),
+            "live_visual_classifications": {"MASK_001": "off"},
+            "effective_confirmed_failed_mask_ids": ("MASK_001", "MASK_024"),
+            "effective_classifications": {"MASK_001": "on"},
+            "expected_states": {"MASK_001": "off"},
+        }
+        window = _window(context)
+        live = window._display_readout_context
+        self.assertEqual(
+            "off", window._display_readout_mask_state("MASK_001", live, True)
+        )
+        self.assertEqual(
+            "neutral", window._display_readout_mask_state("MASK_024", live, True)
+        )
+        context["live_visual_mask_ids"] = ("MASK_001",)
+        context["live_visual_classifications"] = {"MASK_001": "on"}
+        window.set_display_readout_context(context)
+        live_on = window._display_readout_context
+        self.assertEqual(
+            "on", window._display_readout_mask_state("MASK_001", live_on, True)
+        )
+        # Após freeze legítimo, a mesma MASK_ID recebe vermelho terminal.
+        window._display_ng_evidence_frozen = True
+        self.assertEqual(
+            "ng", window._display_readout_mask_state("MASK_001", live_on, True)
+        )
+        window._display_ng_evidence_frozen = False
+        self.assertEqual(
+            "on", window._display_readout_mask_state("MASK_001", live_on, True)
+        )
+
     def test_congelamento_terminal_preserva_evidencia_vermelha(self):
         window = _window({
             "readout_mask_ids": [m["id"] for m in _masks_30()],
