@@ -6254,3 +6254,15 @@ H1 OK, placa OFF, BLUE NG/024 e rearme físico.
 **Segurança:** o token da câmera é validado antes e depois da cópia; não há reprocessamento de frame duplicado, ampliação ilimitada do buffer, segundo worker, scheduler, classificador nem relaxamento de OK/NG. Qualquer histórico anterior à foto CNN continua inelegível. O resultado H1 OK permanece 30/30. Telemetria da janela deve explicar futuras falhas do quórum antes de novas mudanças.
 
 **Validação:** testes direcionados D-098 PASS no CI; teste físico NG 017/020, H1 OK/OFF, BLUE NG 024 e rearme obrigatório antes de liberar a rotina.
+
+## D-099 — Experimento H1 NG de captura única e aviso visual de avanço na câmera
+
+**Data:** 27/10/2026. **Estado:** implementação e regressões direcionadas concluídas; **validação física pendente**.
+
+A pedido explícito do operador, o quórum do **NG rápido do H1 com prova híbrida forte** muda temporariamente de 3 para **1**: `DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES = 1`. A elegibilidade continua estrita pela assinatura `assinatura_ng_h1_consenso`: snapshot de tracking explícito, placa energizada confirmada, maioria dos ON realmente ON, zero máscaras incertas, divergência somente esperada ON/real OFF, `effective_confirmed_failed_mask_ids` idêntico aos OFF, cada falha com consenso CNN + físico same-mask de mesma máscara, nenhum OFF inesperado aceso. A proteção global de presença, energia, alinhamento e estado atual permanece em vigor. Se qualquer exigência falhar, o caminho normal NG de **6 análises** não foi alterado. O modo de três fotos permanece coberto pela suíte de regressão com override do limite. Não é autorização para produção sem supervisão: a captura única aumenta risco de falso NG e deve ser comparada com H1 OK e momentos de transição/sem energia.
+
+No quórum 1, a janela extra de duas capturas D-098 fica inativa para evitar cópias/esperas desnecessárias. Com retorno da configuração para 3, a janela D-098 volta a operar sem código concorrente.
+
+**Aviso na câmera direita:** a janela F3 passa a exibir tarja verde `H1 APROVADO • PRÓXIMO: BLUE` (com os nomes reais) quando e **somente quando** `DisplayCheckSequenceRuntime.EVENT_ADVANCED` for emitido pela entrada oficial `registrar_resultado_check_display_f3`. A tarja vive sobre o Canvas da câmera por 1,7 s e é escondida/cancelada em mudança de resultado terminal e ocultação da janela. Nenhuma alteração na sequência, na captura, no motor de decisão ou nos outros CHECKS. Não cria scheduler periódico nem segundo proprietário visual.
+
+**Critério de validação física:** H1 NG real MASK_017/020 fecha 1/1; H1 30/30 continua OK; H1 OFF/sem LOCK não fecha NG; BLUE NG MASK_024 mantém debounce próprio; avanço H1→BLUE e BLUE→AUX produz tarja visual transitória; resultado terminal e rearme não mantêm tarja antiga.
