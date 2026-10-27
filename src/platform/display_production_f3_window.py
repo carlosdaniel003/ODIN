@@ -67,6 +67,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self._display_last_overlay_context = None
         self._display_frozen_overlay_context = None
         self._display_frozen_ng_visual_debug = {}
+        self._check_advance_hide_after_id = None
         self._check_snapshot: dict = {
             "checks": [],
             "current_check": None,
@@ -82,6 +83,21 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self.preview_legend.configure(
             text="CHECK ATUAL • MONITORAMENTO CONTÍNUO",
             fg=self.PREVIEW_MUTED,
+        )
+
+        # Aviso visual sobre a própria câmera da direita. Como é um widget
+        # posicionado sobre o Canvas, não é apagado pelo repaint da imagem.
+        self.check_advance_banner = tk.Label(
+            self.preview_canvas,
+            text="",
+            font=("DejaVu Sans", 14, "bold"),
+            bg="#166534",
+            fg="#FFFFFF",
+            relief="solid",
+            bd=2,
+            padx=18,
+            pady=11,
+            justify="center",
         )
 
         # Visor lógico: 28 barras A..G e, quando configurados, FM e decimal.
@@ -245,6 +261,52 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         self.container.unbind("<F1>")
 
         self.set_check_sequence(self._check_snapshot)
+
+    @staticmethod
+    def check_advance_message(completed_name: str, next_name: str) -> str:
+        """Texto do aviso apenas quando a máquina avançou efetivamente."""
+        completed = str(completed_name or "CHECK").strip().upper()
+        upcoming = str(next_name or "PRÓXIMO CHECK").strip().upper()
+        return f"{completed} APROVADO  •  PRÓXIMO: {upcoming}"
+
+    def clear_check_advance_notice(self) -> None:
+        pending = getattr(self, "_check_advance_hide_after_id", None)
+        self._check_advance_hide_after_id = None
+        if pending is not None:
+            try:
+                self.root.after_cancel(pending)
+            except (tk.TclError, ValueError):
+                pass
+        banner = getattr(self, "check_advance_banner", None)
+        if banner is not None:
+            banner.place_forget()
+
+    def show_check_advance_notice(
+        self, completed_name: str, next_name: str,
+    ) -> None:
+        """Notificação de avanço real no lado direito, sem mudar o CHECK."""
+        if (
+            bool(getattr(self, "_display_ng_evidence_frozen", False))
+            or bool(getattr(self, "_display_terminal_waiting_removal", False))
+        ):
+            return
+        self.clear_check_advance_notice()
+        self.check_advance_banner.configure(
+            text=self.check_advance_message(completed_name, next_name)
+        )
+        self.check_advance_banner.place(
+            relx=0.5, rely=0.07, anchor="n",
+            relwidth=0.94,
+        )
+        self.check_advance_banner.lift()
+        # Só um desligamento eventual, não um segundo loop/scheduler.
+        self._check_advance_hide_after_id = self.root.after(
+            1700, self.clear_check_advance_notice,
+        )
+
+    def hide(self) -> None:
+        self.clear_check_advance_notice()
+        super().hide()
 
     def _build_display_readout(self) -> None:
         """Cria o visor físico: quatro dígitos e indicadores opcionais."""
@@ -1391,6 +1453,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
             self._set_segregation_action_enabled(True)
 
     def show_waiting_new_plate(self, snapshot: dict | None = None) -> None:
+        self.clear_check_advance_notice()
         """Estado exibido após EMPTY: evidência liberada e próximo ciclo armado."""
         self._display_terminal_waiting_removal = False
         self._display_waiting_new_board_ui = True
@@ -1670,6 +1733,7 @@ class DisplayProductionF3Window(DesktopOperationWindow):
         snapshot: dict,
         discarded: bool = False,
     ) -> None:
+        self.clear_check_advance_notice()
         self._display_terminal_waiting_removal = True
         self._display_waiting_new_board_ui = False
         self._display_terminal_result_kind = (
