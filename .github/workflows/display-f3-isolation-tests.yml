@@ -110,6 +110,17 @@ jobs:
             tests/test_display_f3_geometry_adjustments.py \
             tests/test_display_f3_zoom.py
 
+      - name: Run D-099 single-frame H1 and right-camera banner tests
+        run: |
+          python -m unittest \
+            tests.test_display_f3_neural_runtime.DisplayF3H1ConsensusNGTests.test_d099_h1_ng_forte_finaliza_em_um_snapshot_sem_historico_fisico \
+            tests.test_display_f3_neural_runtime.DisplayF3H1ConsensusNGTests.test_d099_h1_sem_consenso_forte_nao_libera_ng_em_um_frame \
+            tests.test_display_f3_neural_runtime.DisplayF3H1ConsensusNGTests.test_h1_fast_has_one_frame_trial_but_preserves_classic_six_frame_gate \
+            tests.test_display_f3_check_sequence_runtime.DisplayF3CheckSequenceRuntimeTests.test_avanco_real_emite_banner_sobre_camera_direita \
+            tests.test_display_f3_check_sequence_runtime.DisplayF3CheckSequenceRuntimeTests.test_banner_sobre_camera_tem_ciclo_de_vida_sem_timer_periodico \
+            tests.test_display_f3_check_sequence_runtime.DisplayF3CheckSequenceRuntimeTests.test_banner_nao_sobrepoe_estado_terminal_ng \
+            -v
+
       - name: Run D-098 H1 post-snapshot corroboration tests
         run: |
           python -m unittest \
