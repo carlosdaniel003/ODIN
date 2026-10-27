@@ -17,7 +17,7 @@ from src.platform.display_mask_geometry import (
 )
 from src.platform.display_f3_ng_fast_confirmation import (
     assinatura_ng_h1_consenso,
-    contar_corrobacoes_fisicas_h1,
+    tokens_corrobacao_fisica_h1,
 )
 from src.platform.display_project_repository import (
     DISPLAY_CHECK_STATE_OFF,
@@ -1863,9 +1863,17 @@ class DisplayAutomaticCheckF3Mixin:
             self._display_auto_h1_fast_ng_signature = fast_ng_key
             self._display_auto_h1_fast_ng_frame_tokens = []
         if fast_ng_key is not None:
-            token_key = repr(frame_token)
+            # Somente tokens reais da câmera; serializações/replays do mesmo
+            # RAW devem manter a MESMA identidade entre CNN e energia.
+            token_key = (
+                ("camera", int(frame_token[1]))
+                if isinstance(frame_token, (tuple, list))
+                and len(frame_token) >= 2
+                and frame_token[0] == "camera"
+                else None
+            )
             seen = self._display_auto_h1_fast_ng_frame_tokens
-            if token_key not in seen:
+            if token_key is not None and token_key not in seen:
                 seen.append(token_key)
 
         if approved == self._display_auto_last_decision:
@@ -1896,14 +1904,16 @@ class DisplayAutomaticCheckF3Mixin:
             )
         )
         fast_ng_active = bool(fast_ng_key is not None)
-        physical_corrob_frames = 0
+        physical_tokens = ()
+        semantic_tokens = tuple(
+            getattr(self, "_display_auto_h1_fast_ng_frame_tokens", ()) or ()
+        )
         if fast_ng_active:
             required = min(required, self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES)
-            # O F3 fotografa primeiro verde UMA vez e pode consumir quase
-            # toda a janela H1 no worker. O proprietário da energia já
-            # observou outros RAWs físicos enquanto a CNN era executada.
-            # Só aceitamos 3 confirmações same-mask em tokens posteriores
-            # que mantenham o EXATO padrão ON/OFF do H1 congelado.
+            # Um único quórum de 3 capturas RAW distintas aceita CNN híbrida
+            # e/ou corroboração física same-mask, sem contar um frame duas vezes.
+            # D-093 usava max(semânticas, físicas), desperdiçando o caso
+            # industrial observado de 2 CNNs + 1 física válida.
             history = getattr(self, "_display_f3_recent_power_mask_frames", ())
             signature_history = [
                 item for item in (history or ())
@@ -1913,21 +1923,33 @@ class DisplayAutomaticCheckF3Mixin:
                 and str(item.get("check_id") or "")
                     == str(context.get("check_id") or "")
             ]
-            physical_corrob_frames = contar_corrobacoes_fisicas_h1(
+            physical_tokens = tokens_corrobacao_fisica_h1(
                 analysis,
                 fast_ng_ids,
                 signature_history,
                 snapshot_token=frame_token,
                 required=self.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES,
             )
-        semantic_frame_count = len(
-            getattr(self, "_display_auto_h1_fast_ng_frame_tokens", ())
-        )
-        stable_count = (
-            max(semantic_frame_count, physical_corrob_frames)
-            if fast_ng_active
-            else self._display_auto_stable_frames
-        )
+            # H1 dura ~3 s; votos semânticos antigos não podem atravessar
+            # outra apresentação de H1 no mesmo CHECK lógico.
+            if isinstance(frame_token, (tuple, list)) and len(frame_token) >= 2 and frame_token[0] == "camera":
+                newest_id = int(frame_token[1])
+                semantic_tokens = tuple(
+                    key for key in semantic_tokens
+                    if isinstance(key, tuple) and len(key) == 2
+                    and key[0] == "camera"
+                    and 0 <= newest_id - int(key[1]) <= 45
+                )
+                self._display_auto_h1_fast_ng_frame_tokens = list(semantic_tokens)
+            else:
+                semantic_tokens = ()
+            combined_tokens = set(semantic_tokens) | set(physical_tokens)
+            stable_count = min(required, len(combined_tokens))
+        else:
+            combined_tokens = set()
+            stable_count = self._display_auto_stable_frames
+        semantic_frame_count = len(semantic_tokens)
+        physical_corrob_frames = len(physical_tokens)
         trace = self._display_auto_last_decision_trace
         if isinstance(trace, dict):
             trace["fast_ng_consensus"] = bool(fast_ng_active)
@@ -1939,8 +1961,14 @@ class DisplayAutomaticCheckF3Mixin:
                 semantic_frame_count if fast_ng_active else 0
             )
             trace["fast_ng_physical_frames"] = physical_corrob_frames
+            trace["fast_ng_combined_frame_tokens"] = tuple(
+                sorted(combined_tokens, key=lambda token: token[1])
+            ) if fast_ng_active else ()
             trace["fast_ng_confirmation_source"] = (
-                "canonical_power_same_mask_history"
+                "hybrid_semantic_plus_physical_frames"
+                if fast_ng_active and stable_count >= required
+                and semantic_frame_count < required and physical_corrob_frames > 0
+                else "canonical_power_same_mask_history"
                 if fast_ng_active and physical_corrob_frames >= required
                 else "distinct_semantic_snapshots"
                 if fast_ng_active and semantic_frame_count >= required
@@ -1991,11 +2019,13 @@ class DisplayAutomaticCheckF3Mixin:
                 "fast_h1_ng_mask_ids": tuple(fast_ng_ids),
                 "fast_h1_ng_physical_frames": int(physical_corrob_frames),
                 "fast_h1_ng_confirmation_source": (
-                    "canonical_power_same_mask_history"
-                    if fast_ng_active and physical_corrob_frames >= required
-                    else "distinct_semantic_snapshots"
-                    if fast_ng_active else "classic_debounce"
+                    trace.get("fast_ng_confirmation_source")
+                    if fast_ng_active and isinstance(trace, dict)
+                    else "classic_debounce"
                 ),
+                "fast_h1_ng_distinct_frame_tokens": tuple(
+                    sorted(combined_tokens, key=lambda token: token[1])
+                ) if fast_ng_active else (),
                 "transition_frames": int(self._display_auto_transition_frames),
                 "physical_stable_key": getattr(
                     self,
