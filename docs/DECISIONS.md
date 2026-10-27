@@ -6242,3 +6242,15 @@ localizado. Negativa com display sem luz. Execução no
 dispositivo físico pendente: capturar início de H1, verificar
 primeira máscara verde antes de fim do H1, H1 NG 017/020,
 H1 OK, placa OFF, BLUE NG/024 e rearme físico.
+
+## D-098 — Captura física pós-snapshot do H1 sem segunda autoridade
+
+**Estado:** implementado e testado em CI direcionado; aprovação industrial **pendente** (27/10/2026).
+
+**Motivo:** com H1 limitado a cerca de três segundos, a CNN marcava falhas reais 017/020, porém o scheduler `render_only` não alimentava a autoridade física enquanto o worker estava ocupado. O DEBUG comprovou um único token posterior ao frame semântico, insuficiente para o quórum de 3/3.
+
+**Decisão:** `F3PowerAuthority` torna-se também o proprietário de uma janela curta de aquisição RAW ligada ao snapshot que disparou a CNN. `F3RuntimeCoordinator` pode copiar, **sem classificação no Tk**, no máximo duas fotos RAW posteriores (IDs válidos, intervalo mínimo de dois frames, dentro da janela de 24 frames e com geometria rastreada/alinhada). A mesma tarefa semântica no executor HIGH verifica cada captura usando a `same_physical_mask_on_off_learning` existente. A aceitação requer o **mesmo conjunto de falhas OFF**, todos os outros segmentos conformes, energia positiva, máscara física da mesma origem, fonte espacial rastreada, assinatura de projeto/CHECK atual e ausência de rearme. Somente a autoridade física acrescenta tokens validados ao histórico; o árbitro semântico já existente continua exigindo 3 capturas independentes. Capturas sem comprovação simplesmente não contam.
+
+**Segurança:** o token da câmera é validado antes e depois da cópia; não há reprocessamento de frame duplicado, ampliação ilimitada do buffer, segundo worker, scheduler, classificador nem relaxamento de OK/NG. Qualquer histórico anterior à foto CNN continua inelegível. O resultado H1 OK permanece 30/30. Telemetria da janela deve explicar futuras falhas do quórum antes de novas mudanças.
+
+**Validação:** testes direcionados D-098 PASS no CI; teste físico NG 017/020, H1 OK/OFF, BLUE NG 024 e rearme obrigatório antes de liberar a rotina.
