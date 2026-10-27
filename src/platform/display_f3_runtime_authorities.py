@@ -461,7 +461,10 @@ class F3PowerAuthority:
         """Janela de até dois RAW extras durante uma inferência semântica H1."""
         sid = _camera_frame_id_from_token(snapshot_token)
         valid = bool(
-            isinstance(context, dict) and context.get("current_index") == 0
+            # D-099: uma foto já basta para o H1 híbrido elegível.
+            # Não copiar RAW ou esperar duas fotos adicionais nesse teste.
+            int(getattr(self.app, "DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES", 3)) > 1
+            and isinstance(context, dict) and context.get("current_index") == 0
             and not context.get("intermittent") and sid is not None
             and not getattr(self.app, "_display_f3_waiting_empty_rearm", False)
             and not getattr(self.app, "_display_f3_waiting_new_board_after_empty", False)
