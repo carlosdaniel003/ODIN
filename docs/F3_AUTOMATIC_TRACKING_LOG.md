@@ -3329,3 +3329,11 @@ O reteste `image(20261027-161846).png` / `Texto colado(20261027-161922).txt` con
 Corrigida a lacuna temporal sem diminuir 3/3: `F3PowerAuthority` mantém janela estritamente limitada de 2 fotografias RAW físicas posteriores ao snapshot H1, capturadas por `F3RuntimeCoordinator` quando o executor está ocupado (só cópia, sem imagem processada no Tk), identidade da câmera checada antes/depois, alinhamento/LOCK obrigatórios. O mesmo job HIGH que executa a CNN verifica as capturas com `_generic_live_mask_energy` da fonte física canônica e filtra os votos pela função `tokens_corrobacao_fisica_h1`. Ingestão ocorre exclusivamente na mesma autoridade física antes da decisão semântica, com idempotência por token e proteção de CHECK/rearme. Não cria worker, timer, nova regra de segmentação ou nova fonte de decisão.
 
 `fast_ng_raw_burst_diagnostics` expõe captured/accepted tokens e estado para a próxima coleta de DEBUG. Testes direcionados D-098 e py_compile passaram no CI; cobertura total da suíte permanece bloqueada por falha tracking OFF em módulo fora do escopo. **Teste industrial D-098 pendente**, incluindo H1 NG/OK, H1 OFF, BLUE NG 024 e rearme.
+
+## 27/10/2026 — D-099 teste explícito de H1 NG com uma captura; banner de avanço
+
+Sem novo teste físico da D-098, o operador optou por **experimento 1/1** para o caso H1 NG de consenso híbrido forte. A alteração é exclusivamente no limiar `DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES` da via elegível de H1; não flexibiliza consenso CNN/mesma máscara, energia, LOCK, geometria, failed IDs, nem a regra normal de seis análises de NG. O pacote de capturas adicionais D-098 não é montado enquanto o limiar for 1. Mantém os testes D-098 para a configuração histórica de 3/3.
+
+A ausência de indicação visual na própria câmera após sucesso foi atendida no evento `check_advanced`: tarja verde `CHECK APROVADO • PRÓXIMO: ...` no canvas direito, 1,7 s e teardown com hide/resultado terminal; eventos bloqueados não geram tarja.
+
+**Estado:** CI direcionado D-099 passou; validação física e avaliação de falsos NG pendentes.
