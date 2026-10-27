@@ -89,3 +89,98 @@ def assinatura_ng_h1_consenso(
     if confirmed != set(failures):
         return ()
     return tuple(sorted(failures))
+
+
+def contar_corroborações_fisicas_h1(
+    analysis: dict,
+    failed_mask_ids: tuple[str, ...],
+    observations: list[dict] | tuple[dict, ...] | None,
+    *,
+    snapshot_token,
+    required: int = 3,
+) -> int:
+    """Confirma NG de snapshot híbrido com leituras físicas de frames NOVOS.
+
+    A CNN decide a divergência no RAW congelado. Esta função só verifica se a
+    mesma leitura persiste nos frames físicos já coletados pelo proprietário
+    de energia. Não executa CNN, tracking ou matching adicional.
+    """
+    if (
+        not failed_mask_ids
+        or not isinstance(snapshot_token, (list, tuple))
+        or len(snapshot_token) < 2
+        or snapshot_token[0] != "camera"
+        or not isinstance(observations, (list, tuple))
+    ):
+        return 0
+    try:
+        snapshot_id = int(snapshot_token[1])
+    except (TypeError, ValueError):
+        return 0
+
+    expected = {}
+    for row in analysis.get("mask_results") or ():
+        if not isinstance(row, dict):
+            return 0
+        mid = str(row.get("mask_id") or "")
+        state = str(row.get("expected") or "")
+        if not mid or state not in ("on", "off") or mid in expected:
+            return 0
+        expected[mid] = state
+    if not set(failed_mask_ids).issubset(expected):
+        return 0
+
+    seen = set()
+    consecutive = 0
+    for item in reversed(observations):
+        if not isinstance(item, dict):
+            break
+        token = item.get("frame_token")
+        if not isinstance(token, (list, tuple)) or len(token) < 2 or token[0] != "camera":
+            break
+        try:
+            frame_id = int(token[1])
+        except (TypeError, ValueError):
+            break
+        if frame_id <= snapshot_id:
+            break
+        # H1 dura aproximadamente 3 segundos; nunca herdar votos
+        # indefinidamente de outra fase da placa.
+        if frame_id - snapshot_id > 45:
+            break
+        if frame_id in seen:
+            continue
+        seen.add(frame_id)
+
+        if (
+            item.get("powered_confirmed") is not True
+            or item.get("decision_allowed") is not True
+            or item.get("board_present") is not True
+            or item.get("spatial_alignment_ready") is not True
+            or item.get("same_mask_comparison") is not True
+        ):
+            break
+        states = item.get("mask_classifications")
+        if not isinstance(states, dict):
+            break
+        if not all(states.get(mid) == "off" for mid in failed_mask_ids):
+            break
+        # Nenhum outro ON esperado pode ficar apagado e nenhum OFF
+        # esperado pode acender: um CHECK diferente não valida H1.
+        for mid, state in states.items():
+            if mid in expected and str(state) != (
+                "off" if mid in failed_mask_ids else expected[mid]
+            ):
+                break
+        else:
+            expected_on = [
+                mid for mid, state in expected.items()
+                if state == "on" and mid not in failed_mask_ids
+            ]
+            if expected_on and all(states.get(mid) == "on" for mid in expected_on):
+                consecutive += 1
+                if consecutive >= required:
+                    return required
+                continue
+        break
+    return consecutive
