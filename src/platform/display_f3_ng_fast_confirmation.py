@@ -91,7 +91,7 @@ def assinatura_ng_h1_consenso(
     return tuple(sorted(failures))
 
 
-def contar_corroborações_fisicas_h1(
+def contar_corrobacoes_fisicas_h1(
     analysis: dict,
     failed_mask_ids: tuple[str, ...],
     observations: list[dict] | tuple[dict, ...] | None,
