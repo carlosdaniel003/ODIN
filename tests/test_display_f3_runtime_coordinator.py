@@ -299,6 +299,32 @@ class DisplayF3RuntimeCoordinatorTests(unittest.TestCase):
             coordinator.stats()["heavy_executor"]["active_jobs"],
         )
 
+    def test_busy_semantic_render_only_collects_raw_without_second_heavy_job(self):
+        app, coordinator = self._install()
+        samples = []
+        app._display_f3_object_tracking_enabled = True
+        app._display_f3_semantic_future = type(
+            "_PendingFuture", (), {"done": lambda self: False}
+        )()
+        power = type(
+            "_Recorder", (), {
+                "capture_h1_confirmation_raw": lambda self, frame, token, geometry:
+                    samples.append((frame, token, geometry)),
+            }
+        )()
+        app._display_f3_runtime_authorities = type(
+            "_Owner", (), {"power": power}
+        )()
+        app._display_f3_tracking_live_geometry = {"locked": True}
+        app._display_f3_heavy_executor = _HeavyExecutor(active=1)
+
+        app.root.run_next()
+        self.assertEqual(0, app.full_cycles)
+        self.assertEqual(1, app.renders)
+        self.assertEqual(1, len(samples))
+        self.assertEqual(("camera", 1), samples[0][1])
+        self.assertEqual(1, coordinator.stats()["render_only_count"])
+
     def test_primeiro_lock_high_pode_ser_enfileirado_mesmo_com_executor_ocupado(self):
         app, coordinator = self._install()
         app._display_f3_object_tracking_enabled = True
