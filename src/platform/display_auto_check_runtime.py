@@ -1965,13 +1965,13 @@ class DisplayAutomaticCheckF3Mixin:
                 sorted(combined_tokens, key=lambda token: token[1])
             ) if fast_ng_active else ()
             trace["fast_ng_confirmation_source"] = (
-                "hybrid_semantic_plus_physical_frames"
-                if fast_ng_active and stable_count >= required
-                and semantic_frame_count < required and physical_corrob_frames > 0
-                else "canonical_power_same_mask_history"
+                "canonical_power_same_mask_history"
                 if fast_ng_active and physical_corrob_frames >= required
                 else "distinct_semantic_snapshots"
                 if fast_ng_active and semantic_frame_count >= required
+                else "hybrid_semantic_plus_physical_frames"
+                if fast_ng_active and stable_count >= required
+                and semantic_frame_count < required and physical_corrob_frames > 0
                 else "pending"
             )
         matched = int(analysis.get("matched_mask_count", 0) or 0)
