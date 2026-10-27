@@ -6037,3 +6037,47 @@ congelamento visual temporário do primeiro verde.
 **Validação:** novos testes de USB fase ON→OFF, mascaramento de vermelho
 não terminal, vermelho terminal NG e descarte de fallback stale.
 Integração física pendente no JIG.
+
+## D-092 — H1 NG por falha de segmento com consenso forte usa 3 frames distintos
+
+**Estado:** código e suíte neural PASS (119/119); reteste físico pendente.
+
+**Evidência (27/10/2026):** CM_500_L, H1 CHECK_001, placa com MASK_017
+e MASK_020 apagados (esperados ON). Screenshot mostra 28/30 conformes,
+5 LEDs ON / 25 OFF, status de NG 3/6 sem fim do ciclo. No DEBUG do
+runtime (não confundir com reavaliação manual da outra foto):
+`operational_state.power_gate_blocked=false`,
+`power_evidence.powered_confirmed=true`, 5 votos de energia com mínimo 4.
+A autoridade híbrida marcou 28/30, NG confirmado semanticamente em
+MASK_017 e MASK_020, sem INCERTO. Para ambas, CNN e físico concordaram
+em OFF. A policy devolveu `ng/h1_hibrido_divergencia_confirmada`;
+o bloqueio restante era o debounce fixo de 6 capturas num H1 ~3s.
+
+**Decisão de segurança:** encurtar para 3 fotos com `frame_token`
+DISTINTO somente o NG H1 de tracking ON, foto RAW rastreada explícita,
+energia positiva por frame e H1 com MAIORIA das máscaras esperadas ON
+realmente classificadas ON. Toda máscara anormal deve ter
+`semantic_certain=true`, expected ON/classified OFF, evidência local
+same-mask ON/OFF e `hybrid_resolution=neural_physical_consensus`,
+CNN certa OFF e físico local autoritativo OFF; conjunto de falhas igual
+ao conjunto confirmado do mesmo analyzer, nenhuma outra máscara
+INCERTA. O sistema exige o mesmo conjunto de falhas nas 3 fotos,
+não conta duas vezes o mesmo token e zera a prova rápida ao perder
+certeza, trocar CHECK ou voltar a SEARCHING.
+
+Na falta de QUALQUER requisito, continua o debounce NG de 6 leituras.
+BLUE intermitente preserva 3 fases ON antes da decisão e suas demais
+proteções. OK continua exigindo 30/30 sem nenhum atalho. Todos os gates
+de presença, energia, alinhamento, captura, terminal/rearme, e o
+julgamento da CNN/autoridade física permanecem inalterados.
+Esta correção não dispensa a validação em dispositivo físico.
+
+**UI:** antes do fechamento, exibir `validando NG 1/3` etc., e
+`NG confirmado` apenas no frame que satisfaz a prova temporal.
+Registrar no debug a prova rápida e as MASK_ID confirmadas.
+
+**Validação automática:** 119 testes neurais PASS; teste end-to-end
+do runtime demonstra H1 101,101,102,103 ⇒ conta 1,1,2,3 e registra
+NG uma única vez; testes de exclusão abrangem BLUE, tracking OFF,
+H1 parcialmente aceso, divergência ambígua e mesma-máscara sem consenso.
+Pendente reteste com H1 OK, H1 NG/017+020, H1 OFF e BLUE NG/024.
