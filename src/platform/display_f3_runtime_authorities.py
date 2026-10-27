@@ -714,10 +714,26 @@ class F3PowerAuthority:
             history = list(
                 getattr(self.app, "_display_f3_recent_power_mask_frames", []) or []
             )
-            if history and history[-1].get("frame_token") == observation["frame_token"]:
-                history[-1] = observation
-            else:
+            # D-081: durante o handoff semântico o gate reavalia o RAW
+            # congelado, cujo token pode ser MAIS ANTIGO que o latest-frame
+            # observado enquanto a CNN trabalhava. Essa reavaliação não pode
+            # voltar o relógio da confirmação temporal nem descartar amostras
+            # mais novas do mesmo CHECK.
+            last_token = history[-1].get("frame_token") if history else None
+            try:
+                frame_id = int(observation["frame_token"][1])
+                last_id = (
+                    int(last_token[1])
+                    if isinstance(last_token, (list, tuple))
+                    and len(last_token) >= 2 and last_token[0] == "camera"
+                    else -1
+                )
+            except (TypeError, ValueError):
+                frame_id, last_id = -1, -1
+            if frame_id > last_id:
                 history.append(observation)
+            elif frame_id == last_id and history:
+                history[-1] = observation
             self.app._display_f3_recent_power_mask_frames = history[-18:]
         self.app._display_f3_power_authority_status = {
             "source": F3_RUNTIME_AUTHORITIES_SOURCE,
