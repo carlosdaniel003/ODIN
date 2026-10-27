@@ -1219,6 +1219,17 @@ class DisplayProductionF3Mixin:
         else:
             self._cancelar_resultado_display_f3()
             self._renderizar_fluxo_checks_display_f3()
+            if tipo == DisplayCheckSequenceRuntime.EVENT_ADVANCED:
+                # Somente o evento efetivo da máquina de estados sinaliza
+                # aprovação/avanço; nunca um score ou máscara visual provisória.
+                completed = evento.get("completed_check") or {}
+                current = snapshot.get("current_check") or {}
+                notify = getattr(janela, "show_check_advance_notice", None)
+                if callable(notify):
+                    notify(
+                        str(completed.get("name") or completed.get("id") or "CHECK"),
+                        str(current.get("name") or current.get("id") or "PRÓXIMO"),
+                    )
         return evento
 
     def concluir_check_display_f3(self) -> dict:
