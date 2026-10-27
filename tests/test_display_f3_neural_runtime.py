@@ -2937,7 +2937,8 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         source = inspect.getsource(DisplayAutomaticCheckF3Mixin._process_display_auto_check)
         self.assertIn("assinatura_ng_h1_consenso(", source)
         self.assertIn("if token_key not in seen:", source)
-        self.assertIn("len(self._display_auto_h1_fast_ng_frame_tokens)", source)
+        self.assertIn("contar_corrobacoes_fisicas_h1(", source)
+        self.assertIn("semantic_frame_count", source)
         self.assertIn("DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES", source)
         self.assertEqual(
             6, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_NG_STABLE_FRAMES
