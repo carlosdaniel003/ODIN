@@ -446,6 +446,8 @@ class F3PowerAuthority:
 
     def reset(self) -> None:
         self._intermittent_latch = None
+        self.app._display_f3_recent_power_mask_frames = []
+        self.app._display_f3_recent_power_mask_signature = None
 
     def evaluate(self, frame, project_name: str, context: dict | None) -> dict:
         return power_v2_module.avaliar_evidencia_energia_unificada_display_f3(
@@ -664,6 +666,59 @@ class F3PowerAuthority:
 
         output[contract_module.F3_DECISION_ALLOWED_KEY] = decision_allowed
         output[contract_module.F3_MASK_LIVE_KEY] = True
+
+        # D-093: reter apenas a telemetria já produzida pela MESMA autoridade
+        # física em frames distintos. O analyzer semântico consulta o histórico
+        # para corroborar um NG H1 já decidido pela CNN. Isso não decide NG,
+        # não repete leitura e não cria worker, timer ou novo classificador.
+        signature = (str(project_name or ""), str(check_id or ""))
+        previous_signature = getattr(
+            self.app, "_display_f3_recent_power_mask_signature", None
+        )
+        if (
+            bool(presence.get("empty_confirmed"))
+            or not bool(presence.get("board_present"))
+            or not check_id
+            or signature != previous_signature
+        ):
+            self.app._display_f3_recent_power_mask_frames = []
+        self.app._display_f3_recent_power_mask_signature = (
+            signature if bool(presence.get("board_present")) else None
+        )
+        source_evidence = energy_for_status if isinstance(energy_for_status, dict) else {}
+        token = source_evidence.get("frame_token")
+        if (
+            isinstance(token, (list, tuple))
+            and len(token) >= 2
+            and token[0] == "camera"
+        ):
+            observation = {
+                "frame_token": deepcopy(token),
+                "project_name": str(project_name or ""),
+                "check_id": check_id,
+                "board_present": bool(presence.get("board_present")),
+                "powered_confirmed": bool(source_evidence.get("powered_confirmed") is True),
+                "decision_allowed": bool(decision_allowed),
+                "spatial_alignment_ready": bool(
+                    source_evidence.get("spatial_alignment_ready") is True
+                ),
+                "same_mask_comparison": bool(
+                    source_evidence.get("same_mask_comparison") is True
+                    and source_evidence.get("primary_authority")
+                    == "same_physical_mask_on_off_learning"
+                ),
+                "mask_classifications": deepcopy(
+                    source_evidence.get("mask_classifications") or {}
+                ),
+            }
+            history = list(
+                getattr(self.app, "_display_f3_recent_power_mask_frames", []) or []
+            )
+            if history and history[-1].get("frame_token") == observation["frame_token"]:
+                history[-1] = observation
+            else:
+                history.append(observation)
+            self.app._display_f3_recent_power_mask_frames = history[-18:]
         self.app._display_f3_power_authority_status = {
             "source": F3_RUNTIME_AUTHORITIES_SOURCE,
             "board_present": bool(presence.get("board_present")),
