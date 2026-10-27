@@ -3255,3 +3255,26 @@ dependendo de mesma máscara, padrão e gate; CNN mantém
 consenso forte. Não usar 2/3 diretamente como NG.
 
 **Reteste industrial D-094:** aguarda execução.
+
+## 27/10/2026 — D-095 / sem LOCK e sem máscaras no início do H1
+
+Reteste real após D-094 mostra painel `AGUARDANDO H1`, câmera
+captando H1 brilhante, mas `RASTREAMENTO F3 • PROCURANDO PLACA`:
+sem contorno nem máscaras verdes. DEBUG frame 629, worker 625,
+`object_tracking.locked=false`, `reason=h1_fast_acquisition_unlocked`;
+filtro escuro detectado, 0 componentes luminosos globalmente
+identificados (`luminous_components_insufficient`), apesar de
+`dynamic_range=235` e threshold 105,3.
+O worker demorou 202ms e o FPS observado foi 14,73;
+isso não demonstra por si só atraso da CNN.
+
+No H1, `fast_acquire` corta os resgates AKAZE/template
+full-HD; sem componentes separados, a aquisição dependia
+de nova foto que só chegava no fim dos cerca de 3 s de H1.
+
+D-095 acrescenta ao MESMO detector de pose luminosa a
+corroboração por núcleos ON e correspondência por ID usando
+a homografia/afim candidata do filtro atual. Não usar
+retângulo genérico como prova, nem mostrar máscara fixa
+durante SEARCHING. Reteste e tempo até primeiro LOCK
+continuam pendentes.
