@@ -2955,6 +2955,104 @@ class DisplayF3H1ConsensusNGTests(unittest.TestCase):
         owner.reset()
         self.assertIsNone(app._display_f3_power_history_diagnostics)
 
+    def test_h1_d098_captures_two_new_raw_frames_and_same_mask_verifies(self):
+        from src.platform.display_f3_runtime_authorities import F3PowerAuthority
+        from src.platform.display_f3_ng_fast_confirmation import (
+            tokens_corrobacao_fisica_h1,
+        )
+        import src.platform.display_f3_power_authority_v2 as physical
+
+        app = SimpleNamespace()
+        app._display_auto_current_context = lambda: {
+            "project_name": "DISPLAY A", "check_id": "CHECK_001",
+        }
+        app._display_f3_recent_power_mask_frames = []
+        app._display_f3_recent_power_mask_signature = ("DISPLAY A", "CHECK_001")
+        owner = F3PowerAuthority(app)
+        context = {
+            "project_name": "DISPLAY A", "check_id": "CHECK_001",
+            "check_name": "H1", "current_index": 0, "intermittent": False,
+            "snapshot_capture_trigger": {"triggered": True, "mask_ids": ["MASK_008"]},
+        }
+        geometry = {"locked": True, "spatial_alignment_ready": True}
+        picture = np.zeros((16, 16, 3), dtype=np.uint8)
+        owner.begin_h1_confirmation_capture(context, ("camera", 414))
+        owner.capture_h1_confirmation_raw(picture, ("camera", 414), geometry)
+        owner.capture_h1_confirmation_raw(picture, ("camera", 415), geometry)
+        owner.capture_h1_confirmation_raw(picture, ("camera", 415), geometry)
+        owner.capture_h1_confirmation_raw(picture, ("camera", 417), geometry)
+        owner.capture_h1_confirmation_raw(picture, ("camera", 420), geometry)
+
+        analysis = self._case()
+        states = {r["mask_id"]: r["classified"] for r in analysis["mask_results"]}
+        evidence = {
+            "powered_confirmed": True,
+            "raw_analysis_ready": True,
+            "primary_authority": "same_physical_mask_on_off_learning",
+            "mask_geometry_source": "tracking_live_geometry_raw",
+            "mask_classifications": states,
+        }
+        with patch.object(physical, "_generic_live_mask_energy", return_value=evidence):
+            found = owner.confirm_h1_captured_frames(
+                context, ("camera", 414), analysis, 180, object(),
+            )
+        self.assertEqual([415, 417], [row["frame_token"][1] for row in found])
+        owner.append_h1_confirmed_samples(found, context, ("camera", 414))
+        owner.append_h1_confirmed_samples(found, context, ("camera", 414))
+        history = app._display_f3_recent_power_mask_frames
+        self.assertEqual([415, 417], [row["frame_token"][1] for row in history])
+        self.assertEqual(2, len(tokens_corrobacao_fisica_h1(
+            analysis, ("MASK_017", "MASK_020"), history,
+            snapshot_token=("camera", 414),
+        )))
+        self.assertEqual(3, len({("camera", 414), *[
+            tuple(row["frame_token"]) for row in history
+        ]}))
+
+    def test_h1_d098_never_accepts_wrong_mask_or_changed_check(self):
+        from src.platform.display_f3_runtime_authorities import F3PowerAuthority
+        import src.platform.display_f3_power_authority_v2 as physical
+
+        app = SimpleNamespace()
+        app._display_auto_current_context = lambda: {
+            "project_name": "DISPLAY A", "check_id": "CHECK_002",
+        }
+        app._display_f3_recent_power_mask_frames = []
+        app._display_f3_recent_power_mask_signature = ("DISPLAY A", "CHECK_001")
+        owner = F3PowerAuthority(app)
+        context = {
+            "project_name": "DISPLAY A", "check_id": "CHECK_001",
+            "check_name": "H1", "current_index": 0, "intermittent": False,
+            "snapshot_capture_trigger": {"triggered": True, "mask_ids": ["MASK_008"]},
+        }
+        geometry = {"locked": True, "spatial_alignment_ready": True}
+        frame = np.zeros((8, 8, 3), dtype=np.uint8)
+        owner.begin_h1_confirmation_capture(context, ("camera", 414))
+        owner.capture_h1_confirmation_raw(frame, ("camera", 415), geometry)
+        owner.capture_h1_confirmation_raw(frame, ("camera", 417), geometry)
+        analysis = self._case()
+        states = {r["mask_id"]: r["classified"] for r in analysis["mask_results"]}
+        states["MASK_020"] = "on"
+        ev = {
+            "powered_confirmed": True,
+            "raw_analysis_ready": True,
+            "primary_authority": "same_physical_mask_on_off_learning",
+            "mask_geometry_source": "tracking_live_geometry_raw",
+            "mask_classifications": states,
+        }
+        with patch.object(physical, "_generic_live_mask_energy", return_value=ev):
+            found = owner.confirm_h1_captured_frames(
+                context, ("camera", 414), analysis, 180, object(),
+            )
+        self.assertEqual([], found)
+        owner.append_h1_confirmed_samples([{
+            "frame_token": ("camera", 415), "source": "h1_worker_post_snapshot_same_mask",
+            "board_present": True, "powered_confirmed": True,
+            "decision_allowed": True, "spatial_alignment_ready": True,
+            "same_mask_comparison": True, "mask_classifications": states,
+        }], context, ("camera", 414))
+        self.assertEqual([], app._display_f3_recent_power_mask_frames)
+
     def _make_h1_production_runtime(self, history):
         app = DisplayAutomaticCheckF3Mixin.__new__(DisplayAutomaticCheckF3Mixin)
         app.display_f3_ativo = True
