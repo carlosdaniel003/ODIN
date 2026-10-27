@@ -1544,13 +1544,22 @@ def _render_classic_luminous_preview(
         ).items()
         if str(mask_id)
     }
-    confirmed_failed_mask_ids = {
-        str(mask_id)
-        for mask_id in (
-            context.get("effective_confirmed_failed_mask_ids") or ()
-        )
-        if str(mask_id)
-    }
+    # A câmera ao vivo mostra emissão do frame exibido, NÃO divergências
+    # acumuladas pela análise semântica. Um CHECK USB/BLUE pode ficar na
+    # fase OFF ou estar aguardando confirmação e manter um resultado antigo
+    # na telemetria: isso não é um NG terminal. Vermelho só pertence ao
+    # snapshot que efetivamente fechou NG e foi segregado visualmente.
+    confirmed_failed_mask_ids = (
+        {
+            str(mask_id)
+            for mask_id in (
+                context.get("effective_confirmed_failed_mask_ids") or ()
+            )
+            if str(mask_id)
+        }
+        if bool(context.get("terminal_ng_evidence"))
+        else set()
+    )
     hybrid_pending_mask_ids = {
         str(mask_id)
         for mask_id in (context.get("hybrid_pending_mask_ids") or ())
