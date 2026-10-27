@@ -2593,5 +2593,114 @@ class DisplayF3NeuralRuntimeTests(unittest.TestCase):
         )
 
 
+class DisplayF3H1ConsensusNGTests(unittest.TestCase):
+    """Regressões D-092 para H1 real 28/30 sem relaxar OK/NG."""
+
+    @staticmethod
+    def _case():
+        rows = []
+        expected_on = {8, 9, 11, 12, 13, 17, 20}
+        missing = {17, 20}
+        for number in range(1, 31):
+            mask_id = f"MASK_{number:03d}"
+            expected = "on" if number in expected_on else "off"
+            observed = "off" if number in missing else expected
+            row = {
+                "mask_id": mask_id,
+                "expected": expected,
+                "classified": observed,
+                "matched": observed == expected,
+                "semantic_certain": True,
+            }
+            if number in missing:
+                row.update({
+                    "hybrid_resolution": "neural_physical_consensus",
+                    "neural_certain": True,
+                    "neural_classified": "off",
+                    "physical_evidence_available": True,
+                    "physical_local_authoritative": True,
+                    "physical_classified": "off",
+                    "physical_reference_source": "f3_check_photos_same_mask",
+                })
+            rows.append(row)
+        return {
+            "ready": True,
+            "approved": False,
+            "neural_visual_authority": True,
+            "tracking_snapshot_explicit": True,
+            "effective_uncertain_mask_count": 0,
+            "effective_confirmed_failed_mask_ids": ("MASK_017", "MASK_020"),
+            "mask_results": rows,
+        }
+
+    def test_h1_cnn_e_fisico_concordam_nas_duas_falhas(self):
+        from src.platform.display_f3_ng_fast_confirmation import (
+            assinatura_ng_h1_consenso,
+        )
+        case = self._case()
+        policy = decidir_analise_display_f3(case, reference_gate=True)
+        self.assertEqual("ng", policy["decision"])
+        self.assertEqual(
+            ("MASK_017", "MASK_020"),
+            assinatura_ng_h1_consenso(
+                {"intermittent": False},
+                case,
+                policy,
+                reference_gate=True,
+                tracking_snapshot=True,
+            ),
+        )
+
+    def test_h1_transicao_fraca_cnn_incerta_e_blue_nao_tem_atalho(self):
+        from copy import deepcopy
+        from src.platform.display_f3_ng_fast_confirmation import (
+            assinatura_ng_h1_consenso,
+        )
+        case = self._case()
+        policy = decidir_analise_display_f3(case, reference_gate=True)
+        def evaluate(candidate, *, reference_gate=True, tracking=True, intermittent=False):
+            return assinatura_ng_h1_consenso(
+                {"intermittent": intermittent},
+                candidate,
+                policy,
+                reference_gate=reference_gate,
+                tracking_snapshot=tracking,
+            )
+        self.assertEqual((), evaluate(case, tracking=False))
+        self.assertEqual((), evaluate(case, reference_gate=False))
+        self.assertEqual((), evaluate(case, intermittent=True))
+        weak = deepcopy(case)
+        for row in weak["mask_results"]:
+            if row["expected"] == "on" and row["mask_id"] != "MASK_008":
+                row["classified"] = "off"
+        self.assertEqual((), evaluate(weak))  # fase parcial do H1
+        uncertain = deepcopy(case)
+        uncertain["mask_results"][16]["neural_certain"] = False
+        self.assertEqual((), evaluate(uncertain))
+        contested = deepcopy(case)
+        contested["mask_results"][19]["physical_classified"] = "on"
+        self.assertEqual((), evaluate(contested))
+        stale = deepcopy(case)
+        stale["tracking_snapshot_explicit"] = False
+        self.assertEqual((), evaluate(stale))
+        unsupported = deepcopy(case)
+        unsupported["effective_confirmed_failed_mask_ids"] = ("MASK_017",)
+        self.assertEqual((), evaluate(unsupported))
+
+    def test_h1_fast_requires_three_distinct_camera_frames_no_duplicate(self):
+        # Contrato temporal: apenas tokens de captura independentes contam.
+        source = inspect.getsource(DisplayAutomaticCheckF3Mixin._process_display_auto_check)
+        self.assertIn("assinatura_ng_h1_consenso(", source)
+        self.assertIn("if token_key not in seen:", source)
+        self.assertIn("len(self._display_auto_h1_fast_ng_frame_tokens)", source)
+        self.assertIn("DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES", source)
+        self.assertEqual(
+            6, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_NG_STABLE_FRAMES
+        )
+        self.assertEqual(
+            3, DisplayAutomaticCheckF3Mixin.DISPLAY_AUTO_H1_CONSENSUS_NG_FRAMES
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
