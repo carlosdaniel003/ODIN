@@ -6006,3 +6006,34 @@ insuficientes. A confirmação temporal pode requerer pulsos adicionais.
 
 CI: suíte neural 115/115 PASS e testes isolados de BLUE e readout PASS.
 Reteste industrial BLUE OK, NG MASK_024 e rearme ainda necessário.
+
+## D-091 — Paridade óptica live F3 sem vermelho semântico herdado
+
+**Status:** Implementado em código; reteste físico pendente.
+
+**Contexto:** no USB da placa em análise, a câmera mostrava display apagado,
+mas a sobreposição e o VISOR DO DISPLAY mostravam várias barras vermelhas.
+O operador confirmou que NÃO havia NG terminal e que o julgamento estava
+correto. A análise produtiva guardava divergências (17/30 conformes),
+e o renderer visual tratava `effective_confirmed_failed_mask_ids` de uma
+análise anterior como vermelho persistente no frame live. A amostragem também
+aceitava classificações físicas sem token do mesmo frame quando o sampler
+não estava pronto, permitindo persistência de um ON antigo.
+
+**Decisão:** na câmera ao vivo e no visor, verde/escuro/neutro vêm apenas
+da emissão da imagem apresentada; as divergências do motor permanecem no
+status e no diagnóstico, nunca pintam vermelho sem NG terminal. O
+marcador explícito `terminal_ng_evidence` identifica a captura que
+EFETIVAMENTE encerrou NG. SEGREGAR mantém seu vermelho próprio.
+O renderer terminal e o readout congelado preservam o vermelho SOMENTE
+nas máscaras exatas confirmadas. Um estado físico de outro frame não
+completa a amostragem visual atual; máscaras não medidas ficam neutras.
+
+**Limites:** não alterar CNN, híbrido, 30 máscaras, presença/energia,
+rastreio, julgamento de OK/NG, debounce ou rearme. Não usar status
+semântico antigo como prova de brilho do frame atual. Preservar o
+congelamento visual temporário do primeiro verde.
+
+**Validação:** novos testes de USB fase ON→OFF, mascaramento de vermelho
+não terminal, vermelho terminal NG e descarte de fallback stale.
+Integração física pendente no JIG.
